@@ -1,1 +1,1 @@
-export const isMac = navigator.platform.startsWith("Mac");
+export const isMac = navigator.userAgent.includes("Mac");
