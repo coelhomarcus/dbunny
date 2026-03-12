@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type FormEvent } from "react";
-import { useConnection } from "../contexts/ConnectionContext";
+import { useConnection } from "../contexts/useConnection";
 import { useNavigate } from "react-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {

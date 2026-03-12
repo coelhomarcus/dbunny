@@ -1,5 +1,5 @@
 import { Outlet, useNavigate, NavLink } from "react-router";
-import { useConnection } from "../contexts/ConnectionContext";
+import { useConnection } from "../contexts/useConnection";
 import { useEffect, useState } from "react";
 import SchemaTree from "../components/SchemaTree";
 import { Terminal, Eye, EyeOff, LogOut } from "lucide-react";
