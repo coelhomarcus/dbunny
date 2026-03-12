@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, type FormEvent } from "react";
-import { useConnection } from "../contexts/ConnectionContext";
+import { useState, useEffect, useRef } from "react";
+import { useConnection } from "../contexts/useConnection";
 import { useNavigate } from "react-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -143,7 +143,7 @@ export default function ConnectPage() {
     }
   }
 
-  async function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: { preventDefault: () => void }) {
     e.preventDefault();
     try {
       const url = buildConnectionUrl(fields);

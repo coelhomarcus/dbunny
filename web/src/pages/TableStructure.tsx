@@ -6,17 +6,21 @@ import type { ColumnInfo } from "@/types";
 
 export default function TableStructure() {
   const { schema, table } = useParams<{ schema: string; table: string }>();
-  const [columns, setColumns] = useState<ColumnInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [result, setResult] = useState<{ key: string; columns: ColumnInfo[] } | null>(null);
+  const key = `${schema}.${table}`;
 
   useEffect(() => {
     if (!schema || !table) return;
-    setLoading(true);
-    api
-      .getColumns(schema, table)
-      .then(setColumns)
-      .finally(() => setLoading(false));
+    let stale = false;
+    const k = `${schema}.${table}`;
+    api.getColumns(schema, table).then((cols) => {
+      if (!stale) setResult({ key: k, columns: cols });
+    });
+    return () => { stale = true; };
   }, [schema, table]);
+
+  const loading = !result || result.key !== key;
+  const columns = loading ? [] : result.columns;
 
   return (
     <div className="h-full flex flex-col">

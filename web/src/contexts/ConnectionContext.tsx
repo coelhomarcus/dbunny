@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { createContext, useState, useCallback, type ReactNode } from "react";
 import { api, setSessionId } from "../lib/api";
 import type { ConnectionInfo } from "@/types";
 
@@ -12,7 +12,7 @@ interface ConnectionContextValue {
   disconnect: () => Promise<void>;
 }
 
-const ConnectionContext = createContext<ConnectionContextValue | null>(null);
+export const ConnectionContext = createContext<ConnectionContextValue | null>(null);
 
 export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
@@ -63,10 +63,4 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       {children}
     </ConnectionContext.Provider>
   );
-}
-
-export function useConnection() {
-  const ctx = useContext(ConnectionContext);
-  if (!ctx) throw new Error("useConnection must be used within ConnectionProvider");
-  return ctx;
 }
