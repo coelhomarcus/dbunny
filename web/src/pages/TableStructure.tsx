@@ -1,0 +1,119 @@
+import { useEffect, useState } from "react";
+import { useParams, NavLink } from "react-router";
+import { Loader } from "lucide-react";
+import { api } from "../lib/api";
+import type { ColumnInfo } from "@/types";
+
+export default function TableStructure() {
+  const { schema, table } = useParams<{ schema: string; table: string }>();
+  const [columns, setColumns] = useState<ColumnInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!schema || !table) return;
+    setLoading(true);
+    api
+      .getColumns(schema, table)
+      .then(setColumns)
+      .finally(() => setLoading(false));
+  }, [schema, table]);
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
+        <h2 className="text-sm font-medium">
+          <span className="text-zinc-500">{schema}.</span>
+          {table}
+        </h2>
+        <div className="flex gap-1">
+          <NavLink
+            to={`/db/${schema}/${table}`}
+            end
+            className={({ isActive }) =>
+              `px-3 py-1 text-xs rounded transition-colors ${
+                isActive
+                  ? "bg-zinc-700 text-white"
+                  : "text-zinc-400 hover:text-white"
+              }`
+            }
+          >
+            Data
+          </NavLink>
+          <NavLink
+            to={`/db/${schema}/${table}/structure`}
+            className={({ isActive }) =>
+              `px-3 py-1 text-xs rounded transition-colors ${
+                isActive
+                  ? "bg-zinc-700 text-white"
+                  : "text-zinc-400 hover:text-white"
+              }`
+            }
+          >
+            Structure
+          </NavLink>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex-1 flex items-end justify-end p-4">
+          <Loader size={16} className="animate-spin text-zinc-500" />
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-zinc-900">
+              <tr>
+                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                  #
+                </th>
+                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                  Column
+                </th>
+                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                  Type
+                </th>
+                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                  Nullable
+                </th>
+                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                  Default
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {columns.map((col, i) => (
+                <tr
+                  key={col.name}
+                  className={`border-b border-zinc-800/50 ${
+                    i % 2 === 0 ? "bg-zinc-950" : "bg-zinc-900/30"
+                  }`}
+                >
+                  <td className="px-4 py-2 text-zinc-600">
+                    {col.ordinalPosition}
+                  </td>
+                  <td className="px-4 py-2 text-white font-medium">
+                    {col.name}
+                  </td>
+                  <td className="px-4 py-2 text-amber-400">{col.dataType}</td>
+                  <td className="px-4 py-2">
+                    {col.isNullable ? (
+                      <span className="text-zinc-500">YES</span>
+                    ) : (
+                      <span className="text-red-400">NO</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-zinc-400 font-mono text-xs">
+                    {col.defaultValue ?? (
+                      <span className="text-zinc-600">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

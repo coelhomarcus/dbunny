@@ -1,0 +1,16 @@
+{
+  "name": "dbunny",
+  "private": true,
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "dev:web": "npm run dev --workspace=web"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1"
+  }
+}

@@ -1,0 +1,66 @@
+import {
+  ChevronsUpDown,
+  ChevronUp,
+  ChevronDown,
+} from "lucide-react";
+import type { ColumnInfo } from "@/types";
+
+interface SortableColumnHeaderProps {
+  id: string;
+  columnInfo?: ColumnInfo;
+  sorted: false | "asc" | "desc";
+  onToggleSort: ((event: unknown) => void);
+  onResizeStart: (e: React.MouseEvent) => void;
+}
+
+function normalizeType(type: string): string {
+  if (type.startsWith("timestamp")) return "timestamp";
+  if (type.startsWith("time ")) return "time";
+  if (type === "character varying") return "varchar";
+  if (type === "double precision") return "float8";
+  if (type === "character") return "char";
+  return type;
+}
+
+export default function SortableColumnHeader({
+  id, columnInfo, sorted, onToggleSort, onResizeStart,
+}: SortableColumnHeaderProps) {
+  return (
+    <th
+      onClick={onToggleSort}
+      className="relative bg-zinc-900 text-left px-3 py-2 border-b border-r border-zinc-800 cursor-pointer hover:bg-zinc-800 select-none group"
+    >
+      <span className="flex items-center justify-between gap-2 overflow-hidden">
+        <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+          {columnInfo?.isPrimaryKey && (
+            <span className="text-[10px] text-amber-500/70 font-mono shrink-0">
+              PK
+            </span>
+          )}
+          <span className="font-semibold text-zinc-200 truncate">
+            {id}
+          </span>
+          {columnInfo?.dataType && (
+            <span className="text-zinc-500 shrink-0 font-normal">
+              {normalizeType(columnInfo.dataType)}
+            </span>
+          )}
+        </span>
+        <span className="shrink-0 text-zinc-700 group-hover:text-zinc-400 transition-colors">
+          {sorted === "asc" ? (
+            <ChevronUp size={11} />
+          ) : sorted === "desc" ? (
+            <ChevronDown size={11} />
+          ) : (
+            <ChevronsUpDown size={11} />
+          )}
+        </span>
+      </span>
+      <div
+        onMouseDown={onResizeStart}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-zinc-500/40 active:bg-zinc-500/60 transition-colors"
+      />
+    </th>
+  );
+}

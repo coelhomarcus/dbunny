@@ -1,0 +1,35 @@
+[package]
+name = "dbunny"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "dbunny_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1", "with-chrono-0_4", "with-uuid-1"] }
+tokio = { version = "1", features = ["full"] }
+deadpool-postgres = "0.14"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+url = "2"
+aes-gcm = "0.10"
+rand = "0.8"
+base64 = "0.22"
+pbkdf2 = { version = "0.12", features = ["simple"] }
+sha2 = "0.10"
+hostname = "0.4"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
