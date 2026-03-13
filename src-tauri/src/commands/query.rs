@@ -1,4 +1,5 @@
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tauri::State;
@@ -43,75 +44,235 @@ pub struct TableDataParams {
     pub sort_direction: Option<String>,
 }
 
+fn try_get_string(row: &Row, i: usize) -> JsonValue {
+    match row.try_get::<_, Option<String>>(i) {
+        Ok(Some(s)) => JsonValue::String(s),
+        Ok(None) => JsonValue::Null,
+        Err(_) => JsonValue::String("<binary>".to_string()),
+    }
+}
+
 fn row_to_json_values(row: &Row) -> Vec<JsonValue> {
     let columns = row.columns();
     let mut values = Vec::with_capacity(columns.len());
 
     for (i, col) in columns.iter().enumerate() {
         let value = match *col.type_() {
-            Type::BOOL => row
-                .get::<_, Option<bool>>(i)
-                .map(JsonValue::Bool)
-                .unwrap_or(JsonValue::Null),
-            Type::INT2 => row
-                .get::<_, Option<i16>>(i)
-                .map(|v| JsonValue::Number(v.into()))
-                .unwrap_or(JsonValue::Null),
-            Type::INT4 => row
-                .get::<_, Option<i32>>(i)
-                .map(|v| JsonValue::Number(v.into()))
-                .unwrap_or(JsonValue::Null),
-            Type::INT8 => row
-                .get::<_, Option<i64>>(i)
-                .map(|v| JsonValue::Number(v.into()))
-                .unwrap_or(JsonValue::Null),
-            Type::FLOAT4 => row
-                .get::<_, Option<f32>>(i)
-                .map(|v| {
-                    serde_json::Number::from_f64(v as f64)
-                        .map(JsonValue::Number)
-                        .unwrap_or(JsonValue::Null)
-                })
-                .unwrap_or(JsonValue::Null),
-            Type::FLOAT8 | Type::NUMERIC => row
-                .get::<_, Option<f64>>(i)
-                .map(|v| {
-                    serde_json::Number::from_f64(v)
-                        .map(JsonValue::Number)
-                        .unwrap_or(JsonValue::Null)
-                })
-                .unwrap_or(JsonValue::Null),
-            Type::JSON | Type::JSONB => row
-                .get::<_, Option<JsonValue>>(i)
-                .unwrap_or(JsonValue::Null),
-            Type::TIMESTAMP => row
-                .get::<_, Option<NaiveDateTime>>(i)
-                .map(|v| JsonValue::String(v.format("%Y-%m-%d %H:%M:%S").to_string()))
-                .unwrap_or(JsonValue::Null),
-            Type::TIMESTAMPTZ => row
-                .get::<_, Option<DateTime<Utc>>>(i)
-                .map(|v| JsonValue::String(v.format("%Y-%m-%d %H:%M:%S%z").to_string()))
-                .unwrap_or(JsonValue::Null),
-            Type::DATE => row
-                .get::<_, Option<NaiveDate>>(i)
-                .map(|v| JsonValue::String(v.format("%Y-%m-%d").to_string()))
-                .unwrap_or(JsonValue::Null),
-            Type::TIME => row
-                .get::<_, Option<NaiveTime>>(i)
-                .map(|v| JsonValue::String(v.format("%H:%M:%S").to_string()))
-                .unwrap_or(JsonValue::Null),
-            Type::UUID => row
-                .get::<_, Option<Uuid>>(i)
-                .map(|v| JsonValue::String(v.to_string()))
-                .unwrap_or(JsonValue::Null),
-            _ => {
-                // Fall back to string representation for all other types
-                match row.try_get::<_, Option<String>>(i) {
-                    Ok(Some(s)) => JsonValue::String(s),
+            // --- Boolean ---
+            Type::BOOL => match row.try_get::<_, Option<bool>>(i) {
+                Ok(Some(v)) => JsonValue::Bool(v),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+
+            // --- Integers ---
+            Type::INT2 => match row.try_get::<_, Option<i16>>(i) {
+                Ok(Some(v)) => JsonValue::Number(v.into()),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::INT4 | Type::OID => match row.try_get::<_, Option<i32>>(i) {
+                Ok(Some(v)) => JsonValue::Number(v.into()),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::INT8 => match row.try_get::<_, Option<i64>>(i) {
+                Ok(Some(v)) => JsonValue::Number(v.into()),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+
+            // --- Floats ---
+            Type::FLOAT4 => match row.try_get::<_, Option<f32>>(i) {
+                Ok(Some(v)) => serde_json::Number::from_f64(v as f64)
+                    .map(JsonValue::Number)
+                    .unwrap_or(JsonValue::Null),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::FLOAT8 => match row.try_get::<_, Option<f64>>(i) {
+                Ok(Some(v)) => serde_json::Number::from_f64(v)
+                    .map(JsonValue::Number)
+                    .unwrap_or(JsonValue::Null),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+
+            // --- Arbitrary precision decimal (NUMERIC / DECIMAL) ---
+            // Serialized as string to preserve full precision
+            Type::NUMERIC => match row.try_get::<_, Option<Decimal>>(i) {
+                Ok(Some(v)) => JsonValue::String(v.to_string()),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+
+            // --- JSON / JSONB ---
+            Type::JSON | Type::JSONB => match row.try_get::<_, Option<JsonValue>>(i) {
+                Ok(Some(v)) => v,
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+
+            // --- Date / Time ---
+            Type::DATE => match row.try_get::<_, Option<NaiveDate>>(i) {
+                Ok(Some(v)) => JsonValue::String(v.format("%Y-%m-%d").to_string()),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::TIME | Type::TIMETZ => match row.try_get::<_, Option<NaiveTime>>(i) {
+                Ok(Some(v)) => JsonValue::String(v.format("%H:%M:%S%.f").to_string()),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::TIMESTAMP => match row.try_get::<_, Option<NaiveDateTime>>(i) {
+                Ok(Some(v)) => JsonValue::String(v.format("%Y-%m-%d %H:%M:%S%.f").to_string()),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::TIMESTAMPTZ => match row.try_get::<_, Option<DateTime<Utc>>>(i) {
+                Ok(Some(v)) => JsonValue::String(v.format("%Y-%m-%d %H:%M:%S%.f%z").to_string()),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+
+            // --- UUID ---
+            Type::UUID => match row.try_get::<_, Option<Uuid>>(i) {
+                Ok(Some(v)) => JsonValue::String(v.to_string()),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+
+            // --- Binary ---
+            Type::BYTEA => match row.try_get::<_, Option<Vec<u8>>>(i) {
+                Ok(Some(v)) => JsonValue::String(base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    &v,
+                )),
+                Ok(None) => JsonValue::Null,
+                Err(_) => JsonValue::String("<binary>".to_string()),
+            },
+
+            // --- Arrays ---
+            Type::BOOL_ARRAY => match row.try_get::<_, Option<Vec<bool>>>(i) {
+                Ok(Some(v)) => JsonValue::Array(v.into_iter().map(JsonValue::Bool).collect()),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::INT2_ARRAY => match row.try_get::<_, Option<Vec<i16>>>(i) {
+                Ok(Some(v)) => JsonValue::Array(
+                    v.into_iter()
+                        .map(|n| JsonValue::Number(n.into()))
+                        .collect(),
+                ),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::INT4_ARRAY | Type::OID_ARRAY => match row.try_get::<_, Option<Vec<i32>>>(i) {
+                Ok(Some(v)) => JsonValue::Array(
+                    v.into_iter()
+                        .map(|n| JsonValue::Number(n.into()))
+                        .collect(),
+                ),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::INT8_ARRAY => match row.try_get::<_, Option<Vec<i64>>>(i) {
+                Ok(Some(v)) => JsonValue::Array(
+                    v.into_iter()
+                        .map(|n| JsonValue::Number(n.into()))
+                        .collect(),
+                ),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::FLOAT4_ARRAY => match row.try_get::<_, Option<Vec<f32>>>(i) {
+                Ok(Some(v)) => JsonValue::Array(
+                    v.into_iter()
+                        .map(|n| {
+                            serde_json::Number::from_f64(n as f64)
+                                .map(JsonValue::Number)
+                                .unwrap_or(JsonValue::Null)
+                        })
+                        .collect(),
+                ),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::FLOAT8_ARRAY => match row.try_get::<_, Option<Vec<f64>>>(i) {
+                Ok(Some(v)) => JsonValue::Array(
+                    v.into_iter()
+                        .map(|n| {
+                            serde_json::Number::from_f64(n)
+                                .map(JsonValue::Number)
+                                .unwrap_or(JsonValue::Null)
+                        })
+                        .collect(),
+                ),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::NUMERIC_ARRAY => match row.try_get::<_, Option<Vec<Decimal>>>(i) {
+                Ok(Some(v)) => JsonValue::Array(
+                    v.into_iter()
+                        .map(|n| JsonValue::String(n.to_string()))
+                        .collect(),
+                ),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::TEXT_ARRAY | Type::VARCHAR_ARRAY | Type::BPCHAR_ARRAY | Type::NAME_ARRAY => {
+                match row.try_get::<_, Option<Vec<String>>>(i) {
+                    Ok(Some(v)) => {
+                        JsonValue::Array(v.into_iter().map(JsonValue::String).collect())
+                    }
                     Ok(None) => JsonValue::Null,
-                    Err(_) => JsonValue::String("<binary>".to_string()),
+                    Err(_) => try_get_string(row, i),
                 }
             }
+            Type::UUID_ARRAY => match row.try_get::<_, Option<Vec<Uuid>>>(i) {
+                Ok(Some(v)) => JsonValue::Array(
+                    v.into_iter()
+                        .map(|u| JsonValue::String(u.to_string()))
+                        .collect(),
+                ),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::DATE_ARRAY => match row.try_get::<_, Option<Vec<NaiveDate>>>(i) {
+                Ok(Some(v)) => JsonValue::Array(
+                    v.into_iter()
+                        .map(|d| JsonValue::String(d.format("%Y-%m-%d").to_string()))
+                        .collect(),
+                ),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::TIMESTAMP_ARRAY => match row.try_get::<_, Option<Vec<NaiveDateTime>>>(i) {
+                Ok(Some(v)) => JsonValue::Array(
+                    v.into_iter()
+                        .map(|d| {
+                            JsonValue::String(d.format("%Y-%m-%d %H:%M:%S%.f").to_string())
+                        })
+                        .collect(),
+                ),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+            Type::TIMESTAMPTZ_ARRAY => match row.try_get::<_, Option<Vec<DateTime<Utc>>>>(i) {
+                Ok(Some(v)) => JsonValue::Array(
+                    v.into_iter()
+                        .map(|d| {
+                            JsonValue::String(d.format("%Y-%m-%d %H:%M:%S%.f%z").to_string())
+                        })
+                        .collect(),
+                ),
+                Ok(None) => JsonValue::Null,
+                Err(_) => try_get_string(row, i),
+            },
+
+            // --- Fallback: text, char, varchar, money, interval, geometric, network,
+            //     range, tsvector, tsquery, xml, bit, oid subtypes, etc. ---
+            _ => try_get_string(row, i),
         };
         values.push(value);
     }
