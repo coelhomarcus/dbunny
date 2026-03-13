@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "DBunny",
         "width": 1200,
         "height": 800,
@@ -20,7 +21,9 @@
         "resizable": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "acceptFirstMouse": true
+        "acceptFirstMouse": true,
+        "visible": false,
+        "backgroundColor": "#000000"
       }
     ],
     "security": {

@@ -18,6 +18,7 @@ pub fn run() {
                 let mut cache = state.saved_connections.blocking_lock();
                 *cache = connections;
             }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
