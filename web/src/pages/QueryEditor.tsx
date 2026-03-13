@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import type { QueryResult } from "@/types";
 import { useSqlAutocomplete } from "../hooks/useSqlAutocomplete";
 import QueryResults from "../components/QueryResults";
-import { Plus, X } from "lucide-react";
+import { Plus, X, Upload, Download } from "lucide-react";
 
 type TabMeta = {
   id: number;
@@ -35,6 +35,7 @@ export default function QueryEditor() {
 
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const activeIdRef = useRef(activeId);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { registerCompletionProvider } = useSqlAutocomplete();
 
@@ -119,6 +120,37 @@ export default function QueryEditor() {
       setResult(payload.result);
       setError(payload.error);
     }
+  }
+
+  function exportQuery() {
+    const sql = editorRef.current?.getValue() ?? savedPayloads.get(activeId)?.sql ?? "";
+    const meta = tabMetas.find((t) => t.id === activeId);
+    const filename = `${(meta?.label ?? "query").replace(/\s+/g, "_").toLowerCase()}.sql`;
+    const blob = new Blob([sql], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importQuery() {
+    fileInputRef.current?.click();
+  }
+
+  function handleFileImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const sql = ev.target?.result as string;
+      editorRef.current?.setValue(sql);
+      const payload = savedPayloads.get(activeId);
+      if (payload) payload.sql = sql;
+    };
+    reader.readAsText(file);
+    e.target.value = "";
   }
 
   const runQuery = useCallback(async () => {
@@ -259,10 +291,37 @@ export default function QueryEditor() {
         </button>
         {result && (
           <span className="text-xs text-zinc-500">
-            {result.rowCount} rows in {result.duration}ms
+            {result.rowsAffected != null
+              ? `${result.rowsAffected} rows affected in ${result.duration}ms`
+              : `${result.rowCount} rows in ${result.duration}ms`}
           </span>
         )}
+        <div className="flex items-center gap-1 ml-auto">
+          <button
+            onClick={importQuery}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-xs rounded transition-colors"
+            title="Import .sql file"
+          >
+            <Upload size={13} />
+            Import
+          </button>
+          <button
+            onClick={exportQuery}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-xs rounded transition-colors"
+            title="Export as .sql file"
+          >
+            <Download size={13} />
+            Export
+          </button>
+        </div>
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".sql,.txt"
+        className="hidden"
+        onChange={handleFileImport}
+      />
 
       {/* Results */}
       <QueryResults result={result} error={error} running={running} />

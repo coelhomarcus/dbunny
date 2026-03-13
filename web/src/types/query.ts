@@ -11,6 +11,7 @@ export interface QueryResult {
   columns: QueryColumn[];
   rows: unknown[][];
   rowCount: number;
+  rowsAffected?: number;
   duration: number;
 }
 

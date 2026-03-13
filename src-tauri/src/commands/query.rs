@@ -22,6 +22,7 @@ pub struct QueryResult {
     pub columns: Vec<QueryColumn>,
     pub rows: Vec<Vec<JsonValue>>,
     pub row_count: usize,
+    pub rows_affected: Option<u64>,
     pub duration: u64,
 }
 
@@ -339,24 +340,46 @@ pub async fn execute_query(
         .await
         .map_err(|e| e.to_string())?;
 
-    let columns = columns_from_statement(stmt.columns());
+    let sql_upper = sql.trim().to_uppercase();
+    let is_query = sql_upper.starts_with("SELECT")
+        || sql_upper.starts_with("WITH")
+        || sql_upper.starts_with("TABLE")
+        || sql_upper.starts_with("VALUES")
+        || sql_upper.starts_with("EXPLAIN")
+        || sql_upper.starts_with("SHOW");
 
-    let rows = session
-        .client
-        .query(&stmt, &[])
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let duration = start.elapsed().as_millis() as u64;
-    let row_count = rows.len();
-    let json_rows: Vec<Vec<JsonValue>> = rows.iter().map(row_to_json_values).collect();
-
-    Ok(QueryResult {
-        columns,
-        rows: json_rows,
-        row_count,
-        duration,
-    })
+    if is_query {
+        let columns = columns_from_statement(stmt.columns());
+        let rows = session
+            .client
+            .query(&stmt, &[])
+            .await
+            .map_err(|e| e.to_string())?;
+        let duration = start.elapsed().as_millis() as u64;
+        let row_count = rows.len();
+        let json_rows: Vec<Vec<JsonValue>> = rows.iter().map(row_to_json_values).collect();
+        Ok(QueryResult {
+            columns,
+            rows: json_rows,
+            row_count,
+            rows_affected: None,
+            duration,
+        })
+    } else {
+        let affected = session
+            .client
+            .execute(&stmt, &[])
+            .await
+            .map_err(|e| e.to_string())?;
+        let duration = start.elapsed().as_millis() as u64;
+        Ok(QueryResult {
+            columns: vec![],
+            rows: vec![],
+            row_count: affected as usize,
+            rows_affected: Some(affected),
+            duration,
+        })
+    }
 }
 
 #[tauri::command]
