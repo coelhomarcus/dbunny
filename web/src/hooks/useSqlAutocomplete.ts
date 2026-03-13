@@ -129,7 +129,7 @@ export function useSqlAutocomplete() {
                 label: t.name,
                 kind: monaco.languages.CompletionItemKind.Class,
                 insertText: quoted,
-                detail: `${t.schema} — table`,
+                detail: `${t.schema} - table`,
                 range: dotRange,
                 sortText: "0_" + t.name,
               });

@@ -109,7 +109,7 @@ export default function TableStructure() {
                   </td>
                   <td className="px-4 py-2 text-zinc-400 font-mono text-xs">
                     {col.defaultValue ?? (
-                      <span className="text-zinc-600">—</span>
+                      <span className="text-zinc-600">-</span>
                     )}
                   </td>
                 </tr>

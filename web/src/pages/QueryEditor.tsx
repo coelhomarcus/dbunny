@@ -22,7 +22,7 @@ type DangerInfo = {
   detail: string;
 };
 
-// Module-level — survives navigation (component unmount/remount)
+// Module-level - survives navigation (component unmount/remount)
 let nextId = 2;
 let savedTabMetas: TabMeta[] = [{ id: 1, label: "Query 1" }];
 let savedActiveId = 1;
@@ -404,7 +404,7 @@ export default function QueryEditor() {
         <div className="flex items-center gap-1 ml-auto">
           <button
             onClick={() => setSafeMode((v) => !v)}
-            title={safeMode ? "Safe Mode ON — click to disable" : "Safe Mode OFF — click to enable"}
+            title={safeMode ? "Safe Mode ON - click to disable" : "Safe Mode OFF - click to enable"}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded transition-colors ${
               safeMode
                 ? "text-emerald-400 hover:text-emerald-300 hover:bg-zinc-800"

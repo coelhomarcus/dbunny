@@ -6,6 +6,7 @@ import DatabaseLayout from "./pages/DatabaseLayout";
 import QueryEditor from "./pages/QueryEditor";
 import TableView from "./pages/TableView";
 import TableStructure from "./pages/TableStructure";
+import FunctionView from "./pages/FunctionView";
 
 export default function App() {
   useEffect(() => {
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="query" element={<QueryEditor />} />
             <Route path=":schema/:table" element={<TableView />} />
             <Route path=":schema/:table/structure" element={<TableStructure />} />
+            <Route path=":schema/function/:name" element={<FunctionView />} />
           </Route>
         </Routes>
       </HashRouter>

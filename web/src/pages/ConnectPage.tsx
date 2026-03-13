@@ -444,7 +444,7 @@ export default function ConnectPage() {
 
               {/* Action buttons */}
               <div className="mt-4 flex">
-                {/* Save/Update — animates in/out sliding from left */}
+                {/* Save/Update - animates in/out sliding from left */}
                 <div
                   className="shrink-0 overflow-hidden transition-[max-width,opacity] duration-500"
                   style={{
@@ -467,7 +467,7 @@ export default function ConnectPage() {
                   </div>
                 </div>
 
-                {/* Connect — expands to fill available space */}
+                {/* Connect - expands to fill available space */}
                 <button
                   type="submit"
                   disabled={!canConnect || isConnecting}

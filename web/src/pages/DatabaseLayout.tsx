@@ -35,7 +35,7 @@ export default function DatabaseLayout() {
 
   return (
     <div className="h-screen flex flex-col  bg-zinc-950 text-white">
-      {/* Drag region — only needed on macOS where title bar is overlay */}
+      {/* Drag region - only needed on macOS where title bar is overlay */}
       {isMac && <div className="h-8 w-full shrink-0" onMouseDown={startDrag} />}
       <div className="flex flex-1 overflow-hidden">
       {/* Sidebar */}

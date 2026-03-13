@@ -27,6 +27,7 @@ export default function SchemaTree() {
   const params = useParams();
   const activeTable = params.table;
   const activeSchema = params.schema;
+  const activeFunction = params.name;
 
   useEffect(() => {
     api
@@ -219,18 +220,32 @@ export default function SchemaTree() {
                     </button>
                     {expanded.has(`${schema.name}:functions`) && (
                       <div>
-                        {data.functions.map((f) => (
-                          <div
-                            key={`${f.name}-${f.argumentTypes}`}
-                            className="flex items-center gap-2 pl-12 pr-3 py-1.5 text-xs text-zinc-500"
-                          >
-                            <Braces
-                              size={13}
-                              className="shrink-0 text-purple-500/60"
-                            />
-                            <span className="truncate">{f.name}</span>
-                          </div>
-                        ))}
+                        {data.functions.map((f) => {
+                          const isActive =
+                            activeSchema === schema.name &&
+                            activeFunction === f.name;
+                          return (
+                            <button
+                              key={`${f.name}-${f.argumentTypes}`}
+                              onClick={() =>
+                                navigate(
+                                  `/db/${schema.name}/function/${f.name}?args=${encodeURIComponent(f.argumentTypes)}`
+                                )
+                              }
+                              className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-xs transition-colors ${
+                                isActive
+                                  ? "bg-zinc-800 text-white"
+                                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+                              }`}
+                            >
+                              <Braces
+                                size={13}
+                                className={`shrink-0 ${isActive ? "text-purple-400" : "text-purple-500/60"}`}
+                              />
+                              <span className="truncate">{f.name}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
