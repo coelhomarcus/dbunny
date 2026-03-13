@@ -10,11 +10,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::new())
         .setup(|app| {
-            // Load saved connections from disk into memory cache at startup
             let state = app.state::<AppState>();
             if let Ok(path) = storage::get_storage_path(app.handle()) {
                 let connections = storage::load_connections_from_path(&path);
-                // Use blocking lock since we're in sync setup
                 let mut cache = state.saved_connections.blocking_lock();
                 *cache = connections;
             }
