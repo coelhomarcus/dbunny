@@ -228,7 +228,7 @@ const { registerCompletionProvider } = useSqlAutocomplete();
     <div className="h-full flex flex-col">
       {/* Tabs */}
       <div className="flex items-center border-b border-zinc-800 bg-zinc-950 shrink-0">
-        <div className="flex items-center flex-1 overflow-x-auto">
+        <div className="flex items-center flex-1 overflow-x-auto overflow-y-hidden">
           {tabMetas.map((tab) => (
             <button
               key={tab.id}
