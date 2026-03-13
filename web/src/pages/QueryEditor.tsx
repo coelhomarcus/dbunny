@@ -35,9 +35,7 @@ export default function QueryEditor() {
 
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const activeIdRef = useRef(activeId);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const { registerCompletionProvider } = useSqlAutocomplete();
+const { registerCompletionProvider } = useSqlAutocomplete();
 
   useEffect(() => {
     activeIdRef.current = activeId;
@@ -122,35 +120,39 @@ export default function QueryEditor() {
     }
   }
 
-  function exportQuery() {
+  async function exportQuery() {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+
     const sql = editorRef.current?.getValue() ?? savedPayloads.get(activeId)?.sql ?? "";
     const meta = tabMetas.find((t) => t.id === activeId);
-    const filename = `${(meta?.label ?? "query").replace(/\s+/g, "_").toLowerCase()}.sql`;
-    const blob = new Blob([sql], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    const defaultName = `${(meta?.label ?? "query").replace(/\s+/g, "_").toLowerCase()}.sql`;
+
+    const path = await save({
+      defaultPath: defaultName,
+      filters: [{ name: "SQL", extensions: ["sql"] }, { name: "Text", extensions: ["txt"] }],
+    });
+
+    if (path) {
+      await writeTextFile(path, sql);
+    }
   }
 
-  function importQuery() {
-    fileInputRef.current?.click();
-  }
+  async function importQuery() {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
 
-  function handleFileImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const sql = ev.target?.result as string;
+    const path = await open({
+      multiple: false,
+      filters: [{ name: "SQL", extensions: ["sql"] }, { name: "Text", extensions: ["txt"] }],
+    });
+
+    if (path && typeof path === "string") {
+      const sql = await readTextFile(path);
       editorRef.current?.setValue(sql);
       const payload = savedPayloads.get(activeId);
       if (payload) payload.sql = sql;
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+    }
   }
 
   const runQuery = useCallback(async () => {
@@ -315,15 +317,7 @@ export default function QueryEditor() {
           </button>
         </div>
       </div>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".sql,.txt"
-        className="hidden"
-        onChange={handleFileImport}
-      />
-
-      {/* Results */}
+{/* Results */}
       <QueryResults result={result} error={error} running={running} />
     </div>
   );

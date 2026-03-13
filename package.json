@@ -12,5 +12,9 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1"
+  },
+  "dependencies": {
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-fs": "^2.4.5"
   }
 }
