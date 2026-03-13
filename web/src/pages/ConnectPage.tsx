@@ -129,17 +129,20 @@ export default function ConnectPage() {
 
     setIsSaving(true);
     try {
-      await api.saveConnection({
-        id: selectedId || undefined,
-        name: connectionName.trim(),
-        host: fields.host.trim(),
-        port: parseInt(fields.port || "5432", 10),
-        database: fields.database.trim(),
-        user: fields.user.trim(),
-        password: fields.password,
-        ssl: fields.ssl,
-        color: connectionColor,
-      });
+      await Promise.all([
+        api.saveConnection({
+          id: selectedId || undefined,
+          name: connectionName.trim(),
+          host: fields.host.trim(),
+          port: parseInt(fields.port || "5432", 10),
+          database: fields.database.trim(),
+          user: fields.user.trim(),
+          password: fields.password,
+          ssl: fields.ssl,
+          color: connectionColor,
+        }),
+        new Promise((r) => setTimeout(r, 600)),
+      ]);
       await loadSavedConnections();
     } catch {
       // error handling could be added
@@ -443,7 +446,7 @@ export default function ConnectPage() {
               <div className="mt-4 flex">
                 {/* Save/Update — animates in/out sliding from left */}
                 <div
-                  className="shrink-0 overflow-hidden transition-all duration-300"
+                  className="shrink-0 overflow-hidden transition-[max-width,opacity] duration-500"
                   style={{
                     maxWidth: canSave ? "140px" : "0px",
                     opacity: canSave ? 1 : 0,
@@ -454,15 +457,12 @@ export default function ConnectPage() {
                       type="button"
                       onClick={handleSave}
                       disabled={isSaving}
-                      className="h-10 px-4 border border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800/50 disabled:opacity-50 text-zinc-300 font-medium text-sm rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap w-full"
+                      className="h-10 px-4 border border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800/50 text-zinc-300 font-medium text-sm rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed relative whitespace-nowrap w-full"
                     >
-                      {isSaving ? (
-                        <Loader className="w-3.5 h-3.5 animate-spin" />
-                      ) : selectedId ? (
-                        "Update"
-                      ) : (
-                        "Save"
-                      )}
+                      <span className={`transition-opacity duration-200 ${isSaving ? "opacity-0" : "opacity-100"}`}>
+                        {selectedId ? "Update" : "Save"}
+                      </span>
+                      <Loader className={`w-3.5 h-3.5 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${isSaving ? "opacity-100" : "opacity-0"}`} />
                     </button>
                   </div>
                 </div>

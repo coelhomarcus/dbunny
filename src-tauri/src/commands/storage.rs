@@ -142,7 +142,7 @@ pub fn get_storage_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String
         .app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {e}"))?;
 
-    Ok(app_data_dir.join("connections.json"))
+    Ok(app_data_dir.join("db_connections.json"))
 }
 
 pub fn load_connections_from_path(path: &Path) -> Vec<SavedConnection> {
