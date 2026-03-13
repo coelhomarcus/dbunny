@@ -9,8 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
-const KEYRING_SERVICE: &str = "com.dbunny.desktop";
-const KEYRING_ENTRY: &str = "master-key";
+const PBKDF2_SALT: &[u8] = b"dbunny-connection-salt-v1";
+const PBKDF2_ITERATIONS: u32 = 100_000;
 
 /// Sensitive connection data — encrypted at rest as a JSON blob.
 #[derive(Serialize, Deserialize)]
@@ -60,35 +60,19 @@ pub struct ConnectionsFile {
 
 // ── Key management ────────────────────────────────────────────────────────────
 
-/// Returns the 32-byte master key from the system keychain.
-/// On first run, generates a random key and stores it there.
+/// Derives a 32-byte AES key from the machine hostname using PBKDF2-SHA256.
+/// Consistent across restarts on the same machine without any external storage.
 pub fn get_or_create_key() -> Result<[u8; 32], String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ENTRY)
-        .map_err(|e| format!("Keychain error: {e}"))?;
+    use pbkdf2::pbkdf2_hmac;
+    use sha2::Sha256;
 
-    match entry.get_password() {
-        Ok(encoded) => {
-            let bytes = BASE64
-                .decode(&encoded)
-                .map_err(|e| format!("Failed to decode key: {e}"))?;
-            if bytes.len() != 32 {
-                return Err("Invalid key length in keychain".into());
-            }
-            let mut key = [0u8; 32];
-            key.copy_from_slice(&bytes);
-            Ok(key)
-        }
-        Err(keyring::Error::NoEntry) => {
-            let mut key = [0u8; 32];
-            rand::thread_rng().fill_bytes(&mut key);
-            let encoded = BASE64.encode(&key);
-            entry
-                .set_password(&encoded)
-                .map_err(|e| format!("Failed to store key in keychain: {e}"))?;
-            Ok(key)
-        }
-        Err(e) => Err(format!("Keychain error: {e}")),
-    }
+    let machine_name = hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "dbunny-default-host".to_string());
+
+    let mut key = [0u8; 32];
+    pbkdf2_hmac::<Sha256>(machine_name.as_bytes(), PBKDF2_SALT, PBKDF2_ITERATIONS, &mut key);
+    Ok(key)
 }
 
 // ── Crypto helpers ────────────────────────────────────────────────────────────

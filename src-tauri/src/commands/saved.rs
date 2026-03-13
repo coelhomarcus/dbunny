@@ -25,10 +25,10 @@ pub async fn get_saved_connections(
 ) -> Result<Vec<SavedConnectionInfo>, String> {
     let connections = state.saved_connections.lock().await;
 
-    connections
+    Ok(connections
         .iter()
-        .map(|c| c.to_info(&state.encryption_key))
-        .collect::<Result<Vec<_>, _>>()
+        .filter_map(|c| c.to_info(&state.encryption_key).ok())
+        .collect())
 }
 
 #[tauri::command]
