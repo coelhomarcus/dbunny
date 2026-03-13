@@ -3,33 +3,39 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use pbkdf2::pbkdf2_hmac;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
+const PBKDF2_SALT: &[u8] = b"dbunny-connection-salt-v1";
 const PBKDF2_ITERATIONS: u32 = 100_000;
-const SALT: &[u8] = b"dbunny-connection-salt-v1";
 
+/// Sensitive connection data — encrypted at rest as a JSON blob.
+#[derive(Serialize, Deserialize)]
+struct SensitiveData {
+    host: String,
+    port: u16,
+    database: String,
+    user: String,
+    password: String,
+}
+
+/// Stored on disk. Only metadata is plaintext; everything else is in `encrypted_data`.
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedConnection {
     pub id: String,
     pub name: String,
-    pub host: String,
-    pub port: u16,
-    pub database: String,
-    pub user: String,
-    pub encrypted_password: String,
+    pub encrypted_data: String,
     pub ssl: bool,
     pub color: String,
     pub created_at: String,
     pub updated_at: String,
 }
 
+/// Returned to the frontend with all fields decrypted.
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedConnectionInfo {
@@ -52,20 +58,28 @@ pub struct ConnectionsFile {
     pub connections: Vec<SavedConnection>,
 }
 
-/// Derives AES-256 key from machine hostname. Call once at startup.
-pub fn derive_key() -> [u8; 32] {
+// ── Key management ────────────────────────────────────────────────────────────
+
+/// Derives a 32-byte AES key from the machine hostname using PBKDF2-SHA256.
+/// Consistent across restarts on the same machine without any external storage.
+pub fn get_or_create_key() -> Result<[u8; 32], String> {
+    use pbkdf2::pbkdf2_hmac;
+    use sha2::Sha256;
+
     let machine_name = hostname::get()
         .map(|h| h.to_string_lossy().to_string())
         .unwrap_or_else(|_| "dbunny-default-host".to_string());
 
     let mut key = [0u8; 32];
-    pbkdf2_hmac::<Sha256>(machine_name.as_bytes(), SALT, PBKDF2_ITERATIONS, &mut key);
-    key
+    pbkdf2_hmac::<Sha256>(machine_name.as_bytes(), PBKDF2_SALT, PBKDF2_ITERATIONS, &mut key);
+    Ok(key)
 }
 
-pub fn encrypt_password(key: &[u8; 32], plaintext: &str) -> Result<String, String> {
+// ── Crypto helpers ────────────────────────────────────────────────────────────
+
+pub fn encrypt(key: &[u8; 32], plaintext: &str) -> Result<String, String> {
     let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| format!("Failed to create cipher: {}", e))?;
+        Aes256Gcm::new_from_slice(key).map_err(|e| format!("Failed to create cipher: {e}"))?;
 
     let mut nonce_bytes = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
@@ -73,7 +87,7 @@ pub fn encrypt_password(key: &[u8; 32], plaintext: &str) -> Result<String, Strin
 
     let ciphertext = cipher
         .encrypt(nonce, plaintext.as_bytes())
-        .map_err(|e| format!("Encryption failed: {}", e))?;
+        .map_err(|e| format!("Encryption failed: {e}"))?;
 
     let mut combined = Vec::with_capacity(12 + ciphertext.len());
     combined.extend_from_slice(&nonce_bytes);
@@ -82,13 +96,13 @@ pub fn encrypt_password(key: &[u8; 32], plaintext: &str) -> Result<String, Strin
     Ok(BASE64.encode(&combined))
 }
 
-pub fn decrypt_password(key: &[u8; 32], encrypted: &str) -> Result<String, String> {
+pub fn decrypt(key: &[u8; 32], encrypted: &str) -> Result<String, String> {
     let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| format!("Failed to create cipher: {}", e))?;
+        Aes256Gcm::new_from_slice(key).map_err(|e| format!("Failed to create cipher: {e}"))?;
 
     let combined = BASE64
         .decode(encrypted)
-        .map_err(|e| format!("Base64 decode failed: {}", e))?;
+        .map_err(|e| format!("Base64 decode failed: {e}"))?;
 
     if combined.len() < 13 {
         return Err("Invalid encrypted data".into());
@@ -99,21 +113,22 @@ pub fn decrypt_password(key: &[u8; 32], encrypted: &str) -> Result<String, Strin
 
     let plaintext = cipher
         .decrypt(nonce, ciphertext)
-        .map_err(|e| format!("Decryption failed: {}", e))?;
+        .map_err(|e| format!("Decryption failed: {e}"))?;
 
-    String::from_utf8(plaintext).map_err(|e| format!("Invalid UTF-8: {}", e))
+    String::from_utf8(plaintext).map_err(|e| format!("Invalid UTF-8: {e}"))
 }
+
+// ── Storage helpers ───────────────────────────────────────────────────────────
 
 pub fn get_storage_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
 
-    Ok(app_data_dir.join("connections.json"))
+    Ok(app_data_dir.join("db_connections.json"))
 }
 
-/// Load connections from a specific path. Used during setup before AppHandle is fully available.
 pub fn load_connections_from_path(path: &Path) -> Vec<SavedConnection> {
     if !path.exists() {
         return Vec::new();
@@ -125,7 +140,7 @@ pub fn load_connections_from_path(path: &Path) -> Vec<SavedConnection> {
     };
 
     let file: ConnectionsFile = serde_json::from_str(&content).unwrap_or(ConnectionsFile {
-        version: 1,
+        version: 2,
         connections: Vec::new(),
     });
 
@@ -140,42 +155,79 @@ pub fn save_connections_to_file(
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create app data dir: {}", e))?;
+            .map_err(|e| format!("Failed to create app data dir: {e}"))?;
     }
 
     let file = ConnectionsFile {
-        version: 1,
+        version: 2,
         connections: connections.to_vec(),
     };
 
     let json = serde_json::to_string_pretty(&file)
-        .map_err(|e| format!("Failed to serialize connections: {}", e))?;
+        .map_err(|e| format!("Failed to serialize connections: {e}"))?;
 
     let temp_path = path.with_extension("json.tmp");
     fs::write(&temp_path, &json)
-        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+        .map_err(|e| format!("Failed to write temp file: {e}"))?;
     fs::rename(&temp_path, &path)
-        .map_err(|e| format!("Failed to rename temp file: {}", e))?;
+        .map_err(|e| format!("Failed to rename temp file: {e}"))?;
 
     Ok(())
 }
 
+// ── SavedConnection impl ──────────────────────────────────────────────────────
+
 impl SavedConnection {
-    pub fn to_info(&self, key: &[u8; 32]) -> Result<SavedConnectionInfo, String> {
-        let password = if self.encrypted_password.is_empty() {
-            String::new()
-        } else {
-            decrypt_password(key, &self.encrypted_password)?
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        key: &[u8; 32],
+        id: String,
+        name: String,
+        host: String,
+        port: u16,
+        database: String,
+        user: String,
+        password: String,
+        ssl: bool,
+        color: String,
+        created_at: String,
+        updated_at: String,
+    ) -> Result<Self, String> {
+        let sensitive = SensitiveData {
+            host,
+            port,
+            database,
+            user,
+            password,
         };
+        let json = serde_json::to_string(&sensitive)
+            .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?;
+        let encrypted_data = encrypt(key, &json)?;
+
+        Ok(Self {
+            id,
+            name,
+            encrypted_data,
+            ssl,
+            color,
+            created_at,
+            updated_at,
+        })
+    }
+
+    pub fn to_info(&self, key: &[u8; 32]) -> Result<SavedConnectionInfo, String> {
+        let json = decrypt(key, &self.encrypted_data)?;
+        let sensitive: SensitiveData = serde_json::from_str(&json)
+            .map_err(|e| format!("Failed to deserialize sensitive data: {e}"))?;
 
         Ok(SavedConnectionInfo {
             id: self.id.clone(),
             name: self.name.clone(),
-            host: self.host.clone(),
-            port: self.port,
-            database: self.database.clone(),
-            user: self.user.clone(),
-            password,
+            host: sensitive.host,
+            port: sensitive.port,
+            database: sensitive.database,
+            user: sensitive.user,
+            password: sensitive.password,
             ssl: self.ssl,
             color: self.color.clone(),
             created_at: self.created_at.clone(),

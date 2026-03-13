@@ -12,7 +12,6 @@ import {
   X,
   Loader,
   Bookmark,
-  Save,
   Plus,
 } from "lucide-react";
 import {
@@ -88,6 +87,24 @@ export default function ConnectPage() {
     });
   }
 
+  async function handleConnectSaved(conn: SavedConnection) {
+    handleSelectSaved(conn);
+    try {
+      const url = buildConnectionUrl({
+        host: conn.host,
+        port: conn.port.toString(),
+        database: conn.database,
+        user: conn.user,
+        password: conn.password,
+        ssl: conn.ssl,
+      });
+      await connect(url, conn.name);
+      navigate("/db/query");
+    } catch {
+      // error handled by context
+    }
+  }
+
   function handleNewConnection() {
     setSelectedId(null);
     setConnectionName("");
@@ -112,17 +129,20 @@ export default function ConnectPage() {
 
     setIsSaving(true);
     try {
-      await api.saveConnection({
-        id: selectedId || undefined,
-        name: connectionName.trim(),
-        host: fields.host.trim(),
-        port: parseInt(fields.port || "5432", 10),
-        database: fields.database.trim(),
-        user: fields.user.trim(),
-        password: fields.password,
-        ssl: fields.ssl,
-        color: connectionColor,
-      });
+      await Promise.all([
+        api.saveConnection({
+          id: selectedId || undefined,
+          name: connectionName.trim(),
+          host: fields.host.trim(),
+          port: parseInt(fields.port || "5432", 10),
+          database: fields.database.trim(),
+          user: fields.user.trim(),
+          password: fields.password,
+          ssl: fields.ssl,
+          color: connectionColor,
+        }),
+        new Promise((r) => setTimeout(r, 600)),
+      ]);
       await loadSavedConnections();
     } catch {
       // error handling could be added
@@ -134,9 +154,7 @@ export default function ConnectPage() {
   async function handleDelete(id: string) {
     try {
       await api.deleteSavedConnection(id);
-      if (selectedId === id) {
-        handleNewConnection();
-      }
+      if (selectedId === id) handleNewConnection();
       await loadSavedConnections();
     } catch {
       // error handling could be added
@@ -147,11 +165,7 @@ export default function ConnectPage() {
     e.preventDefault();
     try {
       const url = buildConnectionUrl(fields);
-      const savedName = selectedId
-        ? connectionName
-        : connectionName.trim()
-          ? connectionName
-          : undefined;
+      const savedName = connectionName.trim() || undefined;
       await connect(url, savedName);
       navigate("/db/query");
     } catch {
@@ -166,7 +180,6 @@ export default function ConnectPage() {
 
   return (
     <div className="h-screen bg-zinc-950 flex flex-col">
-      {/* Drag region — only needed on macOS where title bar is overlay */}
       {isMac && (
         <div
           className="h-8 w-full shrink-0"
@@ -178,9 +191,8 @@ export default function ConnectPage() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar — always rendered, fixed width */}
+        {/* Sidebar */}
         <aside className="w-56 shrink-0 border-r border-zinc-800/60 flex flex-col select-none">
-          {/* Sidebar header */}
           <div className="h-10 px-3 flex items-center justify-between shrink-0">
             <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
               Connections
@@ -196,14 +208,13 @@ export default function ConnectPage() {
               </button>
             )}
           </div>
-
-          {/* Connections list or empty state */}
           <div className="flex-1 overflow-y-auto">
             {hasSavedConnections ? (
               <SavedConnectionsList
                 connections={savedConnections}
                 selectedId={selectedId}
                 onSelect={handleSelectSaved}
+                onConnect={handleConnectSaved}
                 onDelete={handleDelete}
               />
             ) : (
@@ -222,14 +233,14 @@ export default function ConnectPage() {
         <main className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
           <div className="w-full max-w-md">
             {/* Header */}
-            <div className="text-center mb-8">
-              <div className="inline-flex items-center justify-center select-none">
+            <div className="text-center mb-8 select-none">
+              <div className="inline-flex items-center justify-center mb-3">
                 <img src="/icon.svg" className="size-14" />
               </div>
-              <h1 className="text-xl font-semibold text-white mb-1 select-none">
+              <h1 className="text-xl font-semibold text-white mb-1">
                 {selectedId ? "Edit Connection" : "New Connection"}
               </h1>
-              <p className="text-sm text-zinc-500 select-none">
+              <p className="text-sm text-zinc-500">
                 {selectedId
                   ? "Update your connection details"
                   : "Enter your PostgreSQL connection details"}
@@ -239,39 +250,6 @@ export default function ConnectPage() {
             {/* Form */}
             <form onSubmit={handleSubmit} className="select-none">
               <div className="bg-zinc-900 rounded-xl border border-zinc-800 divide-y divide-zinc-800">
-                {/* Connection Name + Color */}
-                <div className="relative">
-                  <label className="absolute top-2.5 left-10 text-[11px] font-medium text-zinc-500 uppercase tracking-wider select-none">
-                    Name
-                  </label>
-                  <Bookmark className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                  <input
-                    type="text"
-                    value={connectionName}
-                    onChange={(e) => setConnectionName(e.target.value)}
-                    placeholder="My Database"
-                    className="w-full pl-10 pr-14 pt-7 pb-2.5 bg-transparent text-white text-sm placeholder-zinc-600 focus:outline-none focus:bg-zinc-800/50 transition-colors rounded-t-xl"
-                    spellCheck={false}
-                  />
-                  <div className="absolute right-3.5 top-1/2 -translate-y-1/2">
-                    <button
-                      type="button"
-                      onClick={() => colorInputRef.current?.click()}
-                      className="w-5 h-5 rounded-full border-2 border-zinc-700 hover:border-zinc-500 transition-colors cursor-pointer"
-                      style={{ backgroundColor: connectionColor }}
-                      title="Pick a color"
-                    />
-                    <input
-                      ref={colorInputRef}
-                      type="color"
-                      value={connectionColor}
-                      onChange={(e) => setConnectionColor(e.target.value)}
-                      className="sr-only"
-                      tabIndex={-1}
-                    />
-                  </div>
-                </div>
-
                 {/* Host & Port */}
                 <div className="flex divide-x divide-zinc-800">
                   <div className="flex-1 relative">
@@ -284,7 +262,7 @@ export default function ConnectPage() {
                       value={fields.host}
                       onChange={(e) => updateField("host", e.target.value)}
                       placeholder="localhost"
-                      className="w-full pl-10 pr-4 pt-7 pb-2.5 bg-transparent text-white text-sm placeholder-zinc-600 focus:outline-none focus:bg-zinc-800/50 transition-colors"
+                      className="w-full pl-10 pr-4 pt-7 pb-2.5 bg-transparent text-white text-sm placeholder-zinc-600 focus:outline-none focus:bg-zinc-800/50 transition-colors rounded-tl-xl"
                       spellCheck={false}
                       autoFocus
                     />
@@ -298,7 +276,7 @@ export default function ConnectPage() {
                       value={fields.port}
                       onChange={(e) => updateField("port", e.target.value)}
                       placeholder="5432"
-                      className="w-full px-3 pt-7 pb-2.5 bg-transparent text-white text-sm placeholder-zinc-600 focus:outline-none focus:bg-zinc-800/50 transition-colors font-mono"
+                      className="w-full px-3 pt-7 pb-2.5 bg-transparent text-white text-sm placeholder-zinc-600 focus:outline-none focus:bg-zinc-800/50 transition-colors font-mono rounded-tr-xl"
                       spellCheck={false}
                     />
                   </div>
@@ -371,6 +349,39 @@ export default function ConnectPage() {
                     />
                   </button>
                 </div>
+
+                {/* Name + Color */}
+                <div className="relative">
+                  <label className="absolute top-2.5 left-10 text-[11px] font-medium text-zinc-500 uppercase tracking-wider select-none">
+                    Name
+                  </label>
+                  <Bookmark className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={connectionName}
+                    onChange={(e) => setConnectionName(e.target.value)}
+                    placeholder="My Database"
+                    className="w-full pl-10 pr-12 pt-7 pb-2.5 bg-transparent text-white text-sm placeholder-zinc-600 focus:outline-none focus:bg-zinc-800/50 transition-colors rounded-b-xl"
+                    spellCheck={false}
+                  />
+                  <div className="absolute right-3.5 top-1/2 -translate-y-1/2">
+                    <button
+                      type="button"
+                      onClick={() => colorInputRef.current?.click()}
+                      className="w-5 h-5 rounded-full border-2 border-zinc-700 hover:border-zinc-500 transition-colors cursor-pointer"
+                      style={{ backgroundColor: connectionColor }}
+                      title="Pick a color"
+                    />
+                    <input
+                      ref={colorInputRef}
+                      type="color"
+                      value={connectionColor}
+                      onChange={(e) => setConnectionColor(e.target.value)}
+                      className="sr-only"
+                      tabIndex={-1}
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Import from URL */}
@@ -385,27 +396,25 @@ export default function ConnectPage() {
                 </button>
               ) : (
                 <div className="mt-3 flex gap-2">
-                  <div className="flex-1 relative">
-                    <input
-                      type="text"
-                      value={importUrl}
-                      onChange={(e) => setImportUrl(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleImport();
-                        }
-                        if (e.key === "Escape") {
-                          setShowImport(false);
-                          setImportUrl("");
-                        }
-                      }}
-                      placeholder="postgresql://user:pass@host:5432/db"
-                      className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-white text-xs placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
-                      autoFocus
-                      spellCheck={false}
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleImport();
+                      }
+                      if (e.key === "Escape") {
+                        setShowImport(false);
+                        setImportUrl("");
+                      }
+                    }}
+                    placeholder="postgresql://user:pass@host:5432/db"
+                    className="flex-1 px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-white text-xs placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                    autoFocus
+                    spellCheck={false}
+                  />
                   <button
                     type="button"
                     onClick={handleImport}
@@ -434,21 +443,31 @@ export default function ConnectPage() {
               )}
 
               {/* Action buttons */}
-              <div className="mt-5 flex gap-3">
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={!canSave || isSaving}
-                  className="w-24 h-10 border border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800/50 disabled:border-zinc-800 disabled:text-zinc-600 text-zinc-300 font-medium text-sm rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              <div className="mt-4 flex">
+                {/* Save/Update — animates in/out sliding from left */}
+                <div
+                  className="shrink-0 overflow-hidden transition-[max-width,opacity] duration-500"
+                  style={{
+                    maxWidth: canSave ? "140px" : "0px",
+                    opacity: canSave ? 1 : 0,
+                  }}
                 >
-                  {isSaving ? (
-                    <Loader className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Save className="w-4 h-4" />
-                  )}
-                  {selectedId ? "Update" : "Save"}
-                </button>
+                  <div className="pr-2">
+                    <button
+                      type="button"
+                      onClick={handleSave}
+                      disabled={isSaving}
+                      className="h-10 px-4 border border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800/50 text-zinc-300 font-medium text-sm rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed relative whitespace-nowrap w-full"
+                    >
+                      <span className={`transition-opacity duration-200 ${isSaving ? "opacity-0" : "opacity-100"}`}>
+                        {selectedId ? "Update" : "Save"}
+                      </span>
+                      <Loader className={`w-3.5 h-3.5 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${isSaving ? "opacity-100" : "opacity-0"}`} />
+                    </button>
+                  </div>
+                </div>
 
+                {/* Connect — expands to fill available space */}
                 <button
                   type="submit"
                   disabled={!canConnect || isConnecting}

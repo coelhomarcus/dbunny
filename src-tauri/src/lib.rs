@@ -4,20 +4,28 @@ use commands::state::AppState;
 use commands::storage;
 use tauri::Manager;
 
+#[cfg(debug_assertions)]
+#[allow(dead_code)]
+#[tauri::command]
+fn open_devtools(window: tauri::WebviewWindow) {
+    window.open_devtools();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(AppState::new())
         .setup(|app| {
-            // Load saved connections from disk into memory cache at startup
             let state = app.state::<AppState>();
             if let Ok(path) = storage::get_storage_path(app.handle()) {
                 let connections = storage::load_connections_from_path(&path);
-                // Use blocking lock since we're in sync setup
                 let mut cache = state.saved_connections.blocking_lock();
                 *cache = connections;
             }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -35,6 +43,8 @@ pub fn run() {
             commands::saved::get_saved_connections,
             commands::saved::save_connection,
             commands::saved::delete_saved_connection,
+            #[cfg(debug_assertions)]
+            open_devtools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
