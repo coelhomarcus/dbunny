@@ -24,6 +24,20 @@ export interface FunctionInfo {
   argumentTypes: string;
 }
 
+export interface FunctionDetail {
+  name: string;
+  schema: string;
+  returnType: string;
+  argumentTypes: string;
+  language: string;
+  source: string;
+  kind: string;
+  volatility: string;
+  isStrict: boolean;
+  owner: string;
+  description: string | null;
+}
+
 export type SchemaNodeType = "schema" | "table" | "view" | "function" | "folder";
 
 export interface SchemaTreeNode {

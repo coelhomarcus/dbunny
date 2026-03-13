@@ -36,6 +36,22 @@ pub struct FunctionInfo {
     pub argument_types: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FunctionDetail {
+    pub name: String,
+    pub schema: String,
+    pub return_type: String,
+    pub argument_types: String,
+    pub language: String,
+    pub source: String,
+    pub kind: String,
+    pub volatility: String,
+    pub is_strict: bool,
+    pub owner: String,
+    pub description: Option<String>,
+}
+
 #[tauri::command]
 pub async fn get_schemas(
     state: State<'_, AppState>,
@@ -156,6 +172,67 @@ pub async fn get_functions(
             argument_types: r.get("argument_types"),
         })
         .collect())
+}
+
+#[tauri::command]
+pub async fn get_function_detail(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    function_name: String,
+    argument_types: String,
+) -> Result<FunctionDetail, String> {
+    let sessions = state.sessions.lock().await;
+    let session = sessions.get(&session_id).ok_or("Session not found")?;
+
+    let row = session
+        .client
+        .query_one(
+            "SELECT p.proname as name, \
+             n.nspname as schema, \
+             pg_get_function_result(p.oid) as return_type, \
+             pg_get_function_arguments(p.oid) as argument_types, \
+             l.lanname as language, \
+             pg_get_functiondef(p.oid) as source, \
+             CASE p.prokind \
+               WHEN 'f' THEN 'function' \
+               WHEN 'p' THEN 'procedure' \
+               WHEN 'a' THEN 'aggregate' \
+               WHEN 'w' THEN 'window' \
+             END as kind, \
+             CASE p.provolatile \
+               WHEN 'i' THEN 'IMMUTABLE' \
+               WHEN 's' THEN 'STABLE' \
+               WHEN 'v' THEN 'VOLATILE' \
+             END as volatility, \
+             p.proisstrict as is_strict, \
+             pg_catalog.pg_get_userbyid(p.proowner) as owner, \
+             d.description \
+             FROM pg_proc p \
+             JOIN pg_namespace n ON p.pronamespace = n.oid \
+             JOIN pg_language l ON p.prolang = l.oid \
+             LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_proc'::regclass \
+             WHERE n.nspname = $1 AND p.proname = $2 \
+               AND pg_get_function_arguments(p.oid) = $3 \
+             LIMIT 1",
+            &[&schema, &function_name, &argument_types],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(FunctionDetail {
+        name: row.get("name"),
+        schema: row.get("schema"),
+        return_type: row.get("return_type"),
+        argument_types: row.get("argument_types"),
+        language: row.get("language"),
+        source: row.get::<_, Option<String>>("source").unwrap_or_default(),
+        kind: row.get("kind"),
+        volatility: row.get("volatility"),
+        is_strict: row.get("is_strict"),
+        owner: row.get("owner"),
+        description: row.get("description"),
+    })
 }
 
 #[tauri::command]

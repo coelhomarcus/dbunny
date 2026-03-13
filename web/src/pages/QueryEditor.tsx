@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import type { QueryResult } from "@/types";
 import { useSqlAutocomplete } from "../hooks/useSqlAutocomplete";
 import QueryResults from "../components/QueryResults";
-import { Plus, X, Upload, Download, Loader } from "lucide-react";
+import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
 
 type TabMeta = {
   id: number;
@@ -17,13 +17,54 @@ type TabPayload = {
   error: string | null;
 };
 
-// Module-level — survives navigation (component unmount/remount)
+type DangerInfo = {
+  rule: string;
+  detail: string;
+};
+
+// Module-level - survives navigation (component unmount/remount)
 let nextId = 2;
 let savedTabMetas: TabMeta[] = [{ id: 1, label: "Query 1" }];
 let savedActiveId = 1;
+let savedSafeMode = true;
 const savedPayloads: Map<number, TabPayload> = new Map([
   [1, { sql: "SELECT 1;", result: null, error: null }],
 ]);
+
+function detectDangerousStatements(sql: string): DangerInfo[] {
+  const dangers: DangerInfo[] = [];
+
+  // Strip comments and string literals to avoid false positives
+  const normalized = sql
+    .replace(/--[^\n]*/g, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+
+  const stmts = normalized.split(";").map((s) => s.trim()).filter(Boolean);
+
+  for (const stmt of stmts) {
+    if (/\bDROP\s+DATABASE\b/.test(stmt)) {
+      dangers.push({ rule: "DROP DATABASE", detail: "Deletes the entire database permanently." });
+    } else if (/\bDROP\s+SCHEMA\b/.test(stmt)) {
+      dangers.push({ rule: "DROP SCHEMA", detail: "Deletes the schema and all its objects permanently." });
+    } else if (/\bDROP\s+TABLE\b/.test(stmt)) {
+      dangers.push({ rule: "DROP TABLE", detail: "Deletes the table and all its data permanently." });
+    } else if (/\bTRUNCATE\b/.test(stmt)) {
+      dangers.push({ rule: "TRUNCATE", detail: "Deletes all rows from the table instantly." });
+    } else if (/\bDELETE\b/.test(stmt) && !/\bWHERE\b/.test(stmt)) {
+      dangers.push({ rule: "DELETE without WHERE", detail: "Deletes every row in the table, no filter applied." });
+    } else if (/\bUPDATE\b/.test(stmt) && /\bSET\b/.test(stmt) && !/\bWHERE\b/.test(stmt)) {
+      dangers.push({ rule: "UPDATE without WHERE", detail: "Updates every row in the table, no filter applied." });
+    } else if (/\bALTER\s+TABLE\b/.test(stmt) && /\bDROP\s+COLUMN\b/.test(stmt)) {
+      dangers.push({ rule: "ALTER TABLE DROP COLUMN", detail: "Removes the column and its data permanently." });
+    }
+  }
+
+  return dangers;
+}
 
 export default function QueryEditor() {
   const [tabMetas, setTabMetas] = useState<TabMeta[]>(savedTabMetas);
@@ -32,14 +73,21 @@ export default function QueryEditor() {
   const [result, setResult] = useState<QueryResult | null>(initial.result);
   const [error, setError] = useState<string | null>(initial.error);
   const [running, setRunning] = useState(false);
+  const [safeMode, setSafeMode] = useState(savedSafeMode);
+  const [pendingDangers, setPendingDangers] = useState<DangerInfo[] | null>(null);
+  const pendingSqlRef = useRef<string | null>(null);
 
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const activeIdRef = useRef(activeId);
-const { registerCompletionProvider } = useSqlAutocomplete();
+  const { registerCompletionProvider } = useSqlAutocomplete();
 
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
+
+  useEffect(() => {
+    savedSafeMode = safeMode;
+  }, [safeMode]);
 
   // Save editor SQL on unmount so it's available when navigating back
   useEffect(() => {
@@ -64,10 +112,8 @@ const { registerCompletionProvider } = useSqlAutocomplete();
 
   function switchTab(id: number) {
     saveCurrentSql();
-
     setActiveId(id);
     savedActiveId = id;
-
     const payload = savedPayloads.get(id)!;
     editorRef.current?.setValue(payload.sql);
     setResult(payload.result);
@@ -76,18 +122,14 @@ const { registerCompletionProvider } = useSqlAutocomplete();
 
   function addTab() {
     saveCurrentSql();
-
     const id = nextId++;
     const label = `Query ${id}`;
     savedPayloads.set(id, { sql: "", result: null, error: null });
-
     const newMetas = [...tabMetas, { id, label }];
     setTabMetas(newMetas);
     savedTabMetas = newMetas;
-
     setActiveId(id);
     savedActiveId = id;
-
     editorRef.current?.setValue("");
     setResult(null);
     setError(null);
@@ -96,22 +138,18 @@ const { registerCompletionProvider } = useSqlAutocomplete();
   function closeTab(e: React.MouseEvent, id: number) {
     e.stopPropagation();
     if (tabMetas.length === 1) return;
-
     const index = tabMetas.findIndex((t) => t.id === id);
     const newMetas = tabMetas.filter((t) => t.id !== id);
     savedPayloads.delete(id);
-
     let newActiveId = activeId;
     if (id === activeId) {
       const newIndex = Math.min(index, newMetas.length - 1);
       newActiveId = newMetas[newIndex].id;
     }
-
     setTabMetas(newMetas);
     savedTabMetas = newMetas;
     setActiveId(newActiveId);
     savedActiveId = newActiveId;
-
     if (id === activeId) {
       const payload = savedPayloads.get(newActiveId)!;
       editorRef.current?.setValue(payload.sql);
@@ -123,30 +161,23 @@ const { registerCompletionProvider } = useSqlAutocomplete();
   async function exportQuery() {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-
     const sql = editorRef.current?.getValue() ?? savedPayloads.get(activeId)?.sql ?? "";
     const meta = tabMetas.find((t) => t.id === activeId);
     const defaultName = `${(meta?.label ?? "query").replace(/\s+/g, "_").toLowerCase()}.sql`;
-
     const path = await save({
       defaultPath: defaultName,
       filters: [{ name: "SQL", extensions: ["sql"] }, { name: "Text", extensions: ["txt"] }],
     });
-
-    if (path) {
-      await writeTextFile(path, sql);
-    }
+    if (path) await writeTextFile(path, sql);
   }
 
   async function importQuery() {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
-
     const path = await open({
       multiple: false,
       filters: [{ name: "SQL", extensions: ["sql"] }, { name: "Text", extensions: ["txt"] }],
     });
-
     if (path && typeof path === "string") {
       const sql = await readTextFile(path);
       editorRef.current?.setValue(sql);
@@ -155,24 +186,10 @@ const { registerCompletionProvider } = useSqlAutocomplete();
     }
   }
 
-  const runQuery = useCallback(async () => {
-    const editor = editorRef.current;
-    if (!editor) return;
-
-    const selection = editor.getSelection();
-    let sql: string;
-    if (selection && !selection.isEmpty()) {
-      sql = editor.getModel()?.getValueInRange(selection) ?? "";
-    } else {
-      sql = editor.getValue();
-    }
-
-    if (!sql.trim()) return;
-
+  const executeQuery = useCallback(async (sql: string) => {
     setRunning(true);
     setError(null);
     setResult(null);
-
     const delay = new Promise<void>((r) => setTimeout(r, 400));
     try {
       const [res] = await Promise.all([api.query(sql), delay]);
@@ -189,6 +206,42 @@ const { registerCompletionProvider } = useSqlAutocomplete();
       setRunning(false);
     }
   }, []);
+
+  const runQuery = useCallback(async () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const selection = editor.getSelection();
+    let sql: string;
+    if (selection && !selection.isEmpty()) {
+      sql = editor.getModel()?.getValueInRange(selection) ?? "";
+    } else {
+      sql = editor.getValue();
+    }
+    if (!sql.trim()) return;
+
+    if (safeMode) {
+      const dangers = detectDangerousStatements(sql);
+      if (dangers.length > 0) {
+        pendingSqlRef.current = sql;
+        setPendingDangers(dangers);
+        return;
+      }
+    }
+
+    await executeQuery(sql);
+  }, [safeMode, executeQuery]);
+
+  function confirmDangerousQuery() {
+    const sql = pendingSqlRef.current;
+    setPendingDangers(null);
+    pendingSqlRef.current = null;
+    if (sql) executeQuery(sql);
+  }
+
+  function cancelDangerousQuery() {
+    setPendingDangers(null);
+    pendingSqlRef.current = null;
+  }
 
   const handleBeforeMount: BeforeMount = (monaco) => {
     monaco.editor.defineTheme("app-dark", {
@@ -226,9 +279,54 @@ const { registerCompletionProvider } = useSqlAutocomplete();
 
   return (
     <div className="h-full flex flex-col">
+      {/* Danger confirmation modal */}
+      {pendingDangers && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+            <div className="px-5 pt-5 pb-4">
+              <div className="flex items-center gap-2.5 mb-1">
+                <div className="flex items-center justify-center w-6 h-6 rounded-full bg-red-500/10">
+                  <AlertTriangle size={13} className="text-red-400" />
+                </div>
+                <h3 className="text-[13px] font-semibold text-white">Query blocked by Safe Mode</h3>
+              </div>
+              <p className="text-xs text-zinc-500 mt-2">
+                {pendingDangers.length === 1
+                  ? "A potentially destructive operation was detected."
+                  : `${pendingDangers.length} potentially destructive operations were detected.`}
+              </p>
+            </div>
+
+            <div className="mx-5 mb-4 rounded-lg border border-zinc-800 divide-y divide-zinc-800/80">
+              {pendingDangers.map((d, i) => (
+                <div key={i} className="px-3 py-2.5">
+                  <span className="font-mono text-[11px] font-medium text-red-400 block">{d.rule}</span>
+                  <span className="text-[11px] text-zinc-500 block mt-0.5">{d.detail}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 px-5 py-3.5 border-t border-zinc-800 bg-zinc-900/80">
+              <button
+                onClick={confirmDangerousQuery}
+                className="px-3 py-1.5 text-[11px] font-medium bg-red-600/80 hover:bg-red-600 text-white rounded-lg transition-colors"
+              >
+                Run anyway
+              </button>
+              <button
+                onClick={cancelDangerousQuery}
+                className="px-3 py-1.5 text-[11px] font-medium text-zinc-400 hover:text-white rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex items-center border-b border-zinc-800 bg-zinc-950 shrink-0">
-        <div className="flex items-center flex-1 overflow-x-auto">
+        <div className="flex items-center flex-1 overflow-x-auto overflow-y-hidden">
           {tabMetas.map((tab) => (
             <button
               key={tab.id}
@@ -305,6 +403,18 @@ const { registerCompletionProvider } = useSqlAutocomplete();
         )}
         <div className="flex items-center gap-1 ml-auto">
           <button
+            onClick={() => setSafeMode((v) => !v)}
+            title={safeMode ? "Safe Mode ON - click to disable" : "Safe Mode OFF - click to enable"}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded transition-colors ${
+              safeMode
+                ? "text-emerald-400 hover:text-emerald-300 hover:bg-zinc-800"
+                : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+            }`}
+          >
+            {safeMode ? <ShieldCheck size={13} /> : <ShieldOff size={13} />}
+            {safeMode ? "Safe" : "Unsafe"}
+          </button>
+          <button
             onClick={importQuery}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-xs rounded transition-colors"
             title="Import .sql file"
@@ -322,7 +432,8 @@ const { registerCompletionProvider } = useSqlAutocomplete();
           </button>
         </div>
       </div>
-{/* Results */}
+
+      {/* Results */}
       <QueryResults result={result} error={error} running={running} />
     </div>
   );

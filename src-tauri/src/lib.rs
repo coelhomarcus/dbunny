@@ -35,6 +35,7 @@ pub fn run() {
             commands::schema::get_tables,
             commands::schema::get_views,
             commands::schema::get_functions,
+            commands::schema::get_function_detail,
             commands::schema::get_columns,
             commands::query::execute_query,
             commands::query::get_table_data,

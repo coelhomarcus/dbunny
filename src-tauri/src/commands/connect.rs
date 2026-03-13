@@ -50,9 +50,15 @@ pub async fn connect(
         }
     });
 
-    // Test connection
+    // Test connection + pre-warm catalog cache
     client
-        .query("SELECT 1", &[])
+        .query(
+            "SELECT c.table_name, p.proname \
+             FROM information_schema.columns c \
+             JOIN pg_proc p ON true \
+             WHERE false",
+            &[],
+        )
         .await
         .map_err(|e| format!("Connection test failed: {}", e))?;
 

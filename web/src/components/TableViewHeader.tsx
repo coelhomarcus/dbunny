@@ -50,7 +50,7 @@ export default function TableViewHeader({
         )}
         {hasNoPk && (
           <span className="text-xs text-amber-500/70">
-            no primary key — editing disabled
+            no primary key - editing disabled
           </span>
         )}
       </div>

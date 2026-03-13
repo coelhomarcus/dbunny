@@ -4,6 +4,7 @@ import type {
   SchemaInfo,
   TableInfo,
   FunctionInfo,
+  FunctionDetail,
   ColumnInfo,
   QueryResult,
   TableDataResponse,
@@ -44,6 +45,10 @@ export const api = {
 
   async getFunctions(schema: string) {
     return invoke<FunctionInfo[]>("get_functions", { sessionId, schema });
+  },
+
+  async getFunctionDetail(schema: string, functionName: string, argumentTypes: string) {
+    return invoke<FunctionDetail>("get_function_detail", { sessionId, schema, functionName, argumentTypes });
   },
 
   async getColumns(schema: string, table: string) {

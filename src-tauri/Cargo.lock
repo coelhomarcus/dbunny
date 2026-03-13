@@ -810,7 +810,7 @@ dependencies = [
 
 [[package]]
 name = "dbunny"
-version = "0.1.1"
+version = "0.2.1"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
