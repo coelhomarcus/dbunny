@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router";
+import { HashRouter, Routes, Route, Navigate } from "react-router";
 import { ConnectionProvider } from "./contexts/ConnectionContext";
 import ConnectPage from "./pages/ConnectPage";
 import DatabaseLayout from "./pages/DatabaseLayout";
@@ -9,7 +9,7 @@ import TableStructure from "./pages/TableStructure";
 export default function App() {
   return (
     <ConnectionProvider>
-      <BrowserRouter>
+      <HashRouter>
         <Routes>
           <Route path="/" element={<ConnectPage />} />
           <Route path="/db" element={<DatabaseLayout />}>
@@ -19,7 +19,7 @@ export default function App() {
             <Route path=":schema/:table/structure" element={<TableStructure />} />
           </Route>
         </Routes>
-      </BrowserRouter>
+      </HashRouter>
     </ConnectionProvider>
   );
 }

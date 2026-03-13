@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, ArrowRight } from "lucide-react";
 import type { SavedConnection } from "@/types";
 
 interface SavedConnectionsListProps {
   connections: SavedConnection[];
   selectedId: string | null;
   onSelect: (connection: SavedConnection) => void;
+  onConnect: (connection: SavedConnection) => void;
   onDelete: (id: string) => void;
 }
 
@@ -13,6 +14,7 @@ export default function SavedConnectionsList({
   connections,
   selectedId,
   onSelect,
+  onConnect,
   onDelete,
 }: SavedConnectionsListProps) {
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
@@ -35,6 +37,9 @@ export default function SavedConnectionsList({
             }`}
             onClick={() => {
               if (!isConfirmingDelete) onSelect(conn);
+            }}
+            onDoubleClick={() => {
+              if (!isConfirmingDelete) onConnect(conn);
             }}
           >
             {isConfirmingDelete ? (
@@ -63,33 +68,45 @@ export default function SavedConnectionsList({
                 </div>
               </div>
             ) : (
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="w-2 h-2 rounded-full shrink-0"
-                    style={{ backgroundColor: conn.color || "#3b82f6" }}
-                  />
-                  <span className="text-[13px] text-zinc-200 truncate">
-                    {conn.name || "Unnamed"}
-                  </span>
+              <>
+                <div className="min-w-0 flex-1 pr-14">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: conn.color || "#3b82f6" }}
+                    />
+                    <span className="text-[13px] text-zinc-200 truncate">
+                      {conn.name || "Unnamed"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-600 truncate pl-4 font-mono">
+                    {conn.host}:{conn.port}/{conn.database}
+                  </p>
                 </div>
-                <p className="text-[11px] text-zinc-600 truncate pl-4 font-mono">
-                  {conn.host}:{conn.port}/{conn.database}
-                </p>
-              </div>
-            )}
 
-            {!isConfirmingDelete && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setConfirmingDeleteId(conn.id);
-                }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-zinc-700 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
-                title="Delete"
-              >
-                <Trash2 size={12} />
-              </button>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onConnect(conn);
+                    }}
+                    className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors"
+                    title="Connect"
+                  >
+                    <ArrowRight size={12} />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmingDeleteId(conn.id);
+                    }}
+                    className="p-1 rounded text-zinc-700 hover:text-red-400 hover:bg-zinc-700/50 transition-colors"
+                    title="Delete"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </>
             )}
           </div>
         );
