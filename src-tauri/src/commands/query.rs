@@ -281,6 +281,26 @@ fn row_to_json_values(row: &Row) -> Vec<JsonValue> {
     values
 }
 
+fn pg_error_to_json(e: tokio_postgres::Error) -> String {
+    if let Some(db) = e.as_db_error() {
+        let position = match db.position() {
+            Some(tokio_postgres::error::ErrorPosition::Original(p)) => Some(*p),
+            _ => None,
+        };
+        serde_json::json!({
+            "message": db.message(),
+            "severity": db.severity(),
+            "detail": db.detail(),
+            "hint": db.hint(),
+            "position": position,
+            "code": db.code().code(),
+        })
+        .to_string()
+    } else {
+        e.to_string()
+    }
+}
+
 fn columns_from_statement(columns: &[tokio_postgres::Column]) -> Vec<QueryColumn> {
     columns
         .iter()
@@ -338,7 +358,7 @@ pub async fn execute_query(
         .client
         .prepare(&sql)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(pg_error_to_json)?;
 
     let sql_upper = sql.trim().to_uppercase();
     let is_query = sql_upper.starts_with("SELECT")
@@ -354,7 +374,7 @@ pub async fn execute_query(
             .client
             .query(&stmt, &[])
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(pg_error_to_json)?;
         let duration = start.elapsed().as_millis() as u64;
         let row_count = rows.len();
         let json_rows: Vec<Vec<JsonValue>> = rows.iter().map(row_to_json_values).collect();
@@ -370,7 +390,7 @@ pub async fn execute_query(
             .client
             .execute(&stmt, &[])
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(pg_error_to_json)?;
         let duration = start.elapsed().as_millis() as u64;
         Ok(QueryResult {
             columns: vec![],

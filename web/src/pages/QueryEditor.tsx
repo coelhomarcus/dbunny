@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import type { QueryResult } from "@/types";
 import { useSqlAutocomplete } from "../hooks/useSqlAutocomplete";
 import QueryResults from "../components/QueryResults";
-import { Plus, X, Upload, Download } from "lucide-react";
+import { Plus, X, Upload, Download, Loader } from "lucide-react";
 
 type TabMeta = {
   id: number;
@@ -173,12 +173,14 @@ const { registerCompletionProvider } = useSqlAutocomplete();
     setError(null);
     setResult(null);
 
+    const delay = new Promise<void>((r) => setTimeout(r, 400));
     try {
-      const res = await api.query(sql);
+      const [res] = await Promise.all([api.query(sql), delay]);
       setResult(res);
       const payload = savedPayloads.get(activeIdRef.current);
       if (payload) { payload.result = res; payload.error = null; }
     } catch (err) {
+      await delay;
       const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "Query failed";
       setError(msg);
       const payload = savedPayloads.get(activeIdRef.current);
@@ -287,9 +289,12 @@ const { registerCompletionProvider } = useSqlAutocomplete();
         <button
           onClick={runQuery}
           disabled={running}
-          className="px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white text-xs font-medium rounded transition-colors"
+          className="px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white text-xs font-medium rounded transition-colors relative"
         >
-          {running ? "Running..." : "Run (Ctrl+Enter)"}
+          <span className={`transition-opacity duration-200 ${running ? "opacity-0" : "opacity-100"}`}>
+            Run (Ctrl+Enter)
+          </span>
+          <Loader className={`w-3.5 h-3.5 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
         </button>
         {result && (
           <span className="text-xs text-zinc-500">
