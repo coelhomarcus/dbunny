@@ -35,46 +35,25 @@ export default function SchemaTree() {
         setSchemas(s);
         setLoading(false);
 
-        const toExpand =
-          s.length === 1
-            ? [s[0].name]
-            : s.filter((x) => x.name === "public").map((x) => x.name);
-        if (toExpand.length === 0) return;
-
-        setExpanded(new Set(toExpand));
-
-        await Promise.all(
-          toExpand.map(async (name) => {
-            try {
-              const [tables, views, functions] = await Promise.all([
-                api.getTables(name),
-                api.getViews(name),
-                api.getFunctions(name),
-              ]);
-              setSchemaData((prev) => ({
-                ...prev,
-                [name]: { tables, views, functions, loaded: true },
-              }));
-            } catch {
-              // ignore
-            }
-          }),
-        );
       })
       .catch(() => setLoading(false));
   }, []);
 
+  const toggle = useCallback((key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
   const toggleSchema = useCallback(
     async (schema: string) => {
-      setExpanded((prev) => {
-        const next = new Set(prev);
-        if (next.has(schema)) {
-          next.delete(schema);
-        } else {
-          next.add(schema);
-        }
-        return next;
-      });
+      toggle(schema);
 
       if (!schemaData[schema]?.loaded) {
         try {
@@ -92,7 +71,7 @@ export default function SchemaTree() {
         }
       }
     },
-    [schemaData],
+    [schemaData, toggle],
   );
 
   if (loading) {
@@ -133,79 +112,127 @@ export default function SchemaTree() {
             {/* Schema contents */}
             {isExpanded && data?.loaded && (
               <div>
-                {/* Tables */}
+                {/* Tables folder */}
                 {data.tables.length > 0 && (
                   <div>
-                    {data.tables.map((t) => {
-                      const isActive =
-                        activeSchema === schema.name && activeTable === t.name;
-                      return (
-                        <button
-                          key={t.name}
-                          onClick={() =>
-                            navigate(`/db/${schema.name}/${t.name}`)
-                          }
-                          className={`w-full flex items-center gap-2 pl-8 pr-3 py-1.5 text-xs transition-colors ${
-                            isActive
-                              ? "bg-zinc-800 text-white"
-                              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
-                          }`}
-                        >
-                          <Table2
-                            size={13}
-                            className={`shrink-0 ${isActive ? "text-green-400" : "text-green-500/60"}`}
-                          />
-                          <span className="truncate">{t.name}</span>
-                        </button>
-                      );
-                    })}
+                    <button
+                      onClick={() => toggle(`${schema.name}:tables`)}
+                      className="w-full flex items-center gap-1.5 pl-5 pr-3 py-1.5 hover:bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors group"
+                    >
+                      <ChevronRight
+                        size={10}
+                        className={`shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-all duration-150 ${expanded.has(`${schema.name}:tables`) ? "rotate-90" : ""}`}
+                      />
+                      <Folder size={13} className="shrink-0 text-green-500/60" />
+                      <span className="truncate text-xs">Tables</span>
+                      <span className="ml-auto text-[10px] text-zinc-600">{data.tables.length}</span>
+                    </button>
+                    {expanded.has(`${schema.name}:tables`) && (
+                      <div>
+                        {data.tables.map((t) => {
+                          const isActive =
+                            activeSchema === schema.name && activeTable === t.name;
+                          return (
+                            <button
+                              key={t.name}
+                              onClick={() =>
+                                navigate(`/db/${schema.name}/${t.name}`)
+                              }
+                              className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-xs transition-colors ${
+                                isActive
+                                  ? "bg-zinc-800 text-white"
+                                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+                              }`}
+                            >
+                              <Table2
+                                size={13}
+                                className={`shrink-0 ${isActive ? "text-green-400" : "text-green-500/60"}`}
+                              />
+                              <span className="truncate">{t.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {/* Views */}
+                {/* Views folder */}
                 {data.views.length > 0 && (
                   <div>
-                    {data.views.map((v) => {
-                      const isActive =
-                        activeSchema === schema.name && activeTable === v.name;
-                      return (
-                        <button
-                          key={v.name}
-                          onClick={() =>
-                            navigate(`/db/${schema.name}/${v.name}`)
-                          }
-                          className={`w-full flex items-center gap-2 pl-8 pr-3 py-1.5 text-xs transition-colors ${
-                            isActive
-                              ? "bg-zinc-800 text-white"
-                              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
-                          }`}
-                        >
-                          <Eye
-                            size={13}
-                            className={`shrink-0 ${isActive ? "text-blue-400" : "text-blue-500/60"}`}
-                          />
-                          <span className="truncate">{v.name}</span>
-                        </button>
-                      );
-                    })}
+                    <button
+                      onClick={() => toggle(`${schema.name}:views`)}
+                      className="w-full flex items-center gap-1.5 pl-5 pr-3 py-1.5 hover:bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors group"
+                    >
+                      <ChevronRight
+                        size={10}
+                        className={`shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-all duration-150 ${expanded.has(`${schema.name}:views`) ? "rotate-90" : ""}`}
+                      />
+                      <Folder size={13} className="shrink-0 text-blue-500/60" />
+                      <span className="truncate text-xs">Views</span>
+                      <span className="ml-auto text-[10px] text-zinc-600">{data.views.length}</span>
+                    </button>
+                    {expanded.has(`${schema.name}:views`) && (
+                      <div>
+                        {data.views.map((v) => {
+                          const isActive =
+                            activeSchema === schema.name && activeTable === v.name;
+                          return (
+                            <button
+                              key={v.name}
+                              onClick={() =>
+                                navigate(`/db/${schema.name}/${v.name}`)
+                              }
+                              className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-xs transition-colors ${
+                                isActive
+                                  ? "bg-zinc-800 text-white"
+                                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+                              }`}
+                            >
+                              <Eye
+                                size={13}
+                                className={`shrink-0 ${isActive ? "text-blue-400" : "text-blue-500/60"}`}
+                              />
+                              <span className="truncate">{v.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {/* Functions */}
+                {/* Functions folder */}
                 {data.functions.length > 0 && (
                   <div>
-                    {data.functions.map((f) => (
-                      <div
-                        key={`${f.name}-${f.argumentTypes}`}
-                        className="flex items-center gap-2 pl-5 pr-3 py-1.5 text-xs text-zinc-500"
-                      >
-                        <Braces
-                          size={13}
-                          className="shrink-0 text-purple-500/60"
-                        />
-                        <span className="truncate">{f.name}</span>
+                    <button
+                      onClick={() => toggle(`${schema.name}:functions`)}
+                      className="w-full flex items-center gap-1.5 pl-5 pr-3 py-1.5 hover:bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors group"
+                    >
+                      <ChevronRight
+                        size={10}
+                        className={`shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-all duration-150 ${expanded.has(`${schema.name}:functions`) ? "rotate-90" : ""}`}
+                      />
+                      <Folder size={13} className="shrink-0 text-purple-500/60" />
+                      <span className="truncate text-xs">Functions</span>
+                      <span className="ml-auto text-[10px] text-zinc-600">{data.functions.length}</span>
+                    </button>
+                    {expanded.has(`${schema.name}:functions`) && (
+                      <div>
+                        {data.functions.map((f) => (
+                          <div
+                            key={`${f.name}-${f.argumentTypes}`}
+                            className="flex items-center gap-2 pl-12 pr-3 py-1.5 text-xs text-zinc-500"
+                          >
+                            <Braces
+                              size={13}
+                              className="shrink-0 text-purple-500/60"
+                            />
+                            <span className="truncate">{f.name}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
 
