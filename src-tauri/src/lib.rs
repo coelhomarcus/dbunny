@@ -4,6 +4,13 @@ use commands::state::AppState;
 use commands::storage;
 use tauri::Manager;
 
+#[cfg(debug_assertions)]
+#[allow(dead_code)]
+#[tauri::command]
+fn open_devtools(window: tauri::WebviewWindow) {
+    window.open_devtools();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -34,6 +41,8 @@ pub fn run() {
             commands::saved::get_saved_connections,
             commands::saved::save_connection,
             commands::saved::delete_saved_connection,
+            #[cfg(debug_assertions)]
+            open_devtools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

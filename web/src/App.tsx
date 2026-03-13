@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router";
 import { ConnectionProvider } from "./contexts/ConnectionContext";
 import ConnectPage from "./pages/ConnectPage";
@@ -7,6 +8,18 @@ import TableView from "./pages/TableView";
 import TableStructure from "./pages/TableStructure";
 
 export default function App() {
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    async function handleKey(e: KeyboardEvent) {
+      if (e.ctrlKey && e.shiftKey && e.key === "I") {
+        const { invoke } = await import("@tauri-apps/api/core");
+        invoke("open_devtools");
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
+
   return (
     <ConnectionProvider>
       <HashRouter>

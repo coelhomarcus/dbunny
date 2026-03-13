@@ -1,17 +1,125 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import Editor, { type OnMount, type BeforeMount } from "@monaco-editor/react";
 import { api } from "../lib/api";
 import type { QueryResult } from "@/types";
 import { useSqlAutocomplete } from "../hooks/useSqlAutocomplete";
 import QueryResults from "../components/QueryResults";
+import { Plus, X } from "lucide-react";
+
+type TabMeta = {
+  id: number;
+  label: string;
+};
+
+type TabPayload = {
+  sql: string;
+  result: QueryResult | null;
+  error: string | null;
+};
+
+// Module-level — survives navigation (component unmount/remount)
+let nextId = 2;
+let savedTabMetas: TabMeta[] = [{ id: 1, label: "Query 1" }];
+let savedActiveId = 1;
+const savedPayloads: Map<number, TabPayload> = new Map([
+  [1, { sql: "SELECT 1;", result: null, error: null }],
+]);
 
 export default function QueryEditor() {
-  const [result, setResult] = useState<QueryResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [tabMetas, setTabMetas] = useState<TabMeta[]>(savedTabMetas);
+  const [activeId, setActiveId] = useState(savedActiveId);
+  const initial = savedPayloads.get(savedActiveId)!;
+  const [result, setResult] = useState<QueryResult | null>(initial.result);
+  const [error, setError] = useState<string | null>(initial.error);
   const [running, setRunning] = useState(false);
+
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const activeIdRef = useRef(activeId);
 
   const { registerCompletionProvider } = useSqlAutocomplete();
+
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
+
+  // Save editor SQL on unmount so it's available when navigating back
+  useEffect(() => {
+    return () => {
+      const editor = editorRef.current;
+      if (editor) {
+        const payload = savedPayloads.get(activeIdRef.current);
+        if (payload) payload.sql = editor.getValue();
+      }
+      savedActiveId = activeIdRef.current;
+      savedTabMetas = tabMetas;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabMetas]);
+
+  function saveCurrentSql() {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const payload = savedPayloads.get(activeId);
+    if (payload) payload.sql = editor.getValue();
+  }
+
+  function switchTab(id: number) {
+    saveCurrentSql();
+
+    setActiveId(id);
+    savedActiveId = id;
+
+    const payload = savedPayloads.get(id)!;
+    editorRef.current?.setValue(payload.sql);
+    setResult(payload.result);
+    setError(payload.error);
+  }
+
+  function addTab() {
+    saveCurrentSql();
+
+    const id = nextId++;
+    const label = `Query ${id}`;
+    savedPayloads.set(id, { sql: "", result: null, error: null });
+
+    const newMetas = [...tabMetas, { id, label }];
+    setTabMetas(newMetas);
+    savedTabMetas = newMetas;
+
+    setActiveId(id);
+    savedActiveId = id;
+
+    editorRef.current?.setValue("");
+    setResult(null);
+    setError(null);
+  }
+
+  function closeTab(e: React.MouseEvent, id: number) {
+    e.stopPropagation();
+    if (tabMetas.length === 1) return;
+
+    const index = tabMetas.findIndex((t) => t.id === id);
+    const newMetas = tabMetas.filter((t) => t.id !== id);
+    savedPayloads.delete(id);
+
+    let newActiveId = activeId;
+    if (id === activeId) {
+      const newIndex = Math.min(index, newMetas.length - 1);
+      newActiveId = newMetas[newIndex].id;
+    }
+
+    setTabMetas(newMetas);
+    savedTabMetas = newMetas;
+    setActiveId(newActiveId);
+    savedActiveId = newActiveId;
+
+    if (id === activeId) {
+      const payload = savedPayloads.get(newActiveId)!;
+      editorRef.current?.setValue(payload.sql);
+      setResult(payload.result);
+      setError(payload.error);
+    }
+  }
 
   const runQuery = useCallback(async () => {
     const editor = editorRef.current;
@@ -19,7 +127,6 @@ export default function QueryEditor() {
 
     const selection = editor.getSelection();
     let sql: string;
-
     if (selection && !selection.isEmpty()) {
       sql = editor.getModel()?.getValueInRange(selection) ?? "";
     } else {
@@ -35,8 +142,13 @@ export default function QueryEditor() {
     try {
       const res = await api.query(sql);
       setResult(res);
+      const payload = savedPayloads.get(activeIdRef.current);
+      if (payload) { payload.result = res; payload.error = null; }
     } catch (err) {
-      setError(typeof err === "string" ? err : err instanceof Error ? err.message : "Query failed");
+      const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "Query failed";
+      setError(msg);
+      const payload = savedPayloads.get(activeIdRef.current);
+      if (payload) { payload.result = null; payload.error = msg; }
     } finally {
       setRunning(false);
     }
@@ -61,28 +173,65 @@ export default function QueryEditor() {
         "input.border": "#27272a",
       },
     });
-
     registerCompletionProvider(monaco);
   };
 
   const handleEditorMount: OnMount = (editor) => {
     editorRef.current = editor;
-
+    const payload = savedPayloads.get(activeId);
+    editor.setValue(payload?.sql ?? "");
     editor.addAction({
       id: "run-query",
       label: "Run Query",
-      keybindings: [2048 | 3], // Ctrl+Enter
+      keybindings: [2048 | 3],
       run: () => runQuery(),
     });
   };
 
   return (
     <div className="h-full flex flex-col">
+      {/* Tabs */}
+      <div className="flex items-center border-b border-zinc-800 bg-zinc-950 shrink-0">
+        <div className="flex items-center flex-1 overflow-x-auto">
+          {tabMetas.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => switchTab(tab.id)}
+              className={`group flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
+                activeId === tab.id
+                  ? "text-white border-blue-500"
+                  : "text-zinc-500 border-transparent hover:text-zinc-300"
+              }`}
+            >
+              {tab.label}
+              {tabMetas.length > 1 && (
+                <span
+                  onClick={(e) => closeTab(e, tab.id)}
+                  className={`rounded p-0.5 transition-colors cursor-pointer ${
+                    activeId === tab.id
+                      ? "text-zinc-400 hover:text-white hover:bg-zinc-700"
+                      : "text-transparent group-hover:text-zinc-500 hover:text-white! hover:bg-zinc-700"
+                  }`}
+                >
+                  <X size={10} />
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={addTab}
+          className="px-2 py-2 text-zinc-600 hover:text-zinc-300 transition-colors shrink-0"
+          title="New query tab"
+        >
+          <Plus size={14} />
+        </button>
+      </div>
+
       {/* Editor */}
       <div className="flex-1 min-h-0 border-b border-zinc-800">
         <Editor
           defaultLanguage="sql"
-          defaultValue="SELECT 1;"
           theme="app-dark"
           beforeMount={handleBeforeMount}
           onMount={handleEditorMount}
