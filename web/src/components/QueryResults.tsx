@@ -6,6 +6,7 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table";
 import type { QueryColumn, QueryResult } from "@/types";
+import { QueryResultsSkeleton } from "./Skeleton";
 
 interface QueryResultsProps {
   result: QueryResult | null;
@@ -149,6 +150,8 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
           Query executed successfully. {result.rowsAffected ?? result.rowCount} rows affected.
         </div>
       )}
+
+      {running && !result && <QueryResultsSkeleton />}
 
       {!result && !error && !running && (
         <div className="flex-1 flex items-center justify-center h-full text-zinc-600 text-base">

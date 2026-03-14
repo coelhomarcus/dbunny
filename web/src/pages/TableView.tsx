@@ -16,7 +16,7 @@ import TableViewHeader from "../components/TableViewHeader";
 import SortableColumnHeader from "../components/SortableColumnHeader";
 import EditableCell from "../components/EditableCell";
 import Pagination from "../components/Pagination";
-import { Loader } from "lucide-react";
+import { TableSkeleton } from "../components/Skeleton";
 
 export default function TableView() {
   const { schema, table } = useParams<{ schema: string; table: string }>();
@@ -118,11 +118,7 @@ export default function TableView() {
 
       {error && <div className="p-4 text-red-400 text-sm bg-zinc-900 border border-zinc-800/60 rounded-xl">{error}</div>}
 
-      {loading && !data && (
-        <div className="flex-1 flex items-end justify-end p-4">
-          <Loader size={16} className="animate-spin text-zinc-500" />
-        </div>
-      )}
+      {loading && !data && <TableSkeleton columns={6} rows={14} />}
 
       {data && (
         <div className="flex-1 min-h-0 flex flex-col bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, NavLink } from "react-router";
-import { Loader } from "lucide-react";
+import { TableSkeleton } from "../components/Skeleton";
 import { api } from "../lib/api";
 import type { ColumnInfo } from "@/types";
 
@@ -60,9 +60,7 @@ export default function TableStructure() {
       </div>
 
       {loading ? (
-        <div className="flex-1 flex items-end justify-end p-4">
-          <Loader size={16} className="animate-spin text-zinc-500" />
-        </div>
+        <TableSkeleton columns={5} rows={10} />
       ) : (
         <div className="flex-1 overflow-auto bg-zinc-900 border border-zinc-800/60 rounded-xl">
           <table className="w-full text-sm">

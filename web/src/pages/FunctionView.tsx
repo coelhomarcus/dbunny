@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
-import { Loader, Braces, Copy, Check } from "lucide-react";
+import { Braces, Copy, Check } from "lucide-react";
+import { DetailSkeleton } from "../components/Skeleton";
 import { api } from "../lib/api";
 import type { FunctionDetail } from "@/types";
 
@@ -58,9 +59,7 @@ export default function FunctionView() {
       </div>
 
       {loading ? (
-        <div className="flex-1 flex items-end justify-end p-4">
-          <Loader size={16} className="animate-spin text-zinc-500" />
-        </div>
+        <DetailSkeleton />
       ) : error ? (
         <div className="flex-1 flex items-center justify-center p-4">
           <span className="text-sm text-red-400">{error}</span>
