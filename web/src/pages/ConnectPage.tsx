@@ -100,9 +100,7 @@ export default function ConnectPage() {
       });
       await connect(url, conn.name);
       navigate("/db/query");
-    } catch {
-      // error handled by context
-    }
+    } catch {}
   }
 
   function handleNewConnection() {
@@ -144,9 +142,7 @@ export default function ConnectPage() {
         new Promise((r) => setTimeout(r, 600)),
       ]);
       await loadSavedConnections();
-    } catch {
-      // error handling could be added
-    } finally {
+    } catch {} finally {
       setIsSaving(false);
     }
   }
@@ -156,9 +152,7 @@ export default function ConnectPage() {
       await api.deleteSavedConnection(id);
       if (selectedId === id) handleNewConnection();
       await loadSavedConnections();
-    } catch {
-      // error handling could be added
-    }
+    } catch {}
   }
 
   async function handleSubmit(e: { preventDefault: () => void }) {
@@ -168,9 +162,7 @@ export default function ConnectPage() {
       const savedName = connectionName.trim() || undefined;
       await connect(url, savedName);
       navigate("/db/query");
-    } catch {
-      // error is handled by context
-    }
+    } catch {}
   }
 
   const canConnect = fields.host.trim() && fields.database.trim();
@@ -191,7 +183,6 @@ export default function ConnectPage() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
         <aside className="w-56 shrink-0 border-r border-zinc-800/60 flex flex-col select-none">
           <div className="h-10 px-3 flex items-center justify-between shrink-0">
             <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
@@ -229,10 +220,8 @@ export default function ConnectPage() {
           </div>
         </aside>
 
-        {/* Main content */}
         <main className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
           <div className="w-full max-w-md">
-            {/* Header */}
             <div className="text-center mb-8 select-none">
               <div className="inline-flex items-center justify-center mb-3">
                 <img src="/icon.svg" className="size-14" />
@@ -247,10 +236,8 @@ export default function ConnectPage() {
               </p>
             </div>
 
-            {/* Form */}
             <form onSubmit={handleSubmit} className="select-none">
               <div className="bg-zinc-900 rounded-xl border border-zinc-800 divide-y divide-zinc-800">
-                {/* Host & Port */}
                 <div className="flex divide-x divide-zinc-800">
                   <div className="flex-1 relative">
                     <label className="absolute top-2.5 left-10 text-[11px] font-medium text-zinc-500 uppercase tracking-wider select-none">
@@ -282,7 +269,6 @@ export default function ConnectPage() {
                   </div>
                 </div>
 
-                {/* Database */}
                 <div className="relative">
                   <label className="absolute top-2.5 left-10 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
                     Database
@@ -298,7 +284,6 @@ export default function ConnectPage() {
                   />
                 </div>
 
-                {/* User */}
                 <div className="relative">
                   <label className="absolute top-2.5 left-10 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
                     User
@@ -314,7 +299,6 @@ export default function ConnectPage() {
                   />
                 </div>
 
-                {/* Password */}
                 <div className="relative">
                   <label className="absolute top-2.5 left-10 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
                     Password
@@ -330,7 +314,6 @@ export default function ConnectPage() {
                   />
                 </div>
 
-                {/* SSL Toggle */}
                 <div className="flex items-center justify-between px-4 py-3">
                   <span className="text-sm text-zinc-400 select-none">
                     Require SSL
@@ -350,7 +333,6 @@ export default function ConnectPage() {
                   </button>
                 </div>
 
-                {/* Name + Color */}
                 <div className="relative">
                   <label className="absolute top-2.5 left-10 text-[11px] font-medium text-zinc-500 uppercase tracking-wider select-none">
                     Name
@@ -384,7 +366,6 @@ export default function ConnectPage() {
                 </div>
               </div>
 
-              {/* Import from URL */}
               {!showImport ? (
                 <button
                   type="button"
@@ -435,16 +416,13 @@ export default function ConnectPage() {
                 </div>
               )}
 
-              {/* Error */}
               {error && (
                 <div className="mt-4 p-3 bg-red-950/50 border border-red-900/50 rounded-lg text-red-400 text-sm">
                   {error}
                 </div>
               )}
 
-              {/* Action buttons */}
               <div className="mt-4 flex">
-                {/* Save/Update - animates in/out sliding from left */}
                 <div
                   className="shrink-0 overflow-hidden transition-[max-width,opacity] duration-500"
                   style={{
@@ -467,7 +445,6 @@ export default function ConnectPage() {
                   </div>
                 </div>
 
-                {/* Connect - expands to fill available space */}
                 <button
                   type="submit"
                   disabled={!canConnect || isConnecting}
