@@ -104,7 +104,10 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
       {error && <ErrorDisplay raw={error} />}
 
       {result && result.columns.length > 0 && (
-        <table className="w-full text-sm">
+        <table
+          className="w-full text-sm"
+          style={{ minWidth: result.columns.length * 150 }}
+        >
           <thead className="sticky top-0 z-10">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>

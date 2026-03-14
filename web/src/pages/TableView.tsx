@@ -128,12 +128,12 @@ export default function TableView() {
         <div className="flex-1 min-h-0 flex flex-col bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
           <div className="flex-1 overflow-auto">
             <table
-              className="text-sm"
+              className="text-sm w-full"
               style={{
                 tableLayout: "fixed",
                 borderCollapse: "separate",
                 borderSpacing: 0,
-                width:
+                minWidth:
                   40 +
                   data.columns.reduce(
                     (sum, col) => sum + resize.getColWidth(col.name),
