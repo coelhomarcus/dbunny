@@ -127,7 +127,7 @@ export default function TableView() {
       {data && (
         <div className="flex-1 overflow-auto">
           <table
-            className="text-xs"
+            className="text-sm"
             style={{
               tableLayout: "fixed",
               borderCollapse: "separate",

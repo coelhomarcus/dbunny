@@ -13,6 +13,8 @@ import {
   Loader,
   Bookmark,
   Plus,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import {
   type ConnectionFields,
@@ -44,6 +46,7 @@ export default function ConnectPage() {
   const [isSaving, setIsSaving] = useState(false);
   const colorInputRef = useRef<HTMLInputElement>(null);
 
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const { connect, isConnecting, error } = useConnection();
   const navigate = useNavigate();
 
@@ -182,45 +185,76 @@ export default function ConnectPage() {
         />
       )}
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="w-56 shrink-0 border-r border-zinc-800/60 flex flex-col select-none">
-          <div className="h-10 px-3 flex items-center justify-between shrink-0">
-            <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-              Connections
-            </span>
-            {hasSavedConnections && (
-              <button
-                type="button"
-                onClick={handleNewConnection}
-                className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-                title="New connection"
-              >
-                <Plus size={13} />
-              </button>
-            )}
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {hasSavedConnections ? (
-              <SavedConnectionsList
-                connections={savedConnections}
-                selectedId={selectedId}
-                onSelect={handleSelectSaved}
-                onConnect={handleConnectSaved}
-                onDelete={handleDelete}
-              />
-            ) : (
-              <div className="px-3 pt-4">
-                <p className="text-[11px] text-zinc-700 leading-relaxed">
-                  {savedConnections === null
-                    ? ""
-                    : "Save a connection to access it here."}
-                </p>
+      <div className="flex flex-1 overflow-hidden relative">
+        <aside
+          className={`absolute top-2 left-2 bottom-2 z-10 bg-zinc-900 border border-zinc-800/60 rounded-xl shadow-xl flex flex-col select-none transition-all duration-300 ease-in-out ${
+            sidebarExpanded ? "w-64" : "w-12"
+          }`}
+        >
+          {sidebarExpanded ? (
+            <>
+              <div className="h-11 px-3 flex items-center justify-between shrink-0">
+                <span className="text-sm font-medium text-zinc-500 uppercase tracking-wider">
+                  Connections
+                </span>
+                <div className="flex items-center gap-1">
+                  {hasSavedConnections && (
+                    <button
+                      type="button"
+                      onClick={handleNewConnection}
+                      className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                      title="New connection"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setSidebarExpanded(false)}
+                    className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                    title="Minimize sidebar"
+                  >
+                    <PanelLeftClose size={14} />
+                  </button>
+                </div>
               </div>
-            )}
-          </div>
+              <div className="flex-1 overflow-y-auto">
+                {hasSavedConnections ? (
+                  <SavedConnectionsList
+                    connections={savedConnections}
+                    selectedId={selectedId}
+                    onSelect={handleSelectSaved}
+                    onConnect={handleConnectSaved}
+                    onDelete={handleDelete}
+                  />
+                ) : (
+                  <div className="px-3 pt-4">
+                    <p className="text-xs text-zinc-700 leading-relaxed">
+                      {savedConnections === null
+                        ? ""
+                        : "Save a connection to access it here."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center py-3 gap-3">
+              <button
+                onClick={() => setSidebarExpanded(true)}
+                className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                title="Expand sidebar"
+              >
+                <PanelLeftOpen size={16} />
+              </button>
+            </div>
+          )}
         </aside>
 
-        <main className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
+        <main
+          className={`flex-1 flex items-center justify-center p-4 overflow-y-auto transition-all duration-300 ease-in-out ${
+            sidebarExpanded ? "ml-68" : "ml-16"
+          }`}
+        >
           <div className="w-full max-w-md">
             <div className="text-center mb-8 select-none">
               <div className="inline-flex items-center justify-center mb-3">

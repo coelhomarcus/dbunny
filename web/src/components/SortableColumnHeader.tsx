@@ -28,12 +28,12 @@ export default function SortableColumnHeader({
   return (
     <th
       onClick={onToggleSort}
-      className="relative bg-zinc-900 text-left px-3 py-2 border-b border-r border-zinc-800 cursor-pointer hover:bg-zinc-800 select-none group"
+      className="relative bg-zinc-900 text-left px-3 py-2.5 border-b border-r border-zinc-800 cursor-pointer hover:bg-zinc-800 select-none group text-sm"
     >
       <span className="flex items-center justify-between gap-2 overflow-hidden">
         <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
           {columnInfo?.isPrimaryKey && (
-            <span className="text-[10px] text-amber-500/70 font-mono shrink-0">
+            <span className="text-xs text-amber-500/70 font-mono shrink-0">
               PK
             </span>
           )}
@@ -41,18 +41,18 @@ export default function SortableColumnHeader({
             {id}
           </span>
           {columnInfo?.dataType && (
-            <span className="text-zinc-500 shrink-0 font-normal">
+            <span className="text-zinc-500 shrink-0 font-normal text-xs">
               {normalizeType(columnInfo.dataType)}
             </span>
           )}
         </span>
         <span className="shrink-0 text-zinc-700 group-hover:text-zinc-400 transition-colors">
           {sorted === "asc" ? (
-            <ChevronUp size={11} />
+            <ChevronUp size={13} />
           ) : sorted === "desc" ? (
-            <ChevronDown size={11} />
+            <ChevronDown size={13} />
           ) : (
-            <ChevronsUpDown size={11} />
+            <ChevronsUpDown size={13} />
           )}
         </span>
       </span>

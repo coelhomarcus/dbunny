@@ -25,8 +25,8 @@ export default function TableStructure() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
-        <h2 className="text-sm font-medium">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
+        <h2 className="text-base font-medium">
           <span className="text-zinc-500">{schema}.</span>
           {table}
         </h2>
@@ -35,7 +35,7 @@ export default function TableStructure() {
             to={`/db/${schema}/${table}`}
             end
             className={({ isActive }) =>
-              `px-3 py-1 text-xs rounded transition-colors ${
+              `px-3 py-1.5 text-sm rounded-lg transition-colors ${
                 isActive
                   ? "bg-zinc-700 text-white"
                   : "text-zinc-400 hover:text-white"
@@ -47,7 +47,7 @@ export default function TableStructure() {
           <NavLink
             to={`/db/${schema}/${table}/structure`}
             className={({ isActive }) =>
-              `px-3 py-1 text-xs rounded transition-colors ${
+              `px-3 py-1.5 text-sm rounded-lg transition-colors ${
                 isActive
                   ? "bg-zinc-700 text-white"
                   : "text-zinc-400 hover:text-white"
@@ -68,19 +68,19 @@ export default function TableStructure() {
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-zinc-900">
               <tr>
-                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                <th className="text-left px-4 py-2.5 text-sm font-medium text-zinc-400 border-b border-zinc-800">
                   #
                 </th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                <th className="text-left px-4 py-2.5 text-sm font-medium text-zinc-400 border-b border-zinc-800">
                   Column
                 </th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                <th className="text-left px-4 py-2.5 text-sm font-medium text-zinc-400 border-b border-zinc-800">
                   Type
                 </th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                <th className="text-left px-4 py-2.5 text-sm font-medium text-zinc-400 border-b border-zinc-800">
                   Nullable
                 </th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                <th className="text-left px-4 py-2.5 text-sm font-medium text-zinc-400 border-b border-zinc-800">
                   Default
                 </th>
               </tr>

@@ -55,7 +55,7 @@ export default function EditableCell({
               onCancel();
             }
           }}
-          className="absolute inset-0 px-3 bg-zinc-800 text-white text-xs outline-none ring-1 ring-inset ring-green-500/60"
+          className="absolute inset-0 px-3 bg-zinc-800 text-white text-sm outline-none ring-1 ring-inset ring-green-500/60"
         />
       )}
     </td>

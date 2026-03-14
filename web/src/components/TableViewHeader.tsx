@@ -37,19 +37,19 @@ export default function TableViewHeader({
   hasCustomWidths, onResetWidths,
 }: TableViewHeaderProps) {
   return (
-    <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
+    <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
       <div className="flex items-center gap-3">
-        <h2 className="text-sm font-medium">
+        <h2 className="text-base font-medium">
           <span className="text-zinc-500">{schema}.</span>
           {table}
         </h2>
         {totalRows !== undefined && (
-          <span className="text-xs text-zinc-500">
+          <span className="text-sm text-zinc-500">
             {totalRows.toLocaleString()} rows
           </span>
         )}
         {hasNoPk && (
-          <span className="text-xs text-amber-500/70">
+          <span className="text-sm text-amber-500/70">
             no primary key - editing disabled
           </span>
         )}
@@ -60,9 +60,9 @@ export default function TableViewHeader({
           <button
             onClick={onDelete}
             disabled={deleting}
-            className="flex items-center gap-1.5 px-3 py-1 text-xs bg-red-600/80 hover:bg-red-600 disabled:bg-zinc-700 text-white rounded transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-600/80 hover:bg-red-600 disabled:bg-zinc-700 text-white rounded-lg transition-colors"
           >
-            <Trash2 size={12} />
+            <Trash2 size={14} />
             {deleting
               ? "Deleting…"
               : `Delete ${selectedCount} row${selectedCount > 1 ? "s" : ""}`}
@@ -72,23 +72,23 @@ export default function TableViewHeader({
         {hasPendingChanges && (
           <div className="flex items-center gap-2">
             {saveError && (
-              <span className="text-xs text-red-400">{saveError}</span>
+              <span className="text-sm text-red-400">{saveError}</span>
             )}
-            <span className="text-xs text-zinc-500">
+            <span className="text-sm text-zinc-500">
               {dirtyRowCount} row{dirtyRowCount > 1 ? "s" : ""} changed
             </span>
             <button
               onClick={onDiscard}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1.5 text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
             >
-              <X size={12} /> Discard
+              <X size={14} /> Discard
             </button>
             <button
               onClick={onSave}
               disabled={saving}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white rounded transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white rounded-lg transition-colors"
             >
-              <Save size={12} />
+              <Save size={14} />
               {saving ? "Saving…" : "Save (⌘S)"}
             </button>
           </div>
@@ -102,7 +102,7 @@ export default function TableViewHeader({
         >
           <RefreshCw
             key={spinKey}
-            size={13}
+            size={15}
             className={
               refreshing
                 ? "animate-spin"
@@ -119,7 +119,7 @@ export default function TableViewHeader({
             title="Reset column widths"
             className="p-1.5 text-zinc-400 hover:text-zinc-200 transition-colors"
           >
-            <Columns3 size={13} />
+            <Columns3 size={15} />
           </button>
         )}
 
@@ -128,7 +128,7 @@ export default function TableViewHeader({
             to={`/db/${schema}/${table}`}
             end
             className={({ isActive }) =>
-              `px-3 py-1 text-xs rounded transition-colors ${isActive ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white"}`
+              `px-3 py-1.5 text-sm rounded-lg transition-colors ${isActive ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white"}`
             }
           >
             Data
@@ -136,7 +136,7 @@ export default function TableViewHeader({
           <NavLink
             to={`/db/${schema}/${table}/structure`}
             className={({ isActive }) =>
-              `px-3 py-1 text-xs rounded transition-colors ${isActive ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white"}`
+              `px-3 py-1.5 text-sm rounded-lg transition-colors ${isActive ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white"}`
             }
           >
             Structure

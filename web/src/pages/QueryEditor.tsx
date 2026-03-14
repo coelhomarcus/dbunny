@@ -285,9 +285,9 @@ export default function QueryEditor() {
                 <div className="flex items-center justify-center w-6 h-6 rounded-full bg-red-500/10">
                   <AlertTriangle size={13} className="text-red-400" />
                 </div>
-                <h3 className="text-[13px] font-semibold text-white">Query blocked by Safe Mode</h3>
+                <h3 className="text-sm font-semibold text-white">Query blocked by Safe Mode</h3>
               </div>
-              <p className="text-xs text-zinc-500 mt-2">
+              <p className="text-sm text-zinc-500 mt-2">
                 {pendingDangers.length === 1
                   ? "A potentially destructive operation was detected."
                   : `${pendingDangers.length} potentially destructive operations were detected.`}
@@ -297,8 +297,8 @@ export default function QueryEditor() {
             <div className="mx-5 mb-4 rounded-lg border border-zinc-800 divide-y divide-zinc-800/80">
               {pendingDangers.map((d, i) => (
                 <div key={i} className="px-3 py-2.5">
-                  <span className="font-mono text-[11px] font-medium text-red-400 block">{d.rule}</span>
-                  <span className="text-[11px] text-zinc-500 block mt-0.5">{d.detail}</span>
+                  <span className="font-mono text-xs font-medium text-red-400 block">{d.rule}</span>
+                  <span className="text-xs text-zinc-500 block mt-0.5">{d.detail}</span>
                 </div>
               ))}
             </div>
@@ -306,13 +306,13 @@ export default function QueryEditor() {
             <div className="flex items-center gap-2 px-5 py-3.5 border-t border-zinc-800 bg-zinc-900/80">
               <button
                 onClick={confirmDangerousQuery}
-                className="px-3 py-1.5 text-[11px] font-medium bg-red-600/80 hover:bg-red-600 text-white rounded-lg transition-colors"
+                className="px-3 py-1.5 text-xs font-medium bg-red-600/80 hover:bg-red-600 text-white rounded-lg transition-colors"
               >
                 Run anyway
               </button>
               <button
                 onClick={cancelDangerousQuery}
-                className="px-3 py-1.5 text-[11px] font-medium text-zinc-400 hover:text-white rounded-lg transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-white rounded-lg transition-colors"
               >
                 Cancel
               </button>
@@ -327,7 +327,7 @@ export default function QueryEditor() {
             <button
               key={tab.id}
               onClick={() => switchTab(tab.id)}
-              className={`group flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
+              className={`group flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
                 activeId === tab.id
                   ? "text-white border-blue-500"
                   : "text-zinc-500 border-transparent hover:text-zinc-300"
@@ -377,19 +377,19 @@ export default function QueryEditor() {
         />
       </div>
 
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-900">
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-zinc-800 bg-zinc-900">
         <button
           onClick={runQuery}
           disabled={running}
-          className="px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white text-xs font-medium rounded transition-colors relative"
+          className="px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg transition-colors relative"
         >
           <span className={`transition-opacity duration-200 ${running ? "opacity-0" : "opacity-100"}`}>
             Run (Ctrl+Enter)
           </span>
-          <Loader className={`w-3.5 h-3.5 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
+          <Loader className={`w-4 h-4 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
         </button>
         {result && (
-          <span className="text-xs text-zinc-500">
+          <span className="text-sm text-zinc-500">
             {result.rowsAffected != null
               ? `${result.rowsAffected} rows affected in ${result.duration}ms`
               : `${result.rowCount} rows in ${result.duration}ms`}
@@ -399,29 +399,29 @@ export default function QueryEditor() {
           <button
             onClick={() => setSafeMode((v) => !v)}
             title={safeMode ? "Safe Mode ON - click to disable" : "Safe Mode OFF - click to enable"}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded transition-colors ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded-lg transition-colors ${
               safeMode
                 ? "text-emerald-400 hover:text-emerald-300 hover:bg-zinc-800"
                 : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
             }`}
           >
-            {safeMode ? <ShieldCheck size={13} /> : <ShieldOff size={13} />}
+            {safeMode ? <ShieldCheck size={15} /> : <ShieldOff size={15} />}
             {safeMode ? "Safe" : "Unsafe"}
           </button>
           <button
             onClick={importQuery}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-xs rounded transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-sm rounded-lg transition-colors"
             title="Import .sql file"
           >
-            <Upload size={13} />
+            <Upload size={15} />
             Import
           </button>
           <button
             onClick={exportQuery}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-xs rounded transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-sm rounded-lg transition-colors"
             title="Export as .sql file"
           >
-            <Download size={13} />
+            <Download size={15} />
             Export
           </button>
         </div>

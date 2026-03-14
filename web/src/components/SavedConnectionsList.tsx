@@ -75,11 +75,11 @@ export default function SavedConnectionsList({
                       className="w-2 h-2 rounded-full shrink-0"
                       style={{ backgroundColor: conn.color || "#3b82f6" }}
                     />
-                    <span className="text-[13px] text-zinc-200 truncate">
+                    <span className="text-sm text-zinc-200 truncate">
                       {conn.name || "Unnamed"}
                     </span>
                   </div>
-                  <p className="text-[11px] text-zinc-600 truncate pl-4 font-mono">
+                  <p className="text-xs text-zinc-600 truncate pl-4 font-mono">
                     {conn.host}:{conn.port}/{conn.database}
                   </p>
                 </div>

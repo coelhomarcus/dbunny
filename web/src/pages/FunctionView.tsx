@@ -47,10 +47,10 @@ export default function FunctionView() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
         <div className="flex items-center gap-2">
-          <Braces size={14} className="text-purple-400" />
-          <h2 className="text-sm font-medium">
+          <Braces size={16} className="text-purple-400" />
+          <h2 className="text-base font-medium">
             <span className="text-zinc-500">{schema}.</span>
             {name}
           </h2>
@@ -69,7 +69,7 @@ export default function FunctionView() {
         <div className="flex-1 overflow-auto">
           {/* Properties */}
           <div className="px-4 py-3 border-b border-zinc-800/50">
-            <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-xs max-w-xl">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm max-w-xl">
               <Property label="Type" value={detail.kind} />
               <Property label="Language" value={detail.language} />
               <Property label="Returns" value={detail.returnType} />
@@ -94,20 +94,20 @@ export default function FunctionView() {
           {/* Source code */}
           <div className="px-4 py-3">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-zinc-400">
+              <span className="text-sm font-medium text-zinc-400">
                 Definition
               </span>
               <button
                 onClick={copySource}
-                className="flex items-center gap-1 px-2 py-1 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                className="flex items-center gap-1 px-2 py-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
               >
                 {copied ? (
                   <>
-                    <Check size={11} /> Copied
+                    <Check size={13} /> Copied
                   </>
                 ) : (
                   <>
-                    <Copy size={11} /> Copy
+                    <Copy size={13} /> Copy
                   </>
                 )}
               </button>

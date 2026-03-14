@@ -111,7 +111,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
                 {hg.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="text-left px-3 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800 whitespace-nowrap"
+                    className="text-left px-3 py-2.5 text-sm font-medium text-zinc-400 border-b border-zinc-800 whitespace-nowrap"
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
@@ -130,7 +130,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
                 {row.getVisibleCells().map((cell) => (
                   <td
                     key={cell.id}
-                    className="px-3 py-1.5 text-zinc-300 whitespace-nowrap max-w-xs truncate font-mono text-xs"
+                    className="px-3 py-2 text-zinc-300 whitespace-nowrap max-w-xs truncate font-mono text-sm"
                   >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
@@ -142,13 +142,13 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
       )}
 
       {result && result.columns.length === 0 && (
-        <div className="p-4 text-zinc-400 text-sm">
+        <div className="p-4 text-zinc-400 text-base">
           Query executed successfully. {result.rowsAffected ?? result.rowCount} rows affected.
         </div>
       )}
 
       {!result && !error && !running && (
-        <div className="flex-1 flex items-center justify-center h-full text-zinc-600 text-sm">
+        <div className="flex-1 flex items-center justify-center h-full text-zinc-600 text-base">
           Write a query and press Ctrl+Enter to run
         </div>
       )}
