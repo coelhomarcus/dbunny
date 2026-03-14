@@ -34,7 +34,6 @@ const savedPayloads: Map<number, TabPayload> = new Map([
 function detectDangerousStatements(sql: string): DangerInfo[] {
   const dangers: DangerInfo[] = [];
 
-  // Strip comments and string literals to avoid false positives
   const normalized = sql
     .replace(/--[^\n]*/g, " ")
     .replace(/\/\*[\s\S]*?\*\//g, " ")
@@ -89,7 +88,6 @@ export default function QueryEditor() {
     savedSafeMode = safeMode;
   }, [safeMode]);
 
-  // Save editor SQL on unmount so it's available when navigating back
   useEffect(() => {
     return () => {
       const editor = editorRef.current;
@@ -279,7 +277,6 @@ export default function QueryEditor() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Danger confirmation modal */}
       {pendingDangers && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
@@ -324,7 +321,6 @@ export default function QueryEditor() {
         </div>
       )}
 
-      {/* Tabs */}
       <div className="flex items-center border-b border-zinc-800 bg-zinc-950 shrink-0">
         <div className="flex items-center flex-1 overflow-x-auto overflow-y-hidden">
           {tabMetas.map((tab) => (
@@ -362,7 +358,6 @@ export default function QueryEditor() {
         </button>
       </div>
 
-      {/* Editor */}
       <div className="flex-1 min-h-0 border-b border-zinc-800">
         <Editor
           defaultLanguage="sql"
@@ -382,7 +377,6 @@ export default function QueryEditor() {
         />
       </div>
 
-      {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-900">
         <button
           onClick={runQuery}
@@ -433,7 +427,6 @@ export default function QueryEditor() {
         </div>
       </div>
 
-      {/* Results */}
       <QueryResults result={result} error={error} running={running} />
     </div>
   );

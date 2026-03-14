@@ -46,9 +46,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(async () => {
     try {
       await api.disconnect();
-    } catch {
-      // ignore disconnect errors
-    } finally {
+    } catch {} finally {
       setSessionId(null);
       setIsConnected(false);
       setConnectionInfo(null);

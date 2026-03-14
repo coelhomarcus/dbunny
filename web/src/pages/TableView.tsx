@@ -49,7 +49,6 @@ export default function TableView() {
     setPendingChanges: pending.setPendingChanges,
   });
 
-  // Reset selection, pending changes, editing, and column widths on table change
   useEffect(() => {
     pending.setPendingChanges({});
     editing.cancelEdit();
@@ -58,7 +57,6 @@ export default function TableView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema, table]);
 
-  // Keyboard shortcuts
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {

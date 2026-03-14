@@ -30,7 +30,7 @@ export function buildConnectionUrl(fields: ConnectionFields): string {
       ? `${user}:${encodeURIComponent(password)}@`
       : `${user}@`
     : "";
-  const portPart = port && port !== "5432" ? `:${port}` : `:${port}`;
+  const portPart = port ? `:${port}` : "";
   const sslPart = ssl ? "?sslmode=require" : "";
   return `postgresql://${auth}${host}${portPart}/${database}${sslPart}`;
 }

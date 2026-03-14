@@ -130,7 +130,6 @@ export default function SchemaTree() {
 
         return (
           <div key={schema.name}>
-            {/* Schema row */}
             <button
               onClick={() => toggle(schema.name)}
               className="w-full flex items-center gap-1.5 px-1.5 py-1.5 hover:bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors group"
@@ -143,10 +142,8 @@ export default function SchemaTree() {
               <span className="truncate text-xs">{schema.name}</span>
             </button>
 
-            {/* Subfolders — always visible when schema is expanded */}
             {isExpanded && (
               <div>
-                {/* Tables folder */}
                 <SubFolder
                   schemaName={schema.name}
                   kind="tables"
@@ -179,7 +176,6 @@ export default function SchemaTree() {
                   })}
                 </SubFolder>
 
-                {/* Views folder */}
                 <SubFolder
                   schemaName={schema.name}
                   kind="views"
@@ -212,7 +208,6 @@ export default function SchemaTree() {
                   })}
                 </SubFolder>
 
-                {/* Functions folder */}
                 <SubFolder
                   schemaName={schema.name}
                   kind="functions"
