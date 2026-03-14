@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router";
 import { ConnectionProvider } from "./contexts/ConnectionContext";
+import TitleBar from "./components/TitleBar";
 import ConnectPage from "./pages/ConnectPage";
 import DatabaseLayout from "./pages/DatabaseLayout";
 import QueryEditor from "./pages/QueryEditor";
@@ -23,18 +24,23 @@ export default function App() {
 
   return (
     <ConnectionProvider>
-      <HashRouter>
-        <Routes>
-          <Route path="/" element={<ConnectPage />} />
-          <Route path="/db" element={<DatabaseLayout />}>
-            <Route index element={<Navigate to="query" replace />} />
-            <Route path="query" element={<QueryEditor />} />
-            <Route path=":schema/:table" element={<TableView />} />
-            <Route path=":schema/:table/structure" element={<TableStructure />} />
-            <Route path=":schema/function/:name" element={<FunctionView />} />
-          </Route>
-        </Routes>
-      </HashRouter>
+      <div className="h-screen flex flex-col bg-zinc-950 text-white">
+        <TitleBar />
+        <div className="flex-1 min-h-0">
+          <HashRouter>
+            <Routes>
+              <Route path="/" element={<ConnectPage />} />
+              <Route path="/db" element={<DatabaseLayout />}>
+                <Route index element={<Navigate to="query" replace />} />
+                <Route path="query" element={<QueryEditor />} />
+                <Route path=":schema/:table" element={<TableView />} />
+                <Route path=":schema/:table/structure" element={<TableStructure />} />
+                <Route path=":schema/function/:name" element={<FunctionView />} />
+              </Route>
+            </Routes>
+          </HashRouter>
+        </div>
+      </div>
     </ConnectionProvider>
   );
 }

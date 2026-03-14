@@ -174,7 +174,7 @@ export default function ConnectPage() {
     savedConnections !== null && savedConnections.length > 0;
 
   return (
-    <div className="h-screen bg-zinc-950 flex flex-col">
+    <div className="h-full bg-zinc-950 flex flex-col">
       {isMac && (
         <div
           className="h-8 w-full shrink-0"
