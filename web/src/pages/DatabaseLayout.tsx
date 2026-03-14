@@ -37,9 +37,9 @@ export default function DatabaseLayout() {
   return (
     <div className="h-screen flex flex-col bg-zinc-950 text-white">
       {isMac && <div className="h-8 w-full shrink-0" onMouseDown={startDrag} />}
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden p-2 gap-2">
         <aside
-          className={`absolute top-2 left-2 bottom-2 z-10 bg-zinc-900 border border-zinc-800/60 rounded-xl shadow-xl flex flex-col select-none transition-all duration-300 ease-in-out ${
+          className={`shrink-0 bg-zinc-900 border border-zinc-800/60 rounded-xl shadow-xl flex flex-col select-none transition-all duration-300 ease-in-out overflow-hidden ${
             sidebarExpanded ? "w-64" : "w-12"
           }`}
         >
@@ -131,11 +131,7 @@ export default function DatabaseLayout() {
           )}
         </aside>
 
-        <main
-          className={`flex-1 overflow-hidden border-t border-zinc-800/60 transition-all duration-300 ease-in-out ${
-            sidebarExpanded ? "ml-68" : "ml-16"
-          }`}
-        >
+        <main className="flex-1 overflow-hidden">
           <Outlet />
         </main>
       </div>

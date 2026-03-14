@@ -45,9 +45,9 @@ export default function FunctionView() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col gap-2">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900 border border-zinc-800/60 rounded-xl shrink-0">
         <div className="flex items-center gap-2">
           <Braces size={16} className="text-purple-400" />
           <h2 className="text-base font-medium">
@@ -66,9 +66,9 @@ export default function FunctionView() {
           <span className="text-sm text-red-400">{error}</span>
         </div>
       ) : detail ? (
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto flex flex-col gap-3">
           {/* Properties */}
-          <div className="px-4 py-3 border-b border-zinc-800/50">
+          <div className="px-5 py-4 bg-zinc-900 border border-zinc-800/60 rounded-xl shrink-0">
             <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm max-w-xl">
               <Property label="Type" value={detail.kind} />
               <Property label="Language" value={detail.language} />
@@ -92,14 +92,14 @@ export default function FunctionView() {
           </div>
 
           {/* Source code */}
-          <div className="px-4 py-3">
-            <div className="flex items-center justify-between mb-2">
+          <div className="flex-1 min-h-0 flex flex-col bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3 bg-zinc-800/40 border-b border-zinc-800/40">
               <span className="text-sm font-medium text-zinc-400">
                 Definition
               </span>
               <button
                 onClick={copySource}
-                className="flex items-center gap-1 px-2 py-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 rounded-lg transition-colors"
               >
                 {copied ? (
                   <>
@@ -112,7 +112,7 @@ export default function FunctionView() {
                 )}
               </button>
             </div>
-            <pre className="p-4 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-300 font-mono overflow-auto whitespace-pre leading-relaxed">
+            <pre className="flex-1 p-5 text-sm text-zinc-300 font-mono overflow-auto whitespace-pre leading-relaxed">
               {detail.source}
             </pre>
           </div>

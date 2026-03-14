@@ -29,7 +29,7 @@ export default function EditableCell({
 }: EditableCellProps) {
   return (
     <td
-      className={`relative p-0 overflow-hidden border-b border-r border-zinc-800/60 ${isDirty ? "border-l-2 border-l-amber-400/60" : ""}`}
+      className={`relative p-0 overflow-hidden border-b border-r border-zinc-800/40 ${isDirty ? "border-l-2 border-l-amber-400/60" : ""}`}
       onClick={() => !isEditing && onStartEdit()}
     >
       <div

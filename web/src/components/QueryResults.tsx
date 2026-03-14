@@ -100,18 +100,18 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
   });
 
   return (
-    <div className="flex-1 min-h-0 overflow-auto">
+    <div className="flex-1 min-h-0 overflow-auto flex flex-col">
       {error && <ErrorDisplay raw={error} />}
 
       {result && result.columns.length > 0 && (
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-zinc-900 z-10">
+          <thead className="sticky top-0 z-10">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
                 {hg.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="text-left px-3 py-2.5 text-sm font-medium text-zinc-400 border-b border-zinc-800 whitespace-nowrap"
+                    className="text-left px-3 py-2.5 text-sm font-medium text-zinc-400 bg-zinc-800 border-b border-zinc-700/40 whitespace-nowrap"
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
@@ -123,8 +123,8 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
             {table.getRowModel().rows.map((row, i) => (
               <tr
                 key={row.id}
-                className={`border-b border-zinc-800/50 hover:bg-zinc-800/50 ${
-                  i % 2 === 0 ? "bg-zinc-950" : "bg-zinc-900/30"
+                className={`border-b border-zinc-800/40 hover:bg-zinc-800/40 ${
+                  i % 2 === 0 ? "bg-zinc-900" : "bg-zinc-800/20"
                 }`}
               >
                 {row.getVisibleCells().map((cell) => (
@@ -142,7 +142,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
       )}
 
       {result && result.columns.length === 0 && (
-        <div className="p-4 text-zinc-400 text-base">
+        <div className="flex-1 flex items-center justify-center p-4 text-zinc-400 text-base">
           Query executed successfully. {result.rowsAffected ?? result.rowCount} rows affected.
         </div>
       )}

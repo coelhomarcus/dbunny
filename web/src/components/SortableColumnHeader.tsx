@@ -28,7 +28,7 @@ export default function SortableColumnHeader({
   return (
     <th
       onClick={onToggleSort}
-      className="relative bg-zinc-900 text-left px-3 py-2.5 border-b border-r border-zinc-800 cursor-pointer hover:bg-zinc-800 select-none group text-sm"
+      className="relative bg-zinc-800 text-left px-3 py-2.5 border-b border-r border-zinc-700/40 cursor-pointer hover:bg-zinc-700 select-none group text-sm"
     >
       <span className="flex items-center justify-between gap-2 overflow-hidden">
         <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">

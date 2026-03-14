@@ -185,9 +185,9 @@ export default function ConnectPage() {
         />
       )}
 
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden p-2 gap-2">
         <aside
-          className={`absolute top-2 left-2 bottom-2 z-10 bg-zinc-900 border border-zinc-800/60 rounded-xl shadow-xl flex flex-col select-none transition-all duration-300 ease-in-out ${
+          className={`shrink-0 bg-zinc-900 border border-zinc-800/60 rounded-xl shadow-xl flex flex-col select-none transition-all duration-300 ease-in-out overflow-hidden ${
             sidebarExpanded ? "w-64" : "w-12"
           }`}
         >
@@ -250,11 +250,7 @@ export default function ConnectPage() {
           )}
         </aside>
 
-        <main
-          className={`flex-1 flex items-center justify-center p-4 overflow-y-auto transition-all duration-300 ease-in-out ${
-            sidebarExpanded ? "ml-68" : "ml-16"
-          }`}
-        >
+        <main className="flex-1 flex items-center justify-center overflow-y-auto">
           <div className="w-full max-w-md">
             <div className="text-center mb-8 select-none">
               <div className="inline-flex items-center justify-center mb-3">

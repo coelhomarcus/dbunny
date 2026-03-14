@@ -37,7 +37,7 @@ export default function TableViewHeader({
   hasCustomWidths, onResetWidths,
 }: TableViewHeaderProps) {
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
+    <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900 border border-zinc-800/60 rounded-xl">
       <div className="flex items-center gap-3">
         <h2 className="text-base font-medium">
           <span className="text-zinc-500">{schema}.</span>

@@ -90,7 +90,7 @@ export default function TableView() {
   });
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col gap-2">
       <TableViewHeader
         schema={schema!}
         table={table!}
@@ -116,7 +116,7 @@ export default function TableView() {
         onResetWidths={resize.resetWidths}
       />
 
-      {error && <div className="p-4 text-red-400 text-sm">{error}</div>}
+      {error && <div className="p-4 text-red-400 text-sm bg-zinc-900 border border-zinc-800/60 rounded-xl">{error}</div>}
 
       {loading && !data && (
         <div className="flex-1 flex items-end justify-end p-4">
@@ -125,126 +125,126 @@ export default function TableView() {
       )}
 
       {data && (
-        <div className="flex-1 overflow-auto">
-          <table
-            className="text-sm"
-            style={{
-              tableLayout: "fixed",
-              borderCollapse: "separate",
-              borderSpacing: 0,
-              width:
-                40 +
-                data.columns.reduce(
-                  (sum, col) => sum + resize.getColWidth(col.name),
-                  0,
-                ),
-            }}
-          >
-            <colgroup>
-              <col style={{ width: 40 }} />
-              {data.columns.map((col) => (
-                <col
-                  key={col.name}
-                  style={{ width: resize.getColWidth(col.name) }}
-                />
-              ))}
-            </colgroup>
+        <div className="flex-1 min-h-0 flex flex-col bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
+          <div className="flex-1 overflow-auto">
+            <table
+              className="text-sm"
+              style={{
+                tableLayout: "fixed",
+                borderCollapse: "separate",
+                borderSpacing: 0,
+                width:
+                  40 +
+                  data.columns.reduce(
+                    (sum, col) => sum + resize.getColWidth(col.name),
+                    0,
+                  ),
+              }}
+            >
+              <colgroup>
+                <col style={{ width: 40 }} />
+                {data.columns.map((col) => (
+                  <col
+                    key={col.name}
+                    style={{ width: resize.getColWidth(col.name) }}
+                  />
+                ))}
+              </colgroup>
 
-            <thead className="sticky top-0 z-10">
-              {reactTable.getHeaderGroups().map((hg) => (
-                <tr key={hg.id}>
-                  <th
-                    className="bg-zinc-900 border-b border-r border-zinc-800 px-3 py-2 text-left"
-                    style={{ width: 40 }}
-                  >
-                    <Checkbox
-                      checked={selection.allSelected}
-                      indeterminate={selection.someSelected}
-                      onChange={selection.toggleSelectAll}
-                    />
-                  </th>
-                  {hg.headers.map((header) => (
-                    <SortableColumnHeader
-                      key={header.id}
-                      id={header.id}
-                      columnInfo={columnInfos.find((c) => c.name === header.id)}
-                      sorted={header.column.getIsSorted()}
-                      onToggleSort={header.column.getToggleSortingHandler()!}
-                      onResizeStart={(e) => resize.onResizeStart(e, header.id)}
-                    />
-                  ))}
-                </tr>
-              ))}
-            </thead>
-
-            <tbody>
-              {data.rows.map((row, rowIndex) => {
-                const isRowDirty = !!pending.pendingChanges[rowIndex];
-                const isSelected = selection.selectedRows.has(rowIndex);
-                const rowBg = isSelected
-                  ? "bg-zinc-800/40"
-                  : isRowDirty
-                    ? "bg-amber-950/10"
-                    : rowIndex % 2 === 0
-                      ? "bg-zinc-950"
-                      : "bg-zinc-900/40";
-
-                return (
-                  <tr
-                    key={rowIndex}
-                    className={`${rowBg} hover:bg-zinc-800/30`}
-                  >
-                    <td className="border-b border-r border-zinc-800/60 px-3 py-1.5">
+              <thead className="sticky top-0 z-10">
+                {reactTable.getHeaderGroups().map((hg) => (
+                  <tr key={hg.id}>
+                    <th
+                      className="bg-zinc-800 border-b border-r border-zinc-700/40 px-3 py-2.5 text-left"
+                      style={{ width: 40 }}
+                    >
                       <Checkbox
-                        checked={isSelected}
-                        onChange={() => selection.toggleSelectRow(rowIndex)}
+                        checked={selection.allSelected}
+                        indeterminate={selection.someSelected}
+                        onChange={selection.toggleSelectAll}
                       />
-                    </td>
-                    {data.columns.map((col, colIdx) => {
-                      const originalValue = row[colIdx];
-                      const isDirty =
-                        pending.pendingChanges[rowIndex]?.[col.name] !==
-                        undefined;
-                      const displayValue = isDirty
-                        ? pending.pendingChanges[rowIndex][col.name]
-                        : originalValue;
-                      const isEditing =
-                        editing.editingCell?.rowIndex === rowIndex &&
-                        editing.editingCell?.colName === col.name;
-
-                      return (
-                        <EditableCell
-                          key={col.name}
-                          value={originalValue}
-                          displayValue={displayValue}
-                          isDirty={isDirty}
-                          isEditing={isEditing}
-                          hasNoPk={hasNoPk}
-                          editValue={editing.editValue}
-                          inputRef={editing.inputRef}
-                          onStartEdit={() =>
-                            editing.startEdit(rowIndex, col.name, originalValue)
-                          }
-                          onEditValueChange={editing.setEditValue}
-                          onConfirm={editing.confirmEdit}
-                          onCancel={editing.cancelEdit}
-                        />
-                      );
-                    })}
+                    </th>
+                    {hg.headers.map((header) => (
+                      <SortableColumnHeader
+                        key={header.id}
+                        id={header.id}
+                        columnInfo={columnInfos.find((c) => c.name === header.id)}
+                        sorted={header.column.getIsSorted()}
+                        onToggleSort={header.column.getToggleSortingHandler()!}
+                        onResizeStart={(e) => resize.onResizeStart(e, header.id)}
+                      />
+                    ))}
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                ))}
+              </thead>
 
-      {data && (
-        <Pagination
-          page={tableData.page}
-          totalPages={tableData.totalPages}
-          onPageChange={tableData.setPage}
-        />
+              <tbody>
+                {data.rows.map((row, rowIndex) => {
+                  const isRowDirty = !!pending.pendingChanges[rowIndex];
+                  const isSelected = selection.selectedRows.has(rowIndex);
+                  const rowBg = isSelected
+                    ? "bg-zinc-800/40"
+                    : isRowDirty
+                      ? "bg-amber-950/10"
+                      : rowIndex % 2 === 0
+                        ? "bg-zinc-900"
+                        : "bg-zinc-800/20";
+
+                  return (
+                    <tr
+                      key={rowIndex}
+                      className={`${rowBg} hover:bg-zinc-800/40`}
+                    >
+                      <td className="border-b border-r border-zinc-800/40 px-3 py-1.5">
+                        <Checkbox
+                          checked={isSelected}
+                          onChange={() => selection.toggleSelectRow(rowIndex)}
+                        />
+                      </td>
+                      {data.columns.map((col, colIdx) => {
+                        const originalValue = row[colIdx];
+                        const isDirty =
+                          pending.pendingChanges[rowIndex]?.[col.name] !==
+                          undefined;
+                        const displayValue = isDirty
+                          ? pending.pendingChanges[rowIndex][col.name]
+                          : originalValue;
+                        const isEditing =
+                          editing.editingCell?.rowIndex === rowIndex &&
+                          editing.editingCell?.colName === col.name;
+
+                        return (
+                          <EditableCell
+                            key={col.name}
+                            value={originalValue}
+                            displayValue={displayValue}
+                            isDirty={isDirty}
+                            isEditing={isEditing}
+                            hasNoPk={hasNoPk}
+                            editValue={editing.editValue}
+                            inputRef={editing.inputRef}
+                            onStartEdit={() =>
+                              editing.startEdit(rowIndex, col.name, originalValue)
+                            }
+                            onEditValueChange={editing.setEditValue}
+                            onConfirm={editing.confirmEdit}
+                            onCancel={editing.cancelEdit}
+                          />
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <Pagination
+            page={tableData.page}
+            totalPages={tableData.totalPages}
+            onPageChange={tableData.setPage}
+          />
+        </div>
       )}
     </div>
   );
