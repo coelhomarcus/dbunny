@@ -25,10 +25,14 @@ function normalizeType(type: string): string {
 export default function SortableColumnHeader({
   id, columnInfo, sorted, onToggleSort, onResizeStart,
 }: SortableColumnHeaderProps) {
+  const isActive = sorted !== false;
+
   return (
     <th
       onClick={onToggleSort}
-      className="relative bg-zinc-800 text-left px-3 py-2.5 border-b border-r border-zinc-700/40 cursor-pointer hover:bg-zinc-700 select-none group text-sm"
+      className={`relative text-left px-3 py-2.5 border-b border-r border-zinc-700/40 cursor-pointer hover:bg-zinc-700 select-none group text-sm ${
+        isActive ? "bg-zinc-700" : "bg-zinc-800"
+      }`}
     >
       <span className="flex items-center justify-between gap-2 overflow-hidden">
         <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
@@ -37,7 +41,7 @@ export default function SortableColumnHeader({
               PK
             </span>
           )}
-          <span className="font-semibold text-zinc-200 truncate">
+          <span className={`font-semibold truncate ${isActive ? "text-white" : "text-zinc-200"}`}>
             {id}
           </span>
           {columnInfo?.dataType && (
@@ -46,7 +50,11 @@ export default function SortableColumnHeader({
             </span>
           )}
         </span>
-        <span className="shrink-0 text-zinc-700 group-hover:text-zinc-400 transition-colors">
+        <span className={`shrink-0 transition-colors ${
+          isActive
+            ? "text-blue-400"
+            : "text-zinc-600 group-hover:text-zinc-400"
+        }`}>
           {sorted === "asc" ? (
             <ChevronUp size={13} />
           ) : sorted === "desc" ? (

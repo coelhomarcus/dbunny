@@ -5,6 +5,7 @@ import type { QueryResult } from "@/types";
 import { useSqlAutocomplete } from "../hooks/useSqlAutocomplete";
 import QueryResults from "../components/QueryResults";
 import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
+import ExportMenu from "../components/ExportMenu";
 
 type TabMeta = {
   id: number;
@@ -306,13 +307,13 @@ export default function QueryEditor() {
             <div className="flex items-center gap-2 px-5 py-3.5 border-t border-zinc-700/40 bg-zinc-800/20">
               <button
                 onClick={confirmDangerousQuery}
-                className="px-3.5 py-1.5 text-xs font-medium bg-red-600/80 hover:bg-red-600 text-white rounded-lg transition-colors"
+                className="px-3.5 py-1.5 text-xs font-medium bg-red-600/80 hover:bg-red-600 text-white rounded-lg transition-colors cursor-pointer"
               >
                 Run anyway
               </button>
               <button
                 onClick={cancelDangerousQuery}
-                className="px-3.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-white rounded-lg transition-colors"
+                className="px-3.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-white rounded-lg transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -324,7 +325,7 @@ export default function QueryEditor() {
       {/* Editor panel */}
       <div className="flex flex-col flex-1 min-h-0 bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
         {/* Tabs */}
-        <div className="flex items-center bg-zinc-800/40 shrink-0">
+        <div className="flex items-center bg-zinc-800/40 shrink-0 select-none">
           <div className="flex items-center flex-1 overflow-x-auto overflow-y-hidden">
             {tabMetas.map((tab) => (
               <button
@@ -354,7 +355,7 @@ export default function QueryEditor() {
           </div>
           <button
             onClick={addTab}
-            className="px-3 py-2.5 text-zinc-600 hover:text-zinc-300 transition-colors shrink-0"
+            className="px-3 py-2.5 text-zinc-600 hover:text-zinc-300 transition-colors shrink-0 cursor-pointer"
             title="New query tab"
           >
             <Plus size={14} />
@@ -382,14 +383,14 @@ export default function QueryEditor() {
         </div>
 
         {/* Toolbar */}
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 border-t border-zinc-800/60">
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 border-t border-zinc-800/60 select-none">
           <button
             onClick={runQuery}
             disabled={running}
-            className="px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg transition-colors relative"
+            className="px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg transition-colors relative cursor-pointer disabled:cursor-not-allowed"
           >
             <span className={`transition-opacity duration-200 ${running ? "opacity-0" : "opacity-100"}`}>
-              Run (Ctrl+Enter)
+              Run
             </span>
             <Loader className={`w-4 h-4 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
           </button>
@@ -401,10 +402,18 @@ export default function QueryEditor() {
             </span>
           )}
           <div className="flex items-center gap-1 ml-auto">
+            {result && result.columns.length > 0 && (
+              <ExportMenu
+                columns={result.columns}
+                rows={result.rows}
+                defaultName={tabMetas.find((t) => t.id === activeId)?.label.replace(/\s+/g, "_").toLowerCase() ?? "query"}
+                side="up"
+              />
+            )}
             <button
               onClick={() => setSafeMode((v) => !v)}
               title={safeMode ? "Safe Mode ON - click to disable" : "Safe Mode OFF - click to enable"}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded-lg transition-colors ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded-lg transition-colors cursor-pointer ${
                 safeMode
                   ? "text-emerald-400 hover:text-emerald-300 hover:bg-zinc-700/50"
                   : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50"
@@ -415,7 +424,7 @@ export default function QueryEditor() {
             </button>
             <button
               onClick={importQuery}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 text-sm rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 text-sm rounded-lg transition-colors cursor-pointer"
               title="Import .sql file"
             >
               <Upload size={15} />
@@ -423,11 +432,11 @@ export default function QueryEditor() {
             </button>
             <button
               onClick={exportQuery}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 text-sm rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 text-sm rounded-lg transition-colors cursor-pointer"
               title="Export as .sql file"
             >
               <Download size={15} />
-              Export
+              Export SQL
             </button>
           </div>
         </div>

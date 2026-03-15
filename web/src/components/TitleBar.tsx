@@ -60,19 +60,19 @@ export default function TitleBar() {
       <div className="flex h-full">
         <button
           onClick={() => appWindow.minimize()}
-          className="h-full w-12 flex items-center justify-center text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+          className="h-full w-12 flex items-center justify-center text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors cursor-pointer"
         >
           <Minus size={14} />
         </button>
         <button
           onClick={() => appWindow.toggleMaximize()}
-          className="h-full w-12 flex items-center justify-center text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+          className="h-full w-12 flex items-center justify-center text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors cursor-pointer"
         >
           {maximized ? <RestoreIcon /> : <MaximizeIcon />}
         </button>
         <button
           onClick={() => appWindow.close()}
-          className="h-full w-12 flex items-center justify-center text-zinc-400 hover:bg-red-600 hover:text-white transition-colors"
+          className="h-full w-12 flex items-center justify-center text-zinc-400 hover:bg-red-600 hover:text-white transition-colors cursor-pointer"
         >
           <X size={14} />
         </button>

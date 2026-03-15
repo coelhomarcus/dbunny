@@ -98,7 +98,7 @@ export default function FunctionView() {
               </span>
               <button
                 onClick={copySource}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 rounded-lg transition-colors cursor-pointer"
               >
                 {copied ? (
                   <>

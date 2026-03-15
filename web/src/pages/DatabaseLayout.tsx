@@ -81,7 +81,7 @@ export default function DatabaseLayout() {
                 </button>
                 <button
                   onClick={() => setSidebarExpanded(false)}
-                  className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors shrink-0 ml-1"
+                  className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer shrink-0 ml-1"
                   title="Collapse sidebar"
                 >
                   <PanelLeftClose size={14} />
@@ -114,7 +114,7 @@ export default function DatabaseLayout() {
               <div className="px-2 py-2 border-t border-zinc-800/60">
                 <button
                   onClick={handleDisconnect}
-                  className="flex items-center gap-2 w-full px-2.5 py-2 rounded-md text-sm text-zinc-500 hover:text-red-400 hover:bg-zinc-800/40 transition-colors"
+                  className="flex items-center gap-2 w-full px-2.5 py-2 rounded-md text-sm text-zinc-500 hover:text-red-400 hover:bg-zinc-800/40 transition-colors cursor-pointer"
                 >
                   <LogOut size={14} className="shrink-0" />
                   Disconnect
@@ -129,7 +129,7 @@ export default function DatabaseLayout() {
               <Tooltip label="Expand sidebar">
                 <button
                   onClick={() => setSidebarExpanded(true)}
-                  className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                  className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
                 >
                   <PanelLeftOpen size={16} />
                 </button>
@@ -158,7 +158,7 @@ export default function DatabaseLayout() {
                           setSchemaToExpand(s.name);
                           setSidebarExpanded(true);
                         }}
-                        className="p-1.5 rounded text-amber-500/70 hover:text-amber-400 hover:bg-zinc-800 transition-colors"
+                        className="p-1.5 rounded text-amber-500/70 hover:text-amber-400 hover:bg-zinc-800 transition-colors cursor-pointer"
                       >
                         <Folder size={15} />
                       </button>
@@ -170,7 +170,7 @@ export default function DatabaseLayout() {
               <Tooltip label="Disconnect">
                 <button
                   onClick={handleDisconnect}
-                  className="p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                  className="p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors cursor-pointer"
                 >
                   <LogOut size={14} />
                 </button>

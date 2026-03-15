@@ -16,7 +16,7 @@ export default function Pagination({
   onPageSizeChange,
 }: PaginationProps) {
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 border-t border-zinc-800/40 bg-zinc-800/30 text-sm text-zinc-400">
+    <div className="flex items-center justify-between px-4 py-2.5 border-t border-zinc-800/40 bg-zinc-800/30 text-sm text-zinc-400 select-none">
       <div className="flex items-center gap-2">
         <span>Rows per page</span>
         <select
@@ -41,14 +41,14 @@ export default function Pagination({
             <button
               onClick={() => onPageChange(Math.max(1, page - 1))}
               disabled={page <= 1}
-              className="px-3 py-1.5 rounded-lg bg-zinc-700/50 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1.5 rounded-lg bg-zinc-700/50 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed transition-colors"
             >
               Previous
             </button>
             <button
               onClick={() => onPageChange(Math.min(totalPages, page + 1))}
               disabled={page >= totalPages}
-              className="px-3 py-1.5 rounded-lg bg-zinc-700/50 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1.5 rounded-lg bg-zinc-700/50 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed transition-colors"
             >
               Next
             </button>

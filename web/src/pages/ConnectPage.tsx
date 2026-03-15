@@ -206,7 +206,7 @@ export default function ConnectPage() {
                     <button
                       type="button"
                       onClick={handleNewConnection}
-                      className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                      className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
                       title="New connection"
                     >
                       <Plus size={14} />
@@ -214,7 +214,7 @@ export default function ConnectPage() {
                   )}
                   <button
                     onClick={() => setSidebarExpanded(false)}
-                    className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                    className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
                     title="Minimize sidebar"
                   >
                     <PanelLeftClose size={14} />
@@ -249,7 +249,7 @@ export default function ConnectPage() {
               <Tooltip label="Expand sidebar">
                 <button
                   onClick={() => setSidebarExpanded(true)}
-                  className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                  className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
                 >
                   <PanelLeftOpen size={16} />
                 </button>

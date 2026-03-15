@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useCallback } from "react";
 import { useParams } from "react-router";
 import {
   useReactTable,
@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-table";
 import type { QueryColumn } from "@/types";
 import { useTableData } from "../hooks/useTableData";
+import { api } from "../lib/api";
 import { useCellEditing } from "../hooks/useCellEditing";
 import { useRowSelection } from "../hooks/useRowSelection";
 import { useColumnResize } from "../hooks/useColumnResize";
@@ -70,6 +71,39 @@ export default function TableView() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing, pending]);
 
+  const fetchAllRows = useCallback(async () => {
+    const total = data?.totalRows ?? 0;
+    const batchSize = 100;
+    const pages = Math.ceil(total / batchSize);
+    const sortColumn = tableData.sorting[0]?.id;
+    const sortDirection = tableData.sorting[0]?.desc ? "desc" as const : "asc" as const;
+    const params = {
+      pageSize: batchSize, sortColumn,
+      sortDirection: sortColumn ? sortDirection : undefined,
+    };
+
+    const concurrency = 5;
+    let columns: QueryColumn[] = [];
+    const allRows: unknown[][] = new Array(total);
+    let offset = 0;
+
+    for (let i = 0; i < pages; i += concurrency) {
+      const chunk = Array.from(
+        { length: Math.min(concurrency, pages - i) },
+        (_, j) => i + j + 1,
+      );
+      const results = await Promise.all(
+        chunk.map((p) => api.getTableData(schema!, table!, { ...params, page: p })),
+      );
+      for (const res of results) {
+        if (!columns.length) columns = res.columns;
+        for (const row of res.rows) allRows[offset++] = row;
+      }
+    }
+
+    return { columns, rows: allRows.slice(0, offset) };
+  }, [schema, table, data?.totalRows, tableData.sorting]);
+
   const columns = useMemo<ColumnDef<unknown[], unknown>[]>(() => {
     if (!data?.columns) return [];
     return data.columns.map((col: QueryColumn) => ({
@@ -114,6 +148,9 @@ export default function TableView() {
         onRefresh={tableData.refresh}
         hasCustomWidths={resize.hasCustomWidths}
         onResetWidths={resize.resetWidths}
+        columns={data?.columns}
+        rows={data?.rows}
+        onFetchAllRows={fetchAllRows}
       />
 
       {error && <div className="p-4 text-red-400 text-sm bg-zinc-900 border border-zinc-800/60 rounded-xl">{error}</div>}
@@ -147,7 +184,7 @@ export default function TableView() {
                 ))}
               </colgroup>
 
-              <thead className="sticky top-0 z-10">
+              <thead className="sticky top-0 z-10 select-none">
                 {reactTable.getHeaderGroups().map((hg) => (
                   <tr key={hg.id}>
                     <th

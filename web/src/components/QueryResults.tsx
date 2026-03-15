@@ -101,7 +101,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
   });
 
   return (
-    <div className="flex-1 min-h-0 overflow-auto flex flex-col">
+    <div className="flex-1 min-h-0 overflow-auto flex flex-col h-full">
       {error && <ErrorDisplay raw={error} />}
 
       {result && result.columns.length > 0 && (
@@ -109,7 +109,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
           className="w-full text-sm"
           style={{ minWidth: result.columns.length * 150 }}
         >
-          <thead className="sticky top-0 z-10">
+          <thead className="sticky top-0 z-10 select-none">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
                 {hg.headers.map((header) => (
@@ -154,7 +154,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
       {running && !result && <QueryResultsSkeleton />}
 
       {!result && !error && !running && (
-        <div className="flex-1 flex items-center justify-center h-full text-zinc-600 text-base">
+        <div className="flex-1 flex items-center justify-center text-zinc-600 text-base">
           Write a query and press Ctrl+Enter to run
         </div>
       )}
