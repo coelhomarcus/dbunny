@@ -31,7 +31,12 @@ const emptyFolders: SchemaFolders = {
   functions: { items: [], loaded: false, loading: false },
 };
 
-export default function SchemaTree() {
+interface SchemaTreeProps {
+  schemaToExpand?: string | null;
+  onSchemaExpanded?: () => void;
+}
+
+export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaTreeProps = {}) {
   const [schemas, setSchemas] = useState<SchemaInfo[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [folderData, setFolderData] = useState<Record<string, SchemaFolders>>({});
@@ -51,6 +56,13 @@ export default function SchemaTree() {
       })
       .catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!schemaToExpand) return;
+    setExpanded((prev) => new Set([...prev, schemaToExpand]));
+    onSchemaExpanded?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schemaToExpand]);
 
   const toggle = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -123,7 +135,7 @@ export default function SchemaTree() {
   }
 
   return (
-    <div className="text-sm select-none">
+    <div className="text-base select-none">
       {schemas.map((schema) => {
         const isExpanded = expanded.has(schema.name);
         const data = folderData[schema.name] ?? emptyFolders;
@@ -138,8 +150,8 @@ export default function SchemaTree() {
                 size={10}
                 className={`shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-all duration-150 ${isExpanded ? "rotate-90" : ""}`}
               />
-              <Folder size={13} className="shrink-0 text-amber-500/80" />
-              <span className="truncate text-xs">{schema.name}</span>
+              <Folder size={15} className="shrink-0 text-amber-500/80" />
+              <span className="truncate text-sm">{schema.name}</span>
             </button>
 
             {isExpanded && (
@@ -160,7 +172,7 @@ export default function SchemaTree() {
                       <button
                         key={t.name}
                         onClick={() => navigate(`/db/${schema.name}/${t.name}`)}
-                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-xs transition-colors ${
+                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-sm transition-colors ${
                           isActive
                             ? "bg-zinc-800 text-white"
                             : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
@@ -192,7 +204,7 @@ export default function SchemaTree() {
                       <button
                         key={v.name}
                         onClick={() => navigate(`/db/${schema.name}/${v.name}`)}
-                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-xs transition-colors ${
+                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-sm transition-colors ${
                           isActive
                             ? "bg-zinc-800 text-white"
                             : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
@@ -228,7 +240,7 @@ export default function SchemaTree() {
                             `/db/${schema.name}/function/${f.name}?args=${encodeURIComponent(f.argumentTypes)}`
                           )
                         }
-                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-xs transition-colors ${
+                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-sm transition-colors ${
                           isActive
                             ? "bg-zinc-800 text-white"
                             : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
@@ -250,7 +262,7 @@ export default function SchemaTree() {
       })}
 
       {schemas.length === 0 && (
-        <div className="px-3 py-6 text-zinc-600 text-center text-xs">
+        <div className="px-3 py-6 text-zinc-600 text-center text-sm">
           no schemas found
         </div>
       )}
@@ -290,8 +302,8 @@ function SubFolder({
           size={10}
           className={`shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-all duration-150 ${isOpen ? "rotate-90" : ""}`}
         />
-        <Folder size={13} className={`shrink-0 ${folderColor}`} />
-        <span className="truncate text-xs">{label}</span>
+        <Folder size={15} className={`shrink-0 ${folderColor}`} />
+        <span className="truncate text-sm">{label}</span>
         {folder.loading && (
           <Loader size={10} className="ml-auto shrink-0 animate-spin text-zinc-500" />
         )}
@@ -304,7 +316,7 @@ function SubFolder({
       {isOpen && folder.loaded && (
         <div>
           {folder.items.length === 0 ? (
-            <div className="pl-12 py-1.5 text-[11px] text-zinc-600">empty</div>
+            <div className="pl-12 py-1.5 text-xs text-zinc-600">empty</div>
           ) : (
             children
           )}

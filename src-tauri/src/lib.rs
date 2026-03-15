@@ -26,6 +26,13 @@ pub fn run() {
                 *cache = connections;
             }
 
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(false);
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -13,6 +13,8 @@ import {
   Loader,
   Bookmark,
   Plus,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import {
   type ConnectionFields,
@@ -23,6 +25,7 @@ import { api } from "../lib/api";
 import { isMac } from "../lib/platform";
 import type { SavedConnection } from "@/types";
 import SavedConnectionsList from "../components/SavedConnectionsList";
+import Tooltip from "../components/Tooltip";
 
 export default function ConnectPage() {
   const [fields, setFields] = useState<ConnectionFields>({
@@ -44,6 +47,7 @@ export default function ConnectPage() {
   const [isSaving, setIsSaving] = useState(false);
   const colorInputRef = useRef<HTMLInputElement>(null);
 
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const { connect, isConnecting, error } = useConnection();
   const navigate = useNavigate();
 
@@ -171,7 +175,7 @@ export default function ConnectPage() {
     savedConnections !== null && savedConnections.length > 0;
 
   return (
-    <div className="h-screen bg-zinc-950 flex flex-col">
+    <div className="h-full bg-zinc-950 flex flex-col">
       {isMac && (
         <div
           className="h-8 w-full shrink-0"
@@ -182,45 +186,79 @@ export default function ConnectPage() {
         />
       )}
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="w-56 shrink-0 border-r border-zinc-800/60 flex flex-col select-none">
-          <div className="h-10 px-3 flex items-center justify-between shrink-0">
-            <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-              Connections
-            </span>
-            {hasSavedConnections && (
-              <button
-                type="button"
-                onClick={handleNewConnection}
-                className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-                title="New connection"
-              >
-                <Plus size={13} />
-              </button>
-            )}
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {hasSavedConnections ? (
-              <SavedConnectionsList
-                connections={savedConnections}
-                selectedId={selectedId}
-                onSelect={handleSelectSaved}
-                onConnect={handleConnectSaved}
-                onDelete={handleDelete}
-              />
-            ) : (
-              <div className="px-3 pt-4">
-                <p className="text-[11px] text-zinc-700 leading-relaxed">
-                  {savedConnections === null
-                    ? ""
-                    : "Save a connection to access it here."}
-                </p>
+      <div className="flex flex-1 overflow-hidden p-2 gap-2">
+        <aside
+          className={`shrink-0 bg-zinc-900 border border-zinc-800/60 rounded-xl shadow-xl flex flex-col select-none transition-all duration-300 ease-in-out overflow-hidden ${
+            sidebarExpanded ? "w-64" : "w-12"
+          }`}
+        >
+          <div className="relative flex-1">
+            {/* Expanded view */}
+            <div className={`absolute inset-0 flex flex-col transition-opacity duration-200 ${
+              sidebarExpanded ? "opacity-100 delay-75" : "opacity-0 pointer-events-none"
+            }`}>
+              <div className="h-11 px-3 flex items-center justify-between shrink-0">
+                <span className="text-sm font-medium text-zinc-500 uppercase tracking-wider">
+                  Connections
+                </span>
+                <div className="flex items-center gap-1">
+                  {hasSavedConnections && (
+                    <button
+                      type="button"
+                      onClick={handleNewConnection}
+                      className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
+                      title="New connection"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setSidebarExpanded(false)}
+                    className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
+                    title="Minimize sidebar"
+                  >
+                    <PanelLeftClose size={14} />
+                  </button>
+                </div>
               </div>
-            )}
+              <div className="flex-1 overflow-y-auto">
+                {hasSavedConnections ? (
+                  <SavedConnectionsList
+                    connections={savedConnections}
+                    selectedId={selectedId}
+                    onSelect={handleSelectSaved}
+                    onConnect={handleConnectSaved}
+                    onDelete={handleDelete}
+                  />
+                ) : (
+                  <div className="px-3 pt-4">
+                    <p className="text-xs text-zinc-700 leading-relaxed">
+                      {savedConnections === null
+                        ? ""
+                        : "Save a connection to access it here."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Collapsed view */}
+            <div className={`absolute inset-0 flex flex-col items-center py-3 gap-3 transition-opacity duration-200 ${
+              sidebarExpanded ? "opacity-0 pointer-events-none" : "opacity-100 delay-75"
+            }`}>
+              <Tooltip label="Expand sidebar">
+                <button
+                  onClick={() => setSidebarExpanded(true)}
+                  className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
+                >
+                  <PanelLeftOpen size={16} />
+                </button>
+              </Tooltip>
+            </div>
           </div>
         </aside>
 
-        <main className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
+        <main className="flex-1 flex items-center justify-center overflow-y-auto">
           <div className="w-full max-w-md">
             <div className="text-center mb-8 select-none">
               <div className="inline-flex items-center justify-center mb-3">

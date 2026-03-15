@@ -22,7 +22,7 @@ export default function SavedConnectionsList({
   );
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col select-none">
       {connections.map((conn) => {
         const isSelected = conn.id === selectedId;
         const isConfirmingDelete = conn.id === confirmingDeleteId;
@@ -52,7 +52,7 @@ export default function SavedConnectionsList({
                       onDelete(conn.id);
                       setConfirmingDeleteId(null);
                     }}
-                    className="px-2 py-0.5 text-[11px] text-red-400 hover:text-red-300 transition-colors"
+                    className="px-2 py-0.5 text-[11px] text-red-400 hover:text-red-300 transition-colors cursor-pointer"
                   >
                     Yes
                   </button>
@@ -61,7 +61,7 @@ export default function SavedConnectionsList({
                       e.stopPropagation();
                       setConfirmingDeleteId(null);
                     }}
-                    className="px-2 py-0.5 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                    className="px-2 py-0.5 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
                   >
                     No
                   </button>
@@ -75,11 +75,11 @@ export default function SavedConnectionsList({
                       className="w-2 h-2 rounded-full shrink-0"
                       style={{ backgroundColor: conn.color || "#3b82f6" }}
                     />
-                    <span className="text-[13px] text-zinc-200 truncate">
+                    <span className="text-sm text-zinc-200 truncate">
                       {conn.name || "Unnamed"}
                     </span>
                   </div>
-                  <p className="text-[11px] text-zinc-600 truncate pl-4 font-mono">
+                  <p className="text-xs text-zinc-600 truncate pl-4 font-mono">
                     {conn.host}:{conn.port}/{conn.database}
                   </p>
                 </div>
@@ -90,7 +90,7 @@ export default function SavedConnectionsList({
                       e.stopPropagation();
                       onConnect(conn);
                     }}
-                    className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors"
+                    className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors cursor-pointer"
                     title="Connect"
                   >
                     <ArrowRight size={12} />
@@ -100,7 +100,7 @@ export default function SavedConnectionsList({
                       e.stopPropagation();
                       setConfirmingDeleteId(conn.id);
                     }}
-                    className="p-1 rounded text-zinc-700 hover:text-red-400 hover:bg-zinc-700/50 transition-colors"
+                    className="p-1 rounded text-zinc-700 hover:text-red-400 hover:bg-zinc-700/50 transition-colors cursor-pointer"
                     title="Delete"
                   >
                     <Trash2 size={12} />

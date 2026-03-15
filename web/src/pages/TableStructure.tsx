@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, NavLink } from "react-router";
-import { Loader } from "lucide-react";
+import { TableSkeleton } from "../components/Skeleton";
 import { api } from "../lib/api";
 import type { ColumnInfo } from "@/types";
 
@@ -23,10 +23,10 @@ export default function TableStructure() {
   const columns = loading ? [] : result.columns;
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col gap-2">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
-        <h2 className="text-sm font-medium">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900 border border-zinc-800/60 rounded-xl shrink-0">
+        <h2 className="text-base font-medium">
           <span className="text-zinc-500">{schema}.</span>
           {table}
         </h2>
@@ -35,7 +35,7 @@ export default function TableStructure() {
             to={`/db/${schema}/${table}`}
             end
             className={({ isActive }) =>
-              `px-3 py-1 text-xs rounded transition-colors ${
+              `px-3 py-1.5 text-sm rounded-lg transition-colors ${
                 isActive
                   ? "bg-zinc-700 text-white"
                   : "text-zinc-400 hover:text-white"
@@ -47,7 +47,7 @@ export default function TableStructure() {
           <NavLink
             to={`/db/${schema}/${table}/structure`}
             className={({ isActive }) =>
-              `px-3 py-1 text-xs rounded transition-colors ${
+              `px-3 py-1.5 text-sm rounded-lg transition-colors ${
                 isActive
                   ? "bg-zinc-700 text-white"
                   : "text-zinc-400 hover:text-white"
@@ -60,27 +60,25 @@ export default function TableStructure() {
       </div>
 
       {loading ? (
-        <div className="flex-1 flex items-end justify-end p-4">
-          <Loader size={16} className="animate-spin text-zinc-500" />
-        </div>
+        <TableSkeleton columns={5} rows={10} />
       ) : (
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto bg-zinc-900 border border-zinc-800/60 rounded-xl">
           <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-zinc-900">
+            <thead className="sticky top-0">
               <tr>
-                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                <th className="text-left px-4 py-2.5 text-sm font-medium text-zinc-400 bg-zinc-800 border-b border-zinc-700/40">
                   #
                 </th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                <th className="text-left px-4 py-2.5 text-sm font-medium text-zinc-400 bg-zinc-800 border-b border-zinc-700/40">
                   Column
                 </th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                <th className="text-left px-4 py-2.5 text-sm font-medium text-zinc-400 bg-zinc-800 border-b border-zinc-700/40">
                   Type
                 </th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                <th className="text-left px-4 py-2.5 text-sm font-medium text-zinc-400 bg-zinc-800 border-b border-zinc-700/40">
                   Nullable
                 </th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-zinc-400 border-b border-zinc-800">
+                <th className="text-left px-4 py-2.5 text-sm font-medium text-zinc-400 bg-zinc-800 border-b border-zinc-700/40">
                   Default
                 </th>
               </tr>
@@ -89,25 +87,25 @@ export default function TableStructure() {
               {columns.map((col, i) => (
                 <tr
                   key={col.name}
-                  className={`border-b border-zinc-800/50 ${
-                    i % 2 === 0 ? "bg-zinc-950" : "bg-zinc-900/30"
+                  className={`border-b border-zinc-800/40 ${
+                    i % 2 === 0 ? "bg-zinc-900" : "bg-zinc-800/20"
                   }`}
                 >
-                  <td className="px-4 py-2 text-zinc-600">
+                  <td className="px-4 py-2.5 text-zinc-600">
                     {col.ordinalPosition}
                   </td>
-                  <td className="px-4 py-2 text-white font-medium">
+                  <td className="px-4 py-2.5 text-white font-medium">
                     {col.name}
                   </td>
-                  <td className="px-4 py-2 text-amber-400">{col.dataType}</td>
-                  <td className="px-4 py-2">
+                  <td className="px-4 py-2.5 text-amber-400">{col.dataType}</td>
+                  <td className="px-4 py-2.5">
                     {col.isNullable ? (
                       <span className="text-zinc-500">YES</span>
                     ) : (
                       <span className="text-red-400">NO</span>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-zinc-400 font-mono text-xs">
+                  <td className="px-4 py-2.5 text-zinc-400 font-mono text-xs">
                     {col.defaultValue ?? (
                       <span className="text-zinc-600">-</span>
                     )}

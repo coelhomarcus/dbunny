@@ -29,12 +29,12 @@ export default function EditableCell({
 }: EditableCellProps) {
   return (
     <td
-      className={`relative p-0 overflow-hidden border-b border-r border-zinc-800/60 ${isDirty ? "border-l-2 border-l-amber-400/60" : ""}`}
+      className={`relative p-0 overflow-hidden border-b border-r border-zinc-800/40 ${isDirty ? "bg-amber-500/6" : ""}`}
       onClick={() => !isEditing && onStartEdit()}
     >
       <div
         className={`px-3 py-1.5 truncate overflow-hidden ${isEditing ? "invisible" : ""} ${
-          isDirty ? "text-amber-300" : "text-zinc-300"
+          isDirty ? "text-amber-200" : "text-zinc-300"
         } ${!hasNoPk && !isEditing ? "cursor-text" : ""}`}
       >
         {renderValue(displayValue)}
@@ -55,7 +55,7 @@ export default function EditableCell({
               onCancel();
             }
           }}
-          className="absolute inset-0 px-3 bg-zinc-800 text-white text-xs outline-none ring-1 ring-inset ring-green-500/60"
+          className="absolute inset-0 px-3 bg-zinc-800 text-white text-sm outline-none ring-1 ring-inset ring-green-500/60"
         />
       )}
     </td>

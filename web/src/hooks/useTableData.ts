@@ -3,13 +3,27 @@ import { type SortingState, type OnChangeFn } from "@tanstack/react-table";
 import { api } from "../lib/api";
 import type { TableDataResponse, ColumnInfo } from "@/types";
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+const DEFAULT_PAGE_SIZE = 50;
+
+function storageKey(schema?: string, table?: string) {
+  return schema && table ? `dbunny:pageSize:${schema}.${table}` : null;
+}
+
+function readPageSize(schema?: string, table?: string): number {
+  const key = storageKey(schema, table);
+  if (!key) return DEFAULT_PAGE_SIZE;
+  const n = parseInt(localStorage.getItem(key) ?? "", 10);
+  return PAGE_SIZE_OPTIONS.includes(n) ? n : DEFAULT_PAGE_SIZE;
+}
+
 export function useTableData(schema?: string, table?: string) {
   const [data, setData] = useState<TableDataResponse | null>(null);
   const [columnInfos, setColumnInfos] = useState<ColumnInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(50);
+  const [pageSize, setPageSizeState] = useState(() => readPageSize(schema, table));
   const [sorting, setSorting] = useState<SortingState>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [spinKey, setSpinKey] = useState(0);
@@ -54,10 +68,18 @@ export function useTableData(schema?: string, table?: string) {
       .finally(() => setLoading(false));
   }, [schema, table, page, pageSize, sorting, fetchData]);
 
+  const setPageSize = useCallback((size: number) => {
+    const key = storageKey(schema, table);
+    if (key) localStorage.setItem(key, String(size));
+    setPageSizeState(size);
+    setPage(1);
+  }, [schema, table]);
+
   // Reset state when table changes
   useEffect(() => {
     setPage(1);
     setSorting([]);
+    setPageSizeState(readPageSize(schema, table));
   }, [schema, table]);
 
   const refresh = useCallback(async () => {
@@ -84,6 +106,8 @@ export function useTableData(schema?: string, table?: string) {
     page,
     setPage,
     pageSize,
+    setPageSize,
+    pageSizeOptions: PAGE_SIZE_OPTIONS,
     totalPages,
     sorting,
     setSorting: setSorting as OnChangeFn<SortingState>,
