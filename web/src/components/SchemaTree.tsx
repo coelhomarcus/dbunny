@@ -31,7 +31,12 @@ const emptyFolders: SchemaFolders = {
   functions: { items: [], loaded: false, loading: false },
 };
 
-export default function SchemaTree() {
+interface SchemaTreeProps {
+  schemaToExpand?: string | null;
+  onSchemaExpanded?: () => void;
+}
+
+export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaTreeProps = {}) {
   const [schemas, setSchemas] = useState<SchemaInfo[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [folderData, setFolderData] = useState<Record<string, SchemaFolders>>({});
@@ -51,6 +56,13 @@ export default function SchemaTree() {
       })
       .catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!schemaToExpand) return;
+    setExpanded((prev) => new Set([...prev, schemaToExpand]));
+    onSchemaExpanded?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schemaToExpand]);
 
   const toggle = useCallback((key: string) => {
     setExpanded((prev) => {

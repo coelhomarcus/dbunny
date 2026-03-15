@@ -239,6 +239,9 @@ export default function TableView() {
             page={tableData.page}
             totalPages={tableData.totalPages}
             onPageChange={tableData.setPage}
+            pageSize={tableData.pageSize}
+            pageSizeOptions={tableData.pageSizeOptions}
+            onPageSizeChange={tableData.setPageSize}
           />
         </div>
       )}
