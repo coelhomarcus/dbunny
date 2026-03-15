@@ -25,6 +25,7 @@ import { api } from "../lib/api";
 import { isMac } from "../lib/platform";
 import type { SavedConnection } from "@/types";
 import SavedConnectionsList from "../components/SavedConnectionsList";
+import Tooltip from "../components/Tooltip";
 
 export default function ConnectPage() {
   const [fields, setFields] = useState<ConnectionFields>({
@@ -191,8 +192,11 @@ export default function ConnectPage() {
             sidebarExpanded ? "w-64" : "w-12"
           }`}
         >
-          {sidebarExpanded ? (
-            <>
+          <div className="relative flex-1">
+            {/* Expanded view */}
+            <div className={`absolute inset-0 flex flex-col transition-opacity duration-200 ${
+              sidebarExpanded ? "opacity-100 delay-75" : "opacity-0 pointer-events-none"
+            }`}>
               <div className="h-11 px-3 flex items-center justify-between shrink-0">
                 <span className="text-sm font-medium text-zinc-500 uppercase tracking-wider">
                   Connections
@@ -236,18 +240,22 @@ export default function ConnectPage() {
                   </div>
                 )}
               </div>
-            </>
-          ) : (
-            <div className="flex flex-col items-center py-3 gap-3">
-              <button
-                onClick={() => setSidebarExpanded(true)}
-                className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-                title="Expand sidebar"
-              >
-                <PanelLeftOpen size={16} />
-              </button>
             </div>
-          )}
+
+            {/* Collapsed view */}
+            <div className={`absolute inset-0 flex flex-col items-center py-3 gap-3 transition-opacity duration-200 ${
+              sidebarExpanded ? "opacity-0 pointer-events-none" : "opacity-100 delay-75"
+            }`}>
+              <Tooltip label="Expand sidebar">
+                <button
+                  onClick={() => setSidebarExpanded(true)}
+                  className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                >
+                  <PanelLeftOpen size={16} />
+                </button>
+              </Tooltip>
+            </div>
+          </div>
         </aside>
 
         <main className="flex-1 flex items-center justify-center overflow-y-auto">
