@@ -308,38 +308,43 @@ export default function QueryEditor() {
 
       {/* Editor panel */}
       <div className="flex flex-col flex-1 min-h-0 bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
-        {/* Tabs */}
-        <div className="flex items-center bg-zinc-800/40 shrink-0 select-none">
-          <div className="flex items-center flex-1 overflow-x-auto overflow-y-hidden">
-            {tabMetas.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => switchTab(tab.id)}
-                className={`group flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
-                  activeId === tab.id
-                    ? "text-white border-blue-500 bg-zinc-900/80"
-                    : "text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-zinc-900/40"
-                }`}
-              >
-                {tab.label}
-                {tabMetas.length > 1 && (
-                  <span
-                    onClick={(e) => closeTab(e, tab.id)}
-                    className={`rounded p-0.5 transition-colors cursor-pointer ${
-                      activeId === tab.id
-                        ? "text-zinc-400 hover:text-white hover:bg-zinc-700"
-                        : "text-transparent group-hover:text-zinc-500 hover:text-white! hover:bg-zinc-700"
-                    }`}
-                  >
-                    <X size={10} />
-                  </span>
-                )}
-              </button>
-            ))}
+        {/* Tabs: the active one joins the editor below (see .joined-tab in index.css) */}
+        <div className="tab-strip flex items-end shrink-0 select-none">
+          <div className="flex items-end gap-1 flex-1 px-2 pt-1.5 overflow-x-auto overflow-y-hidden">
+            {tabMetas.map((tab) => {
+              const active = activeId === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  data-active={active}
+                  onClick={() => switchTab(tab.id)}
+                  // Transition only while hovered, so switching tabs swaps styles instantly
+                  className={`joined-tab group flex items-center gap-1.5 px-3.5 pt-2 text-sm font-medium whitespace-nowrap cursor-pointer ${
+                    active
+                      ? "pb-[9px] text-white"
+                      : "pb-1 mb-1 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 hover:transition-colors"
+                  }`}
+                >
+                  {tab.label}
+                  {tabMetas.length > 1 && (
+                    <span
+                      onClick={(e) => closeTab(e, tab.id)}
+                      className={`rounded p-0.5 transition-colors cursor-pointer ${
+                        active
+                          ? "text-zinc-400 hover:text-white hover:bg-zinc-700"
+                          : "text-transparent group-hover:text-zinc-500 hover:text-white! hover:bg-zinc-700"
+                      }`}
+                    >
+                      <X size={10} />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
           <button
             onClick={addTab}
-            className="px-3 py-2.5 text-zinc-600 hover:text-zinc-300 transition-colors shrink-0 cursor-pointer"
+            className="mb-1.5 mr-2 p-1.5 rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors shrink-0 cursor-pointer"
             title="New query tab"
           >
             <Plus size={14} />

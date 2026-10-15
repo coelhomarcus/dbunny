@@ -27,3 +27,63 @@
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* Tab strip whose active tab joins the panel below: rounded top, 1px outline and
+   concave ("gooey") bottom corners. --tab-bg must match the content under the tab. */
+.tab-strip {
+  --tab-bg: #18181b;
+  --tab-border: #2e2e33;
+  --tab-radius: 8px;
+  /* Bottom line separating the strip from the content; the active tab covers it */
+  background:
+    linear-gradient(var(--tab-border), var(--tab-border)) bottom / 100% 1px no-repeat,
+    #0e0e10;
+}
+
+.joined-tab {
+  position: relative;
+  border: 1px solid transparent;
+}
+
+.joined-tab[data-active="true"] {
+  z-index: 1;
+  background: var(--tab-bg);
+  border-color: var(--tab-border);
+  border-bottom-width: 0;
+  border-radius: var(--tab-radius) var(--tab-radius) 0 0;
+}
+
+/* Concave corners: an arc of border colour, then the tab background, so the outline
+   flows from the tab's sides into the strip's bottom line. Absolute positions are
+   relative to the padding box, so the arc lines up with the 1px side border. */
+.joined-tab[data-active="true"]::before,
+.joined-tab[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: var(--tab-radius);
+  height: var(--tab-radius);
+  pointer-events: none;
+}
+
+.joined-tab[data-active="true"]::before {
+  left: calc(-1 * var(--tab-radius));
+  background: radial-gradient(
+    circle at 0 0,
+    transparent calc(var(--tab-radius) - 1.5px),
+    var(--tab-border) calc(var(--tab-radius) - 1px),
+    var(--tab-border) calc(var(--tab-radius) - 0.5px),
+    var(--tab-bg) var(--tab-radius)
+  );
+}
+
+.joined-tab[data-active="true"]::after {
+  right: calc(-1 * var(--tab-radius));
+  background: radial-gradient(
+    circle at 100% 0,
+    transparent calc(var(--tab-radius) - 1.5px),
+    var(--tab-border) calc(var(--tab-radius) - 1px),
+    var(--tab-border) calc(var(--tab-radius) - 0.5px),
+    var(--tab-bg) var(--tab-radius)
+  );
+}
