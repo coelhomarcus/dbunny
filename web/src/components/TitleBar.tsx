@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Database, Minus, Plus, X } from "lucide-react";
 import { isMac, isWindows } from "../lib/platform";
@@ -139,13 +140,17 @@ function WindowTab({
 export default function TitleBar() {
   const { tabs, activeTabId, activateTab, closeTab, openTab, cycleTab } = useWorkspace();
 
-  // Cmd/Ctrl+T new tab, Ctrl+Tab / Ctrl+Shift+Tab cycle, Cmd/Ctrl+1..9 jump
+  // Cmd/Ctrl+T new tab, Ctrl+W close tab, Ctrl+Tab / Ctrl+Shift+Tab cycle, Cmd/Ctrl+1..9 jump
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const mod = isMac ? e.metaKey : e.ctrlKey;
       if (mod && !e.shiftKey && e.key.toLowerCase() === "t") {
         e.preventDefault();
         openTab();
+      } else if (!isMac && e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "w") {
+        // On macOS Cmd+W is a menu accelerator, see the listener below
+        e.preventDefault();
+        closeTab(activeTabId);
       } else if (e.ctrlKey && e.key === "Tab") {
         e.preventDefault();
         cycleTab(e.shiftKey ? -1 : 1);
@@ -157,7 +162,16 @@ export default function TitleBar() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [tabs, openTab, cycleTab, activateTab]);
+  }, [tabs, activeTabId, openTab, closeTab, cycleTab, activateTab]);
+
+  // macOS: the native menu's "Close Tab" item (Cmd+W) emits this event
+  useEffect(() => {
+    if (!isMac) return;
+    const unlisten = listen("menu:close-tab", () => closeTab(activeTabId));
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [activeTabId, closeTab]);
 
   return (
     <div
