@@ -188,10 +188,11 @@ body {
      (tab and strip), a translucent colour would not line up at the corners */
   --tab-border: color-mix(in srgb, var(--foreground) 12%, var(--tab-bg));
   --tab-radius: 8px;
-  /* Bottom line separating the strip from the content; the active tab covers it */
+  /* Bottom line separating the strip from the content; the active tab covers it.
+     Same colour as the panel, so the strip reads as part of the header row. */
   background:
     linear-gradient(var(--tab-border), var(--tab-border)) bottom / 100% 1px no-repeat,
-    var(--background);
+    var(--card);
 }
 
 .joined-tab {

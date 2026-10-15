@@ -48,7 +48,8 @@ export default function DatabaseLayout() {
       <div className="flex flex-1 min-h-0">
         <aside
           className={cn(
-            "relative shrink-0 border-r border-border select-none transition-[width] duration-300 ease-in-out overflow-hidden",
+            // Divider starts below the 48px header row, so it never runs into the window tabs
+            "relative shrink-0 after:pointer-events-none after:absolute after:right-0 after:top-12 after:bottom-0 after:w-px after:bg-border select-none transition-[width] duration-300 ease-in-out overflow-hidden",
             sidebarExpanded ? "w-64" : "w-12",
           )}
         >

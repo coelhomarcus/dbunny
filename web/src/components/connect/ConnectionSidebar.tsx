@@ -145,7 +145,8 @@ export default function ConnectionSidebar({
   return (
     <aside
       className={cn(
-        "relative shrink-0 border-r border-border select-none overflow-hidden transition-[width] duration-300 ease-in-out",
+        // Divider starts below the 48px header row, so it never runs into the window tabs
+        "relative shrink-0 after:pointer-events-none after:absolute after:right-0 after:top-12 after:bottom-0 after:w-px after:bg-border select-none overflow-hidden transition-[width] duration-300 ease-in-out",
         expanded ? "w-64" : "w-12",
       )}
     >
