@@ -333,31 +333,34 @@ export default function QueryEditor() {
 
       {/* Editor panel */}
       <div className="flex flex-col flex-1 min-h-0 border-b border-border">
-        {/* Tabs: the active one joins the editor below (see .joined-tab in index.css) */}
-        <div className="tab-strip flex h-12 items-end shrink-0 select-none">
-          <div className="flex items-end gap-1 flex-1 px-2 pt-1.5 overflow-x-auto overflow-y-hidden">
+        {/* Query tabs as compact pills: a lighter level than the connection tabs above */}
+        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2 select-none">
+          <div role="tablist" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
             {tabMetas.map((tab) => {
               const active = activeId === tab.id;
               return (
                 <button
                   key={tab.id}
-                  data-active={active}
+                  role="tab"
+                  aria-selected={active}
                   onClick={() => switchTab(tab.id)}
                   // Transition only while hovered, so switching tabs swaps styles instantly
-                  className={`joined-tab group flex items-center gap-1.5 px-3.5 pt-2 text-sm font-medium whitespace-nowrap cursor-pointer ${
+                  className={`group flex h-7 shrink-0 items-center gap-1 rounded-md pl-2.5 text-[13px] whitespace-nowrap cursor-pointer ${
+                    tabMetas.length > 1 ? "pr-1" : "pr-2.5"
+                  } ${
                     active
-                      ? "pb-[9px] text-foreground"
-                      : "pb-1 mb-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent hover:transition-colors"
+                      ? "bg-accent font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground hover:transition-colors"
                   }`}
                 >
                   {tab.label}
                   {tabMetas.length > 1 && (
                     <span
                       onClick={(e) => closeTab(e, tab.id)}
-                      className={`rounded p-0.5 transition-colors cursor-pointer ${
+                      className={`flex size-4 items-center justify-center rounded transition-colors cursor-pointer hover:bg-foreground/10 ${
                         active
-                          ? "text-muted-foreground hover:text-foreground hover:bg-accent"
-                          : "text-transparent group-hover:text-muted-foreground hover:text-foreground! hover:bg-accent"
+                          ? "text-muted-foreground hover:text-foreground"
+                          : "text-transparent group-hover:text-muted-foreground hover:text-foreground!"
                       }`}
                     >
                       <X size={10} />
@@ -366,10 +369,10 @@ export default function QueryEditor() {
                 </button>
               );
             })}
+            <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={addTab} title="New query tab">
+              <Plus />
+            </Button>
           </div>
-          <Button variant="ghost-muted" size="icon-xs" className="mb-1.5 mr-2" onClick={addTab} title="New query tab">
-            <Plus />
-          </Button>
         </div>
 
         {/* SQL editor */}
