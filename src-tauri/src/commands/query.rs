@@ -4,9 +4,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tauri::State;
 use tokio_postgres::types::Type;
-use tokio_postgres::Row;
+use tokio_postgres::{Row, SimpleQueryMessage};
 use uuid::Uuid;
 
+use super::pgtext::{is_native, text_to_json};
 use super::state::AppState;
 
 #[derive(Serialize)]
@@ -120,7 +121,7 @@ fn row_to_json_values(row: &Row) -> Vec<JsonValue> {
                 Ok(None) => JsonValue::Null,
                 Err(_) => try_get_string(row, i),
             },
-            Type::TIME | Type::TIMETZ => match row.try_get::<_, Option<NaiveTime>>(i) {
+            Type::TIME => match row.try_get::<_, Option<NaiveTime>>(i) {
                 Ok(Some(v)) => JsonValue::String(v.format("%H:%M:%S%.f").to_string()),
                 Ok(None) => JsonValue::Null,
                 Err(_) => try_get_string(row, i),
@@ -306,7 +307,7 @@ fn columns_from_statement(columns: &[tokio_postgres::Column]) -> Vec<QueryColumn
         .iter()
         .map(|c| QueryColumn {
             name: c.name().to_string(),
-            data_type: c.type_().oid().to_string(),
+            data_type: c.type_().name().to_string(),
         })
         .collect()
 }
@@ -340,6 +341,67 @@ async fn get_valid_columns(
     Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
 }
 
+/// Result of running one statement.
+struct StatementOutput {
+    columns: Vec<QueryColumn>,
+    rows: Vec<Vec<JsonValue>>,
+    /// Set for statements that return no rows (INSERT without RETURNING, DDL...).
+    rows_affected: Option<u64>,
+}
+
+/// Runs a single statement and returns its rows as JSON.
+///
+/// Types the binary decoders know are read directly. If any column has another type
+/// (enum, interval, inet, money, range, domain...), the statement runs through the
+/// text protocol and each value is converted from its text form.
+async fn run_statement(
+    client: &tokio_postgres::Client,
+    sql: &str,
+) -> Result<StatementOutput, tokio_postgres::Error> {
+    let stmt = client.prepare(sql).await?;
+
+    if stmt.columns().is_empty() {
+        let affected = client.execute(&stmt, &[]).await?;
+        return Ok(StatementOutput {
+            columns: vec![],
+            rows: vec![],
+            rows_affected: Some(affected),
+        });
+    }
+
+    let columns = columns_from_statement(stmt.columns());
+
+    let rows = if stmt.columns().iter().all(|c| is_native(c.type_())) {
+        let rows = client.query(&stmt, &[]).await?;
+        rows.iter().map(row_to_json_values).collect()
+    } else {
+        let types: Vec<Type> = stmt.columns().iter().map(|c| c.type_().clone()).collect();
+        let messages = client.simple_query(sql).await?;
+        messages
+            .iter()
+            .filter_map(|message| match message {
+                SimpleQueryMessage::Row(row) => Some(
+                    types
+                        .iter()
+                        .enumerate()
+                        .map(|(i, ty)| match row.try_get(i).ok().flatten() {
+                            Some(text) => text_to_json(ty, text),
+                            None => JsonValue::Null,
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .collect()
+    };
+
+    Ok(StatementOutput {
+        columns,
+        rows,
+        rows_affected: None,
+    })
+}
+
 #[tauri::command]
 pub async fn execute_query(
     state: State<'_, AppState>,
@@ -353,49 +415,20 @@ pub async fn execute_query(
     let client = state.client(&session_id).await?;
 
     let start = std::time::Instant::now();
-    let stmt = client
-        .prepare(&sql)
-        .await
-        .map_err(pg_error_to_json)?;
+    let output = run_statement(&client, &sql).await.map_err(pg_error_to_json)?;
+    let duration = start.elapsed().as_millis() as u64;
 
-    let sql_upper = sql.trim().to_uppercase();
-    let is_query = sql_upper.starts_with("SELECT")
-        || sql_upper.starts_with("WITH")
-        || sql_upper.starts_with("TABLE")
-        || sql_upper.starts_with("VALUES")
-        || sql_upper.starts_with("EXPLAIN")
-        || sql_upper.starts_with("SHOW");
-
-    if is_query {
-        let columns = columns_from_statement(stmt.columns());
-        let rows = client
-            .query(&stmt, &[])
-            .await
-            .map_err(pg_error_to_json)?;
-        let duration = start.elapsed().as_millis() as u64;
-        let row_count = rows.len();
-        let json_rows: Vec<Vec<JsonValue>> = rows.iter().map(row_to_json_values).collect();
-        Ok(QueryResult {
-            columns,
-            rows: json_rows,
-            row_count,
-            rows_affected: None,
-            duration,
-        })
-    } else {
-        let affected = client
-            .execute(&stmt, &[])
-            .await
-            .map_err(pg_error_to_json)?;
-        let duration = start.elapsed().as_millis() as u64;
-        Ok(QueryResult {
-            columns: vec![],
-            rows: vec![],
-            row_count: affected as usize,
-            rows_affected: Some(affected),
-            duration,
-        })
-    }
+    let row_count = match output.rows_affected {
+        Some(affected) => affected as usize,
+        None => output.rows.len(),
+    };
+    Ok(QueryResult {
+        columns: output.columns,
+        rows: output.rows,
+        row_count,
+        rows_affected: output.rows_affected,
+        duration,
+    })
 }
 
 #[tauri::command]
@@ -444,20 +477,13 @@ pub async fn get_table_data(
         "SELECT * FROM \"{}\".\"{}\"{}  LIMIT {} OFFSET {}",
         schema, table, order_clause, page_size, offset
     );
-    let stmt = client
-        .prepare(&data_sql)
+    let output = run_statement(&client, &data_sql)
         .await
         .map_err(|e| e.to_string())?;
-    let columns = columns_from_statement(stmt.columns());
-    let rows = client
-        .query(&stmt, &[])
-        .await
-        .map_err(|e| e.to_string())?;
-    let json_rows: Vec<Vec<JsonValue>> = rows.iter().map(row_to_json_values).collect();
 
     Ok(TableDataResponse {
-        columns,
-        rows: json_rows,
+        columns: output.columns,
+        rows: output.rows,
         total_rows,
         page,
         page_size,
@@ -562,4 +588,109 @@ pub async fn delete_rows(
     }
 
     Ok(serde_json::json!({ "rowsDeleted": total_deleted }))
+}
+
+/// Tests that need a real server. Run them with:
+///   DBUNNY_TEST_DATABASE_URL=postgresql://user:pass@localhost/db cargo test --lib -- --ignored
+/// Everything they create is temporary (pg_temp) and disappears with the connection.
+#[cfg(test)]
+mod server_tests {
+    use super::*;
+    use serde_json::json;
+
+    async fn connect() -> tokio_postgres::Client {
+        let url = std::env::var("DBUNNY_TEST_DATABASE_URL")
+            .expect("set DBUNNY_TEST_DATABASE_URL to run the server tests");
+        let (client, connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+            .await
+            .expect("could not connect to the test database");
+        tokio::spawn(connection);
+        client
+    }
+
+    async fn run(client: &tokio_postgres::Client, sql: &str) -> StatementOutput {
+        run_statement(client, sql).await.unwrap_or_else(|e| panic!("{sql}: {e}"))
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn unusual_types_are_readable_instead_of_binary() {
+        let client = connect().await;
+        client.batch_execute("CREATE TYPE pg_temp.mood AS ENUM ('sad', 'happy')").await.unwrap();
+        client.batch_execute("CREATE DOMAIN pg_temp.posint AS int CHECK (VALUE > 0)").await.unwrap();
+
+        let out = run(
+            &client,
+            "SELECT 'happy'::pg_temp.mood, 5::pg_temp.posint, ARRAY['sad','happy']::pg_temp.mood[], \
+             int4range(1, 10), '1 day 02:00:00'::interval, '10.0.0.1/24'::inet, '10:00:00+02'::timetz, \
+             ARRAY[1,2]::int4[], true, 7::int8, NULL::interval, 'abc'::bytea",
+        )
+        .await;
+
+        assert_eq!(out.rows.len(), 1);
+        assert_eq!(
+            out.rows[0],
+            vec![
+                json!("happy"),
+                json!(5),
+                json!(["sad", "happy"]),
+                json!("[1,10)"),
+                json!("1 day 02:00:00"),
+                json!("10.0.0.1/24"),
+                json!("10:00:00+02"),
+                json!([1, 2]),
+                json!(true),
+                json!(7),
+                JsonValue::Null,
+                json!("YWJj"),
+            ]
+        );
+        assert_eq!(out.columns[0].data_type, "mood");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn native_types_still_use_the_binary_path() {
+        let client = connect().await;
+        let out = run(&client, "SELECT 1::int4, 'a'::text, 1.5::float8, '{\"a\":1}'::jsonb, ARRAY['x','y']::text[]").await;
+        assert_eq!(
+            out.rows[0],
+            vec![json!(1), json!("a"), json!(1.5), json!({"a": 1}), json!(["x", "y"])]
+        );
+        assert_eq!(out.columns[0].data_type, "int4");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn insert_returning_gives_rows_and_plain_insert_gives_a_count() {
+        let client = connect().await;
+        client.batch_execute("CREATE TEMP TABLE returning_test (id int)").await.unwrap();
+
+        let returned = run(&client, "INSERT INTO returning_test VALUES (1), (2) RETURNING id").await;
+        assert_eq!(returned.rows, vec![vec![json!(1)], vec![json!(2)]]);
+        assert_eq!(returned.rows_affected, None);
+
+        let plain = run(&client, "INSERT INTO returning_test VALUES (3)").await;
+        assert!(plain.rows.is_empty());
+        assert_eq!(plain.rows_affected, Some(1));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn a_table_with_an_enum_and_nulls_reads_back_correctly() {
+        let client = connect().await;
+        client.batch_execute("CREATE TYPE pg_temp.size AS ENUM ('s', 'm', 'l')").await.unwrap();
+        client
+            .batch_execute("CREATE TEMP TABLE shirts (id int PRIMARY KEY, size pg_temp.size, tags text[], note text)")
+            .await
+            .unwrap();
+        client
+            .batch_execute("INSERT INTO shirts VALUES (1, 'm', ARRAY['a','b'], NULL), (2, NULL, NULL, 'x')")
+            .await
+            .unwrap();
+
+        let out = run(&client, "SELECT * FROM shirts ORDER BY id").await;
+        assert_eq!(out.rows[0], vec![json!(1), json!("m"), json!(["a", "b"]), JsonValue::Null]);
+        assert_eq!(out.rows[1], vec![json!(2), JsonValue::Null, JsonValue::Null, json!("x")]);
+    }
 }
