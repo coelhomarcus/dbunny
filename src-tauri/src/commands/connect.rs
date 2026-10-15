@@ -1,6 +1,7 @@
+use postgres_native_tls::MakeTlsConnector;
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use tokio_postgres::NoTls;
+use tokio_postgres::config::SslMode;
 use uuid::Uuid;
 
 use super::state::AppState;
@@ -14,6 +15,68 @@ pub struct ConnectResponse {
     pub host: String,
     pub port: u16,
     pub server_version: String,
+}
+
+/// How the TLS handshake should behave, derived from the URL's `sslmode`.
+#[derive(Debug, PartialEq)]
+struct TlsPlan {
+    mode: SslMode,
+    verify_cert: bool,
+    verify_host: bool,
+}
+
+/// Maps libpq's `sslmode` to a TLS plan. Like libpq, `prefer` and `require` encrypt
+/// without validating the certificate (managed databases often use their own CA);
+/// `verify-ca` and `verify-full` do validate it.
+fn tls_plan(sslmode: Option<&str>) -> Result<TlsPlan, String> {
+    let plan = |mode, verify_cert, verify_host| TlsPlan { mode, verify_cert, verify_host };
+    match sslmode.unwrap_or("prefer") {
+        "disable" => Ok(plan(SslMode::Disable, false, false)),
+        "prefer" => Ok(plan(SslMode::Prefer, false, false)),
+        "require" => Ok(plan(SslMode::Require, false, false)),
+        "verify-ca" => Ok(plan(SslMode::Require, true, false)),
+        "verify-full" => Ok(plan(SslMode::Require, true, true)),
+        other => Err(format!(
+            "Invalid sslmode \"{}\". Use disable, prefer, require, verify-ca or verify-full",
+            other
+        )),
+    }
+}
+
+/// Builds the driver config and TLS connector from a postgres:// URL.
+fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Config, MakeTlsConnector), String> {
+    let sslmode = url
+        .query_pairs()
+        .find(|(key, _)| key == "sslmode")
+        .map(|(_, value)| value.into_owned());
+    let plan = tls_plan(sslmode.as_deref())?;
+
+    // The driver only understands disable/prefer/require, so sslmode is applied by hand
+    let mut stripped = url.clone();
+    let others: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(key, _)| key != "sslmode")
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    if others.is_empty() {
+        stripped.set_query(None);
+    } else {
+        stripped.query_pairs_mut().clear().extend_pairs(others);
+    }
+
+    let mut config: tokio_postgres::Config = stripped
+        .as_str()
+        .parse()
+        .map_err(|e| format!("Invalid connection URL: {}", e))?;
+    config.ssl_mode(plan.mode);
+
+    let connector = native_tls::TlsConnector::builder()
+        .danger_accept_invalid_certs(!plan.verify_cert)
+        .danger_accept_invalid_hostnames(!plan.verify_host)
+        .build()
+        .map_err(|e| format!("TLS setup failed: {}", e))?;
+
+    Ok((config, MakeTlsConnector::new(connector)))
 }
 
 #[tauri::command]
@@ -40,7 +103,9 @@ pub async fn connect(
     let host = url.host_str().unwrap_or("localhost").to_string();
     let port = url.port().unwrap_or(5432);
 
-    let (client, connection) = tokio_postgres::connect(&connection_url, NoTls)
+    let (config, tls) = connection_config(&url)?;
+    let (client, connection) = config
+        .connect(tls)
         .await
         .map_err(|e| format!("Failed to connect: {}", e))?;
 
@@ -97,4 +162,67 @@ pub async fn disconnect(
     let mut sessions = state.sessions.lock().await;
     sessions.remove(&session_id);
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plan(mode: Option<&str>) -> TlsPlan {
+        tls_plan(mode).unwrap()
+    }
+
+    #[test]
+    fn sslmode_defaults_to_prefer_without_validation() {
+        assert_eq!(plan(None), TlsPlan { mode: SslMode::Prefer, verify_cert: false, verify_host: false });
+    }
+
+    #[test]
+    fn require_encrypts_without_validating_the_certificate() {
+        assert_eq!(plan(Some("require")), TlsPlan { mode: SslMode::Require, verify_cert: false, verify_host: false });
+    }
+
+    #[test]
+    fn verify_modes_validate_the_certificate() {
+        assert_eq!(plan(Some("verify-ca")), TlsPlan { mode: SslMode::Require, verify_cert: true, verify_host: false });
+        assert_eq!(plan(Some("verify-full")), TlsPlan { mode: SslMode::Require, verify_cert: true, verify_host: true });
+    }
+
+    #[test]
+    fn disable_turns_tls_off() {
+        assert_eq!(plan(Some("disable")).mode, SslMode::Disable);
+    }
+
+    #[test]
+    fn unknown_sslmode_is_rejected_with_a_helpful_message() {
+        let err = tls_plan(Some("sometimes")).unwrap_err();
+        assert!(err.contains("sometimes") && err.contains("verify-full"));
+    }
+
+    #[test]
+    fn config_applies_sslmode_and_keeps_other_params() {
+        let url = url::Url::parse("postgresql://u:p%40ss@db.example.com:6543/shop?sslmode=require&connect_timeout=5").unwrap();
+        let (config, _) = connection_config(&url).unwrap();
+        assert_eq!(config.get_ssl_mode(), SslMode::Require);
+        assert_eq!(config.get_hosts().len(), 1);
+        assert_eq!(config.get_ports(), &[6543]);
+        assert_eq!(config.get_dbname(), Some("shop"));
+        assert_eq!(config.get_user(), Some("u"));
+        assert_eq!(config.get_password(), Some(&b"p@ss"[..]));
+        assert_eq!(config.get_connect_timeout().map(|d| d.as_secs()), Some(5));
+    }
+
+    #[test]
+    fn config_without_query_still_parses() {
+        let url = url::Url::parse("postgresql://u@localhost/db").unwrap();
+        let (config, _) = connection_config(&url).unwrap();
+        assert_eq!(config.get_ssl_mode(), SslMode::Prefer);
+    }
+
+    #[test]
+    fn verify_full_url_is_accepted_even_though_the_driver_does_not_know_it() {
+        let url = url::Url::parse("postgresql://u@db.example.com/db?sslmode=verify-full").unwrap();
+        let (config, _) = connection_config(&url).unwrap();
+        assert_eq!(config.get_ssl_mode(), SslMode::Require);
+    }
 }

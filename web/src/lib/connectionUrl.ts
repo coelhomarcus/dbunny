@@ -7,6 +7,9 @@ export interface ConnectionFields {
   ssl: boolean;
 }
 
+// libpq modes that turn encryption on (the switch in the form is a single "require SSL")
+const SSL_MODES = new Set(["require", "verify-ca", "verify-full"]);
+
 export function parseConnectionUrl(url: string): Partial<ConnectionFields> {
   try {
     const parsed = new URL(url);
@@ -16,7 +19,7 @@ export function parseConnectionUrl(url: string): Partial<ConnectionFields> {
       database: parsed.pathname.replace(/^\//, "") || "",
       user: parsed.username || "",
       password: decodeURIComponent(parsed.password || ""),
-      ssl: parsed.searchParams.get("sslmode") === "require",
+      ssl: SSL_MODES.has(parsed.searchParams.get("sslmode") ?? ""),
     };
   } catch {
     return {};
