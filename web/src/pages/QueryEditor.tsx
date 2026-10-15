@@ -1,11 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import Editor, { type OnMount, type BeforeMount } from "@monaco-editor/react";
-import { api } from "../lib/api";
-import type { QueryResult } from "@/types";
-import { useSqlAutocomplete } from "../hooks/useSqlAutocomplete";
+import { useConnection } from "../contexts/useConnection";
+import { useTab } from "../contexts/workspace";
+import { tabState } from "../lib/tabState";
+import type { CompletionSchema, QueryResult } from "@/types";
 import QueryResults from "../components/QueryResults";
+import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
 import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
 import ExportMenu from "../components/ExportMenu";
+import Button from "../components/ui/Button";
 
 type TabMeta = {
   id: number;
@@ -23,14 +25,30 @@ type DangerInfo = {
   detail: string;
 };
 
-// Module-level - survives navigation (component unmount/remount)
-let nextId = 2;
-let savedTabMetas: TabMeta[] = [{ id: 1, label: "Query 1" }];
-let savedActiveId = 1;
-let savedSafeMode = true;
-const savedPayloads: Map<number, TabPayload> = new Map([
-  [1, { sql: "SELECT 1;", result: null, error: null }],
-]);
+// Kept per window tab, so it survives navigating to a table and back
+type QueryEditorState = {
+  nextId: number;
+  tabMetas: TabMeta[];
+  activeId: number;
+  safeMode: boolean;
+  payloads: Map<number, TabPayload>;
+  // Autocomplete catalog, reused when coming back to the page
+  completion: { sessionId: string | null; schema: CompletionSchema } | null;
+};
+
+function createQueryEditorState(): QueryEditorState {
+  return {
+    nextId: 2,
+    tabMetas: [{ id: 1, label: "Query 1" }],
+    activeId: 1,
+    safeMode: true,
+    payloads: new Map([[1, { sql: "SELECT 1;", result: null, error: null }]]),
+    completion: null,
+  };
+}
+
+// Statements that can add/remove tables, columns or functions
+const DDL_PATTERN = /\b(CREATE|ALTER|DROP|RENAME)\b/i;
 
 function detectDangerousStatements(sql: string): DangerInfo[] {
   const dangers: DangerInfo[] = [];
@@ -66,54 +84,90 @@ function detectDangerousStatements(sql: string): DangerInfo[] {
   return dangers;
 }
 
+/**
+ * Makes the saved state consistent before it's used: only tabs that still have
+ * their payload, and an active tab that exists. Protects against state left
+ * inconsistent by older versions instead of crashing on mount.
+ */
+function repairQueryEditorState(saved: QueryEditorState) {
+  saved.tabMetas = saved.tabMetas.filter((t) => saved.payloads.has(t.id));
+  if (saved.tabMetas.length === 0) {
+    const fresh = createQueryEditorState();
+    saved.tabMetas = fresh.tabMetas;
+    saved.payloads = fresh.payloads;
+    saved.nextId = Math.max(saved.nextId, fresh.nextId);
+  }
+  if (!saved.tabMetas.some((t) => t.id === saved.activeId)) {
+    saved.activeId = saved.tabMetas[0].id;
+  }
+}
+
 export default function QueryEditor() {
-  const [tabMetas, setTabMetas] = useState<TabMeta[]>(savedTabMetas);
-  const [activeId, setActiveId] = useState(savedActiveId);
-  const initial = savedPayloads.get(savedActiveId)!;
+  const { tabId } = useTab();
+  const { api, sessionId } = useConnection();
+  const saved = tabState(tabId, "queryEditor", createQueryEditorState);
+  repairQueryEditorState(saved);
+  const [tabMetas, setTabMetas] = useState<TabMeta[]>(saved.tabMetas);
+  const [activeId, setActiveId] = useState(saved.activeId);
+  const initial = saved.payloads.get(saved.activeId)!;
   const [result, setResult] = useState<QueryResult | null>(initial.result);
   const [error, setError] = useState<string | null>(initial.error);
   const [running, setRunning] = useState(false);
-  const [safeMode, setSafeMode] = useState(savedSafeMode);
+  const [safeMode, setSafeMode] = useState(saved.safeMode);
   const [pendingDangers, setPendingDangers] = useState<DangerInfo[] | null>(null);
   const pendingSqlRef = useRef<string | null>(null);
+  const [completionSchema, setCompletionSchema] = useState<CompletionSchema | null>(() =>
+    saved.completion?.sessionId === sessionId ? saved.completion.schema : null,
+  );
 
-  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const editorRef = useRef<SqlEditorHandle | null>(null);
   const activeIdRef = useRef(activeId);
-  const { registerCompletionProvider } = useSqlAutocomplete();
 
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
 
   useEffect(() => {
-    savedSafeMode = safeMode;
-  }, [safeMode]);
+    saved.safeMode = safeMode;
+  }, [safeMode, saved]);
 
+  const loadCompletionSchema = useCallback(() => {
+    api
+      .getCompletionSchema()
+      .then((schema) => {
+        saved.completion = { sessionId, schema };
+        setCompletionSchema(schema);
+      })
+      .catch(() => {});
+  }, [api, sessionId, saved]);
+
+  useEffect(() => {
+    loadCompletionSchema();
+  }, [loadCompletionSchema]);
+
+  // On unmount (e.g. opening a table), keep the SQL being edited. The tab list and
+  // active tab are already written to `saved` by switchTab/addTab/closeTab; writing
+  // them here too would restore stale values (a closed tab coming back as active).
   useEffect(() => {
     return () => {
       const editor = editorRef.current;
-      if (editor) {
-        const payload = savedPayloads.get(activeIdRef.current);
-        if (payload) payload.sql = editor.getValue();
-      }
-      savedActiveId = activeIdRef.current;
-      savedTabMetas = tabMetas;
+      const payload = saved.payloads.get(activeIdRef.current);
+      if (editor && payload) payload.sql = editor.getValue();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabMetas]);
+  }, [saved]);
 
   function saveCurrentSql() {
     const editor = editorRef.current;
     if (!editor) return;
-    const payload = savedPayloads.get(activeId);
+    const payload = saved.payloads.get(activeId);
     if (payload) payload.sql = editor.getValue();
   }
 
   function switchTab(id: number) {
     saveCurrentSql();
     setActiveId(id);
-    savedActiveId = id;
-    const payload = savedPayloads.get(id)!;
+    saved.activeId = id;
+    const payload = saved.payloads.get(id)!;
     editorRef.current?.setValue(payload.sql);
     setResult(payload.result);
     setError(payload.error);
@@ -121,14 +175,14 @@ export default function QueryEditor() {
 
   function addTab() {
     saveCurrentSql();
-    const id = nextId++;
+    const id = saved.nextId++;
     const label = `Query ${id}`;
-    savedPayloads.set(id, { sql: "", result: null, error: null });
+    saved.payloads.set(id, { sql: "", result: null, error: null });
     const newMetas = [...tabMetas, { id, label }];
     setTabMetas(newMetas);
-    savedTabMetas = newMetas;
+    saved.tabMetas = newMetas;
     setActiveId(id);
-    savedActiveId = id;
+    saved.activeId = id;
     editorRef.current?.setValue("");
     setResult(null);
     setError(null);
@@ -139,18 +193,18 @@ export default function QueryEditor() {
     if (tabMetas.length === 1) return;
     const index = tabMetas.findIndex((t) => t.id === id);
     const newMetas = tabMetas.filter((t) => t.id !== id);
-    savedPayloads.delete(id);
+    saved.payloads.delete(id);
     let newActiveId = activeId;
     if (id === activeId) {
       const newIndex = Math.min(index, newMetas.length - 1);
       newActiveId = newMetas[newIndex].id;
     }
     setTabMetas(newMetas);
-    savedTabMetas = newMetas;
+    saved.tabMetas = newMetas;
     setActiveId(newActiveId);
-    savedActiveId = newActiveId;
+    saved.activeId = newActiveId;
     if (id === activeId) {
-      const payload = savedPayloads.get(newActiveId)!;
+      const payload = saved.payloads.get(newActiveId)!;
       editorRef.current?.setValue(payload.sql);
       setResult(payload.result);
       setError(payload.error);
@@ -160,7 +214,7 @@ export default function QueryEditor() {
   async function exportQuery() {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-    const sql = editorRef.current?.getValue() ?? savedPayloads.get(activeId)?.sql ?? "";
+    const sql = editorRef.current?.getValue() ?? saved.payloads.get(activeId)?.sql ?? "";
     const meta = tabMetas.find((t) => t.id === activeId);
     const defaultName = `${(meta?.label ?? "query").replace(/\s+/g, "_").toLowerCase()}.sql`;
     const path = await save({
@@ -180,7 +234,7 @@ export default function QueryEditor() {
     if (path && typeof path === "string") {
       const sql = await readTextFile(path);
       editorRef.current?.setValue(sql);
-      const payload = savedPayloads.get(activeId);
+      const payload = saved.payloads.get(activeId);
       if (payload) payload.sql = sql;
     }
   }
@@ -193,29 +247,24 @@ export default function QueryEditor() {
     try {
       const [res] = await Promise.all([api.query(sql), delay]);
       setResult(res);
-      const payload = savedPayloads.get(activeIdRef.current);
+      const payload = saved.payloads.get(activeIdRef.current);
       if (payload) { payload.result = res; payload.error = null; }
+      if (DDL_PATTERN.test(sql)) loadCompletionSchema();
     } catch (err) {
       await delay;
       const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "Query failed";
       setError(msg);
-      const payload = savedPayloads.get(activeIdRef.current);
+      const payload = saved.payloads.get(activeIdRef.current);
       if (payload) { payload.result = null; payload.error = msg; }
     } finally {
       setRunning(false);
     }
-  }, []);
+  }, [loadCompletionSchema, api, saved]);
 
   const runQuery = useCallback(async () => {
     const editor = editorRef.current;
     if (!editor) return;
-    const selection = editor.getSelection();
-    let sql: string;
-    if (selection && !selection.isEmpty()) {
-      sql = editor.getModel()?.getValueInRange(selection) ?? "";
-    } else {
-      sql = editor.getValue();
-    }
+    const sql = editor.getSelectionOrValue();
     if (!sql.trim()) return;
 
     if (safeMode) {
@@ -242,160 +291,110 @@ export default function QueryEditor() {
     pendingSqlRef.current = null;
   }
 
-  const handleBeforeMount: BeforeMount = (monaco) => {
-    monaco.editor.defineTheme("app-dark", {
-      base: "vs-dark",
-      inherit: true,
-      rules: [],
-      colors: {
-        "editor.background": "#18181b",
-        "editor.lineHighlightBackground": "#1e1e22",
-        "editorLineNumber.foreground": "#3f3f46",
-        "editorLineNumber.activeForeground": "#71717a",
-        "editor.selectionBackground": "#2d2d33",
-        "editorGutter.background": "#18181b",
-        "scrollbar.shadow": "#18181b",
-        "editorWidget.background": "#1e1e22",
-        "editorWidget.border": "#27272a",
-        "input.background": "#1e1e22",
-        "input.border": "#27272a",
-      },
-    });
-    registerCompletionProvider(monaco);
-  };
-
-  const handleEditorMount: OnMount = (editor) => {
-    editorRef.current = editor;
-    const payload = savedPayloads.get(activeId);
-    editor.setValue(payload?.sql ?? "");
-    editor.addAction({
-      id: "run-query",
-      label: "Run Query",
-      keybindings: [2048 | 3],
-      run: () => runQuery(),
-    });
-  };
-
   return (
-    <div className="h-full flex flex-col gap-2">
+    <div className="h-full flex flex-col">
       {pendingDangers && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
-          <div className="bg-zinc-900 border border-zinc-700/50 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
             <div className="px-5 pt-5 pb-4">
               <div className="flex items-center gap-2.5 mb-1">
-                <div className="flex items-center justify-center w-7 h-7 rounded-full bg-red-500/15">
-                  <AlertTriangle size={14} className="text-red-400" />
+                <div className="flex items-center justify-center w-7 h-7 rounded-full bg-destructive/15">
+                  <AlertTriangle size={14} className="text-destructive-foreground" />
                 </div>
-                <h3 className="text-sm font-semibold text-white">Query blocked by Safe Mode</h3>
+                <h3 className="text-sm font-semibold text-foreground">Query blocked by Safe Mode</h3>
               </div>
-              <p className="text-sm text-zinc-500 mt-2">
+              <p className="text-sm text-muted-foreground mt-2">
                 {pendingDangers.length === 1
                   ? "A potentially destructive operation was detected."
                   : `${pendingDangers.length} potentially destructive operations were detected.`}
               </p>
             </div>
 
-            <div className="mx-5 mb-4 rounded-xl border border-zinc-700/40 bg-zinc-800/30 divide-y divide-zinc-700/30">
+            <div className="mx-5 mb-4 rounded-xl border border-border bg-muted divide-y divide-border">
               {pendingDangers.map((d, i) => (
                 <div key={i} className="px-3 py-2.5">
-                  <span className="font-mono text-xs font-medium text-red-400 block">{d.rule}</span>
-                  <span className="text-xs text-zinc-500 block mt-0.5">{d.detail}</span>
+                  <span className="font-mono text-xs font-medium text-destructive-foreground block">{d.rule}</span>
+                  <span className="text-xs text-muted-foreground block mt-0.5">{d.detail}</span>
                 </div>
               ))}
             </div>
 
-            <div className="flex items-center gap-2 px-5 py-3.5 border-t border-zinc-700/40 bg-zinc-800/20">
-              <button
-                onClick={confirmDangerousQuery}
-                className="px-3.5 py-1.5 text-xs font-medium bg-red-600/80 hover:bg-red-600 text-white rounded-lg transition-colors cursor-pointer"
-              >
+            <div className="flex items-center gap-2 px-5 py-3.5 border-t border-border bg-muted">
+              <Button variant="destructive" size="sm" onClick={confirmDangerousQuery}>
                 Run anyway
-              </button>
-              <button
-                onClick={cancelDangerousQuery}
-                className="px-3.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              >
+              </Button>
+              <Button variant="ghost-muted" size="sm" onClick={cancelDangerousQuery}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         </div>
       )}
 
       {/* Editor panel */}
-      <div className="flex flex-col flex-1 min-h-0 bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
-        {/* Tabs */}
-        <div className="flex items-center bg-zinc-800/40 shrink-0 select-none">
-          <div className="flex items-center flex-1 overflow-x-auto overflow-y-hidden">
-            {tabMetas.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => switchTab(tab.id)}
-                className={`group flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
-                  activeId === tab.id
-                    ? "text-white border-blue-500 bg-zinc-900/80"
-                    : "text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-zinc-900/40"
-                }`}
-              >
-                {tab.label}
-                {tabMetas.length > 1 && (
-                  <span
-                    onClick={(e) => closeTab(e, tab.id)}
-                    className={`rounded p-0.5 transition-colors cursor-pointer ${
-                      activeId === tab.id
-                        ? "text-zinc-400 hover:text-white hover:bg-zinc-700"
-                        : "text-transparent group-hover:text-zinc-500 hover:text-white! hover:bg-zinc-700"
-                    }`}
-                  >
-                    <X size={10} />
-                  </span>
-                )}
-              </button>
-            ))}
+      <div className="flex flex-col flex-1 min-h-0 border-b border-border">
+        {/* Query tabs as compact pills: a lighter level than the connection tabs above */}
+        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2 select-none">
+          <div role="tablist" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+            {tabMetas.map((tab) => {
+              const active = activeId === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => switchTab(tab.id)}
+                  // Transition only while hovered, so switching tabs swaps styles instantly
+                  className={`group flex h-7 shrink-0 items-center gap-1 rounded-md pl-2.5 text-[13px] whitespace-nowrap cursor-pointer ${
+                    tabMetas.length > 1 ? "pr-1" : "pr-2.5"
+                  } ${
+                    active
+                      ? "bg-accent font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground hover:transition-colors"
+                  }`}
+                >
+                  {tab.label}
+                  {tabMetas.length > 1 && (
+                    <span
+                      onClick={(e) => closeTab(e, tab.id)}
+                      className={`flex size-4 items-center justify-center rounded transition-colors cursor-pointer hover:bg-foreground/10 ${
+                        active
+                          ? "text-muted-foreground hover:text-foreground"
+                          : "text-transparent group-hover:text-muted-foreground hover:text-foreground!"
+                      }`}
+                    >
+                      <X size={10} />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={addTab} title="New query tab">
+              <Plus />
+            </Button>
           </div>
-          <button
-            onClick={addTab}
-            className="px-3 py-2.5 text-zinc-600 hover:text-zinc-300 transition-colors shrink-0 cursor-pointer"
-            title="New query tab"
-          >
-            <Plus size={14} />
-          </button>
         </div>
 
-        {/* Monaco editor */}
+        {/* SQL editor */}
         <div className="flex-1 min-h-0">
-          <Editor
-            defaultLanguage="sql"
-            theme="app-dark"
-            beforeMount={handleBeforeMount}
-            onMount={handleEditorMount}
-            options={{
-              minimap: { enabled: false },
-              fontSize: 14,
-              lineNumbers: "on",
-              scrollBeyondLastLine: false,
-              wordWrap: "on",
-              padding: { top: 10, bottom: 10 },
-              renderLineHighlight: "gutter",
-              automaticLayout: true,
-            }}
+          <SqlEditor
+            onMount={(handle) => { editorRef.current = handle; }}
+            initialValue={saved.payloads.get(activeId)?.sql ?? ""}
+            schema={completionSchema}
+            onRun={runQuery}
           />
         </div>
 
         {/* Toolbar */}
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 border-t border-zinc-800/60 select-none">
-          <button
-            onClick={runQuery}
-            disabled={running}
-            className="px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg transition-colors relative cursor-pointer disabled:cursor-not-allowed"
-          >
+        <div className="flex items-center gap-3 px-3 py-2 bg-muted border-t border-border select-none">
+          <Button variant="primary" size="sm" className="px-4" onClick={runQuery} disabled={running}>
             <span className={`transition-opacity duration-200 ${running ? "opacity-0" : "opacity-100"}`}>
               Run
             </span>
-            <Loader className={`w-4 h-4 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
-          </button>
+            <Loader className={`size-4 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
+          </Button>
           {result && (
-            <span className="text-sm text-zinc-500">
+            <span className="text-sm text-muted-foreground">
               {result.rowsAffected != null
                 ? `${result.rowsAffected} rows affected in ${result.duration}ms`
                 : `${result.rowCount} rows in ${result.duration}ms`}
@@ -410,40 +409,30 @@ export default function QueryEditor() {
                 side="up"
               />
             )}
-            <button
+            <Button
+              variant={safeMode ? "ghost" : "ghost-muted"}
+              size="sm"
+              className={safeMode ? "text-success-foreground" : undefined}
               onClick={() => setSafeMode((v) => !v)}
               title={safeMode ? "Safe Mode ON - click to disable" : "Safe Mode OFF - click to enable"}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded-lg transition-colors cursor-pointer ${
-                safeMode
-                  ? "text-emerald-400 hover:text-emerald-300 hover:bg-zinc-700/50"
-                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50"
-              }`}
             >
-              {safeMode ? <ShieldCheck size={15} /> : <ShieldOff size={15} />}
+              {safeMode ? <ShieldCheck /> : <ShieldOff />}
               {safeMode ? "Safe" : "Unsafe"}
-            </button>
-            <button
-              onClick={importQuery}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 text-sm rounded-lg transition-colors cursor-pointer"
-              title="Import .sql file"
-            >
-              <Upload size={15} />
+            </Button>
+            <Button variant="ghost-muted" size="sm" onClick={importQuery} title="Import .sql file">
+              <Upload />
               Import
-            </button>
-            <button
-              onClick={exportQuery}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 text-sm rounded-lg transition-colors cursor-pointer"
-              title="Export as .sql file"
-            >
-              <Download size={15} />
+            </Button>
+            <Button variant="ghost-muted" size="sm" onClick={exportQuery} title="Export as .sql file">
+              <Download />
               Export SQL
-            </button>
+            </Button>
           </div>
         </div>
       </div>
 
       {/* Results panel */}
-      <div className="flex-1 min-h-0 bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <QueryResults result={result} error={error} running={running} />
       </div>
     </div>

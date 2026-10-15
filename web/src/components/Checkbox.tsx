@@ -16,9 +16,9 @@ export default function Checkbox({ checked, indeterminate, onChange, className =
       onClick={(e) => { e.stopPropagation(); onChange(); }}
       className={`w-4 h-4 shrink-0 rounded-sm border transition-colors flex items-center justify-center cursor-pointer ${
         checked || indeterminate
-          ? "border-green-500 text-green-400"
-          : "border-zinc-600 hover:border-zinc-400 text-transparent"
-      } bg-transparent ${className}`}
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-input hover:border-ring text-transparent bg-transparent"
+      } ${className}`}
     >
       {indeterminate ? (
         <Minus size={10} strokeWidth={2.5} />

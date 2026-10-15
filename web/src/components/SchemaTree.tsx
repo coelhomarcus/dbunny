@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router";
-import { api } from "../lib/api";
+import { useApi } from "../contexts/useConnection";
 import type { SchemaInfo, TableInfo, FunctionInfo } from "@/types";
 import {
   ChevronRight,
@@ -43,6 +43,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const params = useParams();
+  const api = useApi();
   const activeTable = params.table;
   const activeSchema = params.schema;
   const activeFunction = params.name;
@@ -55,7 +56,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     if (!schemaToExpand) return;
@@ -112,7 +113,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
         }));
       }
     },
-    [folderData],
+    [folderData, api],
   );
 
   const toggleFolder = useCallback(
@@ -129,13 +130,13 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
   if (loading) {
     return (
       <div className="px-3 py-4 flex justify-end">
-        <Loader size={14} className="animate-spin text-zinc-500" />
+        <Loader size={14} className="animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   return (
-    <div className="text-base select-none">
+    <div className="px-2 select-none">
       {schemas.map((schema) => {
         const isExpanded = expanded.has(schema.name);
         const data = folderData[schema.name] ?? emptyFolders;
@@ -144,13 +145,13 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
           <div key={schema.name}>
             <button
               onClick={() => toggle(schema.name)}
-              className="w-full flex items-center gap-1.5 px-1.5 py-1.5 hover:bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors group"
+              className="w-full flex h-7 items-center gap-1.5 rounded-md px-1.5 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors group"
             >
               <ChevronRight
                 size={10}
-                className={`shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-all duration-150 ${isExpanded ? "rotate-90" : ""}`}
+                className={`shrink-0 text-muted-foreground/70 group-hover:text-muted-foreground transition-all duration-150 ${isExpanded ? "rotate-90" : ""}`}
               />
-              <Folder size={15} className="shrink-0 text-amber-500/80" />
+              <Folder size={15} className="shrink-0 text-warning-foreground/80" />
               <span className="truncate text-sm">{schema.name}</span>
             </button>
 
@@ -160,7 +161,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                   schemaName={schema.name}
                   kind="tables"
                   label="Tables"
-                  folderColor="text-green-500/60"
+                  folderColor="text-success-foreground/70"
                   expanded={expanded}
                   folder={data.tables}
                   onToggle={toggleFolder}
@@ -172,15 +173,15 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                       <button
                         key={t.name}
                         onClick={() => navigate(`/db/${schema.name}/${t.name}`)}
-                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-sm transition-colors ${
+                        className={`w-full flex h-7 items-center gap-2 rounded-md pl-11 pr-2 text-sm transition-colors ${
                           isActive
-                            ? "bg-zinc-800 text-white"
-                            : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+                            ? "bg-accent text-foreground"
+                            : "text-muted-foreground hover:text-foreground hover:bg-accent"
                         }`}
                       >
                         <Table2
                           size={13}
-                          className={`shrink-0 ${isActive ? "text-green-400" : "text-green-500/60"}`}
+                          className={`shrink-0 ${isActive ? "text-success-foreground" : "text-success-foreground/70"}`}
                         />
                         <span className="truncate">{t.name}</span>
                       </button>
@@ -192,7 +193,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                   schemaName={schema.name}
                   kind="views"
                   label="Views"
-                  folderColor="text-blue-500/60"
+                  folderColor="text-info-foreground/70"
                   expanded={expanded}
                   folder={data.views}
                   onToggle={toggleFolder}
@@ -204,15 +205,15 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                       <button
                         key={v.name}
                         onClick={() => navigate(`/db/${schema.name}/${v.name}`)}
-                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-sm transition-colors ${
+                        className={`w-full flex h-7 items-center gap-2 rounded-md pl-11 pr-2 text-sm transition-colors ${
                           isActive
-                            ? "bg-zinc-800 text-white"
-                            : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+                            ? "bg-accent text-foreground"
+                            : "text-muted-foreground hover:text-foreground hover:bg-accent"
                         }`}
                       >
                         <Eye
                           size={13}
-                          className={`shrink-0 ${isActive ? "text-blue-400" : "text-blue-500/60"}`}
+                          className={`shrink-0 ${isActive ? "text-info-foreground" : "text-info-foreground/70"}`}
                         />
                         <span className="truncate">{v.name}</span>
                       </button>
@@ -224,7 +225,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                   schemaName={schema.name}
                   kind="functions"
                   label="Functions"
-                  folderColor="text-purple-500/60"
+                  folderColor="text-purple-500/70"
                   expanded={expanded}
                   folder={data.functions}
                   onToggle={toggleFolder}
@@ -240,15 +241,15 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                             `/db/${schema.name}/function/${f.name}?args=${encodeURIComponent(f.argumentTypes)}`
                           )
                         }
-                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-sm transition-colors ${
+                        className={`w-full flex h-7 items-center gap-2 rounded-md pl-11 pr-2 text-sm transition-colors ${
                           isActive
-                            ? "bg-zinc-800 text-white"
-                            : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+                            ? "bg-accent text-foreground"
+                            : "text-muted-foreground hover:text-foreground hover:bg-accent"
                         }`}
                       >
                         <Braces
                           size={13}
-                          className={`shrink-0 ${isActive ? "text-purple-400" : "text-purple-500/60"}`}
+                          className={`shrink-0 ${isActive ? "text-purple-500" : "text-purple-500/70"}`}
                         />
                         <span className="truncate">{f.name}</span>
                       </button>
@@ -262,7 +263,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
       })}
 
       {schemas.length === 0 && (
-        <div className="px-3 py-6 text-zinc-600 text-center text-sm">
+        <div className="px-3 py-6 text-muted-foreground/70 text-center text-sm">
           no schemas found
         </div>
       )}
@@ -296,19 +297,19 @@ function SubFolder({
     <div>
       <button
         onClick={() => onToggle(schemaName, kind)}
-        className="w-full flex items-center gap-1.5 pl-5 pr-3 py-1.5 hover:bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors group"
+        className="w-full flex h-7 items-center gap-1.5 rounded-md pl-5 pr-2 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors group"
       >
         <ChevronRight
           size={10}
-          className={`shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-all duration-150 ${isOpen ? "rotate-90" : ""}`}
+          className={`shrink-0 text-muted-foreground/70 group-hover:text-muted-foreground transition-all duration-150 ${isOpen ? "rotate-90" : ""}`}
         />
         <Folder size={15} className={`shrink-0 ${folderColor}`} />
         <span className="truncate text-sm">{label}</span>
         {folder.loading && (
-          <Loader size={10} className="ml-auto shrink-0 animate-spin text-zinc-500" />
+          <Loader size={10} className="ml-auto shrink-0 animate-spin text-muted-foreground" />
         )}
         {folder.loaded && folder.items.length > 0 && (
-          <span className="ml-auto text-[10px] text-zinc-600">
+          <span className="ml-auto text-[10px] text-muted-foreground/70">
             {folder.items.length}
           </span>
         )}
@@ -316,7 +317,7 @@ function SubFolder({
       {isOpen && folder.loaded && (
         <div>
           {folder.items.length === 0 ? (
-            <div className="pl-12 py-1.5 text-xs text-zinc-600">empty</div>
+            <div className="pl-11 py-1.5 text-xs text-muted-foreground/70">empty</div>
           ) : (
             children
           )}

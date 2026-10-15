@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { Braces, Copy, Check } from "lucide-react";
 import { DetailSkeleton } from "../components/Skeleton";
-import { api } from "../lib/api";
+import { useApi } from "../contexts/useConnection";
+import SqlViewer from "../components/SqlViewer";
+import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import type { FunctionDetail } from "@/types";
 
 export default function FunctionView() {
@@ -13,6 +15,7 @@ export default function FunctionView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const api = useApi();
 
   useEffect(() => {
     if (!schema || !name) return;
@@ -36,7 +39,7 @@ export default function FunctionView() {
     return () => {
       stale = true;
     };
-  }, [schema, name, args]);
+  }, [schema, name, args, api]);
 
   async function copySource() {
     if (!detail?.source) return;
@@ -46,28 +49,23 @@ export default function FunctionView() {
   }
 
   return (
-    <div className="h-full flex flex-col gap-2">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900 border border-zinc-800/60 rounded-xl shrink-0">
-        <div className="flex items-center gap-2">
-          <Braces size={16} className="text-purple-400" />
-          <h2 className="text-base font-medium">
-            <span className="text-zinc-500">{schema}.</span>
-            {name}
-          </h2>
-        </div>
-      </div>
+    <div className="h-full flex flex-col">
+      <PageHeader>
+        <HeaderTitle label={`Function · ${schema}`} icon={<Braces className="text-purple-500" />}>
+          {name}
+        </HeaderTitle>
+      </PageHeader>
 
       {loading ? (
         <DetailSkeleton />
       ) : error ? (
         <div className="flex-1 flex items-center justify-center p-4">
-          <span className="text-sm text-red-400">{error}</span>
+          <span className="text-sm text-destructive-foreground">{error}</span>
         </div>
       ) : detail ? (
-        <div className="flex-1 overflow-auto flex flex-col gap-3">
+        <div className="flex-1 min-h-0 flex flex-col">
           {/* Properties */}
-          <div className="px-5 py-4 bg-zinc-900 border border-zinc-800/60 rounded-xl shrink-0">
+          <div className="px-4 py-4 border-b border-border shrink-0">
             <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm max-w-xl">
               <Property label="Type" value={detail.kind} />
               <Property label="Language" value={detail.language} />
@@ -91,14 +89,14 @@ export default function FunctionView() {
           </div>
 
           {/* Source code */}
-          <div className="flex-1 min-h-0 flex flex-col bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 bg-zinc-800/40 border-b border-zinc-800/40">
-              <span className="text-sm font-medium text-zinc-400">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="flex h-9 shrink-0 items-center justify-between px-4 bg-muted border-b border-border">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                 Definition
               </span>
               <button
                 onClick={copySource}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 rounded-lg transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 h-6 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors cursor-pointer"
               >
                 {copied ? (
                   <>
@@ -111,9 +109,9 @@ export default function FunctionView() {
                 )}
               </button>
             </div>
-            <pre className="flex-1 p-5 text-sm text-zinc-300 font-mono overflow-auto whitespace-pre leading-relaxed">
-              {detail.source}
-            </pre>
+            <div className="flex-1 min-h-0">
+              <SqlViewer value={detail.source} />
+            </div>
           </div>
         </div>
       ) : null}
@@ -124,8 +122,8 @@ export default function FunctionView() {
 function Property({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-2">
-      <span className="text-zinc-500 shrink-0">{label}</span>
-      <span className="text-zinc-200 font-mono">{value}</span>
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <span className="text-foreground font-mono">{value}</span>
     </div>
   );
 }

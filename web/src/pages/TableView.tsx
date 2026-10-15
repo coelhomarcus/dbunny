@@ -7,7 +7,8 @@ import {
 } from "@tanstack/react-table";
 import type { QueryColumn } from "@/types";
 import { useTableData } from "../hooks/useTableData";
-import { api } from "../lib/api";
+import { useApi } from "../contexts/useConnection";
+import { useTab } from "../contexts/workspace";
 import { useCellEditing } from "../hooks/useCellEditing";
 import { useRowSelection } from "../hooks/useRowSelection";
 import { useColumnResize } from "../hooks/useColumnResize";
@@ -21,6 +22,9 @@ import { TableSkeleton } from "../components/Skeleton";
 
 export default function TableView() {
   const { schema, table } = useParams<{ schema: string; table: string }>();
+  const api = useApi();
+  // Hidden window tabs stay mounted; only the visible one reacts to shortcuts
+  const { isActive } = useTab();
 
   const tableData = useTableData(schema, table);
   const { data, columnInfos, loading, error, hasNoPk } = tableData;
@@ -59,6 +63,7 @@ export default function TableView() {
   }, [schema, table]);
 
   useEffect(() => {
+    if (!isActive) return;
     function onKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
@@ -69,7 +74,7 @@ export default function TableView() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editing, pending]);
+  }, [editing, pending, isActive]);
 
   const fetchAllRows = useCallback(async () => {
     const total = data?.totalRows ?? 0;
@@ -102,7 +107,7 @@ export default function TableView() {
     }
 
     return { columns, rows: allRows.slice(0, offset) };
-  }, [schema, table, data?.totalRows, tableData.sorting]);
+  }, [schema, table, data?.totalRows, tableData.sorting, api]);
 
   const columns = useMemo<ColumnDef<unknown[], unknown>[]>(() => {
     if (!data?.columns) return [];
@@ -124,7 +129,7 @@ export default function TableView() {
   });
 
   return (
-    <div className="h-full flex flex-col gap-2">
+    <div className="h-full flex flex-col">
       <TableViewHeader
         schema={schema!}
         table={table!}
@@ -153,12 +158,12 @@ export default function TableView() {
         onFetchAllRows={fetchAllRows}
       />
 
-      {error && <div className="p-4 text-red-400 text-sm bg-zinc-900 border border-zinc-800/60 rounded-xl">{error}</div>}
+      {error && <div className="px-4 py-3 text-destructive-foreground text-sm border-b border-border bg-destructive/5">{error}</div>}
 
       {loading && !data && <TableSkeleton columns={6} rows={14} />}
 
       {data && (
-        <div className="flex-1 min-h-0 flex flex-col bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-auto">
             <table
               className="text-sm w-full"
@@ -188,7 +193,7 @@ export default function TableView() {
                 {reactTable.getHeaderGroups().map((hg) => (
                   <tr key={hg.id}>
                     <th
-                      className="bg-zinc-800 border-b border-r border-zinc-700/40 px-3 py-2.5 text-left"
+                      className="bg-card-header border-b border-r border-border px-3 py-2.5 text-left"
                       style={{ width: 40 }}
                     >
                       <Checkbox
@@ -216,19 +221,19 @@ export default function TableView() {
                   const isRowDirty = !!pending.pendingChanges[rowIndex];
                   const isSelected = selection.selectedRows.has(rowIndex);
                   const rowBg = isSelected
-                    ? "bg-zinc-800/40"
+                    ? "bg-primary/8"
                     : isRowDirty
-                      ? "bg-amber-950/10"
+                      ? "bg-warning/5"
                       : rowIndex % 2 === 0
-                        ? "bg-zinc-900"
-                        : "bg-zinc-800/20";
+                        ? "bg-card"
+                        : "bg-muted";
 
                   return (
                     <tr
                       key={rowIndex}
-                      className={`${rowBg} hover:bg-zinc-800/40`}
+                      className={`${rowBg} hover:bg-accent`}
                     >
-                      <td className="border-b border-r border-zinc-800/40 px-3 py-1.5">
+                      <td className="border-b border-r border-border px-3 py-1.5">
                         <Checkbox
                           checked={isSelected}
                           onChange={() => selection.toggleSelectRow(rowIndex)}

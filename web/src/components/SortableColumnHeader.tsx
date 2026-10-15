@@ -30,30 +30,30 @@ export default function SortableColumnHeader({
   return (
     <th
       onClick={onToggleSort}
-      className={`relative text-left px-3 py-2.5 border-b border-r border-zinc-700/40 cursor-pointer hover:bg-zinc-700 select-none group text-sm ${
-        isActive ? "bg-zinc-700" : "bg-zinc-800"
+      className={`relative text-left px-3 py-2.5 border-b border-r border-border cursor-pointer hover:bg-card-header-active select-none group text-sm ${
+        isActive ? "bg-card-header-active" : "bg-card-header"
       }`}
     >
       <span className="flex items-center justify-between gap-2 overflow-hidden">
         <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
           {columnInfo?.isPrimaryKey && (
-            <span className="text-xs text-amber-500/70 font-mono shrink-0">
+            <span className="text-xs text-warning-foreground/80 font-mono shrink-0">
               PK
             </span>
           )}
-          <span className={`font-semibold truncate ${isActive ? "text-white" : "text-zinc-200"}`}>
+          <span className={`font-semibold truncate ${isActive ? "text-foreground" : "text-foreground"}`}>
             {id}
           </span>
           {columnInfo?.dataType && (
-            <span className="text-zinc-500 shrink-0 font-normal text-xs">
+            <span className="text-muted-foreground shrink-0 font-normal text-xs">
               {normalizeType(columnInfo.dataType)}
             </span>
           )}
         </span>
         <span className={`shrink-0 transition-colors ${
           isActive
-            ? "text-blue-400"
-            : "text-zinc-600 group-hover:text-zinc-400"
+            ? "text-info-foreground"
+            : "text-muted-foreground/70 group-hover:text-muted-foreground"
         }`}>
           {sorted === "asc" ? (
             <ChevronUp size={13} />
@@ -67,7 +67,7 @@ export default function SortableColumnHeader({
       <div
         onMouseDown={onResizeStart}
         onClick={(e) => e.stopPropagation()}
-        className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-zinc-500/40 active:bg-zinc-500/60 transition-colors"
+        className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-muted-foreground/40 active:bg-muted-foreground/60 transition-colors"
       />
     </th>
   );

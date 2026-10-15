@@ -13,6 +13,7 @@ pub struct ConnectResponse {
     pub database: String,
     pub host: String,
     pub port: u16,
+    pub server_version: String,
 }
 
 #[tauri::command]
@@ -62,9 +63,16 @@ pub async fn connect(
         .await
         .map_err(|e| format!("Connection test failed: {}", e))?;
 
+    // Shown in the status bar; not worth failing the connection over
+    let server_version: String = client
+        .query_one("SHOW server_version", &[])
+        .await
+        .map(|row| row.get(0))
+        .unwrap_or_default();
+
     let session_id = Uuid::new_v4().to_string();
 
-    let session = Session { client };
+    let session = Session { client: std::sync::Arc::new(client) };
 
     let mut sessions = state.sessions.lock().await;
     if sessions.len() >= 50 {
@@ -77,6 +85,7 @@ pub async fn connect(
         database,
         host,
         port,
+        server_version,
     })
 }
 

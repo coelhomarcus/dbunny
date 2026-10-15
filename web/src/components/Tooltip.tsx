@@ -34,7 +34,7 @@ export default function Tooltip({ label, children, side = "right" }: TooltipProp
         createPortal(
           <div
             style={{ ...pos, position: "fixed" }}
-            className="z-9999 pointer-events-none whitespace-nowrap bg-zinc-800 border border-zinc-700/60 text-zinc-200 text-xs px-2.5 py-1 rounded-md shadow-lg"
+            className="z-9999 pointer-events-none whitespace-nowrap bg-popover border border-border text-popover-foreground text-xs px-2.5 py-1 rounded-md shadow-lg"
           >
             {label}
           </div>,

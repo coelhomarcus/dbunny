@@ -7,6 +7,9 @@ import {
   Columns3,
 } from "lucide-react";
 import ExportMenu from "./ExportMenu";
+import Button from "./ui/Button";
+import { HeaderTitle, PageHeader } from "./layout/PageHeader";
+import { segmentedItemClass, segmentedListClass } from "./ui/styles";
 import type { QueryColumn } from "@/types";
 
 interface TableViewHeaderProps {
@@ -43,19 +46,16 @@ export default function TableViewHeader({
   columns, rows, onFetchAllRows,
 }: TableViewHeaderProps) {
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900 border border-zinc-800/60 rounded-xl select-none">
-      <div className="flex items-center gap-3">
-        <h2 className="text-base font-medium">
-          <span className="text-zinc-500">{schema}.</span>
-          {table}
-        </h2>
+    <PageHeader className="justify-between">
+      <div className="flex min-w-0 items-center gap-3">
+        <HeaderTitle label={`Table · ${schema}`}>{table}</HeaderTitle>
         {totalRows !== undefined && (
-          <span className="text-sm text-zinc-500">
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
             {totalRows.toLocaleString()} rows
           </span>
         )}
         {hasNoPk && (
-          <span className="text-sm text-amber-500/70">
+          <span className="text-sm text-warning-foreground/80">
             no primary key - editing disabled
           </span>
         )}
@@ -63,52 +63,35 @@ export default function TableViewHeader({
 
       <div className="flex items-center gap-2">
         {selectedCount > 0 && !hasNoPk && (
-          <button
-            onClick={onDelete}
-            disabled={deleting}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-600/80 hover:bg-red-600 disabled:bg-zinc-700 text-white rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed"
-          >
-            <Trash2 size={14} />
+          <Button variant="destructive" size="sm" onClick={onDelete} disabled={deleting}>
+            <Trash2 />
             {deleting
               ? "Deleting…"
               : `Delete ${selectedCount} row${selectedCount > 1 ? "s" : ""}`}
-          </button>
+          </Button>
         )}
 
         {hasPendingChanges && (
           <div className="flex items-center gap-2">
             {saveError && (
-              <span className="text-sm text-red-400">{saveError}</span>
+              <span className="text-sm text-destructive-foreground">{saveError}</span>
             )}
-            <span className="text-sm text-zinc-500">
+            <span className="text-sm text-muted-foreground">
               {dirtyRowCount} row{dirtyRowCount > 1 ? "s" : ""} changed
             </span>
-            <button
-              onClick={onDiscard}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-sm text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
-            >
-              <X size={14} /> Discard
-            </button>
-            <button
-              onClick={onSave}
-              disabled={saving}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed"
-            >
-              <Save size={14} />
+            <Button variant="ghost-muted" size="sm" onClick={onDiscard}>
+              <X /> Discard
+            </Button>
+            <Button variant="primary" size="sm" onClick={onSave} disabled={saving}>
+              <Save />
               {saving ? "Saving…" : "Save (⌘S)"}
-            </button>
+            </Button>
           </div>
         )}
 
-        <button
-          onClick={onRefresh}
-          disabled={refreshing || loading}
-          title="Refresh"
-          className="p-1.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-not-allowed"
-        >
+        <Button variant="ghost-muted" size="icon-sm" onClick={onRefresh} disabled={refreshing || loading} title="Refresh">
           <RefreshCw
             key={spinKey}
-            size={15}
             className={
               refreshing
                 ? "animate-spin"
@@ -117,16 +100,12 @@ export default function TableViewHeader({
                   : ""
             }
           />
-        </button>
+        </Button>
 
         {hasCustomWidths && (
-          <button
-            onClick={onResetWidths}
-            title="Reset column widths"
-            className="p-1.5 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-          >
-            <Columns3 size={15} />
-          </button>
+          <Button variant="ghost-muted" size="icon-sm" onClick={onResetWidths} title="Reset column widths">
+            <Columns3 />
+          </Button>
         )}
 
         {columns && rows && columns.length > 0 && (
@@ -139,26 +118,15 @@ export default function TableViewHeader({
           />
         )}
 
-        <div className="flex gap-1">
-          <NavLink
-            to={`/db/${schema}/${table}`}
-            end
-            className={({ isActive }) =>
-              `px-3 py-1.5 text-sm rounded-lg transition-colors ${isActive ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white"}`
-            }
-          >
+        <div className={segmentedListClass}>
+          <NavLink to={`/db/${schema}/${table}`} end className={({ isActive }) => segmentedItemClass(isActive)}>
             Data
           </NavLink>
-          <NavLink
-            to={`/db/${schema}/${table}/structure`}
-            className={({ isActive }) =>
-              `px-3 py-1.5 text-sm rounded-lg transition-colors ${isActive ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white"}`
-            }
-          >
+          <NavLink to={`/db/${schema}/${table}/structure`} className={({ isActive }) => segmentedItemClass(isActive)}>
             Structure
           </NavLink>
         </div>
       </div>
-    </div>
+    </PageHeader>
   );
 }

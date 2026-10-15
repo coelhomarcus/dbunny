@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <img src="https://marcuscoelho.com/assets/projects/dbunny.webp" width="720" alt="DBunny screenshot" />
+  <img src="https://marcuscoelho.com/assets/projects/dbunny/01.webp" width="720" alt="DBunny screenshot" />
 </p>
 
 ## Sobre
@@ -35,7 +35,7 @@ Disponivel para **Windows**, **macOS** (Intel e Apple Silicon) e **Linux**.
 - Detalhes da conexao ocultados por padrao para privacidade
 
 ### Editor de Queries
-- Editor SQL multi-abas com Monaco Editor e syntax highlighting
+- Editor SQL multi-abas com CodeMirror e syntax highlighting
 - Execute queries com `Ctrl+Enter` (texto selecionado ou conteudo completo do editor)
 - Autocomplete SQL com mais de 40 palavras-chave
 - Safe Mode ativado por padrao, detecta e bloqueia queries destrutivas antes da execucao:
@@ -63,7 +63,7 @@ Disponivel para **Windows**, **macOS** (Intel e Apple Silicon) e **Linux**.
 
 | Camada | Tecnologias |
 |--------|-------------|
-| Frontend | React 19, TypeScript, Tailwind CSS 4, Monaco Editor, TanStack Table |
+| Frontend | React 19, TypeScript, Tailwind CSS 4, CodeMirror, TanStack Table |
 | Backend | Tauri 2 (Rust), tokio-postgres, deadpool-postgres |
 | Seguranca | AES-GCM, PBKDF2, SHA-256 |
 | Build | Vite, GitHub Actions (CI/CD multiplataforma) |

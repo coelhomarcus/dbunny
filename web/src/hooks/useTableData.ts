@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { type SortingState, type OnChangeFn } from "@tanstack/react-table";
-import { api } from "../lib/api";
+import { useApi } from "../contexts/useConnection";
 import type { TableDataResponse, ColumnInfo } from "@/types";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
@@ -18,6 +18,7 @@ function readPageSize(schema?: string, table?: string): number {
 }
 
 export function useTableData(schema?: string, table?: string) {
+  const api = useApi();
   const [data, setData] = useState<TableDataResponse | null>(null);
   const [columnInfos, setColumnInfos] = useState<ColumnInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +49,7 @@ export function useTableData(schema?: string, table?: string) {
         sortDirection: sortColumn ? sortDirection : undefined,
       });
     },
-    [],
+    [api],
   );
 
   useEffect(() => {
@@ -66,7 +67,7 @@ export function useTableData(schema?: string, table?: string) {
       })
       .catch((err) => setError(typeof err === "string" ? err : err.message))
       .finally(() => setLoading(false));
-  }, [schema, table, page, pageSize, sorting, fetchData]);
+  }, [schema, table, page, pageSize, sorting, fetchData, api]);
 
   const setPageSize = useCallback((size: number) => {
     const key = storageKey(schema, table);

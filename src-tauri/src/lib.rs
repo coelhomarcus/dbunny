@@ -11,9 +11,91 @@ fn open_devtools(window: tauri::WebviewWindow) {
     window.open_devtools();
 }
 
+/// Menu item ids and the event the frontend listens to for Cmd+W.
+#[cfg(target_os = "macos")]
+const CLOSE_TAB_ID: &str = "close-tab";
+#[cfg(target_os = "macos")]
+const CLOSE_WINDOW_ID: &str = "close-window";
+#[cfg(target_os = "macos")]
+const CLOSE_TAB_EVENT: &str = "menu:close-tab";
+
+/// Tauri's default macOS menu, except Cmd+W closes the active connection tab
+/// (handled by the frontend) and Close Window moves to Cmd+Shift+W.
+#[cfg(target_os = "macos")]
+fn build_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
+    use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+    let pkg_info = app.package_info();
+    let about = AboutMetadata {
+        name: Some(pkg_info.name.clone()),
+        version: Some(pkg_info.version.to_string()),
+        ..Default::default()
+    };
+
+    let app_menu = SubmenuBuilder::new(app, &pkg_info.name)
+        .about(Some(about))
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+
+    let close_tab = MenuItemBuilder::with_id(CLOSE_TAB_ID, "Close Tab")
+        .accelerator("CmdOrCtrl+W")
+        .build(app)?;
+    let close_window = MenuItemBuilder::with_id(CLOSE_WINDOW_ID, "Close Window")
+        .accelerator("CmdOrCtrl+Shift+W")
+        .build(app)?;
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .item(&close_tab)
+        .item(&close_window)
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let view_menu = SubmenuBuilder::new(app, "View").fullscreen().build()?;
+
+    let window_menu = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .maximize()
+        .build()?;
+
+    MenuBuilder::new(app)
+        .items(&[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu])
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .menu(build_menu)
+        .on_menu_event(|app, event| {
+            use tauri::Emitter;
+            if event.id() == CLOSE_TAB_ID {
+                let _ = app.emit(CLOSE_TAB_EVENT, ());
+            } else if event.id() == CLOSE_WINDOW_ID {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.close();
+                }
+            }
+        });
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -44,6 +126,7 @@ pub fn run() {
             commands::schema::get_functions,
             commands::schema::get_function_detail,
             commands::schema::get_columns,
+            commands::schema::get_completion_schema,
             commands::query::execute_query,
             commands::query::get_table_data,
             commands::query::update_row,
