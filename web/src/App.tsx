@@ -27,9 +27,11 @@ export default function App() {
 
   return (
     <WorkspaceProvider>
-      <div className="h-screen flex flex-col bg-card text-foreground">
+      <div className="h-screen flex flex-col bg-chrome text-foreground">
         <TitleBar />
-        <div className="relative flex-1 min-h-0">
+        {/* -1px: the page card's top border sits under the title bar's last row, where
+            only the active tab (painted above it) hides it */}
+        <div className="relative -mt-px flex-1 min-h-0">
           <TabPanes />
         </div>
       </div>

@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
-/** 48px header bar at the top of a page (same height as the sidebar header). */
+/** 40px header bar at the top of a page (same height as the sidebar header and the query tabs). */
 export function PageHeader({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <header className={cn("flex h-12 shrink-0 items-center gap-3 border-b border-border px-4 select-none", className)}>
+    <header className={cn("flex h-10 shrink-0 items-center gap-3 border-b border-border px-4 select-none", className)}>
       {children}
     </header>
   );

@@ -1,5 +1,6 @@
 import { Outlet, useNavigate, NavLink } from "react-router";
 import { useConnection } from "../contexts/useConnection";
+import { useWorkspace } from "../contexts/workspace";
 import { useEffect, useState } from "react";
 import SchemaTree from "../components/SchemaTree";
 import Tooltip from "../components/Tooltip";
@@ -7,14 +8,14 @@ import Button from "../components/ui/Button";
 import StatusBar from "../components/layout/StatusBar";
 import { HeaderTitle } from "../components/layout/PageHeader";
 import { cn } from "../lib/cn";
-import { Terminal, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, Folder } from "lucide-react";
+import { Terminal, Eye, EyeOff, Folder } from "lucide-react";
 import type { SchemaInfo } from "@/types";
 
 export default function DatabaseLayout() {
   const { isConnected, connectionInfo, savedConnectionName, disconnect, api } = useConnection();
   const navigate = useNavigate();
   const [revealed, setRevealed] = useState(false);
-  const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const { sidebarOpen: sidebarExpanded, setSidebarOpen: setSidebarExpanded } = useWorkspace();
   const [schemas, setSchemas] = useState<SchemaInfo[]>([]);
   const [schemaToExpand, setSchemaToExpand] = useState<string | null>(null);
 
@@ -44,12 +45,12 @@ export default function DatabaseLayout() {
     );
 
   return (
-    <div className="h-full flex flex-col bg-card text-foreground">
+    <div className="h-full flex flex-col text-foreground">
       <div className="flex flex-1 min-h-0">
         <aside
           className={cn(
-            // Divider starts below the 48px header row, so it never runs into the window tabs
-            "relative shrink-0 after:pointer-events-none after:absolute after:right-0 after:top-12 after:bottom-0 after:w-px after:bg-border select-none transition-[width] duration-300 ease-in-out overflow-hidden",
+            // Same colour as the title bar above it: together they form the window frame
+            "relative shrink-0 select-none transition-[width] duration-300 ease-in-out overflow-hidden",
             sidebarExpanded ? "w-64" : "w-12",
           )}
         >
@@ -60,8 +61,7 @@ export default function DatabaseLayout() {
               sidebarExpanded ? "opacity-100 delay-75" : "opacity-0 pointer-events-none",
             )}
           >
-            {/* Same height as the page headers, so the border lines up */}
-            <div className="h-12 shrink-0 flex items-center gap-1 border-b border-border pl-3 pr-2">
+            <div className="h-10 shrink-0 flex items-center gap-1 pl-3 pr-2">
               <HeaderTitle label="Connection" className="flex-1">
                 {savedConnectionName || connectionInfo?.database || "Connection"}
               </HeaderTitle>
@@ -73,12 +73,9 @@ export default function DatabaseLayout() {
               >
                 {revealed ? <EyeOff /> : <Eye />}
               </Button>
-              <Button variant="ghost-muted" size="icon-sm" onClick={() => setSidebarExpanded(false)} title="Collapse sidebar">
-                <PanelLeftClose />
-              </Button>
             </div>
 
-            <nav className="p-2">
+            <nav className="px-2 pb-2">
               <NavLink to="/db/query" className={navItemClass}>
                 <Terminal size={15} className="shrink-0" />
                 Query
@@ -100,14 +97,7 @@ export default function DatabaseLayout() {
               sidebarExpanded ? "opacity-0 pointer-events-none" : "opacity-100 delay-75",
             )}
           >
-            <div className="h-12 w-full shrink-0 flex items-center justify-center border-b border-border">
-              <Tooltip label="Expand sidebar">
-                <Button variant="ghost-muted" size="icon-sm" onClick={() => setSidebarExpanded(true)} aria-label="Expand sidebar">
-                  <PanelLeftOpen />
-                </Button>
-              </Tooltip>
-            </div>
-            <div className="pt-1" />
+            <div className="pt-2" />
             <Tooltip label="Query">
               <NavLink
                 to="/db/query"
@@ -145,7 +135,7 @@ export default function DatabaseLayout() {
           </div>
         </aside>
 
-        <main className="flex-1 min-w-0 overflow-hidden">
+        <main className="flex-1 min-w-0 bg-card rounded-tl-[10px] border-l border-t border-frame-line overflow-hidden">
           <Outlet />
         </main>
       </div>

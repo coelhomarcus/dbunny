@@ -13,8 +13,8 @@
 
   --background: #f3f3f4;
   --foreground: #18181b;
-  /* Window title bar (connection tabs), a step darker than the app background */
-  --chrome: #e6e6e8;
+  /* Window frame: title bar, sidebars and status bar share it, the page sits on --card */
+  --chrome: #eeeef0;
   --card: #ffffff;
   --card-foreground: #18181b;
   --popover: #ffffff;
@@ -61,7 +61,7 @@
 
   --background: #080809;
   --foreground: #f4f4f5;
-  --chrome: #000000;
+  --chrome: #19191b;
   --card: #111112;
   --card-foreground: #f4f4f5;
   --popover: #161617;
@@ -105,6 +105,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-chrome: var(--chrome);
+  /* Opaque line of the window frame, so the sidebar edge and the title bar line meet cleanly */
+  --color-frame-line: color-mix(in srgb, var(--foreground) 12%, var(--card));
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
@@ -247,10 +249,10 @@ body {
    card colour, so it flows into the page below it. */
 .tab-strip.window-tabs {
   --tab-bg: var(--card);
+  --tab-border: var(--color-frame-line);
   --tab-radius: 10px;
-  background:
-    linear-gradient(var(--tab-border), var(--tab-border)) bottom / 100% 1px no-repeat,
-    var(--chrome);
+  /* No line of its own: the page card's top border runs right under the tabs */
+  background: none;
 }
 
 /* Thin separator between two inactive tabs, hidden next to a hovered one */

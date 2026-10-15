@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Database, Minus, Plus, X } from "lucide-react";
+import { Database, Minus, PanelLeft, Plus, X } from "lucide-react";
 import { isMac, isWindows } from "../lib/platform";
 import { cn } from "../lib/cn";
 import { useWorkspace, type WorkspaceTab } from "../contexts/workspace";
@@ -138,7 +138,7 @@ function WindowTab({
  * (traffic lights on macOS sit on the left, drawn by the OS).
  */
 export default function TitleBar() {
-  const { tabs, activeTabId, activateTab, closeTab, openTab, cycleTab } = useWorkspace();
+  const { tabs, activeTabId, activateTab, closeTab, openTab, cycleTab, sidebarOpen, toggleSidebar } = useWorkspace();
 
   // Cmd/Ctrl+T new tab, Ctrl+W close tab, Ctrl+Tab / Ctrl+Shift+Tab cycle, Cmd/Ctrl+1..9 jump
   useEffect(() => {
@@ -175,8 +175,7 @@ export default function TitleBar() {
 
   return (
     <div
-      role="tablist"
-      className="tab-strip window-tabs flex h-10 shrink-0 items-end select-none"
+      className="relative z-10 flex h-10 shrink-0 select-none"
       onMouseDown={(e) => {
         if (e.button === 0 && e.detail === 1 && isDragArea(e.target)) appWindow.startDragging();
       }}
@@ -184,9 +183,26 @@ export default function TitleBar() {
         if (isDragArea(e.target)) appWindow.toggleMaximize();
       }}
     >
-      {/* Room for the macOS traffic lights */}
-      {isMac && <div className="w-20 shrink-0" />}
-      <div className={cn("flex min-w-0 flex-1 items-end gap-1 pr-2", isMac ? "pl-1" : "pl-2")}>
+      {/* Sidebar block: same width as the sidebar below it, so both read as one
+          surface (traffic lights on macOS, collapse toggle at its right edge) */}
+      <div
+        className={cn(
+          "flex shrink-0 items-center justify-end transition-[width] duration-300 ease-in-out",
+          sidebarOpen ? "w-64 pr-2" : isMac ? "w-[7.5rem] pr-2" : "w-12 justify-center",
+        )}
+      >
+        <Button
+          variant="ghost-muted"
+          size="icon-sm"
+          onClick={toggleSidebar}
+          title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+          aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+        >
+          <PanelLeft />
+        </Button>
+      </div>
+
+      <div role="tablist" className="tab-strip window-tabs flex min-w-0 flex-1 items-end gap-1 pl-5 pr-2">
         {tabs.map((tab) => (
           <WindowTab
             key={tab.id}

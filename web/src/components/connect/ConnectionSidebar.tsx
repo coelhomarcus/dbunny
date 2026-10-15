@@ -1,5 +1,5 @@
 import { useMemo, useState, type CSSProperties } from "react";
-import { ArrowRight, Database, PanelLeftClose, PanelLeftOpen, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowRight, Database, Plus, Search, Trash2 } from "lucide-react";
 import type { SavedConnection } from "@/types";
 import { cn } from "../../lib/cn";
 import Button from "../ui/Button";
@@ -91,7 +91,7 @@ function ConnectionRow({
         <Button
           variant="ghost-muted"
           size="icon-xs"
-          className="bg-card hover:bg-card-hover"
+          className="bg-chrome"
           title="Connect"
           onClick={(e) => { e.stopPropagation(); onConnect(); }}
         >
@@ -100,7 +100,7 @@ function ConnectionRow({
         <Button
           variant="ghost-muted"
           size="icon-xs"
-          className="bg-card hover:bg-destructive/10 hover:text-destructive-foreground"
+          className="bg-chrome hover:bg-destructive/10 hover:text-destructive-foreground"
           title="Delete"
           onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
         >
@@ -116,7 +116,6 @@ export default function ConnectionSidebar({
   connections,
   selectedId,
   expanded,
-  onToggleExpanded,
   onSelect,
   onConnect,
   onDelete,
@@ -126,7 +125,6 @@ export default function ConnectionSidebar({
   connections: SavedConnection[] | null;
   selectedId: string | null;
   expanded: boolean;
-  onToggleExpanded: () => void;
   onSelect: (conn: SavedConnection) => void;
   onConnect: (conn: SavedConnection) => void;
   onDelete: (id: string) => void;
@@ -145,8 +143,8 @@ export default function ConnectionSidebar({
   return (
     <aside
       className={cn(
-        // Divider starts below the 48px header row, so it never runs into the window tabs
-        "relative shrink-0 after:pointer-events-none after:absolute after:right-0 after:top-12 after:bottom-0 after:w-px after:bg-border select-none overflow-hidden transition-[width] duration-300 ease-in-out",
+        // Same colour as the title bar above it: together they form the window frame
+        "relative shrink-0 select-none overflow-hidden transition-[width] duration-300 ease-in-out",
         expanded ? "w-64" : "w-12",
       )}
     >
@@ -157,22 +155,19 @@ export default function ConnectionSidebar({
           expanded ? "opacity-100 delay-75" : "pointer-events-none opacity-0",
         )}
       >
-        <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border pl-3 pr-2">
+        <div className="flex h-10 shrink-0 items-center gap-1 pl-3 pr-2">
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="text-sm font-semibold">Connections</span>
+            <span className="text-[13px] font-semibold">Connections</span>
             {count > 0 && <Badge>{count}</Badge>}
           </div>
           <Button variant="ghost-muted" size="icon-sm" onClick={onNew} title="New connection">
             <Plus />
           </Button>
-          <Button variant="ghost-muted" size="icon-sm" onClick={onToggleExpanded} title="Collapse sidebar">
-            <PanelLeftClose />
-          </Button>
         </div>
 
         {count > 0 && (
-          <div className="relative px-2 pt-2">
-            <Search size={13} className="pointer-events-none absolute left-4.5 top-1/2 mt-1 -translate-y-1/2 text-muted-foreground" />
+          <div className="relative px-2">
+            <Search size={13} className="pointer-events-none absolute left-4.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -221,13 +216,6 @@ export default function ConnectionSidebar({
           expanded ? "pointer-events-none opacity-0" : "opacity-100 delay-75",
         )}
       >
-        <div className="flex h-12 w-full shrink-0 items-center justify-center border-b border-border">
-          <Tooltip label="Expand sidebar">
-            <Button variant="ghost-muted" size="icon-sm" onClick={onToggleExpanded} aria-label="Expand sidebar">
-              <PanelLeftOpen />
-            </Button>
-          </Tooltip>
-        </div>
         <div className="flex flex-col items-center gap-1.5 pt-2">
           <Tooltip label="New connection">
             <Button variant="ghost-muted" size="icon-sm" onClick={onNew} aria-label="New connection">
@@ -242,7 +230,7 @@ export default function ConnectionSidebar({
                 onClick={() => onConnect(conn)}
                 className={cn(
                   "rounded-lg cursor-pointer outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/50",
-                  conn.id === selectedId && "ring-2 ring-ring/40 ring-offset-1 ring-offset-card",
+                  conn.id === selectedId && "ring-2 ring-ring/40 ring-offset-1 ring-offset-chrome",
                 )}
               >
                 <ConnectionIcon color={conn.color || DEFAULT_COLOR} size="sm" />

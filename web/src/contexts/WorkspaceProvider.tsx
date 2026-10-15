@@ -3,6 +3,16 @@ import { api } from "../lib/api";
 import { disposeTabState } from "../lib/tabState";
 import { WorkspaceContext, type TabSessionInfo, type WorkspaceTab } from "./workspace";
 
+const SIDEBAR_KEY = "dbunny-sidebar-open";
+
+function readSidebarOpen() {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
 function newTab(): WorkspaceTab {
   return { id: crypto.randomUUID(), title: null, subtitle: null, color: null, sessionId: null };
 }
@@ -10,6 +20,18 @@ function newTab(): WorkspaceTab {
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [tabs, setTabs] = useState<WorkspaceTab[]>(() => [newTab()]);
   const [activeTabId, setActiveTabId] = useState(() => tabs[0].id);
+  const [sidebarOpen, setSidebarOpenState] = useState(readSidebarOpen);
+
+  const setSidebarOpen = useCallback((open: boolean) => {
+    setSidebarOpenState(open);
+    try {
+      localStorage.setItem(SIDEBAR_KEY, String(open));
+    } catch {
+      // not persisted, still applied
+    }
+  }, []);
+
+  const toggleSidebar = useCallback(() => setSidebarOpen(!sidebarOpen), [sidebarOpen, setSidebarOpen]);
 
   const openTab = useCallback(() => {
     const tab = newTab();
@@ -48,8 +70,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ tabs, activeTabId, openTab, closeTab, activateTab: setActiveTabId, cycleTab, updateTab }),
-    [tabs, activeTabId, openTab, closeTab, cycleTab, updateTab],
+    () => ({
+      tabs,
+      activeTabId,
+      openTab,
+      closeTab,
+      activateTab: setActiveTabId,
+      cycleTab,
+      updateTab,
+      sidebarOpen,
+      setSidebarOpen,
+      toggleSidebar,
+    }),
+    [tabs, activeTabId, openTab, closeTab, cycleTab, updateTab, sidebarOpen, setSidebarOpen, toggleSidebar],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

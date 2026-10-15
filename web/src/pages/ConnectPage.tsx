@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { getVersion } from "@tauri-apps/api/app";
 import { ArrowRight, Check, Database, Eye, EyeOff, Link, Loader, PlugZap, TriangleAlert, X } from "lucide-react";
 import { useConnection } from "../contexts/useConnection";
+import { useWorkspace } from "../contexts/workspace";
 import { type ConnectionFields, parseConnectionUrl, buildConnectionUrl } from "../lib/connectionUrl";
 import { api } from "../lib/api";
 import { cn } from "../lib/cn";
@@ -73,11 +74,11 @@ export default function ConnectPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [test, setTest] = useState<TestState>({ status: "idle" });
   const [version, setVersion] = useState<string | null>(null);
-  const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const customColorRef = useRef<HTMLButtonElement>(null);
 
   const { connect, isConnecting, error } = useConnection();
+  const { sidebarOpen } = useWorkspace();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -230,20 +231,19 @@ export default function ConnectPage() {
   const isCustomColor = !COLOR_PRESETS.includes(connectionColor);
 
   return (
-    <div className="h-full flex flex-col bg-card">
+    <div className="h-full flex flex-col">
       <div className="flex flex-1 min-h-0">
         <ConnectionSidebar
           connections={savedConnections}
           selectedId={selectedId}
-          expanded={sidebarExpanded}
-          onToggleExpanded={() => setSidebarExpanded((v) => !v)}
+          expanded={sidebarOpen}
           onSelect={handleSelectSaved}
           onConnect={handleConnectSaved}
           onDelete={handleDelete}
           onNew={handleNewConnection}
         />
 
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main className="flex min-w-0 flex-1 flex-col bg-card rounded-tl-[10px] border-l border-t border-frame-line overflow-hidden">
           <PageHeader>
             <HeaderTitle label={editing ? "Saved connection" : "Connection"} icon={<Database />}>
               {editing ? connectionName || "Unnamed" : "New connection"}

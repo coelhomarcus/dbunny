@@ -23,6 +23,10 @@ export interface WorkspaceValue {
   /** Activate the next/previous tab (wraps around). */
   cycleTab: (direction: 1 | -1) => void;
   updateTab: (id: string, info: TabSessionInfo) => void;
+  /** Sidebar of every tab, shared like in a single window: open or collapsed to an icon rail. */
+  sidebarOpen: boolean;
+  setSidebarOpen: (open: boolean) => void;
+  toggleSidebar: () => void;
 }
 
 export const WorkspaceContext = createContext<WorkspaceValue | null>(null);
