@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import SchemaTree from "../components/SchemaTree";
 import Tooltip from "../components/Tooltip";
 import Button from "../components/ui/Button";
-import ThemeToggle from "../components/ui/ThemeToggle";
-import { Terminal, Eye, EyeOff, LogOut, PanelLeftClose, PanelLeftOpen, Folder } from "lucide-react";
+import StatusBar from "../components/layout/StatusBar";
+import { HeaderTitle } from "../components/layout/PageHeader";
+import { cn } from "../lib/cn";
+import { Terminal, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, Folder } from "lucide-react";
 import type { SchemaInfo } from "@/types";
 
 export default function DatabaseLayout() {
@@ -35,142 +37,119 @@ export default function DatabaseLayout() {
     navigate("/");
   }
 
-  const maskedHost = connectionInfo?.host.replace(/./g, "•") ?? "••••••••";
-  const maskedPort = connectionInfo?.port.toString().replace(/./g, "•") ?? "••••";
-  const maskedDb = connectionInfo?.database.replace(/./g, "•") ?? "••••••••";
+  const navItemClass = ({ isActive }: { isActive: boolean }) =>
+    cn(
+      "flex h-8 items-center gap-2 rounded-lg px-2.5 text-sm transition-colors",
+      isActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+    );
 
   return (
-    <div className="h-full flex flex-col bg-background text-foreground">
-      <div className="flex flex-1 overflow-hidden p-2 gap-2">
+    <div className="h-full flex flex-col bg-card text-foreground">
+      <div className="flex flex-1 min-h-0">
         <aside
-          className={`shrink-0 bg-card border border-border rounded-xl shadow-xs flex flex-col select-none transition-[width] duration-300 ease-in-out overflow-hidden ${
-            sidebarExpanded ? "w-64" : "w-12"
-          }`}
+          className={cn(
+            "relative shrink-0 border-r border-border select-none transition-[width] duration-300 ease-in-out overflow-hidden",
+            sidebarExpanded ? "w-64" : "w-12",
+          )}
         >
-          <div className="relative flex-1">
-            {/* Expanded view */}
-            <div className={`absolute inset-0 flex flex-col transition-opacity duration-200 ${
-              sidebarExpanded ? "opacity-100 delay-75" : "opacity-0 pointer-events-none"
-            }`}>
-              <div className="px-3 pt-2.5 pb-2 flex items-center justify-between shrink-0">
-                <button
-                  onClick={() => setRevealed((v) => !v)}
-                  className="flex-1 min-w-0 flex items-center gap-2 group text-left"
-                  title={revealed ? "Hide connection details" : "Show connection details"}
-                >
-                  <div className="min-w-0 flex-1">
-                    <span className="block text-sm text-foreground truncate font-medium leading-tight">
-                      {savedConnectionName || connectionInfo?.database || "Connection"}
-                    </span>
-                    <span className="block text-[11px] text-muted-foreground truncate font-mono mt-0.5">
-                      {revealed
-                        ? `${connectionInfo?.database} @ ${connectionInfo?.host}:${connectionInfo?.port}`
-                        : `${maskedDb} @ ${maskedHost}:${maskedPort}`}
-                    </span>
-                  </div>
-                  <span className="text-muted-foreground/70 group-hover:text-muted-foreground transition-colors shrink-0">
-                    {revealed ? <EyeOff size={13} /> : <Eye size={13} />}
-                  </span>
-                </button>
-                <Button variant="ghost-muted" size="icon-sm" className="ml-1" onClick={() => setSidebarExpanded(false)} title="Collapse sidebar">
-                  <PanelLeftClose />
-                </Button>
-              </div>
-
-              <div className="px-2 py-1 border-t border-border">
-                <NavLink
-                  to="/db/query"
-                  className={({ isActive }) =>
-                    `flex items-center gap-2 px-2.5 py-2 rounded-md text-sm transition-colors ${
-                      isActive
-                        ? "bg-accent text-foreground font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-accent"
-                    }`
-                  }
-                >
-                  <Terminal size={15} className="shrink-0" />
-                  Query
-                </NavLink>
-              </div>
-
-              <div className="flex-1 overflow-y-auto py-1 border-t border-border">
-                <SchemaTree
-                  schemaToExpand={schemaToExpand}
-                  onSchemaExpanded={() => setSchemaToExpand(null)}
-                />
-              </div>
-
-              <div className="px-2 py-2 border-t border-border flex items-center gap-1">
-                <button
-                  onClick={handleDisconnect}
-                  className="flex-1 flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm text-muted-foreground hover:text-destructive-foreground hover:bg-destructive/10 transition-colors cursor-pointer"
-                >
-                  <LogOut size={14} className="shrink-0" />
-                  Disconnect
-                </button>
-                <ThemeToggle />
-              </div>
+          {/* Expanded view */}
+          <div
+            className={cn(
+              "absolute inset-y-0 left-0 w-64 flex flex-col transition-opacity duration-200",
+              sidebarExpanded ? "opacity-100 delay-75" : "opacity-0 pointer-events-none",
+            )}
+          >
+            {/* Same height as the page headers, so the border lines up */}
+            <div className="h-12 shrink-0 flex items-center gap-1 border-b border-border pl-3 pr-2">
+              <HeaderTitle label="Connection" className="flex-1">
+                {savedConnectionName || connectionInfo?.database || "Connection"}
+              </HeaderTitle>
+              <Button
+                variant="ghost-muted"
+                size="icon-sm"
+                onClick={() => setRevealed((v) => !v)}
+                title={revealed ? "Hide connection details" : "Show connection details"}
+              >
+                {revealed ? <EyeOff /> : <Eye />}
+              </Button>
+              <Button variant="ghost-muted" size="icon-sm" onClick={() => setSidebarExpanded(false)} title="Collapse sidebar">
+                <PanelLeftClose />
+              </Button>
             </div>
 
-            {/* Collapsed view */}
-            <div className={`absolute inset-0 flex flex-col items-center py-2.5 gap-1 transition-opacity duration-200 ${
-              sidebarExpanded ? "opacity-0 pointer-events-none" : "opacity-100 delay-75"
-            }`}>
+            <nav className="p-2">
+              <NavLink to="/db/query" className={navItemClass}>
+                <Terminal size={15} className="shrink-0" />
+                Query
+              </NavLink>
+            </nav>
+
+            <div className="px-3 pt-1 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">
+              Explorer
+            </div>
+            <div className="flex-1 overflow-y-auto pb-2">
+              <SchemaTree schemaToExpand={schemaToExpand} onSchemaExpanded={() => setSchemaToExpand(null)} />
+            </div>
+          </div>
+
+          {/* Collapsed view: a narrow icon rail */}
+          <div
+            className={cn(
+              "absolute inset-0 flex flex-col items-center gap-1 transition-opacity duration-200",
+              sidebarExpanded ? "opacity-0 pointer-events-none" : "opacity-100 delay-75",
+            )}
+          >
+            <div className="h-12 w-full shrink-0 flex items-center justify-center border-b border-border">
               <Tooltip label="Expand sidebar">
                 <Button variant="ghost-muted" size="icon-sm" onClick={() => setSidebarExpanded(true)} aria-label="Expand sidebar">
                   <PanelLeftOpen />
                 </Button>
               </Tooltip>
-              <Tooltip label="Query">
-                <NavLink
-                  to="/db/query"
-                  className={({ isActive }) =>
-                    `size-7 flex items-center justify-center rounded-lg transition-colors ${
-                      isActive
-                        ? "text-foreground bg-accent"
-                        : "text-muted-foreground/70 hover:text-foreground hover:bg-accent"
-                    }`
-                  }
-                >
-                  <Terminal size={15} />
-                </NavLink>
-              </Tooltip>
-              {schemas.length > 0 && (
-                <>
-                  <div className="w-5 border-t border-border my-0.5" />
-                  {schemas.map((s) => (
-                    <Tooltip key={s.name} label={s.name}>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="text-warning-foreground/80 hover:text-warning-foreground"
-                        aria-label={s.name}
-                        onClick={() => {
-                          setSchemaToExpand(s.name);
-                          setSidebarExpanded(true);
-                        }}
-                      >
-                        <Folder />
-                      </Button>
-                    </Tooltip>
-                  ))}
-                </>
-              )}
-              <div className="flex-1" />
-              <ThemeToggle side="right" />
-              <Tooltip label="Disconnect">
-                <Button variant="destructive-ghost" size="icon-sm" onClick={handleDisconnect} aria-label="Disconnect">
-                  <LogOut />
-                </Button>
-              </Tooltip>
             </div>
+            <div className="pt-1" />
+            <Tooltip label="Query">
+              <NavLink
+                to="/db/query"
+                className={({ isActive }) =>
+                  cn(
+                    "size-7 flex items-center justify-center rounded-lg transition-colors",
+                    isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )
+                }
+              >
+                <Terminal size={15} />
+              </NavLink>
+            </Tooltip>
+            {schemas.length > 0 && (
+              <>
+                <div className="w-5 border-t border-border my-0.5" />
+                {schemas.map((s) => (
+                  <Tooltip key={s.name} label={s.name}>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-warning-foreground/80 hover:text-warning-foreground"
+                      aria-label={s.name}
+                      onClick={() => {
+                        setSchemaToExpand(s.name);
+                        setSidebarExpanded(true);
+                      }}
+                    >
+                      <Folder />
+                    </Button>
+                  </Tooltip>
+                ))}
+              </>
+            )}
           </div>
         </aside>
 
-        <main className="flex-1 overflow-hidden">
+        <main className="flex-1 min-w-0 overflow-hidden">
           <Outlet />
         </main>
       </div>
+
+      <StatusBar connectionInfo={connectionInfo} revealed={revealed} onDisconnect={handleDisconnect} />
     </div>
   );
 }

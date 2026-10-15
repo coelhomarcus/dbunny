@@ -129,7 +129,7 @@ export default function TableView() {
   });
 
   return (
-    <div className="h-full flex flex-col gap-2">
+    <div className="h-full flex flex-col">
       <TableViewHeader
         schema={schema!}
         table={table!}
@@ -158,12 +158,12 @@ export default function TableView() {
         onFetchAllRows={fetchAllRows}
       />
 
-      {error && <div className="p-4 text-destructive-foreground text-sm bg-card border border-border rounded-xl">{error}</div>}
+      {error && <div className="px-4 py-3 text-destructive-foreground text-sm border-b border-border bg-destructive/5">{error}</div>}
 
       {loading && !data && <TableSkeleton columns={6} rows={14} />}
 
       {data && (
-        <div className="flex-1 min-h-0 flex flex-col bg-card border border-border rounded-xl overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-auto">
             <table
               className="text-sm w-full"

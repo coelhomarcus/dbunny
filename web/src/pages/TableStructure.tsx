@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { segmentedItemClass, segmentedListClass } from "../components/ui/styles";
+import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { useParams, NavLink } from "react-router";
 import { TableSkeleton } from "../components/Skeleton";
 import { useApi } from "../contexts/useConnection";
@@ -25,13 +26,12 @@ export default function TableStructure() {
   const columns = loading ? [] : result.columns;
 
   return (
-    <div className="h-full flex flex-col gap-2">
+    <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-card border border-border rounded-xl shrink-0">
-        <h2 className="text-base font-medium">
-          <span className="text-muted-foreground">{schema}.</span>
+      <PageHeader className="justify-between">
+        <HeaderTitle label={`Structure · ${schema}`}>
           {table}
-        </h2>
+        </HeaderTitle>
         <div className={segmentedListClass}>
           <NavLink to={`/db/${schema}/${table}`} end className={({ isActive }) => segmentedItemClass(isActive)}>
             Data
@@ -40,12 +40,12 @@ export default function TableStructure() {
             Structure
           </NavLink>
         </div>
-      </div>
+      </PageHeader>
 
       {loading ? (
         <TableSkeleton columns={5} rows={10} />
       ) : (
-        <div className="flex-1 overflow-auto bg-card border border-border rounded-xl">
+        <div className="flex-1 overflow-auto">
           <table className="w-full text-sm">
             <thead className="sticky top-0">
               <tr>

@@ -136,7 +136,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
   }
 
   return (
-    <div className="text-base select-none">
+    <div className="px-2 select-none">
       {schemas.map((schema) => {
         const isExpanded = expanded.has(schema.name);
         const data = folderData[schema.name] ?? emptyFolders;
@@ -145,7 +145,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
           <div key={schema.name}>
             <button
               onClick={() => toggle(schema.name)}
-              className="w-full flex items-center gap-1.5 px-1.5 py-1.5 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors group"
+              className="w-full flex h-7 items-center gap-1.5 rounded-md px-1.5 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors group"
             >
               <ChevronRight
                 size={10}
@@ -173,7 +173,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                       <button
                         key={t.name}
                         onClick={() => navigate(`/db/${schema.name}/${t.name}`)}
-                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-sm transition-colors ${
+                        className={`w-full flex h-7 items-center gap-2 rounded-md pl-11 pr-2 text-sm transition-colors ${
                           isActive
                             ? "bg-accent text-foreground"
                             : "text-muted-foreground hover:text-foreground hover:bg-accent"
@@ -205,7 +205,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                       <button
                         key={v.name}
                         onClick={() => navigate(`/db/${schema.name}/${v.name}`)}
-                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-sm transition-colors ${
+                        className={`w-full flex h-7 items-center gap-2 rounded-md pl-11 pr-2 text-sm transition-colors ${
                           isActive
                             ? "bg-accent text-foreground"
                             : "text-muted-foreground hover:text-foreground hover:bg-accent"
@@ -241,7 +241,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                             `/db/${schema.name}/function/${f.name}?args=${encodeURIComponent(f.argumentTypes)}`
                           )
                         }
-                        className={`w-full flex items-center gap-2 pl-12 pr-3 py-1.5 text-sm transition-colors ${
+                        className={`w-full flex h-7 items-center gap-2 rounded-md pl-11 pr-2 text-sm transition-colors ${
                           isActive
                             ? "bg-accent text-foreground"
                             : "text-muted-foreground hover:text-foreground hover:bg-accent"
@@ -297,7 +297,7 @@ function SubFolder({
     <div>
       <button
         onClick={() => onToggle(schemaName, kind)}
-        className="w-full flex items-center gap-1.5 pl-5 pr-3 py-1.5 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors group"
+        className="w-full flex h-7 items-center gap-1.5 rounded-md pl-5 pr-2 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors group"
       >
         <ChevronRight
           size={10}
@@ -317,7 +317,7 @@ function SubFolder({
       {isOpen && folder.loaded && (
         <div>
           {folder.items.length === 0 ? (
-            <div className="pl-12 py-1.5 text-xs text-muted-foreground/70">empty</div>
+            <div className="pl-11 py-1.5 text-xs text-muted-foreground/70">empty</div>
           ) : (
             children
           )}

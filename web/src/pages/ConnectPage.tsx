@@ -27,6 +27,7 @@ import Tooltip from "../components/Tooltip";
 import Button from "../components/ui/Button";
 import { inputClass } from "../components/ui/styles";
 import ThemeToggle from "../components/ui/ThemeToggle";
+import { HeaderTitle } from "../components/layout/PageHeader";
 import { cn } from "../lib/cn";
 
 export default function ConnectPage() {
@@ -177,23 +178,20 @@ export default function ConnectPage() {
     savedConnections !== null && savedConnections.length > 0;
 
   return (
-    <div className="h-full bg-background flex flex-col">
-
-      <div className="flex flex-1 overflow-hidden p-2 gap-2">
+    <div className="h-full bg-card flex flex-col">
+      <div className="flex flex-1 overflow-hidden">
         <aside
-          className={`shrink-0 bg-card border border-border rounded-xl shadow-xs flex flex-col select-none transition-[width] duration-300 ease-in-out overflow-hidden ${
+          className={`shrink-0 border-r border-border flex flex-col select-none transition-[width] duration-300 ease-in-out overflow-hidden ${
             sidebarExpanded ? "w-64" : "w-12"
           }`}
         >
           <div className="relative flex-1">
             {/* Expanded view */}
-            <div className={`absolute inset-0 flex flex-col transition-opacity duration-200 ${
+            <div className={`absolute inset-y-0 left-0 w-64 flex flex-col transition-opacity duration-200 ${
               sidebarExpanded ? "opacity-100 delay-75" : "opacity-0 pointer-events-none"
             }`}>
-              <div className="h-11 px-3 flex items-center justify-between shrink-0">
-                <span className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-                  Connections
-                </span>
+              <div className="h-12 pl-3 pr-2 flex items-center justify-between shrink-0 border-b border-border">
+                <HeaderTitle label="Saved">Connections</HeaderTitle>
                 <div className="flex items-center gap-0.5">
                   {hasSavedConnections && (
                     <Button variant="ghost-muted" size="icon-sm" onClick={handleNewConnection} title="New connection">
@@ -205,7 +203,7 @@ export default function ConnectPage() {
                   </Button>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto py-1">
                 {hasSavedConnections ? (
                   <SavedConnectionsList
                     connections={savedConnections}
@@ -230,14 +228,16 @@ export default function ConnectPage() {
             </div>
 
             {/* Collapsed view */}
-            <div className={`absolute inset-0 flex flex-col items-center py-3 gap-3 transition-opacity duration-200 ${
+            <div className={`absolute inset-0 flex flex-col items-center pb-2 transition-opacity duration-200 ${
               sidebarExpanded ? "opacity-0 pointer-events-none" : "opacity-100 delay-75"
             }`}>
-              <Tooltip label="Expand sidebar">
-                <Button variant="ghost-muted" size="icon-sm" onClick={() => setSidebarExpanded(true)} aria-label="Expand sidebar">
-                  <PanelLeftOpen />
-                </Button>
-              </Tooltip>
+              <div className="h-12 w-full shrink-0 flex items-center justify-center border-b border-border">
+                <Tooltip label="Expand sidebar">
+                  <Button variant="ghost-muted" size="icon-sm" onClick={() => setSidebarExpanded(true)} aria-label="Expand sidebar">
+                    <PanelLeftOpen />
+                  </Button>
+                </Tooltip>
+              </div>
               <div className="mt-auto">
                 <ThemeToggle side="right" />
               </div>
@@ -262,7 +262,7 @@ export default function ConnectPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="select-none">
-              <div className="bg-card rounded-xl border border-border divide-y divide-border">
+              <div className="bg-card rounded-xl border border-input shadow-xs/5 divide-y divide-border">
                 <div className="flex divide-x divide-border">
                   <div className="flex-1 relative">
                     <label className="absolute top-2.5 left-10 text-[11px] font-medium text-muted-foreground uppercase tracking-wider select-none">

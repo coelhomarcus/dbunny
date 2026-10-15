@@ -275,7 +275,7 @@ export default function QueryEditor() {
   }
 
   return (
-    <div className="h-full flex flex-col gap-2">
+    <div className="h-full flex flex-col">
       {pendingDangers && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
@@ -315,9 +315,9 @@ export default function QueryEditor() {
       )}
 
       {/* Editor panel */}
-      <div className="flex flex-col flex-1 min-h-0 bg-card border border-border rounded-xl overflow-hidden">
+      <div className="flex flex-col flex-1 min-h-0 border-b border-border">
         {/* Tabs: the active one joins the editor below (see .joined-tab in index.css) */}
-        <div className="tab-strip flex items-end shrink-0 select-none">
+        <div className="tab-strip flex h-12 items-end shrink-0 select-none">
           <div className="flex items-end gap-1 flex-1 px-2 pt-1.5 overflow-x-auto overflow-y-hidden">
             {tabMetas.map((tab) => {
               const active = activeId === tab.id;
@@ -412,7 +412,7 @@ export default function QueryEditor() {
       </div>
 
       {/* Results panel */}
-      <div className="flex-1 min-h-0 bg-card border border-border rounded-xl overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <QueryResults result={result} error={error} running={running} />
       </div>
     </div>

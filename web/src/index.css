@@ -232,10 +232,10 @@ body {
   );
 }
 
-/* Window title bar: one tab per connection. The active tab takes the app
-   background, so it flows into the page below it. */
+/* Window title bar: one tab per connection. The active tab takes the body's
+   card colour, so it flows into the page below it. */
 .tab-strip.window-tabs {
-  --tab-bg: var(--background);
+  --tab-bg: var(--card);
   --tab-radius: 10px;
   background:
     linear-gradient(var(--tab-border), var(--tab-border)) bottom / 100% 1px no-repeat,

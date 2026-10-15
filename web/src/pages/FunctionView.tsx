@@ -4,6 +4,7 @@ import { Braces, Copy, Check } from "lucide-react";
 import { DetailSkeleton } from "../components/Skeleton";
 import { useApi } from "../contexts/useConnection";
 import SqlViewer from "../components/SqlViewer";
+import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import type { FunctionDetail } from "@/types";
 
 export default function FunctionView() {
@@ -48,17 +49,12 @@ export default function FunctionView() {
   }
 
   return (
-    <div className="h-full flex flex-col gap-2">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-card border border-border rounded-xl shrink-0">
-        <div className="flex items-center gap-2">
-          <Braces size={16} className="text-purple-500" />
-          <h2 className="text-base font-medium">
-            <span className="text-muted-foreground">{schema}.</span>
-            {name}
-          </h2>
-        </div>
-      </div>
+    <div className="h-full flex flex-col">
+      <PageHeader>
+        <HeaderTitle label={`Function · ${schema}`} icon={<Braces className="text-purple-500" />}>
+          {name}
+        </HeaderTitle>
+      </PageHeader>
 
       {loading ? (
         <DetailSkeleton />
@@ -67,9 +63,9 @@ export default function FunctionView() {
           <span className="text-sm text-destructive-foreground">{error}</span>
         </div>
       ) : detail ? (
-        <div className="flex-1 overflow-auto flex flex-col gap-3">
+        <div className="flex-1 min-h-0 flex flex-col">
           {/* Properties */}
-          <div className="px-5 py-4 bg-card border border-border rounded-xl shrink-0">
+          <div className="px-4 py-4 border-b border-border shrink-0">
             <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm max-w-xl">
               <Property label="Type" value={detail.kind} />
               <Property label="Language" value={detail.language} />
@@ -93,9 +89,9 @@ export default function FunctionView() {
           </div>
 
           {/* Source code */}
-          <div className="flex-1 min-h-0 flex flex-col bg-card border border-border rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 bg-muted border-b border-border">
-              <span className="text-sm font-medium text-muted-foreground">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="flex h-9 shrink-0 items-center justify-between px-4 bg-muted border-b border-border">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                 Definition
               </span>
               <button

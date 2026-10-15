@@ -7,10 +7,12 @@ export interface ConnectResponse {
   database: string;
   host: string;
   port: number;
+  serverVersion: string;
 }
 
 export interface ConnectionInfo {
   database: string;
   host: string;
   port: number;
+  serverVersion: string;
 }

@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import ExportMenu from "./ExportMenu";
 import Button from "./ui/Button";
+import { HeaderTitle, PageHeader } from "./layout/PageHeader";
 import { segmentedItemClass, segmentedListClass } from "./ui/styles";
 import type { QueryColumn } from "@/types";
 
@@ -45,14 +46,11 @@ export default function TableViewHeader({
   columns, rows, onFetchAllRows,
 }: TableViewHeaderProps) {
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 bg-card border border-border rounded-xl select-none">
-      <div className="flex items-center gap-3">
-        <h2 className="text-base font-medium">
-          <span className="text-muted-foreground">{schema}.</span>
-          {table}
-        </h2>
+    <PageHeader className="justify-between">
+      <div className="flex min-w-0 items-center gap-3">
+        <HeaderTitle label={`Table · ${schema}`}>{table}</HeaderTitle>
         {totalRows !== undefined && (
-          <span className="text-sm text-muted-foreground">
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
             {totalRows.toLocaleString()} rows
           </span>
         )}
@@ -129,6 +127,6 @@ export default function TableViewHeader({
           </NavLink>
         </div>
       </div>
-    </div>
+    </PageHeader>
   );
 }

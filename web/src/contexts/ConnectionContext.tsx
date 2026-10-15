@@ -27,7 +27,12 @@ export function ConnectionProvider({
       setError(null);
       try {
         const response = await api.connect(url);
-        const info = { database: response.database, host: response.host, port: response.port };
+        const info = {
+          database: response.database,
+          host: response.host,
+          port: response.port,
+          serverVersion: response.serverVersion,
+        };
         setSessionId(response.sessionId);
         setConnectionInfo(info);
         setSavedConnectionName(saved?.name || null);
