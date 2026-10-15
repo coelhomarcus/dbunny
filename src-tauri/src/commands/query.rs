@@ -8,6 +8,7 @@ use tokio_postgres::{Row, SimpleQueryMessage};
 use uuid::Uuid;
 
 use super::pgtext::{is_native, text_to_json};
+use super::sqlsplit::split_statements;
 use super::state::AppState;
 
 #[derive(Serialize)]
@@ -25,6 +26,8 @@ pub struct QueryResult {
     pub row_count: usize,
     pub rows_affected: Option<u64>,
     pub duration: u64,
+    /// How many statements the script had (1 for a plain query).
+    pub statement_count: usize,
 }
 
 #[derive(Serialize)]
@@ -282,10 +285,13 @@ fn row_to_json_values(row: &Row) -> Vec<JsonValue> {
     values
 }
 
-fn pg_error_to_json(e: tokio_postgres::Error) -> String {
+/// Error as JSON for the UI. `offset` shifts the position to be relative to the whole
+/// script, and `statement` is the (1-based index, total) of the failing statement
+/// when the script had more than one.
+fn pg_error_in_script(e: tokio_postgres::Error, offset: usize, statement: Option<(usize, usize)>) -> String {
     if let Some(db) = e.as_db_error() {
         let position = match db.position() {
-            Some(tokio_postgres::error::ErrorPosition::Original(p)) => Some(*p),
+            Some(tokio_postgres::error::ErrorPosition::Original(p)) => Some(*p as usize + offset),
             _ => None,
         };
         serde_json::json!({
@@ -295,6 +301,8 @@ fn pg_error_to_json(e: tokio_postgres::Error) -> String {
             "hint": db.hint(),
             "position": position,
             "code": db.code().code(),
+            "statement": statement.map(|(index, _)| index),
+            "statementCount": statement.map(|(_, total)| total),
         })
         .to_string()
     } else {
@@ -408,26 +416,47 @@ pub async fn execute_query(
     session_id: String,
     sql: String,
 ) -> Result<QueryResult, String> {
-    if sql.trim().is_empty() {
+    let statements = split_statements(&sql);
+    if statements.is_empty() {
         return Err("SQL query is required".into());
     }
 
     let client = state.client(&session_id).await?;
+    let total = statements.len();
 
     let start = std::time::Instant::now();
-    let output = run_statement(&client, &sql).await.map_err(pg_error_to_json)?;
+    // The result set of the last statement that returns rows is the one shown;
+    // statements without rows only add to the affected count.
+    let mut shown: Option<StatementOutput> = None;
+    let mut affected: u64 = 0;
+    for (index, statement) in statements.iter().enumerate() {
+        let output = run_statement(&client, &statement.text).await.map_err(|e| {
+            pg_error_in_script(e, statement.offset, (total > 1).then_some((index + 1, total)))
+        })?;
+        match output.rows_affected {
+            Some(count) => affected += count,
+            None => shown = Some(output),
+        }
+    }
     let duration = start.elapsed().as_millis() as u64;
 
-    let row_count = match output.rows_affected {
-        Some(affected) => affected as usize,
-        None => output.rows.len(),
-    };
-    Ok(QueryResult {
-        columns: output.columns,
-        rows: output.rows,
-        row_count,
-        rows_affected: output.rows_affected,
-        duration,
+    Ok(match shown {
+        Some(output) => QueryResult {
+            row_count: output.rows.len(),
+            columns: output.columns,
+            rows: output.rows,
+            rows_affected: None,
+            duration,
+            statement_count: total,
+        },
+        None => QueryResult {
+            columns: vec![],
+            rows: vec![],
+            row_count: affected as usize,
+            rows_affected: Some(affected),
+            duration,
+            statement_count: total,
+        },
     })
 }
 
@@ -693,4 +722,55 @@ mod server_tests {
         assert_eq!(out.rows[0], vec![json!(1), json!("m"), json!(["a", "b"]), JsonValue::Null]);
         assert_eq!(out.rows[1], vec![json!(2), JsonValue::Null, JsonValue::Null, json!("x")]);
     }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn a_script_runs_each_statement_in_order() {
+        let client = connect().await;
+        let script = "CREATE TEMP TABLE script_test (id int); \
+                      INSERT INTO script_test VALUES (1), (2); \
+                      INSERT INTO script_test VALUES (3); \
+                      SELECT count(*)::int AS n FROM script_test";
+        let mut shown = None;
+        for statement in split_statements(script) {
+            let out = run(&client, &statement.text).await;
+            if out.rows_affected.is_none() {
+                shown = Some(out);
+            }
+        }
+        assert_eq!(shown.unwrap().rows, vec![vec![json!(3)]]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn semicolons_in_strings_and_function_bodies_survive_on_a_real_server() {
+        let client = connect().await;
+        let script = "CREATE FUNCTION pg_temp.two() RETURNS int AS $$ BEGIN PERFORM 1; RETURN 2; END; $$ LANGUAGE plpgsql; \
+                      SELECT 'a;b' AS s, pg_temp.two() AS n";
+        let statements = split_statements(script);
+        assert_eq!(statements.len(), 2);
+        run(&client, &statements[0].text).await;
+        let out = run(&client, &statements[1].text).await;
+        assert_eq!(out.rows, vec![vec![json!("a;b"), json!(2)]]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn error_positions_are_shifted_to_the_whole_script() {
+        let client = connect().await;
+        let script = "SELECT 1;\n  SELECT nope";
+        let statements = split_statements(script);
+        let err = run_statement(&client, &statements[1].text)
+            .await
+            .err()
+            .expect("the second statement should fail");
+        let json: serde_json::Value = serde_json::from_str(&pg_error_in_script(err, statements[1].offset, Some((2, 2)))).unwrap();
+        let position = json["position"].as_u64().unwrap() as usize;
+        // The position points at "nope", counted in characters from the start of the script
+        let at_position: String = script.chars().skip(position - 1).take(4).collect();
+        assert_eq!(at_position, "nope");
+        assert_eq!(json["statement"], 2);
+        assert_eq!(json["statementCount"], 2);
+    }
 }
+

@@ -21,6 +21,9 @@ type PgError = {
   hint?: string;
   position?: number;
   code?: string;
+  /** Which statement of a script failed (1-based) and how many it had. */
+  statement?: number | null;
+  statementCount?: number | null;
 };
 
 function parseError(raw: string): PgError {
@@ -52,6 +55,12 @@ function ErrorDisplay({ raw }: { raw: string }) {
             )}
           </div>
           <p className="font-mono text-sm leading-relaxed">{err.message}</p>
+          {err.statement != null && err.statementCount != null && (
+            <p className="text-xs opacity-70">
+              Statement {err.statement} of {err.statementCount}
+              {err.statement > 1 && ". The statements before it already ran."}
+            </p>
+          )}
           {err.position != null && (
             <p className="text-xs opacity-70">
               Position: <span className="font-mono">{err.position}</span>

@@ -13,6 +13,8 @@ export interface QueryResult {
   rowCount: number;
   rowsAffected?: number;
   duration: number;
+  /** Statements in the script that was run (1 for a plain query). */
+  statementCount?: number;
 }
 
 export interface QueryError {

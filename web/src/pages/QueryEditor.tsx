@@ -395,6 +395,7 @@ export default function QueryEditor() {
           </Button>
           {result && (
             <span className="text-sm text-muted-foreground">
+              {(result.statementCount ?? 1) > 1 && `${result.statementCount} statements · `}
               {result.rowsAffected != null
                 ? `${result.rowsAffected} rows affected in ${result.duration}ms`
                 : `${result.rowCount} rows in ${result.duration}ms`}
