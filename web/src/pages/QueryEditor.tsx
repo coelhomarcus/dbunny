@@ -5,6 +5,7 @@ import QueryResults from "../components/QueryResults";
 import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
 import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
 import ExportMenu from "../components/ExportMenu";
+import Button from "../components/ui/Button";
 
 type TabMeta = {
   id: number;
@@ -264,50 +265,44 @@ export default function QueryEditor() {
     <div className="h-full flex flex-col gap-2">
       {pendingDangers && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
-          <div className="bg-zinc-900 border border-zinc-700/50 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
             <div className="px-5 pt-5 pb-4">
               <div className="flex items-center gap-2.5 mb-1">
-                <div className="flex items-center justify-center w-7 h-7 rounded-full bg-red-500/15">
-                  <AlertTriangle size={14} className="text-red-400" />
+                <div className="flex items-center justify-center w-7 h-7 rounded-full bg-destructive/15">
+                  <AlertTriangle size={14} className="text-destructive-foreground" />
                 </div>
-                <h3 className="text-sm font-semibold text-white">Query blocked by Safe Mode</h3>
+                <h3 className="text-sm font-semibold text-foreground">Query blocked by Safe Mode</h3>
               </div>
-              <p className="text-sm text-zinc-500 mt-2">
+              <p className="text-sm text-muted-foreground mt-2">
                 {pendingDangers.length === 1
                   ? "A potentially destructive operation was detected."
                   : `${pendingDangers.length} potentially destructive operations were detected.`}
               </p>
             </div>
 
-            <div className="mx-5 mb-4 rounded-xl border border-zinc-700/40 bg-zinc-800/30 divide-y divide-zinc-700/30">
+            <div className="mx-5 mb-4 rounded-xl border border-border bg-muted divide-y divide-border">
               {pendingDangers.map((d, i) => (
                 <div key={i} className="px-3 py-2.5">
-                  <span className="font-mono text-xs font-medium text-red-400 block">{d.rule}</span>
-                  <span className="text-xs text-zinc-500 block mt-0.5">{d.detail}</span>
+                  <span className="font-mono text-xs font-medium text-destructive-foreground block">{d.rule}</span>
+                  <span className="text-xs text-muted-foreground block mt-0.5">{d.detail}</span>
                 </div>
               ))}
             </div>
 
-            <div className="flex items-center gap-2 px-5 py-3.5 border-t border-zinc-700/40 bg-zinc-800/20">
-              <button
-                onClick={confirmDangerousQuery}
-                className="px-3.5 py-1.5 text-xs font-medium bg-red-600/80 hover:bg-red-600 text-white rounded-lg transition-colors cursor-pointer"
-              >
+            <div className="flex items-center gap-2 px-5 py-3.5 border-t border-border bg-muted">
+              <Button variant="destructive" size="sm" onClick={confirmDangerousQuery}>
                 Run anyway
-              </button>
-              <button
-                onClick={cancelDangerousQuery}
-                className="px-3.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              >
+              </Button>
+              <Button variant="ghost-muted" size="sm" onClick={cancelDangerousQuery}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         </div>
       )}
 
       {/* Editor panel */}
-      <div className="flex flex-col flex-1 min-h-0 bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
+      <div className="flex flex-col flex-1 min-h-0 bg-card border border-border rounded-xl overflow-hidden">
         {/* Tabs: the active one joins the editor below (see .joined-tab in index.css) */}
         <div className="tab-strip flex items-end shrink-0 select-none">
           <div className="flex items-end gap-1 flex-1 px-2 pt-1.5 overflow-x-auto overflow-y-hidden">
@@ -321,8 +316,8 @@ export default function QueryEditor() {
                   // Transition only while hovered, so switching tabs swaps styles instantly
                   className={`joined-tab group flex items-center gap-1.5 px-3.5 pt-2 text-sm font-medium whitespace-nowrap cursor-pointer ${
                     active
-                      ? "pb-[9px] text-white"
-                      : "pb-1 mb-1 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 hover:transition-colors"
+                      ? "pb-[9px] text-foreground"
+                      : "pb-1 mb-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent hover:transition-colors"
                   }`}
                 >
                   {tab.label}
@@ -331,8 +326,8 @@ export default function QueryEditor() {
                       onClick={(e) => closeTab(e, tab.id)}
                       className={`rounded p-0.5 transition-colors cursor-pointer ${
                         active
-                          ? "text-zinc-400 hover:text-white hover:bg-zinc-700"
-                          : "text-transparent group-hover:text-zinc-500 hover:text-white! hover:bg-zinc-700"
+                          ? "text-muted-foreground hover:text-foreground hover:bg-accent"
+                          : "text-transparent group-hover:text-muted-foreground hover:text-foreground! hover:bg-accent"
                       }`}
                     >
                       <X size={10} />
@@ -342,13 +337,9 @@ export default function QueryEditor() {
               );
             })}
           </div>
-          <button
-            onClick={addTab}
-            className="mb-1.5 mr-2 p-1.5 rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors shrink-0 cursor-pointer"
-            title="New query tab"
-          >
-            <Plus size={14} />
-          </button>
+          <Button variant="ghost-muted" size="icon-xs" className="mb-1.5 mr-2" onClick={addTab} title="New query tab">
+            <Plus />
+          </Button>
         </div>
 
         {/* SQL editor */}
@@ -362,19 +353,15 @@ export default function QueryEditor() {
         </div>
 
         {/* Toolbar */}
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 border-t border-zinc-800/60 select-none">
-          <button
-            onClick={runQuery}
-            disabled={running}
-            className="px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white text-sm font-medium rounded-lg transition-colors relative cursor-pointer disabled:cursor-not-allowed"
-          >
+        <div className="flex items-center gap-3 px-3 py-2 bg-muted border-t border-border select-none">
+          <Button variant="primary" size="sm" className="px-4" onClick={runQuery} disabled={running}>
             <span className={`transition-opacity duration-200 ${running ? "opacity-0" : "opacity-100"}`}>
               Run
             </span>
-            <Loader className={`w-4 h-4 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
-          </button>
+            <Loader className={`size-4 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
+          </Button>
           {result && (
-            <span className="text-sm text-zinc-500">
+            <span className="text-sm text-muted-foreground">
               {result.rowsAffected != null
                 ? `${result.rowsAffected} rows affected in ${result.duration}ms`
                 : `${result.rowCount} rows in ${result.duration}ms`}
@@ -389,40 +376,30 @@ export default function QueryEditor() {
                 side="up"
               />
             )}
-            <button
+            <Button
+              variant={safeMode ? "ghost" : "ghost-muted"}
+              size="sm"
+              className={safeMode ? "text-success-foreground" : undefined}
               onClick={() => setSafeMode((v) => !v)}
               title={safeMode ? "Safe Mode ON - click to disable" : "Safe Mode OFF - click to enable"}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded-lg transition-colors cursor-pointer ${
-                safeMode
-                  ? "text-emerald-400 hover:text-emerald-300 hover:bg-zinc-700/50"
-                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50"
-              }`}
             >
-              {safeMode ? <ShieldCheck size={15} /> : <ShieldOff size={15} />}
+              {safeMode ? <ShieldCheck /> : <ShieldOff />}
               {safeMode ? "Safe" : "Unsafe"}
-            </button>
-            <button
-              onClick={importQuery}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 text-sm rounded-lg transition-colors cursor-pointer"
-              title="Import .sql file"
-            >
-              <Upload size={15} />
+            </Button>
+            <Button variant="ghost-muted" size="sm" onClick={importQuery} title="Import .sql file">
+              <Upload />
               Import
-            </button>
-            <button
-              onClick={exportQuery}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 text-sm rounded-lg transition-colors cursor-pointer"
-              title="Export as .sql file"
-            >
-              <Download size={15} />
+            </Button>
+            <Button variant="ghost-muted" size="sm" onClick={exportQuery} title="Export as .sql file">
+              <Download />
               Export SQL
-            </button>
+            </Button>
           </div>
         </div>
       </div>
 
       {/* Results panel */}
-      <div className="flex-1 min-h-0 bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
+      <div className="flex-1 min-h-0 bg-card border border-border rounded-xl overflow-hidden">
         <QueryResults result={result} error={error} running={running} />
       </div>
     </div>

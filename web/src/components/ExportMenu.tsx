@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Download, Loader } from "lucide-react";
 import { exportData, type ExportFormat } from "../lib/exportData";
 import type { QueryColumn } from "@/types";
+import Button from "./ui/Button";
 
 interface ExportMenuProps {
   columns: QueryColumn[];
@@ -59,19 +60,15 @@ export default function ExportMenu({
 
   return (
     <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-400 hover:text-zinc-200 text-sm rounded-lg transition-colors cursor-pointer"
-        title="Export data"
-      >
-        {loading ? <Loader size={14} className="animate-spin" /> : <Download size={14} />}
-      </button>
+      <Button variant="ghost-muted" size="icon-sm" data-active={open} onClick={() => setOpen((v) => !v)} title="Export data">
+        {loading ? <Loader className="animate-spin" /> : <Download />}
+      </Button>
 
       {open && (
-        <div className={`absolute ${posClass} z-50 min-w-40 bg-zinc-800 border border-zinc-700/60 rounded-lg shadow-xl overflow-hidden`}>
+        <div className={`absolute ${posClass} z-50 min-w-44 p-1 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg overflow-hidden`}>
           {showAllOption && (
-            <div className="px-3 pt-2 pb-1">
-              <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+            <div className="px-2 pt-1.5 pb-1">
+              <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
                 Current page
               </span>
             </div>
@@ -80,7 +77,7 @@ export default function ExportMenu({
             <button
               key={f.value}
               onClick={() => handleExport(f.value)}
-              className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors cursor-pointer"
+              className="w-full text-left px-2 py-1.5 rounded-md text-sm text-foreground hover:bg-accent cursor-pointer"
             >
               {f.label}
             </button>
@@ -88,9 +85,9 @@ export default function ExportMenu({
 
           {showAllOption && (
             <>
-              <div className="border-t border-zinc-700/40" />
-              <div className="px-3 pt-2 pb-1">
-                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+              <div className="-mx-1 my-1 border-t border-border" />
+              <div className="px-2 pt-1.5 pb-1">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
                   All rows ({totalRows.toLocaleString()})
                 </span>
               </div>
@@ -99,7 +96,7 @@ export default function ExportMenu({
                   key={`all-${f.value}`}
                   onClick={() => handleExportAll(f.value)}
                   disabled={loading}
-                  className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full text-left px-2 py-1.5 rounded-md text-sm text-foreground hover:bg-accent cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {f.label}
                 </button>

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightSpecialChars, drawSelection } from "@codemirror/view";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
-import { appDarkThemeExtension } from "../lib/codemirror/theme";
+import { appThemeExtension } from "../lib/codemirror/theme";
 import { sqlDialect } from "../lib/codemirror/sqlCompletion";
 
 /** Read-only, syntax-highlighted SQL (function definitions, etc.). */
@@ -26,7 +26,7 @@ export default function SqlViewer({ value }: { value: string }) {
           search({ top: true }),
           keymap.of(searchKeymap),
           sqlDialect.language,
-          appDarkThemeExtension,
+          appThemeExtension,
         ],
       }),
     });

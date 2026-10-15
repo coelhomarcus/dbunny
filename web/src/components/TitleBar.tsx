@@ -49,30 +49,30 @@ export default function TitleBar() {
 
   return (
     <div
-      className="h-9 bg-zinc-950 flex items-center justify-between select-none shrink-0"
+      className="h-9 bg-background flex items-center justify-between select-none shrink-0"
       onMouseDown={startDrag}
     >
       <div className="flex items-center gap-2 px-3 pointer-events-none">
-        <img src="/icon.svg" className="size-4" />
-        <span className="text-xs text-zinc-500 font-medium">DBunny</span>
+        <img src="/icon.svg" className="size-4 invert dark:invert-0" />
+        <span className="text-xs text-muted-foreground font-medium">DBunny</span>
       </div>
 
       <div className="flex h-full">
         <button
           onClick={() => appWindow.minimize()}
-          className="h-full w-12 flex items-center justify-center text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors cursor-pointer"
+          className="h-full w-12 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
         >
           <Minus size={14} />
         </button>
         <button
           onClick={() => appWindow.toggleMaximize()}
-          className="h-full w-12 flex items-center justify-center text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors cursor-pointer"
+          className="h-full w-12 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
         >
           {maximized ? <RestoreIcon /> : <MaximizeIcon />}
         </button>
         <button
           onClick={() => appWindow.close()}
-          className="h-full w-12 flex items-center justify-center text-zinc-400 hover:bg-red-600 hover:text-white transition-colors cursor-pointer"
+          className="h-full w-12 flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-white transition-colors cursor-pointer"
         >
           <X size={14} />
         </button>

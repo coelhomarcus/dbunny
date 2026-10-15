@@ -2,69 +2,83 @@ import { EditorView } from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 
-export const appDarkTheme = EditorView.theme(
-  {
-    "&": {
-      height: "100%",
-      fontSize: "14px",
-      color: "#d4d4d4",
-      backgroundColor: "#18181b",
-    },
-    "&.cm-focused": { outline: "none" },
-    ".cm-scroller": {
-      fontFamily: 'Menlo, "SF Mono", Consolas, "Courier New", monospace',
-      lineHeight: "1.5",
-    },
-    ".cm-content": { padding: "10px 0", caretColor: "#aeafad" },
-    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "#aeafad" },
-    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
-      { backgroundColor: "#2d2d33" },
-    ".cm-selectionMatch": { backgroundColor: "#2d2d3399" },
-    ".cm-matchingBracket, &.cm-focused .cm-matchingBracket": {
-      backgroundColor: "transparent",
-      outline: "1px solid #52525b",
-    },
-    ".cm-gutters": {
-      backgroundColor: "#18181b",
-      color: "#3f3f46",
-      border: "none",
-    },
-    ".cm-lineNumbers .cm-gutterElement": { padding: "0 16px 0 20px" },
-    ".cm-activeLineGutter": { backgroundColor: "#1e1e22", color: "#71717a" },
-    ".cm-tooltip": {
-      backgroundColor: "#1e1e22",
-      border: "1px solid #27272a",
-      borderRadius: "6px",
-      overflow: "hidden",
-    },
-    ".cm-tooltip-autocomplete > ul": { fontFamily: 'Menlo, "SF Mono", Consolas, "Courier New", monospace' },
-    ".cm-tooltip-autocomplete > ul > li": { padding: "2px 8px" },
-    ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
-      backgroundColor: "#2d2d33",
-      color: "#ffffff",
-    },
-    ".cm-completionMatchedText": { textDecoration: "none", color: "#60a5fa", fontWeight: "600" },
-    ".cm-panels": { backgroundColor: "#1e1e22", color: "#d4d4d4" },
-    ".cm-panels.cm-panels-top": { borderBottom: "1px solid #27272a" },
-    ".cm-panels.cm-panels-bottom": { borderTop: "1px solid #27272a" },
-    ".cm-panel input, .cm-panel button": { fontSize: "12px" },
-    ".cm-textfield": { backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: "4px" },
-    ".cm-button": { backgroundImage: "none", backgroundColor: "#27272a", border: "1px solid #3f3f46", borderRadius: "4px" },
-    ".cm-searchMatch": { backgroundColor: "#515c6a80" },
-    ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "#62331c" },
-  },
-  { dark: true },
-);
+const MONO = 'Menlo, "SF Mono", Consolas, "Courier New", monospace';
 
-// VS Code "Dark+" token colours
-export const appDarkHighlight = HighlightStyle.define([
-  { tag: t.keyword, color: "#569cd6" },
-  { tag: [t.typeName, t.standard(t.name)], color: "#569cd6" },
-  { tag: [t.string, t.special(t.string)], color: "#ce9178" },
-  { tag: [t.number, t.bool, t.null], color: "#b5cea8" },
-  { tag: [t.lineComment, t.blockComment], color: "#6a9955" },
-  { tag: [t.operator, t.punctuation], color: "#d4d4d4" },
-  { tag: t.special(t.name), color: "#9cdcfe" },
+// Every colour comes from the CSS theme tokens in index.css, so the editor
+// follows light/dark mode without being reconfigured.
+export const appTheme = EditorView.theme({
+  "&": {
+    height: "100%",
+    fontSize: "14px",
+    color: "var(--foreground)",
+    backgroundColor: "var(--card)",
+  },
+  "&.cm-focused": { outline: "none" },
+  ".cm-scroller": { fontFamily: MONO, lineHeight: "1.5" },
+  ".cm-content": { padding: "10px 0", caretColor: "var(--editor-cursor)" },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--editor-cursor)" },
+  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
+    { backgroundColor: "var(--editor-selection)" },
+  ".cm-selectionMatch": { backgroundColor: "var(--editor-selection)" },
+  ".cm-matchingBracket, &.cm-focused .cm-matchingBracket": {
+    backgroundColor: "transparent",
+    outline: "1px solid var(--ring)",
+  },
+  ".cm-gutters": {
+    backgroundColor: "var(--card)",
+    color: "var(--editor-gutter)",
+    border: "none",
+  },
+  ".cm-lineNumbers .cm-gutterElement": { padding: "0 16px 0 20px" },
+  ".cm-activeLineGutter": {
+    backgroundColor: "var(--editor-line-active)",
+    color: "var(--editor-gutter-active)",
+  },
+  ".cm-tooltip": {
+    backgroundColor: "var(--popover)",
+    color: "var(--popover-foreground)",
+    border: "1px solid var(--border)",
+    borderRadius: "8px",
+    overflow: "hidden",
+    boxShadow: "0 8px 24px rgb(0 0 0 / 0.12)",
+  },
+  ".cm-tooltip-autocomplete > ul": { fontFamily: MONO, padding: "4px" },
+  ".cm-tooltip-autocomplete > ul > li": { padding: "2px 8px", borderRadius: "5px" },
+  ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
+    backgroundColor: "var(--accent)",
+    color: "var(--foreground)",
+  },
+  ".cm-completionDetail": { color: "var(--muted-foreground)", fontStyle: "normal" },
+  ".cm-completionMatchedText": { textDecoration: "none", color: "var(--primary)", fontWeight: "600" },
+  ".cm-panels": { backgroundColor: "var(--popover)", color: "var(--foreground)" },
+  ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--border)" },
+  ".cm-panels.cm-panels-bottom": { borderTop: "1px solid var(--border)" },
+  ".cm-panel input, .cm-panel button": { fontSize: "12px" },
+  ".cm-textfield": {
+    backgroundColor: "var(--card)",
+    color: "var(--foreground)",
+    border: "1px solid var(--input)",
+    borderRadius: "6px",
+  },
+  ".cm-button": {
+    backgroundImage: "none",
+    backgroundColor: "var(--secondary)",
+    color: "var(--foreground)",
+    border: "1px solid var(--input)",
+    borderRadius: "6px",
+  },
+  ".cm-searchMatch": { backgroundColor: "color-mix(in srgb, var(--warning) 30%, transparent)" },
+  ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "color-mix(in srgb, var(--primary) 35%, transparent)" },
+});
+
+const appHighlight = HighlightStyle.define([
+  { tag: t.keyword, color: "var(--syntax-keyword)" },
+  { tag: [t.typeName, t.standard(t.name)], color: "var(--syntax-type)" },
+  { tag: [t.string, t.special(t.string)], color: "var(--syntax-string)" },
+  { tag: [t.number, t.bool, t.null], color: "var(--syntax-number)" },
+  { tag: [t.lineComment, t.blockComment], color: "var(--syntax-comment)" },
+  { tag: [t.operator, t.punctuation], color: "var(--foreground)" },
+  { tag: t.special(t.name), color: "var(--syntax-special)" },
 ]);
 
-export const appDarkThemeExtension = [appDarkTheme, syntaxHighlighting(appDarkHighlight)];
+export const appThemeExtension = [appTheme, syntaxHighlighting(appHighlight)];

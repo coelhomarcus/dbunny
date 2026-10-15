@@ -15,7 +15,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { indentOnInput, bracketMatching } from "@codemirror/language";
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
-import { appDarkThemeExtension } from "../lib/codemirror/theme";
+import { appThemeExtension } from "../lib/codemirror/theme";
 import { sqlCompletion, sqlDialect } from "../lib/codemirror/sqlCompletion";
 import type { CompletionSchema } from "@/types";
 
@@ -90,7 +90,7 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun }: SqlE
       EditorView.lineWrapping,
       sqlDialect.language,
       completionRef.current.of(sqlCompletion(schemaRef.current)),
-      appDarkThemeExtension,
+      appThemeExtension,
     ];
 
     const view = new EditorView({

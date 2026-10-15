@@ -1,3 +1,4 @@
+import Button from "./ui/Button";
 interface PaginationProps {
   page: number;
   totalPages: number;
@@ -16,13 +17,13 @@ export default function Pagination({
   onPageSizeChange,
 }: PaginationProps) {
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 border-t border-zinc-800/40 bg-zinc-800/30 text-sm text-zinc-400 select-none">
+    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-muted text-sm text-muted-foreground select-none">
       <div className="flex items-center gap-2">
         <span>Rows per page</span>
         <select
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
-          className="bg-zinc-700/50 border border-zinc-700/60 rounded-lg px-2 py-1 text-zinc-300 hover:bg-zinc-700 focus:outline-none cursor-pointer"
+          className="h-7 bg-card border border-input rounded-lg px-1.5 text-foreground shadow-xs/5 hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 cursor-pointer"
         >
           {pageSizeOptions.map((opt) => (
             <option key={opt} value={opt}>
@@ -38,20 +39,12 @@ export default function Pagination({
             Page {page} of {totalPages}
           </span>
           <div className="flex gap-2">
-            <button
-              onClick={() => onPageChange(Math.max(1, page - 1))}
-              disabled={page <= 1}
-              className="px-3 py-1.5 rounded-lg bg-zinc-700/50 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed transition-colors"
-            >
+            <Button variant="outline" size="sm" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}>
               Previous
-            </button>
-            <button
-              onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-              disabled={page >= totalPages}
-              className="px-3 py-1.5 rounded-lg bg-zinc-700/50 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed transition-colors"
-            >
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages}>
               Next
-            </button>
+            </Button>
           </div>
         </div>
       )}

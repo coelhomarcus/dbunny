@@ -1,12 +1,20 @@
 <!doctype html>
-<html lang="en" style="background-color: black;">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DBunny</title>
+    <script>
+      // Apply the theme before first paint (same logic as src/lib/theme.ts)
+      try {
+        var pref = localStorage.getItem("dbunny-theme") || "system";
+        var dark = pref === "dark" || (pref !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+        if (dark) document.documentElement.classList.add("dark");
+      } catch (e) {}
+    </script>
   </head>
-  <body style="background-color: black;">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -153,12 +153,12 @@ export default function TableView() {
         onFetchAllRows={fetchAllRows}
       />
 
-      {error && <div className="p-4 text-red-400 text-sm bg-zinc-900 border border-zinc-800/60 rounded-xl">{error}</div>}
+      {error && <div className="p-4 text-destructive-foreground text-sm bg-card border border-border rounded-xl">{error}</div>}
 
       {loading && !data && <TableSkeleton columns={6} rows={14} />}
 
       {data && (
-        <div className="flex-1 min-h-0 flex flex-col bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col bg-card border border-border rounded-xl overflow-hidden">
           <div className="flex-1 overflow-auto">
             <table
               className="text-sm w-full"
@@ -188,7 +188,7 @@ export default function TableView() {
                 {reactTable.getHeaderGroups().map((hg) => (
                   <tr key={hg.id}>
                     <th
-                      className="bg-zinc-800 border-b border-r border-zinc-700/40 px-3 py-2.5 text-left"
+                      className="bg-card-header border-b border-r border-border px-3 py-2.5 text-left"
                       style={{ width: 40 }}
                     >
                       <Checkbox
@@ -216,19 +216,19 @@ export default function TableView() {
                   const isRowDirty = !!pending.pendingChanges[rowIndex];
                   const isSelected = selection.selectedRows.has(rowIndex);
                   const rowBg = isSelected
-                    ? "bg-zinc-800/40"
+                    ? "bg-primary/8"
                     : isRowDirty
-                      ? "bg-amber-950/10"
+                      ? "bg-warning/5"
                       : rowIndex % 2 === 0
-                        ? "bg-zinc-900"
-                        : "bg-zinc-800/20";
+                        ? "bg-card"
+                        : "bg-muted";
 
                   return (
                     <tr
                       key={rowIndex}
-                      className={`${rowBg} hover:bg-zinc-800/40`}
+                      className={`${rowBg} hover:bg-accent`}
                     >
-                      <td className="border-b border-r border-zinc-800/40 px-3 py-1.5">
+                      <td className="border-b border-r border-border px-3 py-1.5">
                         <Checkbox
                           checked={isSelected}
                           onChange={() => selection.toggleSelectRow(rowIndex)}

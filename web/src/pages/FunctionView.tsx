@@ -49,11 +49,11 @@ export default function FunctionView() {
   return (
     <div className="h-full flex flex-col gap-2">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900 border border-zinc-800/60 rounded-xl shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-card border border-border rounded-xl shrink-0">
         <div className="flex items-center gap-2">
-          <Braces size={16} className="text-purple-400" />
+          <Braces size={16} className="text-purple-500" />
           <h2 className="text-base font-medium">
-            <span className="text-zinc-500">{schema}.</span>
+            <span className="text-muted-foreground">{schema}.</span>
             {name}
           </h2>
         </div>
@@ -63,12 +63,12 @@ export default function FunctionView() {
         <DetailSkeleton />
       ) : error ? (
         <div className="flex-1 flex items-center justify-center p-4">
-          <span className="text-sm text-red-400">{error}</span>
+          <span className="text-sm text-destructive-foreground">{error}</span>
         </div>
       ) : detail ? (
         <div className="flex-1 overflow-auto flex flex-col gap-3">
           {/* Properties */}
-          <div className="px-5 py-4 bg-zinc-900 border border-zinc-800/60 rounded-xl shrink-0">
+          <div className="px-5 py-4 bg-card border border-border rounded-xl shrink-0">
             <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm max-w-xl">
               <Property label="Type" value={detail.kind} />
               <Property label="Language" value={detail.language} />
@@ -92,14 +92,14 @@ export default function FunctionView() {
           </div>
 
           {/* Source code */}
-          <div className="flex-1 min-h-0 flex flex-col bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 bg-zinc-800/40 border-b border-zinc-800/40">
-              <span className="text-sm font-medium text-zinc-400">
+          <div className="flex-1 min-h-0 flex flex-col bg-card border border-border rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3 bg-muted border-b border-border">
+              <span className="text-sm font-medium text-muted-foreground">
                 Definition
               </span>
               <button
                 onClick={copySource}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 rounded-lg transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 h-6 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors cursor-pointer"
               >
                 {copied ? (
                   <>
@@ -125,8 +125,8 @@ export default function FunctionView() {
 function Property({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-2">
-      <span className="text-zinc-500 shrink-0">{label}</span>
-      <span className="text-zinc-200 font-mono">{value}</span>
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <span className="text-foreground font-mono">{value}</span>
     </div>
   );
 }

@@ -16,7 +16,7 @@ const MAX_PREVIEW = 300;
 
 function renderValue(value: unknown) {
   if (value === null)
-    return <span className="text-zinc-600 italic">NULL</span>;
+    return <span className="text-muted-foreground/70 italic">NULL</span>;
   const str = typeof value === "object" ? JSON.stringify(value) : String(value);
   if (str.length > MAX_PREVIEW) return str.slice(0, MAX_PREVIEW) + "…";
   return str;
@@ -29,12 +29,12 @@ export default function EditableCell({
 }: EditableCellProps) {
   return (
     <td
-      className={`relative p-0 overflow-hidden border-b border-r border-zinc-800/40 ${isDirty ? "bg-amber-500/6" : ""}`}
+      className={`relative p-0 overflow-hidden border-b border-r border-border ${isDirty ? "bg-warning/8" : ""}`}
       onClick={() => !isEditing && onStartEdit()}
     >
       <div
         className={`px-3 py-1.5 truncate overflow-hidden ${isEditing ? "invisible" : ""} ${
-          isDirty ? "text-amber-200" : "text-zinc-300"
+          isDirty ? "text-warning-foreground" : "text-foreground"
         } ${!hasNoPk && !isEditing ? "cursor-text" : ""}`}
       >
         {renderValue(displayValue)}
@@ -55,7 +55,7 @@ export default function EditableCell({
               onCancel();
             }
           }}
-          className="absolute inset-0 px-3 bg-zinc-800 text-white text-sm outline-none ring-1 ring-inset ring-green-500/60"
+          className="absolute inset-0 px-3 bg-card text-foreground text-sm outline-none ring-1 ring-inset ring-primary/60"
         />
       )}
     </td>

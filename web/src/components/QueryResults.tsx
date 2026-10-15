@@ -35,9 +35,9 @@ function ErrorDisplay({ raw }: { raw: string }) {
   const err = parseError(raw);
   const severity = err.severity?.toUpperCase() ?? "ERROR";
   const severityColor =
-    severity === "WARNING" ? "text-yellow-400 bg-yellow-950/40 border-yellow-900/50"
-    : severity === "NOTICE" ? "text-blue-400 bg-blue-950/40 border-blue-900/50"
-    : "text-red-400 bg-red-950/40 border-red-900/50";
+    severity === "WARNING" ? "text-warning-foreground bg-warning/10 border-warning/30"
+    : severity === "NOTICE" ? "text-info-foreground bg-info/10 border-info/30"
+    : "text-destructive-foreground bg-destructive/10 border-destructive/30";
 
   return (
     <div className={`m-4 rounded-lg border p-4 text-sm ${severityColor}`}>
@@ -86,7 +86,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
       accessorFn: (row: unknown[]) => row[index],
       cell: (info) => {
         const value = info.getValue();
-        if (value === null) return <span className="text-zinc-600 italic">NULL</span>;
+        if (value === null) return <span className="text-muted-foreground/70 italic">NULL</span>;
         if (typeof value === "object") return JSON.stringify(value);
         return String(value);
       },
@@ -115,7 +115,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
                 {hg.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="text-left px-3 py-2.5 text-sm font-medium text-zinc-400 bg-zinc-800 border-b border-zinc-700/40 whitespace-nowrap"
+                    className="text-left px-3 py-2.5 text-sm font-medium text-muted-foreground bg-card-header border-b border-border whitespace-nowrap"
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
@@ -127,14 +127,14 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
             {table.getRowModel().rows.map((row, i) => (
               <tr
                 key={row.id}
-                className={`border-b border-zinc-800/40 hover:bg-zinc-800/40 ${
-                  i % 2 === 0 ? "bg-zinc-900" : "bg-zinc-800/20"
+                className={`border-b border-border hover:bg-accent ${
+                  i % 2 === 0 ? "bg-card" : "bg-muted"
                 }`}
               >
                 {row.getVisibleCells().map((cell) => (
                   <td
                     key={cell.id}
-                    className="px-3 py-2 text-zinc-300 whitespace-nowrap max-w-xs truncate font-mono text-sm"
+                    className="px-3 py-2 text-foreground whitespace-nowrap max-w-xs truncate font-mono text-sm"
                   >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
@@ -146,7 +146,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
       )}
 
       {result && result.columns.length === 0 && (
-        <div className="flex-1 flex items-center justify-center p-4 text-zinc-400 text-base">
+        <div className="flex-1 flex items-center justify-center p-4 text-muted-foreground text-base">
           Query executed successfully. {result.rowsAffected ?? result.rowCount} rows affected.
         </div>
       )}
@@ -154,7 +154,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
       {running && !result && <QueryResultsSkeleton />}
 
       {!result && !error && !running && (
-        <div className="flex-1 flex items-center justify-center text-zinc-600 text-base">
+        <div className="flex-1 flex items-center justify-center text-muted-foreground/70 text-base">
           Write a query and press Ctrl+Enter to run
         </div>
       )}

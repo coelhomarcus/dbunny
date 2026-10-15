@@ -24,7 +24,7 @@ export default function App() {
 
   return (
     <ConnectionProvider>
-      <div className="h-screen flex flex-col bg-zinc-950 text-white">
+      <div className="h-screen flex flex-col bg-background text-foreground">
         <TitleBar />
         <div className="flex-1 min-h-0">
           <HashRouter>
