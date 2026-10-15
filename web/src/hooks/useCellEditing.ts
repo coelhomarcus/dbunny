@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type Dispatch, type SetStateAction } from "react";
 import type { TableDataResponse } from "@/types";
+import { resolveEdit, toEditText } from "../lib/cellEdit";
 
 export type PendingChanges = Record<number, Record<string, unknown>>;
 
@@ -12,7 +13,9 @@ interface UseCellEditingOptions {
 
 export function useCellEditing({ data, hasNoPk, pendingChanges, setPendingChanges }: UseCellEditingOptions) {
   const [editingCell, setEditingCell] = useState<{ rowIndex: number; colName: string } | null>(null);
-  const [editValue, setEditValue] = useState("");
+  const [editValue, setEditValueState] = useState("");
+  // NULL is separate from an empty field: an empty field means an empty string
+  const [editIsNull, setEditIsNull] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -25,7 +28,8 @@ export function useCellEditing({ data, hasNoPk, pendingChanges, setPendingChange
       setEditingCell({ rowIndex, colName });
       const pending = pendingChanges[rowIndex]?.[colName];
       const value = pending !== undefined ? pending : originalValue;
-      setEditValue(value === null ? "" : (typeof value === "object" ? JSON.stringify(value) : String(value)));
+      setEditValueState(toEditText(value));
+      setEditIsNull(value === null || value === undefined);
     },
     [hasNoPk, pendingChanges],
   );
@@ -35,15 +39,14 @@ export function useCellEditing({ data, hasNoPk, pendingChanges, setPendingChange
     const { rowIndex, colName } = editingCell;
     const colIdx = data.columns.findIndex((c) => c.name === colName);
     const originalValue = data.rows[rowIndex][colIdx];
-    const originalStr = originalValue === null ? "" : (typeof originalValue === "object" ? JSON.stringify(originalValue) : String(originalValue));
+    const outcome = resolveEdit(originalValue, editIsNull, editValue);
 
     setPendingChanges((prev) => {
       const rowChanges = { ...(prev[rowIndex] ?? {}) };
-      if (editValue === originalStr) {
+      if (!outcome.changed) {
         delete rowChanges[colName];
       } else {
-        rowChanges[colName] =
-          editValue === "" && originalValue === null ? null : editValue;
+        rowChanges[colName] = outcome.value;
       }
       if (Object.keys(rowChanges).length === 0) {
         const next = { ...prev };
@@ -54,14 +57,27 @@ export function useCellEditing({ data, hasNoPk, pendingChanges, setPendingChange
     });
 
     setEditingCell(null);
-  }, [editingCell, editValue, data, setPendingChanges]);
+  }, [editingCell, editValue, editIsNull, data, setPendingChanges]);
 
   const cancelEdit = useCallback(() => setEditingCell(null), []);
+
+  /** Typing replaces NULL with text. */
+  const setEditValue = useCallback((value: string) => {
+    setEditValueState(value);
+    setEditIsNull(false);
+  }, []);
+
+  const setEditNull = useCallback(() => {
+    setEditValueState("");
+    setEditIsNull(true);
+  }, []);
 
   return {
     editingCell,
     editValue,
+    editIsNull,
     setEditValue,
+    setEditNull,
     inputRef,
     startEdit,
     confirmEdit,

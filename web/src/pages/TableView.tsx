@@ -260,11 +260,13 @@ export default function TableView() {
                             isEditing={isEditing}
                             hasNoPk={hasNoPk}
                             editValue={editing.editValue}
+                            editIsNull={editing.editIsNull}
                             inputRef={editing.inputRef}
                             onStartEdit={() =>
                               editing.startEdit(rowIndex, col.name, originalValue)
                             }
                             onEditValueChange={editing.setEditValue}
+                            onSetNull={editing.setEditNull}
                             onConfirm={editing.confirmEdit}
                             onCancel={editing.cancelEdit}
                           />

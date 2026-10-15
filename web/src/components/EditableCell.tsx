@@ -5,9 +5,12 @@ interface EditableCellProps {
   isEditing: boolean;
   hasNoPk: boolean;
   editValue: string;
+  /** The field currently holds SQL NULL (as opposed to an empty string). */
+  editIsNull: boolean;
   inputRef: React.RefObject<HTMLInputElement | null>;
   onStartEdit: () => void;
   onEditValueChange: (v: string) => void;
+  onSetNull: () => void;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -24,8 +27,8 @@ function renderValue(value: unknown) {
 
 export default function EditableCell({
   displayValue, isDirty, isEditing, hasNoPk,
-  editValue, inputRef,
-  onStartEdit, onEditValueChange, onConfirm, onCancel,
+  editValue, editIsNull, inputRef,
+  onStartEdit, onEditValueChange, onSetNull, onConfirm, onCancel,
 }: EditableCellProps) {
   return (
     <td
@@ -40,23 +43,46 @@ export default function EditableCell({
         {renderValue(displayValue)}
       </div>
       {isEditing && (
-        <input
-          ref={inputRef}
-          value={editValue}
-          onChange={(e) => onEditValueChange(e.target.value)}
-          onBlur={onConfirm}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
+        <>
+          <input
+            ref={inputRef}
+            value={editValue}
+            onChange={(e) => onEditValueChange(e.target.value)}
+            onBlur={onConfirm}
+            placeholder={editIsNull ? "NULL" : "empty"}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onConfirm();
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                onCancel();
+              }
+              // Ctrl/Cmd+Shift+N: set the value to NULL
+              if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "n") {
+                e.preventDefault();
+                onSetNull();
+              }
+            }}
+            className="absolute inset-0 px-3 pr-14 bg-card text-foreground text-sm outline-none ring-1 ring-inset ring-primary/60 placeholder:italic placeholder:text-muted-foreground/70"
+          />
+          {/* mousedown is prevented so the input keeps focus (a blur would confirm the edit) */}
+          <button
+            type="button"
+            tabIndex={-1}
+            title="Set to NULL (Ctrl/Cmd+Shift+N)"
+            onMouseDown={(e) => {
               e.preventDefault();
-              onConfirm();
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              onCancel();
-            }
-          }}
-          className="absolute inset-0 px-3 bg-card text-foreground text-sm outline-none ring-1 ring-inset ring-primary/60"
-        />
+              onSetNull();
+            }}
+            className={`absolute right-1.5 top-1/2 z-10 -translate-y-1/2 rounded px-1.5 py-0.5 text-[11px] font-medium cursor-pointer transition-colors ${
+              editIsNull ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+            }`}
+          >
+            NULL
+          </button>
+        </>
       )}
     </td>
   );
