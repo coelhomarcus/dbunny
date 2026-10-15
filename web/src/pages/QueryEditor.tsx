@@ -1,9 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import Editor, { type OnMount, type BeforeMount } from "@monaco-editor/react";
-import { api } from "../lib/api";
-import type { QueryResult } from "@/types";
-import { useSqlAutocomplete } from "../hooks/useSqlAutocomplete";
+import { api, getSessionId } from "../lib/api";
+import type { CompletionSchema, QueryResult } from "@/types";
 import QueryResults from "../components/QueryResults";
+import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
 import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
 import ExportMenu from "../components/ExportMenu";
 
@@ -31,6 +30,15 @@ let savedSafeMode = true;
 const savedPayloads: Map<number, TabPayload> = new Map([
   [1, { sql: "SELECT 1;", result: null, error: null }],
 ]);
+// Autocomplete catalog of the current connection, reused when coming back to the page
+let savedCompletion: { sessionId: string | null; schema: CompletionSchema } | null = null;
+
+function cachedCompletionSchema() {
+  return savedCompletion?.sessionId === getSessionId() ? savedCompletion.schema : null;
+}
+
+// Statements that can add/remove tables, columns or functions
+const DDL_PATTERN = /\b(CREATE|ALTER|DROP|RENAME)\b/i;
 
 function detectDangerousStatements(sql: string): DangerInfo[] {
   const dangers: DangerInfo[] = [];
@@ -76,10 +84,10 @@ export default function QueryEditor() {
   const [safeMode, setSafeMode] = useState(savedSafeMode);
   const [pendingDangers, setPendingDangers] = useState<DangerInfo[] | null>(null);
   const pendingSqlRef = useRef<string | null>(null);
+  const [completionSchema, setCompletionSchema] = useState<CompletionSchema | null>(cachedCompletionSchema);
 
-  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const editorRef = useRef<SqlEditorHandle | null>(null);
   const activeIdRef = useRef(activeId);
-  const { registerCompletionProvider } = useSqlAutocomplete();
 
   useEffect(() => {
     activeIdRef.current = activeId;
@@ -88,6 +96,21 @@ export default function QueryEditor() {
   useEffect(() => {
     savedSafeMode = safeMode;
   }, [safeMode]);
+
+  const loadCompletionSchema = useCallback(() => {
+    const sessionId = getSessionId();
+    api
+      .getCompletionSchema()
+      .then((schema) => {
+        savedCompletion = { sessionId, schema };
+        setCompletionSchema(schema);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadCompletionSchema();
+  }, [loadCompletionSchema]);
 
   useEffect(() => {
     return () => {
@@ -195,6 +218,7 @@ export default function QueryEditor() {
       setResult(res);
       const payload = savedPayloads.get(activeIdRef.current);
       if (payload) { payload.result = res; payload.error = null; }
+      if (DDL_PATTERN.test(sql)) loadCompletionSchema();
     } catch (err) {
       await delay;
       const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "Query failed";
@@ -204,18 +228,12 @@ export default function QueryEditor() {
     } finally {
       setRunning(false);
     }
-  }, []);
+  }, [loadCompletionSchema]);
 
   const runQuery = useCallback(async () => {
     const editor = editorRef.current;
     if (!editor) return;
-    const selection = editor.getSelection();
-    let sql: string;
-    if (selection && !selection.isEmpty()) {
-      sql = editor.getModel()?.getValueInRange(selection) ?? "";
-    } else {
-      sql = editor.getValue();
-    }
+    const sql = editor.getSelectionOrValue();
     if (!sql.trim()) return;
 
     if (safeMode) {
@@ -241,40 +259,6 @@ export default function QueryEditor() {
     setPendingDangers(null);
     pendingSqlRef.current = null;
   }
-
-  const handleBeforeMount: BeforeMount = (monaco) => {
-    monaco.editor.defineTheme("app-dark", {
-      base: "vs-dark",
-      inherit: true,
-      rules: [],
-      colors: {
-        "editor.background": "#18181b",
-        "editor.lineHighlightBackground": "#1e1e22",
-        "editorLineNumber.foreground": "#3f3f46",
-        "editorLineNumber.activeForeground": "#71717a",
-        "editor.selectionBackground": "#2d2d33",
-        "editorGutter.background": "#18181b",
-        "scrollbar.shadow": "#18181b",
-        "editorWidget.background": "#1e1e22",
-        "editorWidget.border": "#27272a",
-        "input.background": "#1e1e22",
-        "input.border": "#27272a",
-      },
-    });
-    registerCompletionProvider(monaco);
-  };
-
-  const handleEditorMount: OnMount = (editor) => {
-    editorRef.current = editor;
-    const payload = savedPayloads.get(activeId);
-    editor.setValue(payload?.sql ?? "");
-    editor.addAction({
-      id: "run-query",
-      label: "Run Query",
-      keybindings: [2048 | 3],
-      run: () => runQuery(),
-    });
-  };
 
   return (
     <div className="h-full flex flex-col gap-2">
@@ -362,23 +346,13 @@ export default function QueryEditor() {
           </button>
         </div>
 
-        {/* Monaco editor */}
+        {/* SQL editor */}
         <div className="flex-1 min-h-0">
-          <Editor
-            defaultLanguage="sql"
-            theme="app-dark"
-            beforeMount={handleBeforeMount}
-            onMount={handleEditorMount}
-            options={{
-              minimap: { enabled: false },
-              fontSize: 14,
-              lineNumbers: "on",
-              scrollBeyondLastLine: false,
-              wordWrap: "on",
-              padding: { top: 10, bottom: 10 },
-              renderLineHighlight: "gutter",
-              automaticLayout: true,
-            }}
+          <SqlEditor
+            onMount={(handle) => { editorRef.current = handle; }}
+            initialValue={savedPayloads.get(activeId)?.sql ?? ""}
+            schema={completionSchema}
+            onRun={runQuery}
           />
         </div>
 

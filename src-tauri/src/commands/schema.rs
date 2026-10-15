@@ -283,3 +283,124 @@ pub async fn get_columns(
         })
         .collect())
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionRelation {
+    pub schema: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub relation_type: String,
+    pub columns: Vec<CompletionColumn>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionColumn {
+    pub name: String,
+    pub data_type: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionSchema {
+    pub current_schema: Option<String>,
+    pub relations: Vec<CompletionRelation>,
+    pub functions: Vec<FunctionInfo>,
+}
+
+/// Everything the SQL editor needs for autocomplete, fetched in a couple of
+/// catalog queries instead of one `get_columns` call per table.
+#[tauri::command]
+pub async fn get_completion_schema(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<CompletionSchema, String> {
+    let sessions = state.sessions.lock().await;
+    let session = sessions.get(&session_id).ok_or("Session not found")?;
+
+    let current_schema: Option<String> = session
+        .client
+        .query_one("SELECT current_schema()::text AS name", &[])
+        .await
+        .map_err(|e| e.to_string())?
+        .get("name");
+
+    let rows = session
+        .client
+        .query(
+            "SELECT n.nspname AS schema, c.relname AS name, \
+             CASE WHEN c.relkind IN ('v', 'm') THEN 'view' ELSE 'table' END AS type, \
+             a.attname AS column_name, \
+             format_type(a.atttypid, a.atttypmod) AS data_type \
+             FROM pg_class c \
+             JOIN pg_namespace n ON n.oid = c.relnamespace \
+             LEFT JOIN pg_attribute a \
+               ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+             WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') \
+               AND n.nspname NOT IN ('pg_catalog', 'information_schema') \
+               AND n.nspname NOT LIKE 'pg\\_toast%' \
+               AND n.nspname NOT LIKE 'pg\\_temp%' \
+             ORDER BY n.nspname, c.relname, a.attnum",
+            &[],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut relations: Vec<CompletionRelation> = Vec::new();
+    for r in &rows {
+        let schema: String = r.get("schema");
+        let name: String = r.get("name");
+        let is_same = relations
+            .last()
+            .is_some_and(|last| last.schema == schema && last.name == name);
+        if !is_same {
+            relations.push(CompletionRelation {
+                schema,
+                name,
+                relation_type: r.get("type"),
+                columns: Vec::new(),
+            });
+        }
+        if let Some(column) = r.get::<_, Option<String>>("column_name") {
+            relations.last_mut().unwrap().columns.push(CompletionColumn {
+                name: column,
+                data_type: r.get("data_type"),
+            });
+        }
+    }
+
+    let function_rows = session
+        .client
+        .query(
+            "SELECT p.proname AS name, n.nspname AS schema, \
+             COALESCE(pg_get_function_result(p.oid), '') AS return_type, \
+             pg_get_function_arguments(p.oid) AS argument_types \
+             FROM pg_proc p \
+             JOIN pg_namespace n ON p.pronamespace = n.oid \
+             WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') \
+               AND n.nspname NOT LIKE 'pg\\_toast%' \
+               AND n.nspname NOT LIKE 'pg\\_temp%' \
+               AND p.prokind IN ('f', 'p') \
+             ORDER BY n.nspname, p.proname",
+            &[],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let functions = function_rows
+        .iter()
+        .map(|r| FunctionInfo {
+            name: r.get("name"),
+            schema: r.get("schema"),
+            return_type: r.get("return_type"),
+            argument_types: r.get("argument_types"),
+        })
+        .collect();
+
+    Ok(CompletionSchema {
+        current_schema,
+        relations,
+        functions,
+    })
+}

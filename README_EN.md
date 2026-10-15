@@ -33,7 +33,7 @@ Available for **Windows**, **macOS** (Intel & Apple Silicon), and **Linux**.
 - Connection details masked by default for privacy
 
 ### Query Editor
-- Multi-tab SQL editor powered by Monaco Editor with syntax highlighting
+- Multi-tab SQL editor powered by CodeMirror with syntax highlighting
 - Execute queries with `Ctrl+Enter` (run selected text or full editor content)
 - SQL autocomplete with 40+ keywords
 - Safe Mode enabled by default — detects and blocks destructive queries before execution:
@@ -61,7 +61,7 @@ Available for **Windows**, **macOS** (Intel & Apple Silicon), and **Linux**.
 
 | Layer | Technologies |
 |-------|-------------|
-| Frontend | React 19, TypeScript, Tailwind CSS 4, Monaco Editor, TanStack Table |
+| Frontend | React 19, TypeScript, Tailwind CSS 4, CodeMirror, TanStack Table |
 | Backend | Tauri 2 (Rust), tokio-postgres, deadpool-postgres |
 | Security | AES-GCM, PBKDF2, SHA-256 |
 | Build | Vite, GitHub Actions (multi-platform CI/CD) |

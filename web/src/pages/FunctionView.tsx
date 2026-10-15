@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "react-router";
 import { Braces, Copy, Check } from "lucide-react";
 import { DetailSkeleton } from "../components/Skeleton";
 import { api } from "../lib/api";
+import SqlViewer from "../components/SqlViewer";
 import type { FunctionDetail } from "@/types";
 
 export default function FunctionView() {
@@ -111,9 +112,9 @@ export default function FunctionView() {
                 )}
               </button>
             </div>
-            <pre className="flex-1 p-5 text-sm text-zinc-300 font-mono overflow-auto whitespace-pre leading-relaxed">
-              {detail.source}
-            </pre>
+            <div className="flex-1 min-h-0">
+              <SqlViewer value={detail.source} />
+            </div>
           </div>
         </div>
       ) : null}

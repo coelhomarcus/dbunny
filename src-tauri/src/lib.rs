@@ -44,6 +44,7 @@ pub fn run() {
             commands::schema::get_functions,
             commands::schema::get_function_detail,
             commands::schema::get_columns,
+            commands::schema::get_completion_schema,
             commands::query::execute_query,
             commands::query::get_table_data,
             commands::query::update_row,

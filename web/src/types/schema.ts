@@ -48,3 +48,21 @@ export interface SchemaTreeNode {
   children?: SchemaTreeNode[];
   isLoaded?: boolean;
 }
+
+export interface CompletionColumn {
+  name: string;
+  dataType: string;
+}
+
+export interface CompletionRelation {
+  schema: string;
+  name: string;
+  type: "table" | "view";
+  columns: CompletionColumn[];
+}
+
+export interface CompletionSchema {
+  currentSchema: string | null;
+  relations: CompletionRelation[];
+  functions: FunctionInfo[];
+}

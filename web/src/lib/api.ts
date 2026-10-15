@@ -6,6 +6,7 @@ import type {
   FunctionInfo,
   FunctionDetail,
   ColumnInfo,
+  CompletionSchema,
   QueryResult,
   TableDataResponse,
   SavedConnection,
@@ -53,6 +54,10 @@ export const api = {
 
   async getColumns(schema: string, table: string) {
     return invoke<ColumnInfo[]>("get_columns", { sessionId, schema, table });
+  },
+
+  async getCompletionSchema() {
+    return invoke<CompletionSchema>("get_completion_schema", { sessionId });
   },
 
   async getTableData(
