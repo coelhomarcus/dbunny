@@ -226,3 +226,48 @@ mod tests {
         assert_eq!(config.get_ssl_mode(), SslMode::Require);
     }
 }
+
+/// Tests that need a real server with SSL enabled (a self-signed certificate is fine). Run with:
+///   DBUNNY_TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/db cargo test --lib -- --ignored
+#[cfg(test)]
+mod server_tests {
+    use super::*;
+
+    fn base_url() -> String {
+        std::env::var("DBUNNY_TEST_DATABASE_URL").expect("set DBUNNY_TEST_DATABASE_URL to run the server tests")
+    }
+
+    /// Connects with the given sslmode and reports whether the session is encrypted.
+    async fn connect_with(sslmode: &str) -> Result<bool, String> {
+        let separator = if base_url().contains('?') { '&' } else { '?' };
+        let url = url::Url::parse(&format!("{}{}sslmode={}", base_url(), separator, sslmode)).unwrap();
+        let (config, tls) = connection_config(&url)?;
+        let (client, connection) = config.connect(tls).await.map_err(|e| e.to_string())?;
+        tokio::spawn(connection);
+        let row = client
+            .query_one("SELECT COALESCE((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false)", &[])
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(row.get(0))
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL (server with ssl on)"]
+    async fn require_and_prefer_encrypt_even_with_a_self_signed_certificate() {
+        assert!(connect_with("require").await.unwrap());
+        assert!(connect_with("prefer").await.unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL (server with ssl on)"]
+    async fn disable_does_not_use_tls() {
+        assert!(!connect_with("disable").await.unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL (server with ssl on)"]
+    async fn verify_modes_refuse_a_certificate_nobody_trusts() {
+        assert!(connect_with("verify-ca").await.is_err());
+        assert!(connect_with("verify-full").await.is_err());
+    }
+}
