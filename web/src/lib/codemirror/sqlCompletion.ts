@@ -6,7 +6,6 @@ import {
   type CompletionContext,
   type CompletionSource,
 } from "@codemirror/autocomplete";
-import { syntaxTree } from "@codemirror/language";
 import {
   PostgreSQL,
   keywordCompletionSource,
@@ -121,17 +120,61 @@ function indexRelations(schema: CompletionSchema): RelationIndex {
 
 const IDENT = String.raw`(?:"(?:[^"]|"")+"|[A-Za-z_][\w$]*)`;
 const IDENT_RE = new RegExp(IDENT, "g");
-const TABLE_REF = new RegExp(String.raw`(?:\b(?:from|join|update|into|table)\s+|,\s*)(${IDENT}(?:\s*\.\s*${IDENT})?)`, "gi");
+const QUALIFIED = String.raw`(${IDENT}(?:\s*\.\s*${IDENT})?)`;
+// Two separate passes: a single regex would let `, FROM` swallow the `FROM users` after it
+const TABLE_REFS = [
+  new RegExp(String.raw`\b(?:from|join|update|into|table)\s+${QUALIFIED}`, "gi"),
+  new RegExp(String.raw`,\s*${QUALIFIED}`, "gi"),
+];
 
 function unquote(part: string) {
   return part.startsWith('"') ? part.slice(1, -1).replace(/""/g, '"') : part.toLowerCase();
 }
 
+/** Bounds of the statement around `pos`, split on `;`. */
+function statementRange(context: CompletionContext, pos: number) {
+  const doc = context.state.doc.toString();
+  const end = doc.indexOf(";", pos);
+  return { from: doc.lastIndexOf(";", pos - 1) + 1, to: end < 0 ? doc.length : end };
+}
+
 function statementText(context: CompletionContext) {
-  let node = syntaxTree(context.state).resolveInner(context.pos, -1);
-  while (node.name !== "Statement" && node.parent) node = node.parent;
-  if (node.name === "Statement") return context.state.sliceDoc(node.from, node.to);
-  return context.state.doc.toString();
+  const { from, to } = statementRange(context, context.pos);
+  return context.state.sliceDoc(from, to);
+}
+
+/** Statement text before `pos`, with comments and string contents blanked out. */
+function textBefore(context: CompletionContext, pos: number) {
+  return context.state
+    .sliceDoc(statementRange(context, pos).from, pos)
+    .replace(/--[^\n]*/g, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/'(?:[^']|'')*'/g, "''");
+}
+
+const AFTER_TABLE_KEYWORD = /\b(?:from|join|update|into|table|truncate)\s+$/i;
+const AFTER_COLUMN_KEYWORD = /\b(?:select|distinct|where|and|or|on|set|by|having|returning)\s+$/i;
+const CLAUSE_KEYWORD = /\b(select|from|where|group\s+by|order\s+by|having|set|returning|on|into|values|limit)\b/gi;
+const COLUMN_LIST_CLAUSES = new Set(["select", "where", "group by", "order by", "having", "set", "returning", "on", "into"]);
+
+/**
+ * What belongs at an empty position: a table (`FROM |`, `JOIN |`, `FROM a, |`)
+ * or a column (`SELECT |`, `WHERE |`, `ORDER BY a, |`, `INSERT INTO t (|`).
+ */
+function positionKind(before: string): "table" | "column" | null {
+  if (AFTER_TABLE_KEYWORD.test(before)) return "table";
+  if (AFTER_COLUMN_KEYWORD.test(before)) return "column";
+
+  const afterComma = /,\s*$/.test(before);
+  const afterParen = /\(\s*$/.test(before);
+  if (!afterComma && !afterParen) return null;
+
+  const clause = [...before.matchAll(CLAUSE_KEYWORD)].at(-1)?.[1].toLowerCase().replace(/\s+/g, " ");
+  if (!clause) return null;
+  if (afterComma && clause === "from") return "table";
+  // `INSERT INTO t (` opens the column list; elsewhere a paren is a function call or subquery
+  if (afterParen) return clause === "into" ? "column" : null;
+  return COLUMN_LIST_CLAUSES.has(clause) ? "column" : null;
 }
 
 /**
@@ -141,11 +184,15 @@ function statementText(context: CompletionContext) {
 function columnsInScope(index: RelationIndex): CompletionSource {
   return (context) => {
     const word = context.matchBefore(/[\w$]*/);
-    if (!word || (word.from === word.to && !context.explicit)) return null;
-    if (context.state.sliceDoc(word.from - 1, word.from) === ".") return null;
+    if (!word || context.state.sliceDoc(word.from - 1, word.from) === ".") return null;
+    // With nothing typed yet, only open by itself where a column is expected
+    if (word.from === word.to && !context.explicit && positionKind(textBefore(context, word.from)) !== "column") {
+      return null;
+    }
 
     const seen = new Set<CompletionRelation>();
-    for (const match of statementText(context).matchAll(TABLE_REF)) {
+    const text = statementText(context);
+    for (const match of TABLE_REFS.flatMap((re) => [...text.matchAll(re)])) {
       const path = (match[1].match(IDENT_RE) ?? []).map(unquote);
       const rel = index.get(path.join("."));
       if (rel) seen.add(rel);
@@ -164,6 +211,30 @@ function columnsInScope(index: RelationIndex): CompletionSource {
         });
       }
     }
+    return { from: word.from, options, validFor: /^[\w$]*$/ };
+  };
+}
+
+/**
+ * Opens the table list right after `FROM `, `JOIN `, `UPDATE `… without typing
+ * anything. Once a word is typed, lang-sql's schema source takes over; options
+ * here match its fields exactly so the two don't show duplicates.
+ */
+function tablesAfterKeyword(schema: CompletionSchema): CompletionSource {
+  const current = schema.currentSchema ?? "public";
+  const options: Completion[] = schema.relations.map((rel) => {
+    if (rel.schema === current) {
+      return { label: rel.name, type: "type", detail: rel.type, apply: applyFor(rel.name) };
+    }
+    const qualified = `${rel.schema}.${rel.name}`;
+    const applied = `${quoteIdent(rel.schema)}.${quoteIdent(rel.name)}`;
+    return { label: qualified, type: "type", detail: rel.type, apply: applied === qualified ? undefined : applied };
+  });
+
+  return (context) => {
+    const word = context.matchBefore(/[\w$]*/);
+    if (!word || word.from !== word.to) return null;
+    if (positionKind(textBefore(context, word.from)) !== "table") return null;
     return { from: word.from, options, validFor: /^[\w$]*$/ };
   };
 }
@@ -227,6 +298,7 @@ export function sqlCompletion(schema: CompletionSchema | null): Extension {
         }),
       ),
       ifNotIn(SKIP_NODES, columnsInScope(indexRelations(schema))),
+      ifNotIn(SKIP_NODES, tablesAfterKeyword(schema)),
     );
   }
 
