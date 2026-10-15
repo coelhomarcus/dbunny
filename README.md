@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <img src="https://marcuscoelho.com/assets/projects/dbunny.webp" width="720" alt="DBunny screenshot" />
+  <img src="https://marcuscoelho.com/assets/projects/dbunny/01.webp" width="720" alt="DBunny screenshot" />
 </p>
 
 ## Sobre
