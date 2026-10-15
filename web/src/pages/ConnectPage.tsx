@@ -1,67 +1,93 @@
-import { useState, useEffect, useRef } from "react";
-import { useConnection } from "../contexts/useConnection";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useNavigate } from "react-router";
-import {
-  Database,
-  Server,
-  User,
-  Lock,
-  Link,
-  ArrowRight,
-  X,
-  Loader,
-  Bookmark,
-  Plus,
-  PanelLeftClose,
-  PanelLeftOpen,
-} from "lucide-react";
-import {
-  type ConnectionFields,
-  parseConnectionUrl,
-  buildConnectionUrl,
-} from "../lib/connectionUrl";
+import { getVersion } from "@tauri-apps/api/app";
+import { ArrowRight, Check, Database, Eye, EyeOff, Link, Loader, PlugZap, TriangleAlert, X } from "lucide-react";
+import { useConnection } from "../contexts/useConnection";
+import { type ConnectionFields, parseConnectionUrl, buildConnectionUrl } from "../lib/connectionUrl";
 import { api } from "../lib/api";
-import type { SavedConnection } from "@/types";
-import SavedConnectionsList from "../components/SavedConnectionsList";
-import Tooltip from "../components/Tooltip";
-import Button from "../components/ui/Button";
-import { inputClass } from "../components/ui/styles";
-import ThemeToggle from "../components/ui/ThemeToggle";
-import { HeaderTitle } from "../components/layout/PageHeader";
 import { cn } from "../lib/cn";
+import type { SavedConnection } from "@/types";
+import ConnectionSidebar from "../components/connect/ConnectionSidebar";
+import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
+import { IdleStatusBar } from "../components/layout/StatusBar";
+import Button from "../components/ui/Button";
+import Input from "../components/ui/Input";
+import Field from "../components/ui/Field";
+import Switch from "../components/ui/Switch";
+import Badge from "../components/ui/Badge";
+import Dialog from "../components/ui/Dialog";
+import Popover from "../components/ui/Popover";
+import ColorPicker from "../components/ui/ColorPicker";
+
+const DEFAULT_COLOR = "#3b82f6";
+// Colour tags to tell environments apart (prod, staging, local...)
+const COLOR_PRESETS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899"];
+
+const EMPTY_FIELDS: ConnectionFields = { host: "", port: "", database: "", user: "", password: "", ssl: false };
+
+type TestState =
+  | { status: "idle" }
+  | { status: "testing" }
+  | { status: "ok"; version: string }
+  | { status: "error"; message: string };
+
+function errorMessage(err: unknown) {
+  return typeof err === "string" ? err : err instanceof Error ? err.message : "Connection failed";
+}
+
+function Section({
+  title,
+  description,
+  action,
+  children,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-border bg-card shadow-xs/5">
+      <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[13px] font-semibold">{title}</h2>
+          {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+        </div>
+        {action}
+      </div>
+      <div className="flex flex-col gap-4 p-4">{children}</div>
+    </section>
+  );
+}
 
 export default function ConnectPage() {
-  const [fields, setFields] = useState<ConnectionFields>({
-    host: "",
-    port: "",
-    database: "",
-    user: "",
-    password: "",
-    ssl: false,
-  });
+  const [fields, setFields] = useState<ConnectionFields>(EMPTY_FIELDS);
   const [connectionName, setConnectionName] = useState("");
-  const [connectionColor, setConnectionColor] = useState("#3b82f6");
+  const [connectionColor, setConnectionColor] = useState(DEFAULT_COLOR);
   const [showImport, setShowImport] = useState(false);
   const [importUrl, setImportUrl] = useState("");
-  const [savedConnections, setSavedConnections] = useState<
-    SavedConnection[] | null
-  >(null);
+  const [importError, setImportError] = useState(false);
+  const [savedConnections, setSavedConnections] = useState<SavedConnection[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const colorInputRef = useRef<HTMLInputElement>(null);
-
+  const [showPassword, setShowPassword] = useState(false);
+  const [test, setTest] = useState<TestState>({ status: "idle" });
+  const [version, setVersion] = useState<string | null>(null);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const customColorRef = useRef<HTMLButtonElement>(null);
+
   const { connect, isConnecting, error } = useConnection();
   const navigate = useNavigate();
 
   useEffect(() => {
     loadSavedConnections();
+    getVersion().then(setVersion).catch(() => {});
   }, []);
 
   async function loadSavedConnections() {
     try {
-      const connections = await api.getSavedConnections();
-      setSavedConnections(connections);
+      setSavedConnections(await api.getSavedConnections());
     } catch {
       setSavedConnections([]);
     }
@@ -69,21 +95,36 @@ export default function ConnectPage() {
 
   function updateField(key: keyof ConnectionFields, value: string | boolean) {
     setFields((prev) => ({ ...prev, [key]: value }));
+    setTest({ status: "idle" });
+  }
+
+  /** Fills the form from a postgres:// URL. Returns false if it isn't one. */
+  function importFromUrl(url: string) {
+    const parsed = parseConnectionUrl(url.trim());
+    if (!/^postgres(ql)?:\/\//i.test(url.trim()) || !parsed.host) return false;
+    setFields((prev) => ({ ...prev, ...parsed }));
+    setTest({ status: "idle" });
+    return true;
   }
 
   function handleImport() {
-    const parsed = parseConnectionUrl(importUrl);
-    if (parsed.host) {
-      setFields((prev) => ({ ...prev, ...parsed }));
-      setShowImport(false);
-      setImportUrl("");
+    if (!importFromUrl(importUrl)) {
+      setImportError(true);
+      return;
     }
+    closeImport();
+  }
+
+  function closeImport() {
+    setShowImport(false);
+    setImportUrl("");
+    setImportError(false);
   }
 
   function handleSelectSaved(conn: SavedConnection) {
     setSelectedId(conn.id);
     setConnectionName(conn.name);
-    setConnectionColor(conn.color || "#3b82f6");
+    setConnectionColor(conn.color || DEFAULT_COLOR);
     setFields({
       host: conn.host,
       port: conn.port.toString(),
@@ -92,6 +133,7 @@ export default function ConnectPage() {
       password: conn.password,
       ssl: conn.ssl,
     });
+    setTest({ status: "idle" });
   }
 
   async function handleConnectSaved(conn: SavedConnection) {
@@ -107,34 +149,25 @@ export default function ConnectPage() {
       });
       await connect(url, { name: conn.name, color: conn.color });
       navigate("/db/query");
-    } catch {}
+    } catch {
+      // the error is shown by the connection context
+    }
   }
 
   function handleNewConnection() {
     setSelectedId(null);
     setConnectionName("");
-    setConnectionColor("#3b82f6");
-    setFields({
-      host: "",
-      port: "",
-      database: "",
-      user: "",
-      password: "",
-      ssl: false,
-    });
+    setConnectionColor(DEFAULT_COLOR);
+    setFields(EMPTY_FIELDS);
+    setTest({ status: "idle" });
   }
 
   async function handleSave() {
-    if (
-      !connectionName.trim() ||
-      !fields.host.trim() ||
-      !fields.database.trim()
-    )
-      return;
+    if (!connectionName.trim() || !fields.host.trim() || !fields.database.trim()) return;
 
     setIsSaving(true);
     try {
-      await Promise.all([
+      const [saved] = await Promise.all([
         api.saveConnection({
           id: selectedId || undefined,
           name: connectionName.trim(),
@@ -146,10 +179,14 @@ export default function ConnectPage() {
           ssl: fields.ssl,
           color: connectionColor,
         }),
-        new Promise((r) => setTimeout(r, 600)),
+        new Promise((r) => setTimeout(r, 400)),
       ]);
+      // Keep the saved item selected, so saving again updates instead of duplicating
+      setSelectedId(saved.id);
       await loadSavedConnections();
-    } catch {} finally {
+    } catch {
+      // keep the form as is; nothing was saved
+    } finally {
       setIsSaving(false);
     }
   }
@@ -159,325 +196,302 @@ export default function ConnectPage() {
       await api.deleteSavedConnection(id);
       if (selectedId === id) handleNewConnection();
       await loadSavedConnections();
-    } catch {}
+    } catch {
+      // list is reloaded on the next action
+    }
+  }
+
+  /** Opens and closes a session to check the details, without leaving the form. */
+  async function handleTest() {
+    setTest({ status: "testing" });
+    try {
+      const res = await api.connect(buildConnectionUrl(fields));
+      api.disconnect(res.sessionId).catch(() => {});
+      setTest({ status: "ok", version: res.serverVersion.split(" ")[0] });
+    } catch (err) {
+      setTest({ status: "error", message: errorMessage(err) });
+    }
   }
 
   async function handleSubmit(e: { preventDefault: () => void }) {
     e.preventDefault();
     try {
-      const url = buildConnectionUrl(fields);
       const savedName = connectionName.trim();
-      await connect(url, savedName ? { name: savedName, color: connectionColor } : undefined);
+      await connect(buildConnectionUrl(fields), savedName ? { name: savedName, color: connectionColor } : undefined);
       navigate("/db/query");
-    } catch {}
+    } catch {
+      // the error is shown by the connection context
+    }
   }
 
-  const canConnect = fields.host.trim() && fields.database.trim();
-  const canSave = canConnect && connectionName.trim();
-  const hasSavedConnections =
-    savedConnections !== null && savedConnections.length > 0;
+  const canConnect = Boolean(fields.host.trim() && fields.database.trim());
+  const canSave = canConnect && Boolean(connectionName.trim());
+  const editing = selectedId !== null;
+  const isCustomColor = !COLOR_PRESETS.includes(connectionColor);
 
   return (
-    <div className="h-full bg-card flex flex-col">
-      <div className="flex flex-1 overflow-hidden">
-        <aside
-          className={`shrink-0 border-r border-border flex flex-col select-none transition-[width] duration-300 ease-in-out overflow-hidden ${
-            sidebarExpanded ? "w-64" : "w-12"
-          }`}
-        >
-          <div className="relative flex-1">
-            {/* Expanded view */}
-            <div className={`absolute inset-y-0 left-0 w-64 flex flex-col transition-opacity duration-200 ${
-              sidebarExpanded ? "opacity-100 delay-75" : "opacity-0 pointer-events-none"
-            }`}>
-              <div className="h-12 pl-3 pr-2 flex items-center justify-between shrink-0 border-b border-border">
-                <HeaderTitle label="Saved">Connections</HeaderTitle>
-                <div className="flex items-center gap-0.5">
-                  {hasSavedConnections && (
-                    <Button variant="ghost-muted" size="icon-sm" onClick={handleNewConnection} title="New connection">
-                      <Plus />
-                    </Button>
-                  )}
-                  <Button variant="ghost-muted" size="icon-sm" onClick={() => setSidebarExpanded(false)} title="Minimize sidebar">
-                    <PanelLeftClose />
-                  </Button>
+    <div className="h-full flex flex-col bg-card">
+      <div className="flex flex-1 min-h-0">
+        <ConnectionSidebar
+          connections={savedConnections}
+          selectedId={selectedId}
+          expanded={sidebarExpanded}
+          onToggleExpanded={() => setSidebarExpanded((v) => !v)}
+          onSelect={handleSelectSaved}
+          onConnect={handleConnectSaved}
+          onDelete={handleDelete}
+          onNew={handleNewConnection}
+        />
+
+        <main className="flex min-w-0 flex-1 flex-col">
+          <PageHeader>
+            <HeaderTitle label={editing ? "Saved connection" : "Connection"} icon={<Database />}>
+              {editing ? connectionName || "Unnamed" : "New connection"}
+            </HeaderTitle>
+          </PageHeader>
+
+          <div className="flex-1 overflow-y-auto">
+            <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-xl flex-col gap-5 px-6 py-8">
+              <div className="flex items-center gap-3 select-none">
+                <img src="/icon.svg" className="size-10 invert dark:invert-0" alt="" />
+                <div>
+                  <h1 className="text-lg font-semibold leading-tight">
+                    {editing ? "Edit connection" : "Connect to PostgreSQL"}
+                  </h1>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {editing ? "Update the details, then save or connect." : "Enter the server details, or paste a connection URL into Host."}
+                  </p>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto py-1">
-                {hasSavedConnections ? (
-                  <SavedConnectionsList
-                    connections={savedConnections}
-                    selectedId={selectedId}
-                    onSelect={handleSelectSaved}
-                    onConnect={handleConnectSaved}
-                    onDelete={handleDelete}
-                  />
-                ) : (
-                  <div className="px-3 pt-4">
-                    <p className="text-xs text-muted-foreground/70 leading-relaxed">
-                      {savedConnections === null
-                        ? ""
-                        : "Save a connection to access it here."}
-                    </p>
-                  </div>
-                )}
-              </div>
-              <div className="px-2 py-2 border-t border-border flex items-center">
-                <ThemeToggle />
-              </div>
-            </div>
 
-            {/* Collapsed view */}
-            <div className={`absolute inset-0 flex flex-col items-center pb-2 transition-opacity duration-200 ${
-              sidebarExpanded ? "opacity-0 pointer-events-none" : "opacity-100 delay-75"
-            }`}>
-              <div className="h-12 w-full shrink-0 flex items-center justify-center border-b border-border">
-                <Tooltip label="Expand sidebar">
-                  <Button variant="ghost-muted" size="icon-sm" onClick={() => setSidebarExpanded(true)} aria-label="Expand sidebar">
-                    <PanelLeftOpen />
+              <Section
+                title="Server"
+                action={
+                  <Button variant="ghost-muted" size="xs" onClick={() => setShowImport(true)}>
+                    <Link />
+                    Import from URL
                   </Button>
-                </Tooltip>
-              </div>
-              <div className="mt-auto">
-                <ThemeToggle side="right" />
-              </div>
-            </div>
-          </div>
-        </aside>
-
-        <main className="flex-1 flex items-center justify-center overflow-y-auto">
-          <div className="w-full max-w-md">
-            <div className="text-center mb-8 select-none">
-              <div className="inline-flex items-center justify-center mb-3">
-                <img src="/icon.svg" className="size-14 invert dark:invert-0" />
-              </div>
-              <h1 className="text-xl font-semibold text-foreground mb-1">
-                {selectedId ? "Edit Connection" : "New Connection"}
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                {selectedId
-                  ? "Update your connection details"
-                  : "Enter your PostgreSQL connection details"}
-              </p>
-            </div>
-
-            <form onSubmit={handleSubmit} className="select-none">
-              <div className="bg-card rounded-xl border border-input shadow-xs/5 divide-y divide-border">
-                <div className="flex divide-x divide-border">
-                  <div className="flex-1 relative">
-                    <label className="absolute top-2.5 left-10 text-[11px] font-medium text-muted-foreground uppercase tracking-wider select-none">
-                      Host
-                    </label>
-                    <Server className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <input
-                      type="text"
+                }
+              >
+                <div className="grid grid-cols-[1fr_6.5rem] gap-3">
+                  <Field label="Host" htmlFor="conn-host">
+                    <Input
+                      id="conn-host"
+                      autoFocus
                       value={fields.host}
                       onChange={(e) => updateField("host", e.target.value)}
+                      onPaste={(e) => {
+                        if (importFromUrl(e.clipboardData.getData("text"))) e.preventDefault();
+                      }}
                       placeholder="localhost"
-                      className="w-full pl-10 pr-4 pt-7 pb-2.5 bg-transparent text-foreground text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:bg-muted transition-colors rounded-tl-xl"
                       spellCheck={false}
-                      autoFocus
                     />
-                  </div>
-                  <div className="w-28">
-                    <label className="absolute mt-2.5 ml-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider select-none">
-                      Port
-                    </label>
-                    <input
-                      type="text"
+                  </Field>
+                  <Field label="Port" htmlFor="conn-port">
+                    <Input
+                      id="conn-port"
+                      inputMode="numeric"
                       value={fields.port}
                       onChange={(e) => updateField("port", e.target.value)}
                       placeholder="5432"
-                      className="w-full px-3 pt-7 pb-2.5 bg-transparent text-foreground text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:bg-muted transition-colors font-mono rounded-tr-xl"
-                      spellCheck={false}
+                      className="font-mono"
                     />
-                  </div>
+                  </Field>
                 </div>
-
-                <div className="relative">
-                  <label className="absolute top-2.5 left-10 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                    Database
-                  </label>
-                  <Database className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <input
-                    type="text"
+                <Field label="Database" htmlFor="conn-db">
+                  <Input
+                    id="conn-db"
                     value={fields.database}
                     onChange={(e) => updateField("database", e.target.value)}
                     placeholder="my_database"
-                    className="w-full pl-10 pr-4 pt-7 pb-2.5 bg-transparent text-foreground text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:bg-muted transition-colors"
                     spellCheck={false}
                   />
-                </div>
-
-                <div className="relative">
-                  <label className="absolute top-2.5 left-10 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                    User
-                  </label>
-                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <input
-                    type="text"
-                    value={fields.user}
-                    onChange={(e) => updateField("user", e.target.value)}
-                    placeholder="postgres"
-                    className="w-full pl-10 pr-4 pt-7 pb-2.5 bg-transparent text-foreground text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:bg-muted transition-colors"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="relative">
-                  <label className="absolute top-2.5 left-10 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                    Password
-                  </label>
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <input
-                    type="password"
-                    value={fields.password}
-                    onChange={(e) => updateField("password", e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full pl-10 pr-4 pt-7 pb-2.5 bg-transparent text-foreground text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:bg-muted transition-colors"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between px-4 py-3">
-                  <span className="text-sm text-muted-foreground select-none">
-                    Require SSL
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={fields.ssl}
-                    onClick={() => updateField("ssl", !fields.ssl)}
-                    className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer ${
-                      fields.ssl ? "bg-primary" : "bg-foreground/15"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-xs transition-transform ${
-                        fields.ssl ? "translate-x-4" : ""
-                      }`}
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="User" htmlFor="conn-user">
+                    <Input
+                      id="conn-user"
+                      value={fields.user}
+                      onChange={(e) => updateField("user", e.target.value)}
+                      placeholder="postgres"
+                      spellCheck={false}
+                      autoComplete="off"
                     />
-                  </button>
+                  </Field>
+                  <Field label="Password" htmlFor="conn-password">
+                    <div className="relative">
+                      <Input
+                        id="conn-password"
+                        type={showPassword ? "text" : "password"}
+                        value={fields.password}
+                        onChange={(e) => updateField("password", e.target.value)}
+                        placeholder="••••••••"
+                        className="pr-8"
+                        autoComplete="off"
+                      />
+                      <Button
+                        variant="ghost-muted"
+                        size="icon-xs"
+                        className="absolute right-1 top-1/2 -translate-y-1/2"
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                        onClick={() => setShowPassword((v) => !v)}
+                      >
+                        {showPassword ? <EyeOff /> : <Eye />}
+                      </Button>
+                    </div>
+                  </Field>
                 </div>
-
-                <div className="relative">
-                  <label className="absolute top-2.5 left-10 text-[11px] font-medium text-muted-foreground uppercase tracking-wider select-none">
-                    Name
+                <div className="flex items-center justify-between gap-4">
+                  <label htmlFor="conn-ssl" className="select-none">
+                    <span className="block text-[13px] font-medium">Require SSL</span>
+                    <span className="block text-xs text-muted-foreground">Encrypt the connection (sslmode=require)</span>
                   </label>
-                  <Bookmark className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <input
-                    type="text"
+                  <Switch id="conn-ssl" checked={fields.ssl} onChange={(v) => updateField("ssl", v)} />
+                </div>
+              </Section>
+
+              <Section title="Save as" description="Optional. Keeps the connection in the sidebar for one-click access.">
+                <Field label="Name" htmlFor="conn-name">
+                  <Input
+                    id="conn-name"
                     value={connectionName}
                     onChange={(e) => setConnectionName(e.target.value)}
-                    placeholder="My Database"
-                    className="w-full pl-10 pr-12 pt-7 pb-2.5 bg-transparent text-foreground text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:bg-muted transition-colors rounded-b-xl"
+                    placeholder="e.g. Production"
                     spellCheck={false}
                   />
-                  <div className="absolute right-3.5 top-1/2 -translate-y-1/2">
+                </Field>
+                <Field label="Color" hint="Tag environments, e.g. red for production.">
+                  <div className="flex items-center gap-2">
+                    {COLOR_PRESETS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        aria-label={`Color ${color}`}
+                        aria-pressed={connectionColor === color}
+                        onClick={() => setConnectionColor(color)}
+                        className={cn(
+                          "size-5 rounded-full cursor-pointer outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring/50",
+                          connectionColor === color && "ring-2 ring-offset-2 ring-offset-card",
+                        )}
+                        style={{ backgroundColor: color, ["--tw-ring-color" as string]: color }}
+                      />
+                    ))}
+                    <span className="mx-0.5 h-4 w-px bg-border" />
                     <button
+                      ref={customColorRef}
                       type="button"
-                      onClick={() => colorInputRef.current?.click()}
-                      className="w-5 h-5 rounded-full border-2 border-input hover:border-ring transition-colors cursor-pointer"
-                      style={{ backgroundColor: connectionColor }}
-                      title="Pick a color"
+                      aria-label="Custom color"
+                      aria-expanded={colorPickerOpen}
+                      onClick={() => setColorPickerOpen((v) => !v)}
+                      className={cn(
+                        "size-5 rounded-full cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                        (isCustomColor || colorPickerOpen) && "ring-2 ring-offset-2 ring-offset-card",
+                      )}
+                      style={{
+                        background: isCustomColor
+                          ? connectionColor
+                          : "conic-gradient(#ef4444, #eab308, #22c55e, #3b82f6, #8b5cf6, #ef4444)",
+                        ["--tw-ring-color" as string]: isCustomColor ? connectionColor : "var(--ring)",
+                      }}
                     />
-                    <input
-                      ref={colorInputRef}
-                      type="color"
-                      value={connectionColor}
-                      onChange={(e) => setConnectionColor(e.target.value)}
-                      className="sr-only"
-                      tabIndex={-1}
-                    />
+                    <Popover open={colorPickerOpen} onClose={() => setColorPickerOpen(false)} anchorRef={customColorRef} className="p-3">
+                      <ColorPicker value={connectionColor} onChange={setConnectionColor} />
+                    </Popover>
                   </div>
-                </div>
-              </div>
-
-              {!showImport ? (
-                <Button variant="ghost-muted" size="xs" className="mt-2 -ml-2" onClick={() => setShowImport(true)}>
-                  <Link />
-                  Import from URL
-                </Button>
-              ) : (
-                <div className="mt-3 flex gap-2">
-                  <input
-                    type="text"
-                    value={importUrl}
-                    onChange={(e) => setImportUrl(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleImport();
-                      }
-                      if (e.key === "Escape") {
-                        setShowImport(false);
-                        setImportUrl("");
-                      }
-                    }}
-                    placeholder="postgresql://user:pass@host:5432/db"
-                    className={cn(inputClass, "flex-1 text-xs font-mono")}
-                    autoFocus
-                    spellCheck={false}
-                  />
-                  <Button variant="outline" onClick={handleImport}>
-                    Import
-                  </Button>
-                  <Button
-                    variant="ghost-muted"
-                    size="icon"
-                    aria-label="Cancel import"
-                    onClick={() => {
-                      setShowImport(false);
-                      setImportUrl("");
-                    }}
-                  >
-                    <X />
-                  </Button>
-                </div>
-              )}
+                </Field>
+              </Section>
 
               {error && (
-                <div className="mt-4 p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-destructive-foreground text-sm">
-                  {error}
+                <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2.5 text-sm text-destructive-foreground">
+                  <TriangleAlert size={15} className="mt-0.5 shrink-0" />
+                  <span className="min-w-0 break-words">{error}</span>
                 </div>
               )}
 
-              <div className="mt-4 flex">
-                <div
-                  className="shrink-0 overflow-hidden transition-[max-width,opacity] duration-500"
-                  style={{
-                    maxWidth: canSave ? "140px" : "0px",
-                    opacity: canSave ? 1 : 0,
-                  }}
-                >
-                  <div className="pr-2">
-                    <Button variant="outline" size="lg" onClick={handleSave} disabled={isSaving} className="w-full">
-                      <span className={`transition-opacity duration-200 ${isSaving ? "opacity-0" : "opacity-100"}`}>
-                        {selectedId ? "Update" : "Save"}
-                      </span>
-                      <Loader className={`size-3.5 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${isSaving ? "opacity-100" : "opacity-0"}`} />
-                    </Button>
-                  </div>
-                </div>
-
-                <Button type="submit" variant="primary" size="lg" disabled={!canConnect || isConnecting} className="flex-1">
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={handleTest} disabled={!canConnect || test.status === "testing"}>
+                  {test.status === "testing" ? <Loader className="animate-spin" /> : <PlugZap />}
+                  Test
+                </Button>
+                {test.status === "ok" && (
+                  <Badge variant="success">
+                    <Check />
+                    OK · PostgreSQL {test.version}
+                  </Badge>
+                )}
+                {test.status === "error" && (
+                  <Badge variant="destructive">
+                    <X />
+                    Connection failed
+                  </Badge>
+                )}
+                <div className="flex-1" />
+                <Button variant="outline" onClick={handleSave} disabled={!canSave || isSaving} title={canSave ? undefined : "Give it a name to save"}>
+                  {isSaving && <Loader className="animate-spin" />}
+                  {editing ? "Update" : "Save"}
+                </Button>
+                <Button type="submit" variant="primary" className="group px-4" disabled={!canConnect || isConnecting}>
                   {isConnecting ? (
                     <>
                       <Loader className="animate-spin" />
-                      Connecting...
+                      Connecting…
                     </>
                   ) : (
                     <>
                       Connect
-                      <ArrowRight />
+                      <ArrowRight className="transition-transform group-hover:translate-x-0.5" />
                     </>
                   )}
                 </Button>
               </div>
+              {test.status === "error" && (
+                <p className="-mt-2 break-words font-mono text-xs text-destructive-foreground">{test.message}</p>
+              )}
             </form>
           </div>
         </main>
       </div>
+
+      <IdleStatusBar version={version} />
+
+      <Dialog
+        open={showImport}
+        onClose={closeImport}
+        title="Import from URL"
+        description="Paste a PostgreSQL connection string to fill in the form."
+        footer={
+          <>
+            <Button variant="ghost-muted" size="sm" onClick={closeImport}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleImport} disabled={!importUrl.trim()}>
+              Import
+            </Button>
+          </>
+        }
+      >
+        <Input
+          autoFocus
+          value={importUrl}
+          onChange={(e) => {
+            setImportUrl(e.target.value);
+            setImportError(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleImport();
+            }
+          }}
+          placeholder="postgresql://user:password@host:5432/database"
+          spellCheck={false}
+          className="font-mono text-xs"
+          aria-invalid={importError}
+        />
+        {importError && (
+          <p className="mt-2 text-xs text-destructive-foreground">That doesn't look like a postgres:// connection URL.</p>
+        )}
+      </Dialog>
     </div>
   );
 }

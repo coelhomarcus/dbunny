@@ -52,7 +52,8 @@ export const inputClass =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-card px-2.5 text-sm text-foreground shadow-xs/5 " +
   "outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/70 " +
   "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/20 " +
-  "disabled:opacity-55 dark:bg-muted";
+  "disabled:opacity-55 dark:bg-muted " +
+  "aria-invalid:border-destructive/60 aria-invalid:ring-3 aria-invalid:ring-destructive/15";
 
 export const segmentedListClass = "flex w-fit items-center gap-0.5 rounded-lg bg-muted p-0.5";
 

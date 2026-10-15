@@ -40,3 +40,19 @@ export default function StatusBar({
     </footer>
   );
 }
+
+/** Bottom bar of a tab that isn't connected yet (the home screen). */
+export function IdleStatusBar({ version }: { version: string | null }) {
+  return (
+    <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border bg-background px-3 text-[11px] text-muted-foreground select-none">
+      <span className="flex items-center gap-1.5">
+        <span className="size-1.5 rounded-full bg-muted-foreground/50" />
+        Not connected
+      </span>
+      <div className="ml-auto flex items-center gap-1">
+        {version && <span className="mr-1.5">DBunny {version}</span>}
+        <ThemeToggle side="top" size="icon-xs" />
+      </div>
+    </footer>
+  );
+}
