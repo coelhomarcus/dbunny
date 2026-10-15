@@ -57,13 +57,9 @@ pub async fn get_schemas(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<Vec<SchemaInfo>, String> {
-    let sessions = state.sessions.lock().await;
-    let session = sessions
-        .get(&session_id)
-        .ok_or("Session not found")?;
+    let client = state.client(&session_id).await?;
 
-    let rows = session
-        .client
+    let rows = client
         .query(
             "SELECT schema_name as name FROM information_schema.schemata \
              WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast') \
@@ -82,11 +78,9 @@ pub async fn get_tables(
     session_id: String,
     schema: String,
 ) -> Result<Vec<TableInfo>, String> {
-    let sessions = state.sessions.lock().await;
-    let session = sessions.get(&session_id).ok_or("Session not found")?;
+    let client = state.client(&session_id).await?;
 
-    let rows = session
-        .client
+    let rows = client
         .query(
             "SELECT table_name as name, table_schema as schema, \
              CASE WHEN table_type = 'BASE TABLE' THEN 'table' ELSE 'view' END as type \
@@ -114,11 +108,9 @@ pub async fn get_views(
     session_id: String,
     schema: String,
 ) -> Result<Vec<TableInfo>, String> {
-    let sessions = state.sessions.lock().await;
-    let session = sessions.get(&session_id).ok_or("Session not found")?;
+    let client = state.client(&session_id).await?;
 
-    let rows = session
-        .client
+    let rows = client
         .query(
             "SELECT table_name as name, table_schema as schema, 'view' as type \
              FROM information_schema.tables \
@@ -145,11 +137,9 @@ pub async fn get_functions(
     session_id: String,
     schema: String,
 ) -> Result<Vec<FunctionInfo>, String> {
-    let sessions = state.sessions.lock().await;
-    let session = sessions.get(&session_id).ok_or("Session not found")?;
+    let client = state.client(&session_id).await?;
 
-    let rows = session
-        .client
+    let rows = client
         .query(
             "SELECT p.proname as name, n.nspname as schema, \
              pg_get_function_result(p.oid) as return_type, \
@@ -182,11 +172,9 @@ pub async fn get_function_detail(
     function_name: String,
     argument_types: String,
 ) -> Result<FunctionDetail, String> {
-    let sessions = state.sessions.lock().await;
-    let session = sessions.get(&session_id).ok_or("Session not found")?;
+    let client = state.client(&session_id).await?;
 
-    let row = session
-        .client
+    let row = client
         .query_one(
             "SELECT p.proname as name, \
              n.nspname as schema, \
@@ -242,11 +230,9 @@ pub async fn get_columns(
     schema: String,
     table: String,
 ) -> Result<Vec<ColumnInfo>, String> {
-    let sessions = state.sessions.lock().await;
-    let session = sessions.get(&session_id).ok_or("Session not found")?;
+    let client = state.client(&session_id).await?;
 
-    let rows = session
-        .client
+    let rows = client
         .query(
             "SELECT c.column_name as name, c.data_type as data_type, \
              (c.is_nullable = 'YES') as is_nullable, \
@@ -316,18 +302,15 @@ pub async fn get_completion_schema(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<CompletionSchema, String> {
-    let sessions = state.sessions.lock().await;
-    let session = sessions.get(&session_id).ok_or("Session not found")?;
+    let client = state.client(&session_id).await?;
 
-    let current_schema: Option<String> = session
-        .client
+    let current_schema: Option<String> = client
         .query_one("SELECT current_schema()::text AS name", &[])
         .await
         .map_err(|e| e.to_string())?
         .get("name");
 
-    let rows = session
-        .client
+    let rows = client
         .query(
             "SELECT n.nspname AS schema, c.relname AS name, \
              CASE WHEN c.relkind IN ('v', 'm') THEN 'view' ELSE 'table' END AS type, \
@@ -370,8 +353,7 @@ pub async fn get_completion_schema(
         }
     }
 
-    let function_rows = session
-        .client
+    let function_rows = client
         .query(
             "SELECT p.proname AS name, n.nspname AS schema, \
              COALESCE(pg_get_function_result(p.oid), '') AS return_type, \

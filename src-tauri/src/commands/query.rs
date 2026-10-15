@@ -350,12 +350,10 @@ pub async fn execute_query(
         return Err("SQL query is required".into());
     }
 
-    let sessions = state.sessions.lock().await;
-    let session = sessions.get(&session_id).ok_or("Session not found")?;
+    let client = state.client(&session_id).await?;
 
     let start = std::time::Instant::now();
-    let stmt = session
-        .client
+    let stmt = client
         .prepare(&sql)
         .await
         .map_err(pg_error_to_json)?;
@@ -370,8 +368,7 @@ pub async fn execute_query(
 
     if is_query {
         let columns = columns_from_statement(stmt.columns());
-        let rows = session
-            .client
+        let rows = client
             .query(&stmt, &[])
             .await
             .map_err(pg_error_to_json)?;
@@ -386,8 +383,7 @@ pub async fn execute_query(
             duration,
         })
     } else {
-        let affected = session
-            .client
+        let affected = client
             .execute(&stmt, &[])
             .await
             .map_err(pg_error_to_json)?;
@@ -410,8 +406,7 @@ pub async fn get_table_data(
     table: String,
     params: Option<TableDataParams>,
 ) -> Result<TableDataResponse, String> {
-    let sessions = state.sessions.lock().await;
-    let session = sessions.get(&session_id).ok_or("Session not found")?;
+    let client = state.client(&session_id).await?;
 
     let page = params.as_ref().and_then(|p| p.page).unwrap_or(1).max(1);
     let page_size = params
@@ -425,7 +420,7 @@ pub async fn get_table_data(
     let mut order_clause = String::new();
     if let Some(ref p) = params {
         if let Some(ref sort_col) = p.sort_column {
-            let valid_columns = get_valid_columns(&session.client, &schema, &table).await?;
+            let valid_columns = get_valid_columns(&client, &schema, &table).await?;
             if valid_columns.contains(sort_col) {
                 let dir = match p.sort_direction.as_deref() {
                     Some("desc") => "DESC",
@@ -438,8 +433,7 @@ pub async fn get_table_data(
 
     // Get total count
     let count_sql = format!("SELECT COUNT(*) as total FROM \"{}\".\"{}\"", schema, table);
-    let count_row = session
-        .client
+    let count_row = client
         .query_one(&count_sql as &str, &[])
         .await
         .map_err(|e| e.to_string())?;
@@ -450,14 +444,12 @@ pub async fn get_table_data(
         "SELECT * FROM \"{}\".\"{}\"{}  LIMIT {} OFFSET {}",
         schema, table, order_clause, page_size, offset
     );
-    let stmt = session
-        .client
+    let stmt = client
         .prepare(&data_sql)
         .await
         .map_err(|e| e.to_string())?;
     let columns = columns_from_statement(stmt.columns());
-    let rows = session
-        .client
+    let rows = client
         .query(&stmt, &[])
         .await
         .map_err(|e| e.to_string())?;
@@ -488,10 +480,9 @@ pub async fn update_row(
         return Err("updates is required".into());
     }
 
-    let sessions = state.sessions.lock().await;
-    let session = sessions.get(&session_id).ok_or("Session not found")?;
+    let client = state.client(&session_id).await?;
 
-    let valid_columns = get_valid_columns(&session.client, &schema, &table).await?;
+    let valid_columns = get_valid_columns(&client, &schema, &table).await?;
 
     for col in updates.keys().chain(primary_key.keys()) {
         if !valid_columns.contains(col) {
@@ -517,8 +508,7 @@ pub async fn update_row(
         where_clauses.join(" AND ")
     );
 
-    let result = session
-        .client
+    let result = client
         .execute(&sql as &str, &[])
         .await
         .map_err(|e| e.to_string())?;
@@ -538,10 +528,9 @@ pub async fn delete_rows(
         return Err("primaryKeys is required".into());
     }
 
-    let sessions = state.sessions.lock().await;
-    let session = sessions.get(&session_id).ok_or("Session not found")?;
+    let client = state.client(&session_id).await?;
 
-    let valid_columns = get_valid_columns(&session.client, &schema, &table).await?;
+    let valid_columns = get_valid_columns(&client, &schema, &table).await?;
     if let Some(first) = primary_keys.first() {
         for col in first.keys() {
             if !valid_columns.contains(col) {
@@ -564,8 +553,7 @@ pub async fn delete_rows(
             where_clauses.join(" AND ")
         );
 
-        let result = session
-            .client
+        let result = client
             .execute(&sql as &str, &[])
             .await
             .map_err(|e| e.to_string())?;

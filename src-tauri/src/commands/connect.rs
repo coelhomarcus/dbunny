@@ -64,7 +64,7 @@ pub async fn connect(
 
     let session_id = Uuid::new_v4().to_string();
 
-    let session = Session { client };
+    let session = Session { client: std::sync::Arc::new(client) };
 
     let mut sessions = state.sessions.lock().await;
     if sessions.len() >= 50 {
