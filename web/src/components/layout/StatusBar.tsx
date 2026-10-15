@@ -1,4 +1,4 @@
-import { LogOut } from "lucide-react";
+import { Eye, EyeOff, LogOut } from "lucide-react";
 import type { ConnectionInfo } from "@/types";
 import ThemeToggle from "../ui/ThemeToggle";
 
@@ -8,11 +8,13 @@ const mask = (value: string) => value.replace(/./g, "•");
 export default function StatusBar({
   connectionInfo,
   revealed,
+  onToggleReveal,
   onDisconnect,
 }: {
   connectionInfo: ConnectionInfo | null;
   /** Show host/database in clear text (they're masked by default). */
   revealed: boolean;
+  onToggleReveal: () => void;
   onDisconnect: () => void;
 }) {
   const host = connectionInfo ? `${connectionInfo.host}:${connectionInfo.port}` : "";
@@ -24,8 +26,16 @@ export default function StatusBar({
         <span className="size-1.5 rounded-full bg-success" />
         Connected
       </span>
-      <span className="font-mono">{revealed ? host : mask(host)}</span>
-      <span className="font-mono">{revealed ? database : mask(database)}</span>
+      {/* The toggle sits on the details it reveals */}
+      <button
+        onClick={onToggleReveal}
+        title={revealed ? "Hide connection details" : "Show connection details"}
+        className="group flex h-5 items-center gap-2 rounded-md px-1.5 font-mono transition-colors cursor-pointer hover:bg-accent hover:text-foreground"
+      >
+        <span>{revealed ? host : mask(host)}</span>
+        <span>{revealed ? database : mask(database)}</span>
+        {revealed ? <EyeOff size={11} className="shrink-0" /> : <Eye size={11} className="shrink-0" />}
+      </button>
       <div className="ml-auto flex items-center gap-1">
         {connectionInfo?.serverVersion && <span className="mr-1.5">PostgreSQL {connectionInfo.serverVersion.split(" ")[0]}</span>}
         <ThemeToggle side="top" size="icon-xs" />

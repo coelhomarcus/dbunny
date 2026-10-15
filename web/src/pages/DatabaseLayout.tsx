@@ -8,7 +8,7 @@ import Button from "../components/ui/Button";
 import StatusBar from "../components/layout/StatusBar";
 import { HeaderTitle } from "../components/layout/PageHeader";
 import { cn } from "../lib/cn";
-import { Terminal, Eye, EyeOff, Folder } from "lucide-react";
+import { Terminal, Folder } from "lucide-react";
 import type { SchemaInfo } from "@/types";
 
 export default function DatabaseLayout() {
@@ -61,18 +61,10 @@ export default function DatabaseLayout() {
               sidebarExpanded ? "opacity-100 delay-75" : "opacity-0 pointer-events-none",
             )}
           >
-            <div className="h-10 shrink-0 flex items-center gap-1 pl-3 pr-2">
+            <div className="h-10 shrink-0 flex items-center pl-3 pr-2">
               <HeaderTitle label="Connection" className="flex-1">
                 {savedConnectionName || connectionInfo?.database || "Connection"}
               </HeaderTitle>
-              <Button
-                variant="ghost-muted"
-                size="icon-sm"
-                onClick={() => setRevealed((v) => !v)}
-                title={revealed ? "Hide connection details" : "Show connection details"}
-              >
-                {revealed ? <EyeOff /> : <Eye />}
-              </Button>
             </div>
 
             <nav className="px-2 pb-2">
@@ -140,7 +132,12 @@ export default function DatabaseLayout() {
         </main>
       </div>
 
-      <StatusBar connectionInfo={connectionInfo} revealed={revealed} onDisconnect={handleDisconnect} />
+      <StatusBar
+        connectionInfo={connectionInfo}
+        revealed={revealed}
+        onToggleReveal={() => setRevealed((v) => !v)}
+        onDisconnect={handleDisconnect}
+      />
     </div>
   );
 }
