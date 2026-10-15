@@ -84,10 +84,29 @@ function detectDangerousStatements(sql: string): DangerInfo[] {
   return dangers;
 }
 
+/**
+ * Makes the saved state consistent before it's used: only tabs that still have
+ * their payload, and an active tab that exists. Protects against state left
+ * inconsistent by older versions instead of crashing on mount.
+ */
+function repairQueryEditorState(saved: QueryEditorState) {
+  saved.tabMetas = saved.tabMetas.filter((t) => saved.payloads.has(t.id));
+  if (saved.tabMetas.length === 0) {
+    const fresh = createQueryEditorState();
+    saved.tabMetas = fresh.tabMetas;
+    saved.payloads = fresh.payloads;
+    saved.nextId = Math.max(saved.nextId, fresh.nextId);
+  }
+  if (!saved.tabMetas.some((t) => t.id === saved.activeId)) {
+    saved.activeId = saved.tabMetas[0].id;
+  }
+}
+
 export default function QueryEditor() {
   const { tabId } = useTab();
   const { api, sessionId } = useConnection();
   const saved = tabState(tabId, "queryEditor", createQueryEditorState);
+  repairQueryEditorState(saved);
   const [tabMetas, setTabMetas] = useState<TabMeta[]>(saved.tabMetas);
   const [activeId, setActiveId] = useState(saved.activeId);
   const initial = saved.payloads.get(saved.activeId)!;
@@ -126,18 +145,16 @@ export default function QueryEditor() {
     loadCompletionSchema();
   }, [loadCompletionSchema]);
 
+  // On unmount (e.g. opening a table), keep the SQL being edited. The tab list and
+  // active tab are already written to `saved` by switchTab/addTab/closeTab; writing
+  // them here too would restore stale values (a closed tab coming back as active).
   useEffect(() => {
     return () => {
       const editor = editorRef.current;
-      if (editor) {
-        const payload = saved.payloads.get(activeIdRef.current);
-        if (payload) payload.sql = editor.getValue();
-      }
-      saved.activeId = activeIdRef.current;
-      saved.tabMetas = tabMetas;
+      const payload = saved.payloads.get(activeIdRef.current);
+      if (editor && payload) payload.sql = editor.getValue();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabMetas]);
+  }, [saved]);
 
   function saveCurrentSql() {
     const editor = editorRef.current;
