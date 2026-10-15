@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { api, getSessionId } from "../lib/api";
+import { useConnection } from "../contexts/useConnection";
+import { useTab } from "../contexts/workspace";
+import { tabState } from "../lib/tabState";
 import type { CompletionSchema, QueryResult } from "@/types";
 import QueryResults from "../components/QueryResults";
 import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
@@ -23,19 +25,26 @@ type DangerInfo = {
   detail: string;
 };
 
-// Module-level - survives navigation (component unmount/remount)
-let nextId = 2;
-let savedTabMetas: TabMeta[] = [{ id: 1, label: "Query 1" }];
-let savedActiveId = 1;
-let savedSafeMode = true;
-const savedPayloads: Map<number, TabPayload> = new Map([
-  [1, { sql: "SELECT 1;", result: null, error: null }],
-]);
-// Autocomplete catalog of the current connection, reused when coming back to the page
-let savedCompletion: { sessionId: string | null; schema: CompletionSchema } | null = null;
+// Kept per window tab, so it survives navigating to a table and back
+type QueryEditorState = {
+  nextId: number;
+  tabMetas: TabMeta[];
+  activeId: number;
+  safeMode: boolean;
+  payloads: Map<number, TabPayload>;
+  // Autocomplete catalog, reused when coming back to the page
+  completion: { sessionId: string | null; schema: CompletionSchema } | null;
+};
 
-function cachedCompletionSchema() {
-  return savedCompletion?.sessionId === getSessionId() ? savedCompletion.schema : null;
+function createQueryEditorState(): QueryEditorState {
+  return {
+    nextId: 2,
+    tabMetas: [{ id: 1, label: "Query 1" }],
+    activeId: 1,
+    safeMode: true,
+    payloads: new Map([[1, { sql: "SELECT 1;", result: null, error: null }]]),
+    completion: null,
+  };
 }
 
 // Statements that can add/remove tables, columns or functions
@@ -76,16 +85,21 @@ function detectDangerousStatements(sql: string): DangerInfo[] {
 }
 
 export default function QueryEditor() {
-  const [tabMetas, setTabMetas] = useState<TabMeta[]>(savedTabMetas);
-  const [activeId, setActiveId] = useState(savedActiveId);
-  const initial = savedPayloads.get(savedActiveId)!;
+  const { tabId } = useTab();
+  const { api, sessionId } = useConnection();
+  const saved = tabState(tabId, "queryEditor", createQueryEditorState);
+  const [tabMetas, setTabMetas] = useState<TabMeta[]>(saved.tabMetas);
+  const [activeId, setActiveId] = useState(saved.activeId);
+  const initial = saved.payloads.get(saved.activeId)!;
   const [result, setResult] = useState<QueryResult | null>(initial.result);
   const [error, setError] = useState<string | null>(initial.error);
   const [running, setRunning] = useState(false);
-  const [safeMode, setSafeMode] = useState(savedSafeMode);
+  const [safeMode, setSafeMode] = useState(saved.safeMode);
   const [pendingDangers, setPendingDangers] = useState<DangerInfo[] | null>(null);
   const pendingSqlRef = useRef<string | null>(null);
-  const [completionSchema, setCompletionSchema] = useState<CompletionSchema | null>(cachedCompletionSchema);
+  const [completionSchema, setCompletionSchema] = useState<CompletionSchema | null>(() =>
+    saved.completion?.sessionId === sessionId ? saved.completion.schema : null,
+  );
 
   const editorRef = useRef<SqlEditorHandle | null>(null);
   const activeIdRef = useRef(activeId);
@@ -95,19 +109,18 @@ export default function QueryEditor() {
   }, [activeId]);
 
   useEffect(() => {
-    savedSafeMode = safeMode;
-  }, [safeMode]);
+    saved.safeMode = safeMode;
+  }, [safeMode, saved]);
 
   const loadCompletionSchema = useCallback(() => {
-    const sessionId = getSessionId();
     api
       .getCompletionSchema()
       .then((schema) => {
-        savedCompletion = { sessionId, schema };
+        saved.completion = { sessionId, schema };
         setCompletionSchema(schema);
       })
       .catch(() => {});
-  }, []);
+  }, [api, sessionId, saved]);
 
   useEffect(() => {
     loadCompletionSchema();
@@ -117,11 +130,11 @@ export default function QueryEditor() {
     return () => {
       const editor = editorRef.current;
       if (editor) {
-        const payload = savedPayloads.get(activeIdRef.current);
+        const payload = saved.payloads.get(activeIdRef.current);
         if (payload) payload.sql = editor.getValue();
       }
-      savedActiveId = activeIdRef.current;
-      savedTabMetas = tabMetas;
+      saved.activeId = activeIdRef.current;
+      saved.tabMetas = tabMetas;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabMetas]);
@@ -129,15 +142,15 @@ export default function QueryEditor() {
   function saveCurrentSql() {
     const editor = editorRef.current;
     if (!editor) return;
-    const payload = savedPayloads.get(activeId);
+    const payload = saved.payloads.get(activeId);
     if (payload) payload.sql = editor.getValue();
   }
 
   function switchTab(id: number) {
     saveCurrentSql();
     setActiveId(id);
-    savedActiveId = id;
-    const payload = savedPayloads.get(id)!;
+    saved.activeId = id;
+    const payload = saved.payloads.get(id)!;
     editorRef.current?.setValue(payload.sql);
     setResult(payload.result);
     setError(payload.error);
@@ -145,14 +158,14 @@ export default function QueryEditor() {
 
   function addTab() {
     saveCurrentSql();
-    const id = nextId++;
+    const id = saved.nextId++;
     const label = `Query ${id}`;
-    savedPayloads.set(id, { sql: "", result: null, error: null });
+    saved.payloads.set(id, { sql: "", result: null, error: null });
     const newMetas = [...tabMetas, { id, label }];
     setTabMetas(newMetas);
-    savedTabMetas = newMetas;
+    saved.tabMetas = newMetas;
     setActiveId(id);
-    savedActiveId = id;
+    saved.activeId = id;
     editorRef.current?.setValue("");
     setResult(null);
     setError(null);
@@ -163,18 +176,18 @@ export default function QueryEditor() {
     if (tabMetas.length === 1) return;
     const index = tabMetas.findIndex((t) => t.id === id);
     const newMetas = tabMetas.filter((t) => t.id !== id);
-    savedPayloads.delete(id);
+    saved.payloads.delete(id);
     let newActiveId = activeId;
     if (id === activeId) {
       const newIndex = Math.min(index, newMetas.length - 1);
       newActiveId = newMetas[newIndex].id;
     }
     setTabMetas(newMetas);
-    savedTabMetas = newMetas;
+    saved.tabMetas = newMetas;
     setActiveId(newActiveId);
-    savedActiveId = newActiveId;
+    saved.activeId = newActiveId;
     if (id === activeId) {
-      const payload = savedPayloads.get(newActiveId)!;
+      const payload = saved.payloads.get(newActiveId)!;
       editorRef.current?.setValue(payload.sql);
       setResult(payload.result);
       setError(payload.error);
@@ -184,7 +197,7 @@ export default function QueryEditor() {
   async function exportQuery() {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-    const sql = editorRef.current?.getValue() ?? savedPayloads.get(activeId)?.sql ?? "";
+    const sql = editorRef.current?.getValue() ?? saved.payloads.get(activeId)?.sql ?? "";
     const meta = tabMetas.find((t) => t.id === activeId);
     const defaultName = `${(meta?.label ?? "query").replace(/\s+/g, "_").toLowerCase()}.sql`;
     const path = await save({
@@ -204,7 +217,7 @@ export default function QueryEditor() {
     if (path && typeof path === "string") {
       const sql = await readTextFile(path);
       editorRef.current?.setValue(sql);
-      const payload = savedPayloads.get(activeId);
+      const payload = saved.payloads.get(activeId);
       if (payload) payload.sql = sql;
     }
   }
@@ -217,19 +230,19 @@ export default function QueryEditor() {
     try {
       const [res] = await Promise.all([api.query(sql), delay]);
       setResult(res);
-      const payload = savedPayloads.get(activeIdRef.current);
+      const payload = saved.payloads.get(activeIdRef.current);
       if (payload) { payload.result = res; payload.error = null; }
       if (DDL_PATTERN.test(sql)) loadCompletionSchema();
     } catch (err) {
       await delay;
       const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "Query failed";
       setError(msg);
-      const payload = savedPayloads.get(activeIdRef.current);
+      const payload = saved.payloads.get(activeIdRef.current);
       if (payload) { payload.result = null; payload.error = msg; }
     } finally {
       setRunning(false);
     }
-  }, [loadCompletionSchema]);
+  }, [loadCompletionSchema, api, saved]);
 
   const runQuery = useCallback(async () => {
     const editor = editorRef.current;
@@ -346,7 +359,7 @@ export default function QueryEditor() {
         <div className="flex-1 min-h-0">
           <SqlEditor
             onMount={(handle) => { editorRef.current = handle; }}
-            initialValue={savedPayloads.get(activeId)?.sql ?? ""}
+            initialValue={saved.payloads.get(activeId)?.sql ?? ""}
             schema={completionSchema}
             onRun={runQuery}
           />

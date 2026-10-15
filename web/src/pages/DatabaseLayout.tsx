@@ -6,18 +6,10 @@ import Tooltip from "../components/Tooltip";
 import Button from "../components/ui/Button";
 import ThemeToggle from "../components/ui/ThemeToggle";
 import { Terminal, Eye, EyeOff, LogOut, PanelLeftClose, PanelLeftOpen, Folder } from "lucide-react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { isMac } from "../lib/platform";
-import { api } from "../lib/api";
 import type { SchemaInfo } from "@/types";
 
-async function startDrag(e: React.MouseEvent) {
-  e.preventDefault();
-  await getCurrentWindow().startDragging();
-}
-
 export default function DatabaseLayout() {
-  const { isConnected, connectionInfo, savedConnectionName, disconnect } = useConnection();
+  const { isConnected, connectionInfo, savedConnectionName, disconnect, api } = useConnection();
   const navigate = useNavigate();
   const [revealed, setRevealed] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
@@ -34,7 +26,7 @@ export default function DatabaseLayout() {
     if (isConnected) {
       api.getSchemas().then(setSchemas).catch(() => {});
     }
-  }, [isConnected]);
+  }, [isConnected, api]);
 
   if (!isConnected) return null;
 
@@ -49,10 +41,9 @@ export default function DatabaseLayout() {
 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
-      {isMac && <div className="h-8 w-full shrink-0" onMouseDown={startDrag} />}
       <div className="flex flex-1 overflow-hidden p-2 gap-2">
         <aside
-          className={`shrink-0 bg-card border border-border rounded-xl shadow-xs flex flex-col select-none transition-all duration-300 ease-in-out overflow-hidden ${
+          className={`shrink-0 bg-card border border-border rounded-xl shadow-xs flex flex-col select-none transition-[width] duration-300 ease-in-out overflow-hidden ${
             sidebarExpanded ? "w-64" : "w-12"
           }`}
         >

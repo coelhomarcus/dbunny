@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { Braces, Copy, Check } from "lucide-react";
 import { DetailSkeleton } from "../components/Skeleton";
-import { api } from "../lib/api";
+import { useApi } from "../contexts/useConnection";
 import SqlViewer from "../components/SqlViewer";
 import type { FunctionDetail } from "@/types";
 
@@ -14,6 +14,7 @@ export default function FunctionView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const api = useApi();
 
   useEffect(() => {
     if (!schema || !name) return;
@@ -37,7 +38,7 @@ export default function FunctionView() {
     return () => {
       stale = true;
     };
-  }, [schema, name, args]);
+  }, [schema, name, args, api]);
 
   async function copySource() {
     if (!detail?.source) return;

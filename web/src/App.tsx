@@ -1,6 +1,9 @@
-import { useEffect } from "react";
-import { HashRouter, Routes, Route, Navigate } from "react-router";
+import { useCallback, useEffect, useMemo } from "react";
+import { MemoryRouter, Routes, Route, Navigate } from "react-router";
 import { ConnectionProvider } from "./contexts/ConnectionContext";
+import { WorkspaceProvider } from "./contexts/WorkspaceProvider";
+import { TabContext, useWorkspace, type TabSessionInfo } from "./contexts/workspace";
+import { cn } from "./lib/cn";
 import TitleBar from "./components/TitleBar";
 import ConnectPage from "./pages/ConnectPage";
 import DatabaseLayout from "./pages/DatabaseLayout";
@@ -23,11 +26,45 @@ export default function App() {
   }, []);
 
   return (
-    <ConnectionProvider>
+    <WorkspaceProvider>
       <div className="h-screen flex flex-col bg-background text-foreground">
         <TitleBar />
-        <div className="flex-1 min-h-0">
-          <HashRouter>
+        <div className="relative flex-1 min-h-0">
+          <TabPanes />
+        </div>
+      </div>
+    </WorkspaceProvider>
+  );
+}
+
+function TabPanes() {
+  const { tabs, activeTabId, updateTab } = useWorkspace();
+  return tabs.map((tab) => (
+    <TabPane key={tab.id} tabId={tab.id} active={tab.id === activeTabId} updateTab={updateTab} />
+  ));
+}
+
+/**
+ * One window tab: its own connection and its own navigation. Inactive tabs stay
+ * mounted (just hidden) so queries, results and scroll positions survive switching.
+ */
+function TabPane({
+  tabId,
+  active,
+  updateTab,
+}: {
+  tabId: string;
+  active: boolean;
+  updateTab: (id: string, info: TabSessionInfo) => void;
+}) {
+  const onSessionChange = useCallback((info: TabSessionInfo) => updateTab(tabId, info), [tabId, updateTab]);
+  const tab = useMemo(() => ({ tabId, isActive: active }), [tabId, active]);
+
+  return (
+    <TabContext.Provider value={tab}>
+      <div className={cn("absolute inset-0", !active && "hidden")}>
+        <ConnectionProvider onSessionChange={onSessionChange}>
+          <MemoryRouter>
             <Routes>
               <Route path="/" element={<ConnectPage />} />
               <Route path="/db" element={<DatabaseLayout />}>
@@ -38,9 +75,9 @@ export default function App() {
                 <Route path=":schema/function/:name" element={<FunctionView />} />
               </Route>
             </Routes>
-          </HashRouter>
-        </div>
+          </MemoryRouter>
+        </ConnectionProvider>
       </div>
-    </ConnectionProvider>
+    </TabContext.Provider>
   );
 }

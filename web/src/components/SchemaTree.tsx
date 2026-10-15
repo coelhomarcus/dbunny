@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router";
-import { api } from "../lib/api";
+import { useApi } from "../contexts/useConnection";
 import type { SchemaInfo, TableInfo, FunctionInfo } from "@/types";
 import {
   ChevronRight,
@@ -43,6 +43,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const params = useParams();
+  const api = useApi();
   const activeTable = params.table;
   const activeSchema = params.schema;
   const activeFunction = params.name;
@@ -55,7 +56,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     if (!schemaToExpand) return;
@@ -112,7 +113,7 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
         }));
       }
     },
-    [folderData],
+    [folderData, api],
   );
 
   const toggleFolder = useCallback(

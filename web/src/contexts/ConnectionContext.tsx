@@ -1,64 +1,82 @@
-import { createContext, useState, useCallback, type ReactNode } from "react";
-import { api, setSessionId } from "../lib/api";
+import { useState, useCallback, useMemo, type ReactNode } from "react";
+import { api, createSessionApi } from "../lib/api";
 import type { ConnectionInfo } from "@/types";
+import type { TabSessionInfo } from "./workspace";
+import { ConnectionContext } from "./connection";
 
-interface ConnectionContextValue {
-  isConnected: boolean;
-  isConnecting: boolean;
-  connectionInfo: ConnectionInfo | null;
-  savedConnectionName: string | null;
-  error: string | null;
-  connect: (url: string, savedName?: string) => Promise<void>;
-  disconnect: () => Promise<void>;
-}
+const DISCONNECTED: TabSessionInfo = { title: null, subtitle: null, color: null, sessionId: null };
 
-export const ConnectionContext = createContext<ConnectionContextValue | null>(null);
-
-export function ConnectionProvider({ children }: { children: ReactNode }) {
-  const [isConnected, setIsConnected] = useState(false);
+/** One per window tab: owns that tab's database session. */
+export function ConnectionProvider({
+  children,
+  onSessionChange,
+}: {
+  children: ReactNode;
+  /** Reports title/status to the window tab bar. */
+  onSessionChange: (info: TabSessionInfo) => void;
+}) {
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionInfo, setConnectionInfo] = useState<ConnectionInfo | null>(null);
   const [savedConnectionName, setSavedConnectionName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const connect = useCallback(async (url: string, savedName?: string) => {
-    setIsConnecting(true);
-    setError(null);
-    try {
-      const response = await api.connect(url);
-      setSessionId(response.sessionId);
-      setConnectionInfo({
-        database: response.database,
-        host: response.host,
-        port: response.port,
-      });
-      setSavedConnectionName(savedName || null);
-      setIsConnected(true);
-    } catch (err) {
-      const message = typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to connect";
-      setError(message);
-      throw err;
-    } finally {
-      setIsConnecting(false);
-    }
-  }, []);
+  const connect = useCallback(
+    async (url: string, saved?: { name: string; color?: string | null }) => {
+      setIsConnecting(true);
+      setError(null);
+      try {
+        const response = await api.connect(url);
+        const info = { database: response.database, host: response.host, port: response.port };
+        setSessionId(response.sessionId);
+        setConnectionInfo(info);
+        setSavedConnectionName(saved?.name || null);
+        onSessionChange({
+          title: saved?.name || info.database,
+          subtitle: `${info.host}:${info.port}/${info.database}`,
+          color: saved?.color ?? null,
+          sessionId: response.sessionId,
+        });
+      } catch (err) {
+        const message = typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to connect";
+        setError(message);
+        throw err;
+      } finally {
+        setIsConnecting(false);
+      }
+    },
+    [onSessionChange],
+  );
 
   const disconnect = useCallback(async () => {
     try {
-      await api.disconnect();
-    } catch {} finally {
+      if (sessionId) await api.disconnect(sessionId);
+    } catch {
+      // the session is dropped locally either way
+    } finally {
       setSessionId(null);
-      setIsConnected(false);
       setConnectionInfo(null);
       setSavedConnectionName(null);
+      onSessionChange(DISCONNECTED);
     }
-  }, []);
+  }, [sessionId, onSessionChange]);
 
-  return (
-    <ConnectionContext.Provider
-      value={{ isConnected, isConnecting, connectionInfo, savedConnectionName, error, connect, disconnect }}
-    >
-      {children}
-    </ConnectionContext.Provider>
+  const sessionApi = useMemo(() => createSessionApi(sessionId), [sessionId]);
+
+  const value = useMemo(
+    () => ({
+      isConnected: sessionId !== null,
+      isConnecting,
+      connectionInfo,
+      savedConnectionName,
+      sessionId,
+      api: sessionApi,
+      error,
+      connect,
+      disconnect,
+    }),
+    [sessionId, isConnecting, connectionInfo, savedConnectionName, sessionApi, error, connect, disconnect],
   );
+
+  return <ConnectionContext.Provider value={value}>{children}</ConnectionContext.Provider>;
 }

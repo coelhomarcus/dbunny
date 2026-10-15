@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useConnection } from "../contexts/useConnection";
 import { useNavigate } from "react-router";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Database,
   Server,
@@ -22,7 +21,6 @@ import {
   buildConnectionUrl,
 } from "../lib/connectionUrl";
 import { api } from "../lib/api";
-import { isMac } from "../lib/platform";
 import type { SavedConnection } from "@/types";
 import SavedConnectionsList from "../components/SavedConnectionsList";
 import Tooltip from "../components/Tooltip";
@@ -106,7 +104,7 @@ export default function ConnectPage() {
         password: conn.password,
         ssl: conn.ssl,
       });
-      await connect(url, conn.name);
+      await connect(url, { name: conn.name, color: conn.color });
       navigate("/db/query");
     } catch {}
   }
@@ -167,8 +165,8 @@ export default function ConnectPage() {
     e.preventDefault();
     try {
       const url = buildConnectionUrl(fields);
-      const savedName = connectionName.trim() || undefined;
-      await connect(url, savedName);
+      const savedName = connectionName.trim();
+      await connect(url, savedName ? { name: savedName, color: connectionColor } : undefined);
       navigate("/db/query");
     } catch {}
   }
@@ -180,19 +178,10 @@ export default function ConnectPage() {
 
   return (
     <div className="h-full bg-background flex flex-col">
-      {isMac && (
-        <div
-          className="h-8 w-full shrink-0"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            getCurrentWindow().startDragging();
-          }}
-        />
-      )}
 
       <div className="flex flex-1 overflow-hidden p-2 gap-2">
         <aside
-          className={`shrink-0 bg-card border border-border rounded-xl shadow-xs flex flex-col select-none transition-all duration-300 ease-in-out overflow-hidden ${
+          className={`shrink-0 bg-card border border-border rounded-xl shadow-xs flex flex-col select-none transition-[width] duration-300 ease-in-out overflow-hidden ${
             sidebarExpanded ? "w-64" : "w-12"
           }`}
         >

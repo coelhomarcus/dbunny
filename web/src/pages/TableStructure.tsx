@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { segmentedItemClass, segmentedListClass } from "../components/ui/styles";
 import { useParams, NavLink } from "react-router";
 import { TableSkeleton } from "../components/Skeleton";
-import { api } from "../lib/api";
+import { useApi } from "../contexts/useConnection";
 import type { ColumnInfo } from "@/types";
 
 export default function TableStructure() {
   const { schema, table } = useParams<{ schema: string; table: string }>();
+  const api = useApi();
   const [result, setResult] = useState<{ key: string; columns: ColumnInfo[] } | null>(null);
   const key = `${schema}.${table}`;
 
@@ -18,7 +19,7 @@ export default function TableStructure() {
       if (!stale) setResult({ key: k, columns: cols });
     });
     return () => { stale = true; };
-  }, [schema, table]);
+  }, [schema, table, api]);
 
   const loading = !result || result.key !== key;
   const columns = loading ? [] : result.columns;

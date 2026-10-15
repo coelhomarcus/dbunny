@@ -13,6 +13,8 @@
 
   --background: #f3f3f4;
   --foreground: #18181b;
+  /* Window title bar (connection tabs), a step darker than the app background */
+  --chrome: #e6e6e8;
   --card: #ffffff;
   --card-foreground: #18181b;
   --popover: #ffffff;
@@ -59,6 +61,7 @@
 
   --background: #080809;
   --foreground: #f4f4f5;
+  --chrome: #000000;
   --card: #111112;
   --card-foreground: #f4f4f5;
   --popover: #161617;
@@ -101,6 +104,7 @@
 
 @theme inline {
   --color-background: var(--background);
+  --color-chrome: var(--chrome);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
@@ -172,7 +176,7 @@ body {
   --tab-bg: var(--card);
   /* Opaque on purpose: the outline is painted over two different surfaces
      (tab and strip), a translucent colour would not line up at the corners */
-  --tab-border: color-mix(in srgb, var(--foreground) 12%, var(--card));
+  --tab-border: color-mix(in srgb, var(--foreground) 12%, var(--tab-bg));
   --tab-radius: 8px;
   /* Bottom line separating the strip from the content; the active tab covers it */
   background:
@@ -226,4 +230,31 @@ body {
     var(--tab-border) calc(var(--tab-radius) - 0.5px),
     var(--tab-bg) var(--tab-radius)
   );
+}
+
+/* Window title bar: one tab per connection. The active tab takes the app
+   background, so it flows into the page below it. */
+.tab-strip.window-tabs {
+  --tab-bg: var(--background);
+  --tab-radius: 10px;
+  background:
+    linear-gradient(var(--tab-border), var(--tab-border)) bottom / 100% 1px no-repeat,
+    var(--chrome);
+}
+
+/* Thin separator between two inactive tabs, hidden next to a hovered one */
+.window-tab[data-active="false"] + .window-tab[data-active="false"]::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 25%;
+  height: 50%;
+  width: 1px;
+  background: var(--tab-border);
+  pointer-events: none;
+}
+
+.window-tab[data-active="false"]:hover::before,
+.window-tab[data-active="false"]:hover + .window-tab::before {
+  opacity: 0;
 }

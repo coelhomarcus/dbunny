@@ -7,7 +7,8 @@ import {
 } from "@tanstack/react-table";
 import type { QueryColumn } from "@/types";
 import { useTableData } from "../hooks/useTableData";
-import { api } from "../lib/api";
+import { useApi } from "../contexts/useConnection";
+import { useTab } from "../contexts/workspace";
 import { useCellEditing } from "../hooks/useCellEditing";
 import { useRowSelection } from "../hooks/useRowSelection";
 import { useColumnResize } from "../hooks/useColumnResize";
@@ -21,6 +22,9 @@ import { TableSkeleton } from "../components/Skeleton";
 
 export default function TableView() {
   const { schema, table } = useParams<{ schema: string; table: string }>();
+  const api = useApi();
+  // Hidden window tabs stay mounted; only the visible one reacts to shortcuts
+  const { isActive } = useTab();
 
   const tableData = useTableData(schema, table);
   const { data, columnInfos, loading, error, hasNoPk } = tableData;
@@ -59,6 +63,7 @@ export default function TableView() {
   }, [schema, table]);
 
   useEffect(() => {
+    if (!isActive) return;
     function onKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
@@ -69,7 +74,7 @@ export default function TableView() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editing, pending]);
+  }, [editing, pending, isActive]);
 
   const fetchAllRows = useCallback(async () => {
     const total = data?.totalRows ?? 0;
@@ -102,7 +107,7 @@ export default function TableView() {
     }
 
     return { columns, rows: allRows.slice(0, offset) };
-  }, [schema, table, data?.totalRows, tableData.sorting]);
+  }, [schema, table, data?.totalRows, tableData.sorting, api]);
 
   const columns = useMemo<ColumnDef<unknown[], unknown>[]>(() => {
     if (!data?.columns) return [];
