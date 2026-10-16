@@ -25,6 +25,23 @@ struct SensitiveData {
     /// SSH tunnel settings, secrets included; absent in files from older versions.
     #[serde(default)]
     ssh: Option<SshConfig>,
+    /// How SSL is verified and which certificate files to use; absent in older files.
+    #[serde(default)]
+    tls: Option<TlsSettings>,
+}
+
+/// SSL settings beyond on/off, saved with a connection.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TlsSettings {
+    /// "require", "verify-ca" or "verify-full".
+    pub mode: String,
+    #[serde(default)]
+    pub root_cert: String,
+    #[serde(default)]
+    pub cert: String,
+    #[serde(default)]
+    pub key: String,
 }
 
 /// Stored on disk. Only metadata is plaintext; everything else is in `encrypted_data`.
@@ -55,6 +72,7 @@ pub struct SavedConnectionInfo {
     pub user: String,
     pub password: String,
     pub ssh: Option<SshConfig>,
+    pub tls: Option<TlsSettings>,
     pub ssl: bool,
     pub read_only: bool,
     pub color: String,
@@ -199,6 +217,7 @@ impl SavedConnection {
         user: String,
         password: String,
         ssh: Option<SshConfig>,
+        tls: Option<TlsSettings>,
         ssl: bool,
         color: String,
         created_at: String,
@@ -211,6 +230,7 @@ impl SavedConnection {
             user,
             password,
             ssh,
+            tls,
         };
         let json = serde_json::to_string(&sensitive)
             .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?;
@@ -242,6 +262,7 @@ impl SavedConnection {
             user: sensitive.user,
             password: sensitive.password,
             ssh: sensitive.ssh,
+            tls: sensitive.tls,
             ssl: self.ssl,
             read_only: self.read_only,
             color: self.color.clone(),

@@ -51,7 +51,7 @@ fn tls_plan(sslmode: Option<&str>) -> Result<TlsPlan, String> {
 const TLS_PARAMS: [&str; 4] = ["sslmode", "sslrootcert", "sslcert", "sslkey"];
 
 fn read_file(label: &str, path: &str) -> Result<Vec<u8>, String> {
-    std::fs::read(path).map_err(|e| format!("Couldn't read the {label} {path}: {e}"))
+    std::fs::read(super::ssh::expand_home(path)).map_err(|e| format!("Couldn't read the {label} {path}: {e}"))
 }
 
 /// Builds the driver config and TLS connector from a postgres:// URL.
