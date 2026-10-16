@@ -30,6 +30,8 @@ import type {
 
 /** Relation kinds as the explorer names them. */
 export type RelationKind = "table" | "view" | "matview";
+/** Every kind of relation that has rows, as the server reports it. */
+export type RelationType = "table" | "partitioned" | "foreign" | "view" | "matview";
 
 /** Calls that don't belong to a connection. */
 export const api = {
@@ -152,6 +154,9 @@ export function createSessionApi(sessionId: string | null) {
 
     async getColumns(schema: string, table: string) {
       return invoke<ColumnInfo[]>("get_columns", { sessionId, schema, table });
+    },
+    async getRelationKind(schema: string, name: string) {
+      return invoke<RelationType | null>("get_relation_kind", { sessionId, schema, name });
     },
 
     /** Indexes, constraints, keys, triggers, sizes and DDL of a table or view. */

@@ -5,10 +5,21 @@ import Badge from "./ui/Badge";
 import Tooltip from "./Tooltip";
 import { HeaderTitle, PageHeader } from "./layout/PageHeader";
 import { segmentedItemClass, segmentedListClass } from "./ui/styles";
+import type { RelationType } from "../lib/api";
+
+const LABEL: Record<RelationType, string> = {
+  table: "Table",
+  partitioned: "Partitioned table",
+  foreign: "Foreign table",
+  view: "View",
+  matview: "Materialized view",
+};
 
 interface TableViewHeaderProps {
   schema: string;
   table: string;
+  /** Null until it loads. */
+  relationType: RelationType | null;
   hasNoPk: boolean;
   /** Read-only connection: no insert, edit or delete. */
   readOnly: boolean;
@@ -34,17 +45,28 @@ interface TableViewHeaderProps {
  * over the actions while there are any; the rest of the tools live under the rows.
  */
 export default function TableViewHeader({
-  schema, table, hasNoPk, readOnly,
+  schema, table, relationType, hasNoPk, readOnly: connectionReadOnly,
   selectedCount, deleting, onDelete,
   hasPendingChanges, dirtyRowCount, saveError, saving, onSave, onDiscard, onReviewSql,
   onInsertRow, filterCount, filtersOpen, onToggleFilters,
 }: TableViewHeaderProps) {
+  const isView = relationType === "view" || relationType === "matview";
+  const readOnly = connectionReadOnly || isView;
   const canDelete = selectedCount > 0 && !hasNoPk && !readOnly;
   return (
     <PageHeader className="justify-between">
       <div className="flex min-w-0 items-center gap-2.5">
-        <HeaderTitle label={`Table · ${schema}`}>{table}</HeaderTitle>
-        {readOnly ? (
+        <HeaderTitle label={relationType ? `${LABEL[relationType]} · ${schema}` : schema}>{table}</HeaderTitle>
+        {isView ? (
+          <Tooltip
+            label={relationType === "matview" ? "A materialized view keeps the result of its query: rows can't be edited" : "A view shows the result of its query: rows can't be edited"}
+            side="bottom"
+          >
+            <Badge variant="neutral">
+              <Lock /> Read-only
+            </Badge>
+          </Tooltip>
+        ) : connectionReadOnly ? (
           <Tooltip label="This connection is read-only: rows can't be inserted, edited or deleted" side="bottom">
             <Badge variant="warning">
               <Lock /> Read-only
@@ -92,7 +114,8 @@ export default function TableViewHeader({
                 {deleting ? "Deleting…" : `Delete ${selectedCount} row${selectedCount > 1 ? "s" : ""}`}
               </Button>
             ) : (
-              !readOnly && (
+              // Waits for the kind, so it never flashes on a view
+              !readOnly && relationType && (
                 <Button variant="ghost-muted" size="sm" onClick={onInsertRow}>
                   <Plus />
                   Insert

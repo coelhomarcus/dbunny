@@ -244,6 +244,36 @@ pub async fn get_function_detail(
     })
 }
 
+/// What a relation is: "table", "partitioned", "foreign", "view" or "matview"; None when
+/// there's no relation by that name.
+#[tauri::command]
+pub async fn get_relation_kind(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    name: String,
+) -> Result<Option<String>, String> {
+    let client = state.client(&session_id).await?;
+    relation_kind(&client, &schema, &name).await.map_err(|e| e.to_string())
+}
+
+pub(crate) async fn relation_kind(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    name: &str,
+) -> Result<Option<String>, tokio_postgres::Error> {
+    let row = client
+        .query_opt(
+            "SELECT CASE c.relkind WHEN 'r' THEN 'table' WHEN 'p' THEN 'partitioned' WHEN 'f' THEN 'foreign' \
+                    WHEN 'v' THEN 'view' WHEN 'm' THEN 'matview' END AS kind \
+             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r', 'p', 'f', 'v', 'm')",
+            &[&schema, &name],
+        )
+        .await?;
+    Ok(row.map(|r| r.get("kind")))
+}
+
 #[tauri::command]
 pub async fn get_columns(
     state: State<'_, AppState>,
@@ -992,5 +1022,34 @@ mod server_tests {
         assert!(tree.schemas.iter().any(|x| x.name == "dbunny_explorer_empty" && x.objects.is_empty()), "empty schemas are listed");
         assert!(!tree.schemas.iter().any(|x| x.name == "pg_catalog" || x.name == "information_schema"));
         client.batch_execute(&format!("DROP SCHEMA {s} CASCADE; DROP SCHEMA dbunny_explorer_empty")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn relations_report_their_kind() {
+        let client = connect().await;
+        let s = "dbunny_relation_kinds";
+        client
+            .batch_execute(&format!(
+                "DROP SCHEMA IF EXISTS {s} CASCADE; CREATE SCHEMA {s}; \
+                 CREATE TABLE {s}.plain (id int); \
+                 CREATE TABLE {s}.split (at date) PARTITION BY RANGE (at); \
+                 CREATE VIEW {s}.recent AS SELECT * FROM {s}.plain; \
+                 CREATE MATERIALIZED VIEW {s}.totals AS SELECT count(*) FROM {s}.plain; \
+                 CREATE SEQUENCE {s}.counter;"
+            ))
+            .await
+            .unwrap();
+        let kind = |name: &'static str| {
+            let client = &client;
+            async move { relation_kind(client, s, name).await.unwrap() }
+        };
+        assert_eq!(kind("plain").await.as_deref(), Some("table"));
+        assert_eq!(kind("split").await.as_deref(), Some("partitioned"));
+        assert_eq!(kind("recent").await.as_deref(), Some("view"));
+        assert_eq!(kind("totals").await.as_deref(), Some("matview"));
+        assert_eq!(kind("counter").await, None, "a sequence isn't a relation with rows");
+        assert_eq!(kind("missing").await, None);
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
     }
 }

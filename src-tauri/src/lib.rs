@@ -127,6 +127,7 @@ pub fn run() {
             commands::schema::get_functions,
             commands::schema::get_function_detail,
             commands::schema::get_columns,
+            commands::schema::get_relation_kind,
             commands::structure::get_table_structure,
             commands::schema::get_materialized_views,
             commands::schema::get_sequences,

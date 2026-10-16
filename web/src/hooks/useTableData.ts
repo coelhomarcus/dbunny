@@ -3,6 +3,7 @@ import { type SortingState, type OnChangeFn } from "@tanstack/react-table";
 import { useApi } from "../contexts/useConnection";
 import type { TableDataResponse, ColumnInfo, TableFilter, FilterMode, SortKey } from "@/types";
 import { isActiveFilter } from "../lib/tableFilters";
+import type { RelationType } from "../lib/api";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const DEFAULT_PAGE_SIZE = 50;
@@ -41,6 +42,17 @@ export function useTableData(schema?: string, table?: string, initialFilters: Ta
   const [refreshing, setRefreshing] = useState(false);
   const [counting, setCounting] = useState(false);
   const [spinKey, setSpinKey] = useState(0);
+  // Views and materialized views show rows but can't take writes; unknown until it loads
+  const [relationType, setRelationType] = useState<RelationType | null>(null);
+
+  useEffect(() => {
+    if (!schema || !table) return;
+    let cancel = false;
+    api.getRelationKind(schema, table).then((kind) => !cancel && setRelationType(kind)).catch(() => {});
+    return () => {
+      cancel = true;
+    };
+  }, [schema, table, api]);
 
   const pkColumns = useMemo(
     () => columnInfos.filter((c) => c.isPrimaryKey),
@@ -155,5 +167,6 @@ export function useTableData(schema?: string, table?: string, initialFilters: Ta
     fetchData,
     pkColumns,
     hasNoPk,
+    relationType,
   };
 }

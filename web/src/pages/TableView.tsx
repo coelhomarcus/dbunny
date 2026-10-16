@@ -70,8 +70,12 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
 
   const tableData = useTableData(schema, table, initialFilters);
   const { data, columnInfos, loading, error, hasNoPk } = tableData;
-  const readOnly = useConnection().connectionInfo?.readOnly ?? false;
-  // Rows can't be changed without a primary key to find them, or on a read-only connection
+  const connectionReadOnly = useConnection().connectionInfo?.readOnly ?? false;
+  const { relationType } = tableData;
+  // A view's rows come from its query: nothing to insert into or edit here
+  const isView = relationType === "view" || relationType === "matview";
+  const readOnly = connectionReadOnly || isView;
+  // Rows can't be changed without a primary key to find them, or when nothing can be written
   const editLocked = hasNoPk || readOnly;
 
   const selection = useRowSelection(data?.rows.length ?? 0);
@@ -318,8 +322,9 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       <TableViewHeader
         schema={schema!}
         table={table!}
+        relationType={relationType}
         hasNoPk={hasNoPk}
-        readOnly={readOnly}
+        readOnly={connectionReadOnly}
         selectedCount={selection.selectedRows.size}
         deleting={pending.deleting}
         onDelete={pending.handleDelete}
