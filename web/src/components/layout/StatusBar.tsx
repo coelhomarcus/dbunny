@@ -1,11 +1,7 @@
-import { Eye, EyeOff, Lock, LogOut, Settings } from "lucide-react";
+import { Eye, EyeOff, Lock, LogOut } from "lucide-react";
 import Tooltip from "../Tooltip";
-import Button from "../ui/Button";
-import { useSettingsDialog } from "../../contexts/settingsDialog";
 import { showUpdate, useUpdate } from "../../lib/updater";
-import { isMac } from "../../lib/platform";
 import type { ConnectionInfo } from "@/types";
-import ThemeToggle from "../ui/ThemeToggle";
 
 const mask = (value: string) => value.replace(/./g, "•");
 
@@ -22,18 +18,6 @@ function UpdateIndicator() {
       <span className="size-1.5 rounded-full bg-primary" />
       {state.status === "ready" ? "Restart to update" : `Update to ${state.version}`}
     </button>
-  );
-}
-
-/** Opens Settings; Cmd/Ctrl+, does too. */
-function SettingsButton() {
-  const { openSettings } = useSettingsDialog();
-  return (
-    <Tooltip label={`Settings (${isMac ? "⌘" : "Ctrl+"},)`} side="top">
-      <Button variant="ghost-muted" size="icon-xs" aria-label="Settings" onClick={() => openSettings()}>
-        <Settings />
-      </Button>
-    </Tooltip>
   );
 }
 
@@ -80,8 +64,6 @@ export default function StatusBar({
       <div className="ml-auto flex items-center gap-1">
         <UpdateIndicator />
         {connectionInfo?.serverVersion && <span className="mr-1.5">PostgreSQL {connectionInfo.serverVersion.split(" ")[0]}</span>}
-        <ThemeToggle side="top" size="icon-xs" />
-        <SettingsButton />
         <button
           onClick={onDisconnect}
           className="flex h-5 items-center gap-1 rounded-md px-1.5 hover:bg-destructive/10 hover:text-destructive-foreground transition-colors cursor-pointer"
@@ -104,9 +86,7 @@ export function IdleStatusBar({ version }: { version: string | null }) {
       </span>
       <div className="ml-auto flex items-center gap-1">
         <UpdateIndicator />
-        {version && <span className="mr-1.5">DBunny {version}</span>}
-        <ThemeToggle side="top" size="icon-xs" />
-        <SettingsButton />
+        {version && <span className="pr-1">DBunny {version}</span>}
       </div>
     </footer>
   );

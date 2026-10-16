@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Database, Minus, PanelLeft, Plus, X } from "lucide-react";
+import { Database, Minus, PanelLeft, Plus, X, Settings } from "lucide-react";
 import { isMac } from "../lib/platform";
 import { cn } from "../lib/cn";
 import { useWorkspace, type WorkspaceTab } from "../contexts/workspace";
+import { useSettingsDialog } from "../contexts/settingsDialog";
 import ConnectionGlyph from "./ConnectionGlyph";
 import Button from "./ui/Button";
 import Tooltip from "./Tooltip";
@@ -152,6 +153,7 @@ function WindowTab({
 export default function TitleBar() {
   const { tabs, activeTabId, activateTab, closeTab, openTab, cycleTab, sidebarOpen, toggleSidebar } = useWorkspace();
   const { maximized, fullscreen } = useWindowState();
+  const { openSettings } = useSettingsDialog();
   const trafficLights = isMac && !fullscreen;
 
   // Cmd/Ctrl+T new tab, Ctrl+W close tab, Ctrl+Tab / Ctrl+Shift+Tab cycle, Cmd/Ctrl+1..9 jump
@@ -197,9 +199,14 @@ export default function TitleBar() {
         if (isDragArea(e.target)) appWindow.toggleMaximize();
       }}
     >
-      {/* Room for the traffic lights on macOS, then the sidebar toggle; the tabs follow,
-          and each tab's container below holds its own sidebar */}
-      <div className={cn("flex shrink-0 items-center", trafficLights ? "w-[7.5rem] justify-end pr-1" : "w-12 justify-center")}>
+      {/* Room for the traffic lights on macOS, then Settings and the sidebar toggle; the
+          tabs follow, and each tab's container below holds its own sidebar */}
+      <div className={cn("flex shrink-0 items-center gap-0.5", trafficLights ? "w-[9.5rem] justify-end pr-1" : "w-[4.75rem] justify-center")}>
+        <Tooltip label={`Settings (${isMac ? "⌘" : "Ctrl+"},)`} side="bottom">
+          <Button variant="ghost-muted" size="icon-sm" onClick={() => openSettings()} aria-label="Settings">
+            <Settings />
+          </Button>
+        </Tooltip>
         <Tooltip label={sidebarOpen ? "Hide sidebar" : "Show sidebar"} side="bottom">
           <Button variant="ghost-muted" size="icon-sm" onClick={toggleSidebar} aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}>
             <PanelLeft />
