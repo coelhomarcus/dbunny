@@ -212,7 +212,7 @@ export default function ActivityView() {
                         key={s.pid}
                         onClick={() => setSelected(activeRow ? null : s.pid)}
                         className={cn(
-                          "cursor-pointer border-b border-border align-middle",
+                          "cursor-pointer border-b border-border align-middle transition-colors hover:bg-accent",
                           activeRow ? "bg-accent" : i % 2 ? "bg-muted/50" : "bg-card",
                           !activeRow && s.blockedBy.length > 0 && "bg-destructive/[0.04]",
                         )}
