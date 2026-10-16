@@ -8,6 +8,7 @@ import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
 import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
 import ExportMenu from "../components/ExportMenu";
 import Button from "../components/ui/Button";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 
 type TabMeta = {
   id: number;
@@ -293,43 +294,30 @@ export default function QueryEditor() {
 
   return (
     <div className="h-full flex flex-col">
-      {pendingDangers && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-            <div className="px-5 pt-5 pb-4">
-              <div className="flex items-center gap-2.5 mb-1">
-                <div className="flex items-center justify-center w-7 h-7 rounded-full bg-destructive/15">
-                  <AlertTriangle size={14} className="text-destructive-foreground" />
-                </div>
-                <h3 className="text-sm font-semibold text-foreground">Query blocked by Safe Mode</h3>
-              </div>
-              <p className="text-sm text-muted-foreground mt-2">
-                {pendingDangers.length === 1
-                  ? "A potentially destructive operation was detected."
-                  : `${pendingDangers.length} potentially destructive operations were detected.`}
-              </p>
+      <ConfirmDialog
+        open={pendingDangers !== null}
+        onClose={cancelDangerousQuery}
+        onConfirm={confirmDangerousQuery}
+        icon={<AlertTriangle />}
+        tone="destructive"
+        title="Query blocked by Safe Mode"
+        description={
+          pendingDangers?.length === 1
+            ? "A potentially destructive operation was detected."
+            : `${pendingDangers?.length ?? 0} potentially destructive operations were detected.`
+        }
+        cancelLabel="Cancel"
+        confirmLabel="Run anyway"
+      >
+        <div className="rounded-xl border border-border bg-muted divide-y divide-border">
+          {(pendingDangers ?? []).map((d, i) => (
+            <div key={i} className="px-3 py-2.5">
+              <span className="font-mono text-xs font-medium text-destructive-foreground block">{d.rule}</span>
+              <span className="text-xs text-muted-foreground block mt-0.5">{d.detail}</span>
             </div>
-
-            <div className="mx-5 mb-4 rounded-xl border border-border bg-muted divide-y divide-border">
-              {pendingDangers.map((d, i) => (
-                <div key={i} className="px-3 py-2.5">
-                  <span className="font-mono text-xs font-medium text-destructive-foreground block">{d.rule}</span>
-                  <span className="text-xs text-muted-foreground block mt-0.5">{d.detail}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2 px-5 py-3.5 border-t border-border bg-muted">
-              <Button variant="destructive" size="sm" onClick={confirmDangerousQuery}>
-                Run anyway
-              </Button>
-              <Button variant="ghost-muted" size="sm" onClick={cancelDangerousQuery}>
-                Cancel
-              </Button>
-            </div>
-          </div>
+          ))}
         </div>
-      )}
+      </ConfirmDialog>
 
       {/* Editor panel */}
       <div className="flex flex-col flex-1 min-h-0 border-b border-border">

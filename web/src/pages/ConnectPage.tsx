@@ -461,7 +461,7 @@ export default function ConnectPage() {
         description="Paste a PostgreSQL connection string to fill in the form."
         footer={
           <>
-            <Button variant="ghost-muted" size="sm" onClick={closeImport}>
+            <Button variant="neutral" size="sm" onClick={closeImport}>
               Cancel
             </Button>
             <Button variant="primary" size="sm" onClick={handleImport} disabled={!importUrl.trim()}>

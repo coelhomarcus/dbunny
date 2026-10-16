@@ -14,10 +14,11 @@ import { useRowSelection } from "../hooks/useRowSelection";
 import { useColumnResize } from "../hooks/useColumnResize";
 import { usePendingChanges } from "../hooks/usePendingChanges";
 import { useDiscardGuard } from "../hooks/useDiscardGuard";
-import Dialog from "../components/ui/Dialog";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 import FilterBar from "../components/table/FilterBar";
 import InsertRowDialog from "../components/table/InsertRowDialog";
 import Button from "../components/ui/Button";
+import { TriangleAlert } from "lucide-react";
 import Checkbox from "../components/Checkbox";
 import TableViewHeader from "../components/TableViewHeader";
 import SortableColumnHeader from "../components/SortableColumnHeader";
@@ -361,21 +362,16 @@ export default function TableView() {
         }}
       />
 
-      <Dialog
+      <ConfirmDialog
         open={discardGuard.isConfirming}
         onClose={discardGuard.cancel}
+        onConfirm={discardGuard.confirm}
+        icon={<TriangleAlert />}
+        tone="destructive"
         title="Discard unsaved changes?"
         description={`${pending.dirtyRowCount} row${pending.dirtyRowCount > 1 ? "s have" : " has"} unsaved edits. Loading other rows would discard them.`}
-        footer={
-          <>
-            <Button variant="ghost-muted" size="sm" onClick={discardGuard.cancel}>
-              Keep editing
-            </Button>
-            <Button variant="destructive" size="sm" onClick={discardGuard.confirm}>
-              Discard changes
-            </Button>
-          </>
-        }
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
       />
     </div>
   );

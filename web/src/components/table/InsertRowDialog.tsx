@@ -76,7 +76,7 @@ function InsertForm({
       footer={
         <>
           {error && <p className="mr-auto min-w-0 flex-1 break-words text-xs text-destructive-foreground">{error}</p>}
-          <Button variant="ghost-muted" size="sm" onClick={onClose}>
+          <Button variant="neutral" size="sm" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" size="sm" onClick={() => submit()} disabled={saving}>
