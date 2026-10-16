@@ -46,19 +46,33 @@ fn tls_plan(sslmode: Option<&str>) -> Result<TlsPlan, String> {
     }
 }
 
+/// URL parameters DBunny applies itself instead of passing them to the driver
+/// (which only knows a few sslmodes and no certificate files).
+const TLS_PARAMS: [&str; 4] = ["sslmode", "sslrootcert", "sslcert", "sslkey"];
+
+fn read_file(label: &str, path: &str) -> Result<Vec<u8>, String> {
+    std::fs::read(path).map_err(|e| format!("Couldn't read the {label} {path}: {e}"))
+}
+
 /// Builds the driver config and TLS connector from a postgres:// URL.
 pub(crate) fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Config, MakeTlsConnector), String> {
-    let sslmode = url
-        .query_pairs()
-        .find(|(key, _)| key == "sslmode")
-        .map(|(_, value)| value.into_owned());
-    let plan = tls_plan(sslmode.as_deref())?;
+    let param = |name: &str| {
+        url.query_pairs()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.into_owned())
+            .filter(|value| !value.is_empty())
+    };
+    let mut plan = tls_plan(param("sslmode").as_deref())?;
+    let root_cert = param("sslrootcert");
+    // Like libpq: with a CA file, "require" checks the certificate against it
+    if root_cert.is_some() && plan.mode == SslMode::Require {
+        plan.verify_cert = true;
+    }
 
-    // The driver only understands disable/prefer/require, so sslmode is applied by hand
     let mut stripped = url.clone();
     let others: Vec<(String, String)> = url
         .query_pairs()
-        .filter(|(key, _)| key != "sslmode")
+        .filter(|(key, _)| !TLS_PARAMS.contains(&key.as_ref()))
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
         .collect();
     if others.is_empty() {
@@ -77,11 +91,30 @@ pub(crate) fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Confi
         .map_err(|e| format!("Invalid connection URL: {}", e))?;
     config.ssl_mode(plan.mode);
 
-    let connector = native_tls::TlsConnector::builder()
+    let mut builder = native_tls::TlsConnector::builder();
+    builder
         .danger_accept_invalid_certs(!plan.verify_cert)
-        .danger_accept_invalid_hostnames(!plan.verify_host)
-        .build()
-        .map_err(|e| format!("TLS setup failed: {}", e))?;
+        .danger_accept_invalid_hostnames(!plan.verify_host);
+    if let Some(path) = &root_cert {
+        let ca = native_tls::Certificate::from_pem(&read_file("CA certificate", path)?)
+            .map_err(|e| format!("The CA certificate {path} isn't a PEM certificate: {e}"))?;
+        builder.add_root_certificate(ca);
+    }
+    match (param("sslcert"), param("sslkey")) {
+        (Some(cert), Some(key)) => {
+            let identity = native_tls::Identity::from_pkcs8(&read_file("client certificate", &cert)?, &read_file("client key", &key)?)
+                .map_err(|e| {
+                    format!(
+                        "Couldn't use the client certificate and key: {e}. The key must be an unencrypted PKCS#8 PEM \
+                         (convert it with: openssl pkcs8 -topk8 -nocrypt -in key.pem -out key.pk8.pem)"
+                    )
+                })?;
+            builder.identity(identity);
+        }
+        (None, None) => {}
+        _ => return Err("A client certificate needs both the certificate and its key".into()),
+    }
+    let connector = builder.build().map_err(|e| format!("TLS setup failed: {}", e))?;
 
     Ok((config, MakeTlsConnector::new(connector)))
 }
@@ -436,6 +469,21 @@ mod tests {
     }
 
     #[test]
+    fn certificate_params_are_kept_from_the_driver_and_checked() {
+        let url = url::Url::parse("postgresql://u@db.example.com/db?sslmode=require&sslrootcert=/nope/ca.pem&application_name=x").unwrap();
+        let err = connection_config(&url).err().unwrap();
+        assert!(err.contains("CA certificate /nope/ca.pem"), "{err}");
+
+        let url = url::Url::parse("postgresql://u@db.example.com/db?sslmode=require&sslcert=/a.pem").unwrap();
+        assert!(connection_config(&url).err().unwrap().contains("both the certificate and its key"));
+
+        // Empty values are ignored, the rest still reaches the driver
+        let url = url::Url::parse("postgresql://u@db.example.com/db?sslmode=require&sslrootcert=&application_name=dbunny").unwrap();
+        let (config, _) = connection_config(&url).unwrap();
+        assert_eq!(config.get_application_name(), Some("dbunny"));
+    }
+
+    #[test]
     fn config_without_query_still_parses() {
         let url = url::Url::parse("postgresql://u@localhost/db").unwrap();
         let (config, _) = connection_config(&url).unwrap();
@@ -527,5 +575,70 @@ mod database_server_tests {
         // The first session is untouched
         let current: String = client.query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
         assert_eq!(current, first.database);
+    }
+}
+
+/// Certificates against a real server with SSL and certificate login. Run with:
+///   DBUNNY_TEST_SSL_DIR=<dir with ca.pem, other-ca.pem, client.pem, client.pk8.pem, client.key>
+///   DBUNNY_TEST_SSL_PORT=<port of a server using a certificate for "localhost" signed by ca.pem,
+///   with a "demo"/"demo" password login and a "certuser" that logs in by certificate>
+///   cargo test --lib certificate_server_tests -- --ignored
+#[cfg(test)]
+mod certificate_server_tests {
+    use super::*;
+
+    fn dir() -> String {
+        std::env::var("DBUNNY_TEST_SSL_DIR").expect("set DBUNNY_TEST_SSL_DIR")
+    }
+
+    async fn try_connect(url: &str) -> Result<String, String> {
+        let url = url::Url::parse(url).unwrap();
+        let (config, tls) = connection_config(&url)?;
+        let (client, connection) = config.connect(tls).await.map_err(|e| e.to_string())?;
+        tokio::spawn(connection);
+        let row = client
+            .query_one("SELECT current_user::text || ' ' || ssl::text FROM pg_stat_ssl WHERE pid = pg_backend_pid()", &[])
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(row.get(0))
+    }
+
+    fn url(user: &str, host: &str, query: &str) -> String {
+        let port = std::env::var("DBUNNY_TEST_SSL_PORT").expect("set DBUNNY_TEST_SSL_PORT");
+        let auth = if user == "demo" { "demo:demo".to_string() } else { user.to_string() };
+        format!("postgresql://{auth}@{host}:{port}/demo?{query}")
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_SSL_DIR and DBUNNY_TEST_SSL_PORT"]
+    async fn the_server_certificate_is_checked_against_the_given_ca() {
+        let d = dir();
+        // The right CA: verify-ca and verify-full (the certificate is for localhost) both pass
+        assert_eq!(try_connect(&url("demo", "localhost", &format!("sslmode=verify-ca&sslrootcert={d}/ca.pem"))).await.unwrap(), "demo true");
+        assert_eq!(try_connect(&url("demo", "localhost", &format!("sslmode=verify-full&sslrootcert={d}/ca.pem"))).await.unwrap(), "demo true");
+        // require + CA behaves like verify-ca, as in libpq
+        assert!(try_connect(&url("demo", "localhost", &format!("sslmode=require&sslrootcert={d}/other-ca.pem"))).await.is_err());
+        // Another CA is refused
+        assert!(try_connect(&url("demo", "localhost", &format!("sslmode=verify-ca&sslrootcert={d}/other-ca.pem"))).await.is_err());
+        // verify-full accepts the other name the certificate lists (its IP address)
+        assert!(try_connect(&url("demo", "127.0.0.1", &format!("sslmode=verify-full&sslrootcert={d}/ca.pem"))).await.is_ok());
+        // Plain require without a CA still encrypts without checking
+        assert_eq!(try_connect(&url("demo", "localhost", "sslmode=require")).await.unwrap(), "demo true");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_SSL_DIR and DBUNNY_TEST_SSL_PORT"]
+    async fn client_certificates_log_in() {
+        let d = dir();
+        let with_cert = format!("sslmode=verify-ca&sslrootcert={d}/ca.pem&sslcert={d}/client.pem&sslkey={d}/client.pk8.pem");
+        assert_eq!(try_connect(&url("certuser", "localhost", &with_cert)).await.unwrap(), "certuser true");
+        // Without the certificate the server refuses the login
+        assert!(try_connect(&url("certuser", "localhost", &format!("sslmode=verify-ca&sslrootcert={d}/ca.pem"))).await.is_err());
+        // A PKCS#1 key explains how to convert it
+        let pkcs1 = format!("sslmode=require&sslcert={d}/client.pem&sslkey={d}/client.key");
+        match try_connect(&url("certuser", "localhost", &pkcs1)).await {
+            Ok(_) => {} // some platforms read PKCS#1 too
+            Err(e) => assert!(e.contains("PKCS#8") || e.contains("pkcs8"), "{e}"),
+        }
     }
 }
