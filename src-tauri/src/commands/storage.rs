@@ -378,6 +378,14 @@ impl SavedConnection {
             .ok_or_else(|| format!("This version doesn't support {} connections", self.engine))?;
         let json = decrypt(key, &self.encrypted_data)?;
         let deserialize_error = |e: serde_json::Error| format!("Failed to deserialize sensitive data: {e}");
+        // An entry without an engine reads as PostgreSQL, but an older version that doesn't know the
+        // engine field drops it when it saves the file: one that holds a SQLite path is still SQLite
+        let engine = match engine {
+            Engine::Postgres if serde_json::from_str::<SensitiveData>(&json).is_err() && serde_json::from_str::<SqliteData>(&json).is_ok() => {
+                Engine::Sqlite
+            }
+            other => other,
+        };
         // A SQLite connection has only its path; the PostgreSQL fields are left empty
         let (sensitive, path) = match engine {
             Engine::Postgres => (serde_json::from_str::<SensitiveData>(&json).map_err(deserialize_error)?, String::new()),
@@ -449,6 +457,26 @@ mod tests {
     fn legacy_payload(key: &[u8; 32]) -> String {
         let sensitive = r#"{"host":"db.example.com","port":5433,"database":"shop","user":"me","password":"secret","ssh":{"host":"bastion","port":2222,"user":"ubuntu","authMethod":"key","password":"","keyPath":"/home/me/.ssh/id_ed25519","passphrase":"pp"},"tls":{"mode":"verify-full","rootCert":"/ca.pem","cert":"/client.pem","key":"/client.key"}}"#;
         encrypt(key, sensitive).unwrap()
+    }
+
+    #[test]
+    fn a_sqlite_entry_stripped_of_its_engine_by_an_older_version_is_still_found() {
+        // 0.4.0 doesn't know the engine field: saving rewrites every entry without it
+        let key = [7u8; 32];
+        let payload = encrypt(&key, r#"{"path":"/Users/me/notes.sqlite"}"#).unwrap();
+        let json = format!(
+            r##"{{"version":1,"connections":[{{"id":"s","name":"Notes","encryptedData":"{payload}","ssl":false,"color":"#000","createdAt":"t","updatedAt":"t"}}]}}"##
+        );
+        let file: ConnectionsFile = serde_json::from_str(&json).unwrap();
+        let info = file.connections[0].to_info(&key).unwrap();
+        assert_eq!((info.engine, info.path.as_str()), (Engine::Sqlite, "/Users/me/notes.sqlite"));
+        assert_eq!((info.host.as_str(), info.port), ("", 0));
+
+        // A payload that is neither kind is still an error, not a guess
+        let junk = encrypt(&key, r#"{"x":1}"#).unwrap();
+        let mut broken = file.connections[0].clone();
+        broken.encrypted_data = junk;
+        assert!(broken.to_info(&key).is_err());
     }
 
     #[test]
