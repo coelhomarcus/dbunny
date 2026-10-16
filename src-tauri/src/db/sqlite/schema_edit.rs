@@ -123,15 +123,22 @@ fn change_sql(c: &Connection, schema: &str, table: &str, change: &StructureChang
             if comment.as_deref().is_some_and(|c| !c.trim().is_empty()) {
                 return Err(not_in_sqlite("Comments"));
             }
-            let mut add = format!("{alter} ADD COLUMN {} {}", name("column name", column)?, fragment("type", data_type)?);
+            // SQLite rejects UNIQUE on ADD COLUMN. A unique index is the same rule and is allowed.
+            let quoted = name("column name", column)?;
+            let mut add = format!("{alter} ADD COLUMN {quoted} {}", fragment("type", data_type)?);
             if !nullable {
                 add += " NOT NULL";
             }
             if let Some(default) = default.as_deref().filter(|d| !d.trim().is_empty()) {
                 add += &format!(" DEFAULT {}", fragment("default", default)?);
             }
-            column_flags(&mut add, *unique, check)?;
-            add
+            column_flags(&mut add, false, check)?;
+            if *unique {
+                let index = quote(&free_name(c, schema, &format!("{}_{}_idx", table.trim(), column.trim()))?);
+                format!("{add};\nCREATE UNIQUE INDEX {}.{index} ON {} ({quoted})", quote(schema), quote(table))
+            } else {
+                add
+            }
         }
         StructureChange::RenameColumn { name: column, new_name } => {
             format!("{alter} RENAME COLUMN {} TO {}", name("column name", column)?, name("new name", new_name)?)
@@ -715,8 +722,16 @@ mod tests {
         assert!(err.contains("UNIQUE"), "{err}");
 
         let added = StructureChange::AddColumn { name: "extra".into(), data_type: "INTEGER".into(), nullable: true, default: None, comment: None, unique: true, check: Some("extra >= 0".into()) };
-        let preview = editor(&d).preview_change("main", "amounts", &added).await.unwrap();
-        assert_eq!(preview, "ALTER TABLE \"main\".\"amounts\" ADD COLUMN \"extra\" INTEGER UNIQUE CHECK (extra >= 0);");
+        let preview = preview_then_apply(&d, "main", "amounts", added).await;
+        assert_eq!(
+            preview,
+            "ALTER TABLE \"main\".\"amounts\" ADD COLUMN \"extra\" INTEGER CHECK (extra >= 0);\nCREATE UNIQUE INDEX \"main\".\"amounts_extra_idx\" ON \"amounts\" (\"extra\");"
+        );
+        exec(&d, "INSERT INTO amounts (n, extra) VALUES (2, 1)").await.unwrap();
+        let err = exec(&d, "INSERT INTO amounts (n, extra) VALUES (3, 1)").await.unwrap_err();
+        assert!(err.contains("UNIQUE"), "{err}");
+        let err = exec(&d, "INSERT INTO amounts (n, extra) VALUES (4, -1)").await.unwrap_err();
+        assert!(err.contains("CHECK"), "{err}");
     }
 
     #[tokio::test]
