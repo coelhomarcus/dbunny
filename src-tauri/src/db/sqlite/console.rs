@@ -330,26 +330,27 @@ mod tests {
         assert_eq!(console.execute("SELECT count(*) FROM t").await.unwrap().rows, vec![vec![json!(1)]]);
     }
 
-    #[tokio::test]
-    async fn cancelling_stops_a_running_query() {
-        let f = TempDb::with("CREATE TABLE t (x)");
-        let d = open(&f).await;
-        let running = {
-            let d = d.clone();
-            tokio::spawn(async move { d.console().unwrap().execute(&format!("SELECT 1; {ENDLESS}")).await })
-        };
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let started = Instant::now();
-        d.console().unwrap().cancel().await.unwrap();
-        let err = tokio::time::timeout(Duration::from_secs(3), running).await.expect("the query stops").unwrap().err().unwrap();
-        let e = error(&err);
-        assert_eq!(e["message"], "canceling statement due to user request");
-        assert_eq!((e["code"].as_str(), e["statement"].as_u64()), (Some("SQLITE_INTERRUPT"), Some(2)));
-        assert!(started.elapsed() < Duration::from_secs(2));
+    #[test]
+    fn cancelling_stops_a_running_query() {
+        without_hanging(async {
+            let f = TempDb::with("CREATE TABLE t (x)");
+            let d = open(&f).await;
+            let mut running = {
+                let d = d.clone();
+                tokio::spawn(async move { d.console().unwrap().execute(&format!("SELECT 1; {ENDLESS}")).await })
+            };
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let started = Instant::now();
+            // Until it stops: a cancel that comes before the script starts is forgotten
+            let (e, _) = cancel_until_stopped(&d, &mut running, SOON).await;
+            assert_eq!(e["message"], "canceling statement due to user request");
+            assert_eq!((e["code"].as_str(), e["statement"].as_u64()), (Some("SQLITE_INTERRUPT"), Some(2)));
+            assert!(started.elapsed() < Duration::from_secs(2));
 
-        // Cancelling with nothing running changes nothing, and the next query runs
-        d.console().unwrap().cancel().await.unwrap();
-        assert_eq!(d.console().unwrap().execute("SELECT 2").await.unwrap().rows, vec![vec![json!(2)]]);
+            // Cancelling with nothing running changes nothing, and the next query runs
+            d.console().unwrap().cancel().await.unwrap();
+            assert_eq!(d.console().unwrap().execute("SELECT 2").await.unwrap().rows, vec![vec![json!(2)]]);
+        });
     }
 
     /// Runs `sql` on the editor in a task of its own.

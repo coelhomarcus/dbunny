@@ -329,7 +329,7 @@ mod tests {
 
     use serde_json::{json, Value as JsonValue};
 
-    use super::super::tests_support::TempDb;
+    use super::super::tests_support::{stop_until_done, without_hanging, TempDb};
     use super::super::OpenOptions;
     use super::*;
     use crate::db::model::SortKey;
@@ -841,31 +841,35 @@ mod tests {
         assert_eq!(d.data().count_rows("main", "ins").await.unwrap(), 2);
     }
 
-    #[tokio::test]
-    async fn a_save_does_not_wait_for_a_busy_editor() {
-        let f = TempDb::with("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO t VALUES (1, 'a');");
-        let opts = OpenOptions { busy_timeout: std::time::Duration::from_millis(200), ..Default::default() };
-        let d = SqliteDriver::open(f.path(), opts).await.unwrap();
-        d.editor().run(|c| c.execute_batch("BEGIN; INSERT INTO t VALUES (2, 'b');").map_err(|e| e.to_string())).await.unwrap();
-        // The editor goes on with a statement that never ends, inside its transaction
-        let running = {
-            let d = d.clone();
-            tokio::spawn(async move {
-                let endless = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n";
-                d.editor().run(move |c| c.query_row(endless, [], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string())).await
-            })
-        };
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    #[test]
+    fn a_save_does_not_wait_for_a_busy_editor() {
+        without_hanging(async {
+            let f = TempDb::with("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO t VALUES (1, 'a');");
+            let opts = OpenOptions { busy_timeout: std::time::Duration::from_millis(200), ..Default::default() };
+            let d = SqliteDriver::open(f.path(), opts).await.unwrap();
+            d.editor().run(|c| c.execute_batch("BEGIN; INSERT INTO t VALUES (2, 'b');").map_err(|e| e.to_string())).await.unwrap();
+            // The editor goes on with a statement that never ends, inside its transaction
+            let mut running = {
+                let d = d.clone();
+                tokio::spawn(async move {
+                    let endless = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n";
+                    d.editor().run(move |c| c.query_row(endless, [], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string())).await
+                })
+            };
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        let started = std::time::Instant::now();
-        let save = d.data().save_rows("main", "t", vec![change(json!({ "id": 1 }), json!({ "name": "A" }))]);
-        let saved = tokio::time::timeout(std::time::Duration::from_secs(3), save).await;
-        let elapsed = started.elapsed();
-        d.editor().interrupt();
-        assert!(running.await.unwrap().is_err(), "the endless statement was stopped");
+            let started = std::time::Instant::now();
+            let save = d.data().save_rows("main", "t", vec![change(json!({ "id": 1 }), json!({ "name": "A" }))]);
+            let saved = tokio::time::timeout(std::time::Duration::from_secs(3), save).await;
+            let elapsed = started.elapsed();
+            // Until it stops: an interrupt that comes before the statement starts is lost
+            let interrupt = || std::future::ready(d.editor().interrupt());
+            let (stopped, _) = stop_until_done(&mut running, std::time::Duration::from_millis(20), std::time::Duration::from_secs(5), interrupt).await;
+            assert!(stopped.is_err(), "the endless statement was stopped");
 
-        let err = saved.expect("the save must not wait for the editor's statement").unwrap_err();
-        assert_eq!(err, "A transaction in the query editor is holding the database: commit or roll it back, then try again.");
-        assert!(elapsed < std::time::Duration::from_secs(2), "{elapsed:?}");
+            let err = saved.expect("the save must not wait for the editor's statement").unwrap_err();
+            assert_eq!(err, "A transaction in the query editor is holding the database: commit or roll it back, then try again.");
+            assert!(elapsed < std::time::Duration::from_secs(2), "{elapsed:?}");
+        });
     }
 }
