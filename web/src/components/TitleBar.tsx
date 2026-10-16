@@ -201,7 +201,7 @@ export default function TitleBar() {
     >
       {/* Room for the traffic lights on macOS, then Settings and the sidebar toggle; the
           tabs follow, and each tab's container below holds its own sidebar */}
-      <div className={cn("flex shrink-0 items-center gap-0.5", trafficLights ? "w-[9.5rem] justify-end pr-1" : "w-[4.75rem] justify-center")}>
+      <div className={cn("flex shrink-0 items-center gap-0.5 pr-0.5", trafficLights ? "w-[8.75rem] justify-end" : "pl-2")}>
         <Tooltip label={`Settings (${isMac ? "⌘" : "Ctrl+"},)`} side="bottom">
           <Button variant="ghost-muted" size="icon-sm" onClick={() => openSettings()} aria-label="Settings">
             <Settings />
@@ -214,7 +214,8 @@ export default function TitleBar() {
         </Tooltip>
       </div>
 
-      <div role="tablist" className="tab-strip window-tabs flex min-w-0 flex-1 items-end gap-1 pl-5 pr-2">
+      {/* pl-3: room for the active tab's curved left corner */}
+      <div role="tablist" className="tab-strip window-tabs flex min-w-0 flex-1 items-end gap-1 pl-3 pr-2">
         {tabs.map((tab) => (
           <WindowTab
             key={tab.id}
