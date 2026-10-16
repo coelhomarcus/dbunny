@@ -3,20 +3,25 @@ import { ArrowRight, Database, Plus, Search, Trash2 } from "lucide-react";
 import ConnectionGlyph from "../ConnectionGlyph";
 import type { SavedConnection } from "@/types";
 import { cn } from "../../lib/cn";
+import { DEFAULT_COLOR } from "../../lib/connectionDraft";
 import Button from "../ui/Button";
 import Badge from "../ui/Badge";
 
-const DEFAULT_COLOR = "#3b82f6";
-
 /** Rounded tile tinted with the connection colour: the row's visual anchor. */
-function ConnectionIcon({ color, icon }: { color: string; icon: string }) {
+export function ConnectionIcon({ color, icon, size = "sm" }: { color: string; icon: string; size?: "sm" | "lg" }) {
   const style: CSSProperties = {
     color,
     backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)`,
     boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${color} 22%, transparent)`,
   };
   return (
-    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4" style={style}>
+    <span
+      className={cn(
+        "flex shrink-0 items-center justify-center",
+        size === "sm" ? "size-8 rounded-lg [&_svg]:size-4" : "size-12 rounded-xl [&_svg]:size-6",
+      )}
+      style={style}
+    >
       <ConnectionGlyph icon={icon} />
     </span>
   );
@@ -173,7 +178,7 @@ export default function ConnectionSidebar({
                 <Database size={18} />
               </div>
               <p className="text-sm font-medium">No saved connections</p>
-              <p className="mt-1 text-xs text-muted-foreground">Save a connection from the form to reach it in one click.</p>
+              <p className="mt-1 text-xs text-muted-foreground">Create one with New connection to reach it in one click.</p>
             </div>
           ) : filtered.length === 0 ? (
             <p className="px-2 pt-6 text-center text-xs text-muted-foreground">
