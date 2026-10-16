@@ -46,6 +46,8 @@ interface TableViewHeaderProps {
   hasCustomWidths: boolean;
   onResetWidths: () => void;
   onInsertRow: () => void;
+  /** Show/hide/reorder control for the columns. */
+  columnsMenu?: React.ReactNode;
   filterCount: number;
   filtersOpen: boolean;
   onToggleFilters: () => void;
@@ -60,7 +62,7 @@ export default function TableViewHeader({
   hasPendingChanges, dirtyRowCount, saveError, saving, onSave, onDiscard, onReviewSql,
   refreshing, loading, spinKey, onRefresh,
   hasCustomWidths, onResetWidths,
-  onInsertRow, filterCount, filtersOpen, onToggleFilters,
+  onInsertRow, columnsMenu, filterCount, filtersOpen, onToggleFilters,
   columns, rows, onFetchAllRows,
 }: TableViewHeaderProps) {
   return (
@@ -126,6 +128,8 @@ export default function TableViewHeader({
             </Button>
           </div>
         )}
+
+        {columnsMenu}
 
         {!readOnly && (
           <Button variant="ghost-muted" size="sm" onClick={onInsertRow}>

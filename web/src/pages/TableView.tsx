@@ -15,6 +15,8 @@ import { useTab } from "../contexts/workspace";
 import { useCellEditing } from "../hooks/useCellEditing";
 import { useRowSelection } from "../hooks/useRowSelection";
 import { useColumnResize } from "../hooks/useColumnResize";
+import { useColumnLayout } from "../hooks/useColumnLayout";
+import ColumnsMenu from "../components/table/ColumnsMenu";
 import { usePendingChanges } from "../hooks/usePendingChanges";
 import { useDiscardGuard } from "../hooks/useDiscardGuard";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -71,6 +73,13 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   const editLocked = hasNoPk || readOnly;
 
   const selection = useRowSelection(data?.rows.length ?? 0);
+  const { connectionInfo } = useConnection();
+  const layout = useColumnLayout(
+    connectionInfo && schema && table
+      ? `dbunny:columns:${connectionInfo.host}:${connectionInfo.port}/${connectionInfo.database}/${schema}.${table}`
+      : null,
+    data?.columns,
+  );
   const resize = useColumnResize();
 
   const pending = usePendingChanges({
@@ -184,12 +193,12 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
 
   const columns = useMemo<ColumnDef<unknown[], unknown>[]>(() => {
     if (!data?.columns) return [];
-    return data.columns.map((col: QueryColumn) => ({
-      id: col.name,
-      header: col.name,
+    return layout.visible.map(({ column }) => ({
+      id: column.name,
+      header: column.name,
       accessorFn: (row: unknown[]) => row,
     }));
-  }, [data?.columns]);
+  }, [data?.columns, layout.visible]);
 
   const reactTable = useReactTable({
     data: data?.rows ?? [],
@@ -324,6 +333,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         columns={data?.columns}
         rows={data?.rows}
         onFetchAllRows={fetchAllRows}
+        columnsMenu={data && <ColumnsMenu layout={layout} />}
       />
 
       {filtersOpen && columnInfos.length > 0 && (
@@ -350,18 +360,18 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                 borderSpacing: 0,
                 minWidth:
                   40 +
-                  data.columns.reduce(
-                    (sum, col) => sum + resize.getColWidth(col.name),
+                  layout.visible.reduce(
+                    (sum, { column }) => sum + resize.getColWidth(column.name),
                     0,
                   ),
               }}
             >
               <colgroup>
                 <col style={{ width: 40 }} />
-                {data.columns.map((col) => (
+                {layout.visible.map(({ column }) => (
                   <col
-                    key={col.name}
-                    style={{ width: resize.getColWidth(col.name) }}
+                    key={column.name}
+                    style={{ width: resize.getColWidth(column.name) }}
                   />
                 ))}
               </colgroup>
@@ -417,7 +427,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                           onChange={() => selection.toggleSelectRow(rowIndex)}
                         />
                       </td>
-                      {data.columns.map((col, colIdx) => {
+                      {layout.visible.map(({ column: col, index: colIdx }) => {
                         const originalValue = row[colIdx];
                         const columnInfo = columnInfos.find((c) => c.name === col.name);
                         const link = foreignKeyLink(columnInfo, row, data.columns);
