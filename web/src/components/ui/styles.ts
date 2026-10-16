@@ -34,9 +34,12 @@ const variants = {
     "border-foreground/15 bg-foreground/[0.07] text-foreground shadow-xs shadow-black/10 " +
     "inset-shadow-[0_1px_rgb(255_255_255/0.1)] hover:bg-foreground/[0.11] " +
     "active:inset-shadow-[0_1px_rgb(0_0_0/0.08)] active:shadow-none",
+  // Bordered button without a fill colour: same finish as the filled ones (light edge on
+  // top, soft shadow, pushed-in on press), just tuned for the card surface
   outline:
-    "border-input bg-card text-foreground shadow-xs/5 hover:bg-card-hover " +
-    "dark:inset-shadow-[0_1px_rgb(255_255_255/0.04)] active:shadow-none",
+    "border-input bg-card text-foreground shadow-xs shadow-black/10 " +
+    "inset-shadow-[0_1px_rgb(255_255_255/0.7)] dark:inset-shadow-[0_1px_rgb(255_255_255/0.07)] hover:bg-card-hover " +
+    "active:inset-shadow-[0_1px_rgb(0_0_0/0.08)] active:shadow-none",
   secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-accent",
   ghost: "border-transparent text-foreground hover:bg-accent data-[active=true]:bg-accent",
   "ghost-muted":

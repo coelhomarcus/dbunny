@@ -1,4 +1,6 @@
 import Button from "./ui/Button";
+import { selectClass } from "./ui/styles";
+import { cn } from "../lib/cn";
 interface PaginationProps {
   page: number;
   totalPages: number;
@@ -29,7 +31,7 @@ export default function Pagination({
         <select
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
-          className="h-7 bg-card border border-input rounded-lg px-1.5 text-foreground shadow-xs/5 hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 cursor-pointer"
+          className={cn(selectClass, "h-7 px-1.5 shadow-xs shadow-black/10")}
         >
           {pageSizeOptions.map((opt) => (
             <option key={opt} value={opt}>
