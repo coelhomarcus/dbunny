@@ -1,7 +1,7 @@
 import type { Capabilities } from "./capabilities";
 
 /** The database a connection talks to. */
-export type Engine = "postgres";
+export type Engine = "postgres" | "sqlite";
 
 export interface ConnectRequest {
   connectionUrl: string;
@@ -15,7 +15,7 @@ export interface ConnectResponse {
   serverVersion: string;
   /** Asked for read-only, or the server is a read replica. */
   readOnly: boolean;
-  engine: "postgres";
+  engine: Engine;
   /** What the session supports. */
   capabilities: Capabilities;
 }
@@ -26,7 +26,7 @@ export interface ConnectionInfo {
   port: number;
   serverVersion: string;
   readOnly: boolean;
-  engine: "postgres";
+  engine: Engine;
   capabilities: Capabilities;
 }
 

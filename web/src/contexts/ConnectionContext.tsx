@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { api, createSessionApi } from "../lib/api";
-import type { ConnectionInfo, ConnectResponse, InitialSession, SavedTag, SshConfig } from "@/types";
+import type { ConnectionInfo, ConnectResponse, InitialSession, SavedTag } from "@/types";
+import type { ConnectArgs } from "../lib/connectionDraft";
 import { hostKeyProblem } from "../lib/sshHostKey";
 import type { TabSessionInfo } from "./workspace";
 import { ConnectionContext } from "./connection";
@@ -56,15 +57,14 @@ export function ConnectionProvider({
   const [error, setError] = useState<string | null>(null);
 
   const connect = useCallback(
-    async (
-      url: string,
-      saved?: SavedTag,
-      tunnel?: { ssh?: SshConfig | null; trustHostKey?: string },
-    ) => {
+    async (args: ConnectArgs, saved?: SavedTag, trustHostKey?: string) => {
       setIsConnecting(true);
       setError(null);
       try {
-        const response = await api.connect(url, tunnel?.ssh, tunnel?.trustHostKey);
+        const response =
+          args.kind === "sqlite"
+            ? await api.connectSqlite(args.path, args.readOnly, args.create)
+            : await api.connect(args.url, args.ssh, trustHostKey);
         setSessionId(response.sessionId);
         setConnectionInfo(infoOf(response));
         setSavedConnectionName(saved?.name || null);

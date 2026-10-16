@@ -16,7 +16,15 @@ export interface ConnectionSummary {
   readOnly: boolean;
 }
 
+/** The last segment of a path, whichever separator it uses. */
+export function fileNameOf(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
 export function summaryOf(conn: SavedConnection): ConnectionSummary {
+  if (conn.engine === "sqlite") {
+    return { engineLabel: "SQLite", address: conn.path, user: "", ssl: false, sshVia: null, readOnly: conn.readOnly ?? false };
+  }
   const socket = isSocketHost(conn.host);
   const ssh = conn.ssh;
   return {

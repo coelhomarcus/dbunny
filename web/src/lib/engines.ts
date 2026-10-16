@@ -1,10 +1,10 @@
 import type { Engine } from "@/types";
 
 /** The databases offered when creating a connection; the ones not ready yet show as coming soon. */
-export const ENGINE_CARDS: { id: "postgres" | "sqlite" | "mysql"; label: string; available: boolean }[] = [
-  { id: "postgres", label: "PostgreSQL", available: true },
-  { id: "sqlite", label: "SQLite", available: false },
-  { id: "mysql", label: "MySQL / MariaDB", available: false },
+export const ENGINE_CARDS: { id: "postgres" | "sqlite" | "mysql"; label: string; /** What kind of connection it is, under the name. */ kind: string; available: boolean }[] = [
+  { id: "postgres", label: "PostgreSQL", kind: "Server connection", available: true },
+  { id: "sqlite", label: "SQLite", kind: "Database file", available: true },
+  { id: "mysql", label: "MySQL / MariaDB", kind: "Server connection", available: false },
 ];
 
 export type EngineCardId = (typeof ENGINE_CARDS)[number]["id"];

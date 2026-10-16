@@ -27,6 +27,8 @@ export interface SavedConnection {
   ssl: boolean;
   /** Every transaction starts read-only, so the server refuses writes. */
   readOnly: boolean;
+  /** The database file of a SQLite connection; empty for the others. */
+  path: string;
   color: string;
   /** An id from CONNECTION_ICONS; empty for the default. */
   icon: string;
@@ -47,6 +49,8 @@ export interface SavedConnectionInput {
   tls: TlsSettings | null;
   ssl: boolean;
   readOnly: boolean;
+  /** The database file of a SQLite connection; empty for the others. */
+  path: string;
   color: string;
   icon: string;
 }

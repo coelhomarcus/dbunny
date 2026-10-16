@@ -58,7 +58,7 @@ export default function ConnectionSummaryCard({
         </div>
 
         <dl className="mt-5">
-          <Row label="Address">
+          <Row label={conn.engine === "sqlite" ? "File" : "Address"}>
             <span className="min-w-0 truncate font-mono text-xs">{revealed ? summary.address : mask(summary.address)}</span>
             <Tooltip label={revealed ? "Hide the address" : "Show the address"} side="top">
               <Button
@@ -71,9 +71,11 @@ export default function ConnectionSummaryCard({
               </Button>
             </Tooltip>
           </Row>
-          <Row label="User">
-            <span className="truncate">{summary.user || <span className="text-muted-foreground">Default</span>}</span>
-          </Row>
+          {conn.engine !== "sqlite" && (
+            <Row label="User">
+              <span className="truncate">{summary.user || <span className="text-muted-foreground">Default</span>}</span>
+            </Row>
+          )}
           {(summary.ssl || summary.sshVia || summary.readOnly) && (
             <Row label="Options">
               <div className="flex flex-wrap gap-1.5">

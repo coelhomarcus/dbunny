@@ -5,12 +5,11 @@ import type { SavedConnection } from "@/types";
 import {
   applyUrl,
   configuredTabs,
-  connectionUrlOf,
+  connectArgsOf,
   missingFields,
   newDraft,
   saveInputOf,
   savedTagOf,
-  sshConfigOf,
   tabsFor,
   type ConnectionDraft,
   type ConnectionTab,
@@ -30,12 +29,14 @@ import IdentityEditor from "./IdentityEditor";
 import ImportUrlDialog from "./ImportUrlDialog";
 import OptionsTab from "./OptionsTab";
 import PostgresTabs from "./postgres/PostgresTabs";
+import SqliteFileTab from "./sqlite/SqliteFileTab";
 
 const TAB_LABELS: Record<ConnectionTab, string> = {
   connection: "Connection",
   ssl: "SSL",
   ssh: "SSH tunnel",
   options: "Options",
+  file: "File",
 };
 
 type TestState = { status: "idle" } | { status: "testing" } | { status: "ok"; version: string } | { status: "error"; message: string };
@@ -75,7 +76,7 @@ function ModalBody({
   const isNew = initial === null || initial.id === null;
   const [step, setStep] = useState<"engine" | "form">(initial ? "form" : "engine");
   const [draft, setDraft] = useState<ConnectionDraft>(initial ?? newDraft("postgres"));
-  const [tab, setTab] = useState<ConnectionTab>("connection");
+  const [tab, setTab] = useState<ConnectionTab>(() => tabsFor((initial ?? newDraft("postgres")).engine)[0]);
   // Which action asked for the empty fields to be pointed out; only saving needs a name
   const [showErrors, setShowErrors] = useState<false | "connect" | "save">(false);
   const [test, setTest] = useState<TestState>({ status: "idle" });
@@ -125,7 +126,11 @@ function ModalBody({
     const attempt = async (trustHostKey?: string) => {
       setTest({ status: "testing" });
       try {
-        const res = await api.connect(connectionUrlOf(draft), sshConfigOf(draft), trustHostKey);
+        const args = connectArgsOf(draft);
+        const res =
+          args.kind === "sqlite"
+            ? await api.connectSqlite(args.path, args.readOnly, args.create)
+            : await api.connect(args.url, args.ssh, trustHostKey);
         api.disconnect(res.sessionId).catch(() => {});
         setTest({ status: "ok", version: res.serverVersion.split(" ")[0] });
       } catch (err) {
@@ -158,7 +163,7 @@ function ModalBody({
     setError(null);
     const attempt = async (trustHostKey?: string) => {
       try {
-        await connect(connectionUrlOf(draft), savedTagOf(draft), { ssh: sshConfigOf(draft), trustHostKey });
+        await connect(connectArgsOf(draft), savedTagOf(draft), trustHostKey);
         onConnected();
       } catch (err) {
         // The SSH server's key is asked about, not shown as an error
@@ -171,7 +176,7 @@ function ModalBody({
 
   const configured = configuredTabs(draft);
   const errorTabs = new Set(showErrors ? missingFields(draft, "connect").map((m) => m.tab) : []);
-  const socket = isSocketHost(draft.fields.host);
+  const socket = draft.engine === "postgres" && isSocketHost(draft.fields.host);
   const engineLabel = ENGINE_CARDS.find((c) => c.id === draft.engine)?.label;
   const nameMissing = showErrors === "save" && !draft.identity.name.trim();
 
@@ -212,8 +217,10 @@ function ModalBody({
             <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-2 pb-5">
               <EnginePicker
                 onPick={(engine) => {
-                  if (engine !== "postgres") return;
-                  setDraft((d) => ({ ...d, engine }));
+                  if (engine !== "postgres" && engine !== "sqlite") return;
+                  // A different database starts its own details; who the connection is stays
+                  setDraft((d) => (d.engine === engine ? d : { ...newDraft(engine), identity: d.identity }));
+                  setTab(tabsFor(engine)[0]);
                   setStep("form");
                 }}
               />
@@ -257,6 +264,8 @@ function ModalBody({
                 <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
                   {tab === "options" ? (
                     <OptionsTab draft={draft} onChange={change} />
+                  ) : tab === "file" ? (
+                    <SqliteFileTab draft={draft} onChange={change} showErrors={showErrors !== false} />
                   ) : (
                     <PostgresTabs tab={tab} draft={draft} onChange={change} showErrors={showErrors !== false} onOpenImport={() => setImportOpen(true)} />
                   )}

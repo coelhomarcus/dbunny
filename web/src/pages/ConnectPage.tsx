@@ -4,7 +4,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import type { SavedConnection } from "@/types";
 import { useConnection } from "../contexts/useConnection";
 import { useWorkspace } from "../contexts/workspace";
-import { applyUrl, connectionUrlOf, draftFromSaved, newDraft, savedTagOf, sshConfigOf, type ConnectionDraft } from "../lib/connectionDraft";
+import { applyUrl, connectArgsOf, draftFromSaved, newDraft, savedTagOf, type ConnectionDraft } from "../lib/connectionDraft";
 import { hostKeyProblem } from "../lib/sshHostKey";
 import { api } from "../lib/api";
 import { useHostKeyCheck } from "../hooks/useHostKeyCheck";
@@ -62,7 +62,7 @@ export default function ConnectPage() {
     const draft = draftFromSaved(conn);
     const attempt = async (trustHostKey?: string) => {
       try {
-        await connect(connectionUrlOf(draft), savedTagOf(draft), { ssh: sshConfigOf(draft), trustHostKey });
+        await connect(connectArgsOf(draft), savedTagOf(draft), trustHostKey);
         navigate("/db/query");
       } catch (err) {
         // The SSH server's key is asked about, not shown as an error
