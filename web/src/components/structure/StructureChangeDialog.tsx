@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Columns3, ListTree, PenLine, Trash2 } from "lucide-react";
-import type { ColumnInfo, StructureChange } from "@/types";
+import { ArrowRight, Columns3, KeyRound, ListTree, PenLine, ShieldCheck, Trash2 } from "lucide-react";
+import type { ColumnInfo, CompletionRelation, StructureChange } from "@/types";
 import { useApi } from "../../contexts/useConnection";
 import { cn } from "../../lib/cn";
 import Dialog from "../ui/Dialog";
@@ -14,10 +14,14 @@ export type ChangeDraft =
   | { kind: "addColumn" }
   | { kind: "renameColumn" | "setDefault" | "setComment" | "dropColumn"; column: ColumnInfo }
   | { kind: "createIndex" }
-  | { kind: "dropIndex"; index: string };
+  | { kind: "dropIndex"; index: string }
+  | { kind: "setType"; column: ColumnInfo }
+  | { kind: "addForeignKey" | "addUnique" | "addCheck" }
+  | { kind: "dropConstraint"; constraint: string };
 
 const COMMON_TYPES = ["text", "varchar(255)", "integer", "bigint", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
 const INDEX_METHODS = ["btree", "hash", "gin", "gist", "brin"];
+const REFERENTIAL_ACTIONS = ["NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"];
 
 function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (
@@ -40,6 +44,38 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/** Columns picked in order (the order matters for indexes and keys). */
+function ColumnPicker({ label, columns, value, onChange }: { label: string; columns: ColumnInfo[]; value: string[]; onChange: (next: string[]) => void }) {
+  return (
+    // A div, not a Field label: a label would forward clicks to the first checkbox
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[13px] font-medium">{label}</span>
+      <div className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-lg border border-border p-1.5">
+        {columns.map((c) => {
+          const position = value.indexOf(c.name);
+          const toggle = () => onChange(position >= 0 ? value.filter((n) => n !== c.name) : [...value, c.name]);
+          return (
+            <div key={c.name} className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-[13px] hover:bg-accent" onClick={toggle}>
+              <Checkbox checked={position >= 0} onChange={toggle} />
+              <span className="flex-1 font-mono text-xs">{c.name}</span>
+              <span className="font-mono text-[11px] text-muted-foreground">{c.typeName}</span>
+              {position >= 0 && <span className="w-3 text-right text-[11px] text-muted-foreground tabular-nums">{position + 1}</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** The referenced column a new foreign key column most likely points at. */
+const quoteName = (name: string) => (/^[a-z_][a-z0-9_]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`);
+
+function guessReference(column: string, target: CompletionRelation | undefined): string {
+  const names = target?.columns.map((c) => c.name) ?? [];
+  return names.find((n) => n === column) ?? names.find((n) => n === "id") ?? names[0] ?? "";
+}
+
 function ChangeForm({
   schema,
   table,
@@ -58,7 +94,7 @@ function ChangeForm({
   const api = useApi();
   const column = "column" in draft ? draft.column : null;
   const [name, setName] = useState(column?.name ?? "");
-  const [dataType, setDataType] = useState("text");
+  const [dataType, setDataType] = useState(draft.kind === "setType" ? draft.column.typeName : "text");
   const [nullable, setNullable] = useState(true);
   const [defaultValue, setDefaultValue] = useState(column?.defaultValue ?? "");
   const [comment, setComment] = useState(column?.comment ?? "");
@@ -68,10 +104,31 @@ function ChangeForm({
   const [unique, setUnique] = useState(false);
   const [method, setMethod] = useState("btree");
   const [concurrently, setConcurrently] = useState(false);
+  const [using, setUsing] = useState("");
+  const [keyColumns, setKeyColumns] = useState<string[]>([]);
+  const [relations, setRelations] = useState<CompletionRelation[] | null>(null);
+  const [refTable, setRefTable] = useState("");
+  const [refColumns, setRefColumns] = useState<Record<string, string>>({});
+  const [onUpdate, setOnUpdate] = useState("NO ACTION");
+  const [onDelete, setOnDelete] = useState("NO ACTION");
   const [sql, setSql] = useState("");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The tables a foreign key can point at, with their columns
+  useEffect(() => {
+    if (draft.kind !== "addForeignKey") return;
+    let stale = false;
+    api
+      .getCompletionSchema()
+      .then((s) => !stale && setRelations(s.relations.filter((r) => r.type === "table")))
+      .catch(() => !stale && setRelations([]));
+    return () => {
+      stale = true;
+    };
+  }, [api, draft.kind]);
+  const target = relations?.find((r) => `${r.schema}.${r.name}` === refTable);
 
   const change: StructureChange = (() => {
     switch (draft.kind) {
@@ -96,6 +153,25 @@ function ChangeForm({
         };
       case "dropIndex":
         return { kind: "dropIndex", name: draft.index, cascade };
+      case "setType":
+        return { kind: "setType", name: column!.name, dataType, using: using || null };
+      case "addForeignKey":
+        return {
+          kind: "addForeignKey",
+          name: name || null,
+          columns: keyColumns,
+          refSchema: target?.schema ?? "",
+          refTable: target?.name ?? "",
+          refColumns: keyColumns.map((c) => refColumns[c] ?? guessReference(c, target)),
+          onUpdate,
+          onDelete,
+        };
+      case "addUnique":
+        return { kind: "addUnique", name: name || null, columns: keyColumns };
+      case "addCheck":
+        return { kind: "addCheck", name: name || null, expression };
+      case "dropConstraint":
+        return { kind: "dropConstraint", name: draft.constraint, cascade };
     }
   })();
   const changeKey = JSON.stringify(change);
@@ -128,7 +204,7 @@ function ChangeForm({
     }
   }
 
-  const destructive = draft.kind === "dropColumn" || draft.kind === "dropIndex";
+  const destructive = draft.kind === "dropColumn" || draft.kind === "dropIndex" || draft.kind === "dropConstraint";
   const title = {
     addColumn: "Add column",
     renameColumn: `Rename ${column?.name}`,
@@ -137,8 +213,31 @@ function ChangeForm({
     dropColumn: `Drop column ${column?.name}?`,
     createIndex: "Create index",
     dropIndex: `Drop index ${"index" in draft ? draft.index : ""}?`,
+    setType: `Type of ${column?.name}`,
+    addForeignKey: "Add foreign key",
+    addUnique: "Add unique constraint",
+    addCheck: "Add check constraint",
+    dropConstraint: `Drop constraint ${"constraint" in draft ? draft.constraint : ""}?`,
   }[draft.kind];
-  const icon = destructive ? <Trash2 /> : draft.kind === "createIndex" ? <ListTree /> : draft.kind === "addColumn" ? <Columns3 /> : <PenLine />;
+  const icon = destructive ? (
+    <Trash2 />
+  ) : draft.kind === "createIndex" ? (
+    <ListTree />
+  ) : draft.kind === "addColumn" ? (
+    <Columns3 />
+  ) : draft.kind === "addForeignKey" ? (
+    <KeyRound />
+  ) : draft.kind === "addUnique" || draft.kind === "addCheck" ? (
+    <ShieldCheck />
+  ) : (
+    <PenLine />
+  );
+  const description =
+    draft.kind === "dropColumn"
+      ? "Its data in every row is deleted. This can't be undone."
+      : draft.kind === "setType"
+        ? `Now ${column?.typeName}. Every row is converted, and the table is locked meanwhile.`
+        : `${schema}.${table}`;
 
   return (
     <Dialog
@@ -147,7 +246,7 @@ function ChangeForm({
       icon={icon}
       tone={destructive ? "destructive" : "neutral"}
       title={title}
-      description={draft.kind === "dropColumn" ? "Its data in every row is deleted. This can't be undone." : `${schema}.${table}`}
+      description={description}
       className="max-w-lg"
       footer={
         <>
@@ -166,6 +265,27 @@ function ChangeForm({
           <Field label={draft.kind === "addColumn" ? "Name" : "New name"}>
             <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus spellCheck={false} className="font-mono" />
           </Field>
+        )}
+        {draft.kind === "setType" && (
+          <>
+            <Field label="New type">
+              <Input value={dataType} onChange={(e) => setDataType(e.target.value)} autoFocus spellCheck={false} className="font-mono" list="dbunny-common-types" />
+              <datalist id="dbunny-common-types">
+                {COMMON_TYPES.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
+            </Field>
+            <Field label="Conversion (USING)">
+              <Input
+                value={using}
+                onChange={(e) => setUsing(e.target.value)}
+                placeholder={`automatic, e.g. ${quoteName(column!.name)}::integer`}
+                spellCheck={false}
+                className="font-mono"
+              />
+            </Field>
+          </>
         )}
         {draft.kind === "addColumn" && (
           <>
@@ -192,26 +312,7 @@ function ChangeForm({
         )}
         {draft.kind === "createIndex" && (
           <>
-            {/* A div, not a Field label: a label would forward clicks to the first checkbox */}
-            <div className="flex flex-col gap-1.5">
-              <span className="text-[13px] font-medium">Columns, in order</span>
-              <div className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-lg border border-border p-1.5">
-                {columns.map((c) => {
-                  const position = indexColumns.indexOf(c.name);
-                  return (
-                    <div
-                      key={c.name}
-                      className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-[13px] hover:bg-accent"
-                      onClick={() => setIndexColumns((prev) => (position >= 0 ? prev.filter((n) => n !== c.name) : [...prev, c.name]))}
-                    >
-                      <Checkbox checked={position >= 0} onChange={() => setIndexColumns((prev) => (position >= 0 ? prev.filter((n) => n !== c.name) : [...prev, c.name]))} />
-                      <span className="flex-1 font-mono text-xs">{c.name}</span>
-                      {position >= 0 && <span className="text-[11px] text-muted-foreground tabular-nums">{position + 1}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <ColumnPicker label="Columns, in order" columns={columns} value={indexColumns} onChange={setIndexColumns} />
             <Field label="Or an expression">
               <Input value={expression} onChange={(e) => setExpression(e.target.value)} placeholder="e.g. lower(email)" spellCheck={false} className="font-mono" />
             </Field>
@@ -233,6 +334,76 @@ function ChangeForm({
             <Toggle checked={concurrently} onChange={setConcurrently} label="Build concurrently" hint="Slower, but doesn't block writes to the table meanwhile" />
           </>
         )}
+        {(draft.kind === "addUnique" || draft.kind === "addForeignKey") && (
+          <ColumnPicker label={draft.kind === "addUnique" ? "Columns that can't repeat together" : "Columns"} columns={columns} value={keyColumns} onChange={setKeyColumns} />
+        )}
+        {draft.kind === "addForeignKey" && (
+          <>
+            <Field label="References table">
+              <select value={refTable} onChange={(e) => (setRefTable(e.target.value), setRefColumns({}))} className={cn(selectClass, "w-full")}>
+                <option value="">{relations === null ? "Loading…" : "Choose a table"}</option>
+                {(relations ?? []).map((r) => (
+                  <option key={`${r.schema}.${r.name}`} value={`${r.schema}.${r.name}`}>
+                    {r.schema}.{r.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {target && keyColumns.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[13px] font-medium">Matching columns</span>
+                {keyColumns.map((c) => (
+                  <div key={c} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                    <span className="truncate font-mono text-xs">{c}</span>
+                    <ArrowRight size={13} className="text-muted-foreground" />
+                    <select
+                      value={refColumns[c] ?? guessReference(c, target)}
+                      onChange={(e) => setRefColumns((prev) => ({ ...prev, [c]: e.target.value }))}
+                      className={cn(selectClass, "w-full font-mono text-xs")}
+                      aria-label={`Column referenced by ${c}`}
+                    >
+                      {target.columns.map((rc) => (
+                        <option key={rc.name} value={rc.name}>
+                          {rc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="On delete">
+                <select value={onDelete} onChange={(e) => setOnDelete(e.target.value)} className={cn(selectClass, "w-full")}>
+                  {REFERENTIAL_ACTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {a.toLowerCase()}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="On update">
+                <select value={onUpdate} onChange={(e) => setOnUpdate(e.target.value)} className={cn(selectClass, "w-full")}>
+                  {REFERENTIAL_ACTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {a.toLowerCase()}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          </>
+        )}
+        {draft.kind === "addCheck" && (
+          <Field label="Rows must satisfy">
+            <Input value={expression} onChange={(e) => setExpression(e.target.value)} placeholder="e.g. price >= 0" autoFocus spellCheck={false} className="font-mono" />
+          </Field>
+        )}
+        {(draft.kind === "addForeignKey" || draft.kind === "addUnique" || draft.kind === "addCheck") && (
+          <Field label="Name">
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="automatic" spellCheck={false} className="font-mono" />
+          </Field>
+        )}
         {destructive && (
           <Toggle checked={cascade} onChange={setCascade} label="Cascade" hint="Also drops views and constraints that depend on it" />
         )}
@@ -248,7 +419,7 @@ function ChangeForm({
   );
 }
 
-/** Column and index changes, with the SQL shown before running it. Mounted only while open. */
+/** Column, index and constraint changes, with the SQL shown before running it. Mounted only while open. */
 export default function StructureChangeDialog({ draft, ...props }: { draft: ChangeDraft | null } & Omit<Parameters<typeof ChangeForm>[0], "draft">) {
   return draft ? <ChangeForm draft={draft} {...props} /> : null;
 }

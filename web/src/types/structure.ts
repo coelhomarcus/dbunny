@@ -89,7 +89,25 @@ export type StructureChange =
   | { kind: "setDefault"; name: string; default: string | null }
   | { kind: "setComment"; name: string; comment: string | null }
   | { kind: "createIndex"; name: string | null; columns: string[]; unique: boolean; method: string; concurrently: boolean }
-  | { kind: "dropIndex"; name: string; cascade: boolean };
+  | { kind: "dropIndex"; name: string; cascade: boolean }
+  | { kind: "setType"; name: string; dataType: string; using: string | null }
+  | {
+      kind: "addForeignKey";
+      name: string | null;
+      columns: string[];
+      refSchema: string;
+      refTable: string;
+      refColumns: string[];
+      onUpdate: string;
+      onDelete: string;
+    }
+  | { kind: "addUnique"; name: string | null; columns: string[] }
+  | { kind: "addCheck"; name: string | null; expression: string }
+  | { kind: "dropConstraint"; name: string; cascade: boolean }
+  | { kind: "setTriggerEnabled"; name: string; enabled: boolean }
+  /** `grantee` is a role name, or PUBLIC. */
+  | { kind: "grant"; grantee: string; privileges: string[]; grantOption: boolean }
+  | { kind: "revoke"; grantee: string; privileges: string[] };
 
 /** One column in the table builder. */
 export interface NewColumn {
