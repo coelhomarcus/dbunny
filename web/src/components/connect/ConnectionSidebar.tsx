@@ -79,7 +79,9 @@ function ConnectionRow({
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium leading-snug">{conn.name || "Unnamed"}</div>
         <div className="flex items-center gap-1 text-xs leading-snug text-muted-foreground">
-          <Database className="size-3 shrink-0" aria-hidden />
+          <span className="shrink-0 rounded bg-muted px-1 font-mono text-[10px] font-medium uppercase leading-4 tracking-wide group-hover:bg-background/60">
+            db
+          </span>
           <span className="truncate">{conn.database}</span>
         </div>
       </div>
