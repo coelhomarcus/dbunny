@@ -58,6 +58,14 @@ export interface TriggerInfo {
   definition: string;
 }
 
+/** What one role (or PUBLIC) may do on a table. */
+export interface TablePrivilege {
+  grantee: string;
+  privileges: string[];
+  /** Privileges it may grant on to others. */
+  grantable: string[];
+}
+
 export interface TableStructure {
   meta: TableMeta;
   columns: ColumnInfo[];
@@ -66,6 +74,7 @@ export interface TableStructure {
   foreignKeys: ForeignKeyInfo[];
   referencedBy: ReferencedBy[];
   triggers: TriggerInfo[];
+  privileges: TablePrivilege[];
   ddl: string;
   /** Sections that couldn't be read, usually for lack of permission. */
   warnings: string[];

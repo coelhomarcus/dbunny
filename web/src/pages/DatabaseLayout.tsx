@@ -8,7 +8,7 @@ import Button from "../components/ui/Button";
 import StatusBar from "../components/layout/StatusBar";
 import DatabaseSwitcher from "../components/layout/DatabaseSwitcher";
 import { cn } from "../lib/cn";
-import { Terminal, Folder, Activity } from "lucide-react";
+import { Terminal, Folder, Activity, Users } from "lucide-react";
 import type { SchemaInfo } from "@/types";
 
 export default function DatabaseLayout() {
@@ -74,6 +74,10 @@ export default function DatabaseLayout() {
                 <Activity size={15} className="shrink-0" />
                 Activity
               </NavLink>
+              <NavLink to="/db/roles" className={navItemClass}>
+                <Users size={15} className="shrink-0" />
+                Roles
+              </NavLink>
             </nav>
 
             <div className="px-3 pt-1 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">
@@ -117,6 +121,20 @@ export default function DatabaseLayout() {
                 }
               >
                 <Activity size={15} />
+              </NavLink>
+            </Tooltip>
+            <Tooltip label="Roles">
+              <NavLink
+                to="/db/roles"
+                aria-label="Roles"
+                className={({ isActive }) =>
+                  cn(
+                    "size-7 flex items-center justify-center rounded-lg transition-colors",
+                    isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )
+                }
+              >
+                <Users size={15} />
               </NavLink>
             </Tooltip>
             {schemas.length > 0 && (

@@ -128,3 +128,20 @@ export interface ServerActivity {
   /** Without pg_read_all_stats, other roles' queries are hidden by the server. */
   limitedView: boolean;
 }
+
+export interface RoleInfo {
+  name: string;
+  canLogin: boolean;
+  superuser: boolean;
+  createDb: boolean;
+  createRole: boolean;
+  replication: boolean;
+  bypassRls: boolean;
+  /** -1 when unlimited. */
+  connectionLimit: number;
+  validUntil: string | null;
+  memberOf: string[];
+  isCurrent: boolean;
+  /** Built in (pg_*). */
+  isBuiltin: boolean;
+}

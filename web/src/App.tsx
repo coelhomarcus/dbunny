@@ -14,6 +14,7 @@ import TableStructure from "./pages/TableStructure";
 import FunctionView from "./pages/FunctionView";
 import ObjectView from "./pages/ObjectView";
 import ActivityView from "./pages/ActivityView";
+import RolesView from "./pages/RolesView";
 
 export default function App() {
   useEffect(() => {
@@ -79,6 +80,7 @@ function TabPane({
                 <Route index element={<Navigate to="query" replace />} />
                 <Route path="query" element={<QueryEditor />} />
                 <Route path="activity" element={<ActivityView />} />
+                <Route path="roles" element={<RolesView />} />
                 <Route path=":schema/:table" element={<TableView />} />
                 <Route path=":schema/:table/structure" element={<TableStructure />} />
                 <Route path=":schema/function/:name" element={<FunctionView />} />

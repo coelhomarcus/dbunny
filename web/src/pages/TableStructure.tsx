@@ -16,7 +16,7 @@ import { foreignKeyTarget, shortType } from "../lib/columnMeta";
 import { cn } from "../lib/cn";
 import { formatBytes } from "../lib/format";
 
-type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "ddl";
+type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "permissions" | "ddl";
 
 function tablePath(schema: string, table: string) {
   return `/db/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`;
@@ -277,6 +277,28 @@ function TriggersSection({ structure }: { structure: Structure }) {
   );
 }
 
+function PermissionsSection({ structure }: { structure: Structure }) {
+  return (
+    <Grid headers={["Role", "Can", "Can grant to others"]} empty="Nobody has rights on it">
+      {structure.privileges.map((p) => (
+        <tr key={p.grantee}>
+          <td className={cn(td, "font-medium")}>{p.grantee === "PUBLIC" ? <span className="italic">everyone (PUBLIC)</span> : p.grantee}</td>
+          <td className={td}>
+            <div className="flex flex-wrap gap-1">
+              {p.privileges.map((privilege) => (
+                <Badge key={privilege} variant={privilege === "SELECT" ? "info" : ["DELETE", "TRUNCATE"].includes(privilege) ? "destructive" : "neutral"}>
+                  {privilege}
+                </Badge>
+              ))}
+            </div>
+          </td>
+          <td className={cn(td, "text-xs text-muted-foreground")}>{p.grantable.length ? p.grantable.join(", ") : "—"}</td>
+        </tr>
+      ))}
+    </Grid>
+  );
+}
+
 function DdlSection({ ddl }: { ddl: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -377,6 +399,7 @@ export default function TableStructure() {
               { value: "constraints", label: <>Constraints {count(structure.constraints.length)}</> },
               { value: "keys", label: <>Foreign keys {count(structure.foreignKeys.length + structure.referencedBy.length)}</> },
               { value: "triggers", label: <>Triggers {count(structure.triggers.length)}</> },
+              { value: "permissions", label: <>Permissions {count(structure.privileges.length)}</> },
             ] as { value: Section; label: ReactNode }[])),
         { value: "ddl", label: "DDL" },
       ]
@@ -473,6 +496,7 @@ export default function TableStructure() {
             {shown === "constraints" && <ConstraintsSection structure={structure} />}
             {shown === "keys" && <KeysSection structure={structure} />}
             {shown === "triggers" && <TriggersSection structure={structure} />}
+            {shown === "permissions" && <PermissionsSection structure={structure} />}
             {shown === "ddl" && <DdlSection ddl={structure.ddl} />}
           </div>
         </>

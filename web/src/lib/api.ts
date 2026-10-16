@@ -24,6 +24,7 @@ import type {
   ObjectDefinition,
   ServerActivity,
   DatabaseInfo,
+  RoleInfo,
 } from "@/types";
 
 /** Relation kinds as the explorer names them. */
@@ -111,6 +112,10 @@ export function createSessionApi(sessionId: string | null) {
     /** Copies a table's structure (and optionally its rows) under a new name. */
     async duplicateTable(schema: string, name: string, newName: string, withData: boolean) {
       return invoke<void>("duplicate_table", { sessionId, schema, name, newName, withData });
+    },
+
+    async getRoles() {
+      return invoke<RoleInfo[]>("get_roles", { sessionId });
     },
 
     async getDatabases() {
