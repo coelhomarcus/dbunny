@@ -32,16 +32,16 @@ fn check_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn rename_sql(schema: &str, name: &str, kind: &str, new_name: &str) -> Result<String, String> {
+pub(super) fn rename_sql(schema: &str, name: &str, kind: &str, new_name: &str) -> Result<String, String> {
     check_name(new_name)?;
     Ok(format!("ALTER {} {} RENAME TO {}", keyword(kind)?, relation(schema, name), quote_ident(new_name)))
 }
 
-pub(crate) fn drop_sql(schema: &str, name: &str, kind: &str, cascade: bool) -> Result<String, String> {
+pub(super) fn drop_sql(schema: &str, name: &str, kind: &str, cascade: bool) -> Result<String, String> {
     Ok(format!("DROP {} {}{}", keyword(kind)?, relation(schema, name), if cascade { " CASCADE" } else { "" }))
 }
 
-pub(crate) fn truncate_sql(schema: &str, name: &str, restart_identity: bool, cascade: bool) -> String {
+pub(super) fn truncate_sql(schema: &str, name: &str, restart_identity: bool, cascade: bool) -> String {
     format!(
         "TRUNCATE TABLE {}{}{}",
         relation(schema, name),
@@ -50,7 +50,8 @@ pub(crate) fn truncate_sql(schema: &str, name: &str, restart_identity: bool, cas
     )
 }
 
-/// Runs one statement built here on the session's main connection.
+/// Runs SQL the driver built (one statement or several in one message) on the
+/// session's main connection.
 pub(super) async fn run(driver: &PostgresDriver, sql: &str) -> Result<(), String> {
     let client = driver.client().await?;
     client.batch_execute(sql).await.map_err(|e| db_message(&e))
@@ -59,7 +60,7 @@ pub(super) async fn run(driver: &PostgresDriver, sql: &str) -> Result<(), String
 /// A copy with the same columns, defaults, constraints, indexes and comments
 /// (`LIKE ... INCLUDING ALL`), optionally with the rows. Runs as one transaction, on a
 /// single message so no other command of the session can slip into it.
-pub(crate) async fn duplicate(client: &Client, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
+pub(super) async fn duplicate(client: &Client, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
     check_name(new_name)?;
     let source = relation(schema, name);
     let target = relation(schema, new_name);
@@ -92,27 +93,27 @@ pub(crate) async fn duplicate(client: &Client, schema: &str, name: &str, new_nam
     Ok(())
 }
 
-pub(crate) fn create_schema_sql(name: &str) -> Result<String, String> {
+pub(super) fn create_schema_sql(name: &str) -> Result<String, String> {
     check_name(name)?;
     Ok(format!("CREATE SCHEMA {}", quote_ident(name)))
 }
 
-pub(crate) fn rename_schema_sql(name: &str, new_name: &str) -> Result<String, String> {
+pub(super) fn rename_schema_sql(name: &str, new_name: &str) -> Result<String, String> {
     check_name(new_name)?;
     Ok(format!("ALTER SCHEMA {} RENAME TO {}", quote_ident(name), quote_ident(new_name)))
 }
 
-pub(crate) fn drop_schema_sql(name: &str, cascade: bool) -> String {
+pub(super) fn drop_schema_sql(name: &str, cascade: bool) -> String {
     format!("DROP SCHEMA {}{}", quote_ident(name), if cascade { " CASCADE" } else { "" })
 }
 
-pub(crate) fn create_database_sql(name: &str) -> Result<String, String> {
+pub(super) fn create_database_sql(name: &str) -> Result<String, String> {
     check_name(name)?;
     Ok(format!("CREATE DATABASE {}", quote_ident(name)))
 }
 
 /// `force` (PostgreSQL 13+) ends the sessions still connected to it instead of failing.
-pub(crate) fn drop_database_sql(name: &str, force: bool) -> String {
+pub(super) fn drop_database_sql(name: &str, force: bool) -> String {
     format!("DROP DATABASE {}{}", quote_ident(name), if force { " WITH (FORCE)" } else { "" })
 }
 

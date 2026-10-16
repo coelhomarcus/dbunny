@@ -1,7 +1,6 @@
 //! The driver contract. Every engine implements the core (`Driver`, `Catalog`, `Data`);
 //! the other pieces are optional and a driver hands them out only when its engine has them.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -36,13 +35,6 @@ pub trait Driver: Send + Sync {
     fn admin(&self) -> Option<&dyn ServerAdmin> {
         None
     }
-    /// Only while the commands move behind the contract: lets the ones not moved yet
-    /// reach the PostgreSQL driver. No command needs it anymore; it goes with the transition.
-    #[allow(dead_code)]
-    fn as_any(&self) -> &dyn Any;
-    /// The same, keeping the `Arc`: `AppState::postgres` hands out the driver itself.
-    #[allow(dead_code)]
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
 }
 
 /// Reading what the database holds: the explorer, columns, structure, autocomplete.
@@ -163,12 +155,6 @@ mod tests {
             self
         }
         fn data(&self) -> &dyn Data {
-            self
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
             self
         }
     }

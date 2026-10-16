@@ -102,7 +102,7 @@ fn index_column(column: &str) -> Result<String, String> {
 }
 
 /// The statements a change runs, and whether they must run outside a transaction.
-pub(crate) fn change_sql(schema: &str, table: &str, change: &StructureChange) -> Result<(Vec<String>, bool), String> {
+fn change_sql(schema: &str, table: &str, change: &StructureChange) -> Result<(Vec<String>, bool), String> {
     let target = format!("{}.{}", quote_ident(schema), quote_ident(table));
     let alter = format!("ALTER TABLE {target}");
     let stmts = match change {
@@ -220,7 +220,7 @@ pub(crate) fn change_sql(schema: &str, table: &str, change: &StructureChange) ->
     Ok((stmts, false))
 }
 
-pub(crate) async fn apply(client: &tokio_postgres::Client, schema: &str, table: &str, change: &StructureChange) -> Result<(), String> {
+async fn apply(client: &tokio_postgres::Client, schema: &str, table: &str, change: &StructureChange) -> Result<(), String> {
     let (stmts, outside_transaction) = change_sql(schema, table, change)?;
     if outside_transaction {
         // CREATE INDEX CONCURRENTLY refuses to run inside a transaction
@@ -236,7 +236,7 @@ pub(crate) async fn apply(client: &tokio_postgres::Client, schema: &str, table: 
 }
 
 /// `CREATE TABLE` from the table builder. Several primary key columns make a composite key.
-pub(crate) fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
+fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
     let target = format!("{}.{}", quote_ident(schema), name("table name", table)?);
     if columns.is_empty() {
         return Err("Add at least one column".into());

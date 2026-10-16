@@ -4,7 +4,6 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use super::storage::SavedConnection;
-use crate::db::postgres::PostgresDriver;
 use crate::db::Driver;
 
 /// Most sessions open at once.
@@ -50,18 +49,5 @@ impl AppState {
     /// Forgets a session; the caller closes it.
     pub async fn remove(&self, session_id: &str) -> Option<Arc<dyn Driver>> {
         self.sessions.lock().await.remove(session_id)
-    }
-
-    /// The PostgreSQL driver of a session, for the commands that don't go through the
-    /// driver contract yet. No command uses it anymore, only server tests; it goes with
-    /// the transition.
-    #[allow(dead_code)]
-    pub async fn postgres(&self, session_id: &str) -> Result<Arc<PostgresDriver>, String> {
-        let driver = self.driver(session_id).await?;
-        let engine = driver.engine();
-        driver
-            .into_any()
-            .downcast::<PostgresDriver>()
-            .map_err(|_| format!("This needs a PostgreSQL session, not {}", engine.label()))
     }
 }

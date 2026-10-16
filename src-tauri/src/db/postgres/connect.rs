@@ -462,7 +462,7 @@ mod server_tests {
 mod database_server_tests {
     use super::super::ssh::SshConfig;
     use super::*;
-    use crate::commands::connect::open_session;
+    use crate::commands::connect::{open_session, ConnectResponse};
     use crate::commands::state::AppState;
 
     /// DBUNNY_TEST_SOCKET_URL: a URL whose host is a socket folder, e.g.
@@ -473,9 +473,11 @@ mod database_server_tests {
         let url = url::Url::parse(&std::env::var("DBUNNY_TEST_SOCKET_URL").unwrap()).unwrap();
         let folder = socket_dir(&url).expect("the URL's host must be a socket folder");
         let state = AppState { sessions: Default::default(), saved_connections: Default::default(), encryption_key: [0; 32] };
-        let session = open_session(&state, Endpoint { url: url.clone(), ssh: None, known_hosts: None }, None).await.unwrap();
+        // What `open_session` does, keeping the driver to reach its connection
+        let driver = PostgresDriver::open(Endpoint { url: url.clone(), ssh: None, known_hosts: None }, None).await.unwrap();
+        let session = ConnectResponse::new(state.register(driver.clone()).await.unwrap(), driver.as_ref());
         assert_eq!(session.host, folder, "the socket folder stands for the host");
-        let one: i32 = state.postgres(&session.session_id).await.unwrap().client().await.unwrap().query_one("SELECT 1", &[]).await.unwrap().get(0);
+        let one: i32 = driver.client().await.unwrap().query_one("SELECT 1", &[]).await.unwrap().get(0);
         assert_eq!(one, 1);
 
         let ssh = SshConfig {

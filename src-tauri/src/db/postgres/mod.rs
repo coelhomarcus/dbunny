@@ -15,9 +15,6 @@ pub mod structure;
 pub mod text;
 mod transactions;
 
-use std::any::Any;
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 
@@ -83,13 +80,5 @@ impl Driver for PostgresDriver {
 
     fn admin(&self) -> Option<&dyn ServerAdmin> {
         Some(self)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-        self
     }
 }

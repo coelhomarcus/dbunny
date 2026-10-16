@@ -69,7 +69,7 @@ impl ServerAdmin for PostgresDriver {
 }
 
 /// The endpoint of an open session, pointed at another database of the same server.
-pub(crate) fn endpoint_for_database(endpoint: &Endpoint, database: &str) -> Result<Endpoint, String> {
+pub(super) fn endpoint_for_database(endpoint: &Endpoint, database: &str) -> Result<Endpoint, String> {
     if database.trim().is_empty() {
         return Err("Choose a database".into());
     }
@@ -81,7 +81,7 @@ pub(crate) fn endpoint_for_database(endpoint: &Endpoint, database: &str) -> Resu
     Ok(Endpoint { url, ..endpoint.clone() })
 }
 
-pub(crate) async fn list_databases(client: &tokio_postgres::Client) -> Result<Vec<DatabaseInfo>, String> {
+async fn list_databases(client: &tokio_postgres::Client) -> Result<Vec<DatabaseInfo>, String> {
     let rows = client
         .query(
             "SELECT datname::text AS name, \
@@ -105,7 +105,7 @@ pub(crate) async fn list_databases(client: &tokio_postgres::Client) -> Result<Ve
 
 /// What the server is doing right now: its sessions (pg_stat_activity), which of them
 /// block others.
-pub(crate) async fn server_activity(client: &Client, all_databases: bool) -> Result<ServerActivity, tokio_postgres::Error> {
+async fn server_activity(client: &Client, all_databases: bool) -> Result<ServerActivity, tokio_postgres::Error> {
     // backend_type (PG 10+) is read through to_jsonb so older servers still answer
     let rows = client
         .query(
@@ -153,7 +153,7 @@ pub(crate) async fn server_activity(client: &Client, all_databases: bool) -> Res
     })
 }
 
-pub(crate) async fn signal(client: &Client, pid: i32, terminate: bool) -> Result<bool, String> {
+async fn signal(client: &Client, pid: i32, terminate: bool) -> Result<bool, String> {
     let own: i32 = client.query_one("SELECT pg_backend_pid()", &[]).await.map_err(|e| db_message(&e))?.get(0);
     if pid == own {
         return Err("That's DBunny's own connection".into());
@@ -163,7 +163,7 @@ pub(crate) async fn signal(client: &Client, pid: i32, terminate: bool) -> Result
 }
 
 /// The server's roles, for the Roles page.
-pub(crate) async fn roles(client: &Client) -> Result<Vec<RoleInfo>, tokio_postgres::Error> {
+async fn roles(client: &Client) -> Result<Vec<RoleInfo>, tokio_postgres::Error> {
     // rolbypassrls exists from 9.5; read through to_jsonb like other newer columns
     let rows = client
         .query(
@@ -297,9 +297,16 @@ mod database_server_tests {
     use super::super::ssh::SshConfig;
     use super::*;
     use crate::commands::admin::open_database_session;
-    use crate::commands::connect::open_session;
+    use crate::commands::connect::{open_session, ConnectResponse};
     use crate::commands::state::AppState;
     use uuid::Uuid;
+
+    /// What `open_session` does, keeping the driver to reach its connections.
+    async fn open_kept(state: &AppState, endpoint: Endpoint, trust_host_key: Option<String>) -> (ConnectResponse, Arc<PostgresDriver>) {
+        let driver = PostgresDriver::open(endpoint, trust_host_key).await.unwrap();
+        let session = ConnectResponse::new(state.register(driver.clone()).await.unwrap(), driver.as_ref());
+        (session, driver)
+    }
 
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_DATABASE_URL and a second database named dbunny_second"]
@@ -310,9 +317,9 @@ mod database_server_tests {
             saved_connections: Default::default(),
             encryption_key: [0; 32],
         };
-        let first = open_session(&state, Endpoint { url, ssh: None, known_hosts: None }, None).await.unwrap();
+        let (first, first_driver) = open_kept(&state, Endpoint { url, ssh: None, known_hosts: None }, None).await;
 
-        let client = state.postgres(&first.session_id).await.unwrap().client().await.unwrap();
+        let client = first_driver.client().await.unwrap();
         let databases = list_databases(&client).await.unwrap();
         let names: Vec<_> = databases.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"dbunny_second"), "{names:?}");
@@ -322,7 +329,9 @@ mod database_server_tests {
         let second = open_database_session(&state, &first.session_id, "dbunny_second").await.unwrap();
         assert_eq!(second.database, "dbunny_second");
         assert_ne!(second.session_id, first.session_id);
-        let current: String = state.postgres(&second.session_id).await.unwrap().client().await.unwrap().query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
+        // Asked on the second session's connection: the database it's on
+        let current: String = state.driver(&second.session_id).await.unwrap().admin().unwrap().databases().await.unwrap()
+            .into_iter().find(|d| d.is_current).unwrap().name;
         assert_eq!(current, "dbunny_second");
         // The first session is untouched
         let current: String = client.query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
@@ -362,29 +371,29 @@ mod database_server_tests {
         let err = open_session(&state, endpoint.clone(), None).await.err().expect("an unknown host key must be confirmed");
         let problem: serde_json::Value = serde_json::from_str(&err).unwrap_or_else(|_| panic!("not a host key error: {err}"));
         let fingerprint = problem["sshHostKey"]["fingerprint"].as_str().unwrap().to_string();
-        let first = open_session(&state, endpoint, Some(fingerprint)).await.unwrap();
+        let (first, first_driver) = open_kept(&state, endpoint, Some(fingerprint)).await;
 
         // The switcher: list the server's databases through the tunnel, open another one
-        let client = state.postgres(&first.session_id).await.unwrap().client().await.unwrap();
+        let client = first_driver.client().await.unwrap();
         let names: Vec<String> = list_databases(&client).await.unwrap().into_iter().map(|d| d.name).collect();
         assert!(names.iter().any(|n| n == "dbunny_second"), "{names:?}");
-        let other = endpoint_for_database(&state.postgres(&first.session_id).await.unwrap().endpoint(), "dbunny_second").unwrap();
+        let other = endpoint_for_database(&first_driver.endpoint(), "dbunny_second").unwrap();
         assert!(other.ssh.is_some(), "the SSH settings come along");
-        let second = open_database_session(&state, &first.session_id, "dbunny_second").await.unwrap();
-        let current: String = state.postgres(&second.session_id).await.unwrap().client().await.unwrap().query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
+        // What `open_database_session` does (no host key passed), keeping the driver
+        let (_, second_driver) = open_kept(&state, other, None).await;
+        let current: String = second_driver.client().await.unwrap().query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
         assert_eq!(current, "dbunny_second");
 
         // Each session has its own tunnel; closing the first leaves the second working
         let local_port = |driver: Arc<PostgresDriver>| async move {
             driver.lock().await.as_ref().unwrap().tunnel.as_ref().unwrap().local_port
         };
-        let (one, two) = (
-            local_port(state.postgres(&first.session_id).await.unwrap()).await,
-            local_port(state.postgres(&second.session_id).await.unwrap()).await,
-        );
+        let (one, two) = (local_port(Arc::clone(&first_driver)).await, local_port(Arc::clone(&second_driver)).await);
         assert_ne!(one, two);
         state.sessions.lock().await.remove(&first.session_id);
-        let still: i32 = state.postgres(&second.session_id).await.unwrap().client().await.unwrap().query_one("SELECT 1", &[]).await.unwrap().get(0);
+        // The last hold on the first session: dropping it closes its tunnel
+        drop(first_driver);
+        let still: i32 = second_driver.client().await.unwrap().query_one("SELECT 1", &[]).await.unwrap().get(0);
         assert_eq!(still, 1);
         let _ = std::fs::remove_file(known_hosts);
     }

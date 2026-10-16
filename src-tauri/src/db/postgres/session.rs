@@ -218,11 +218,23 @@ mod server_tests {
         let driver = PostgresDriver::open(test_endpoint(), None).await.unwrap();
         let id = state.register(driver.clone()).await.unwrap();
         let (editor, _) = driver.editor_client().await.unwrap();
-        let running = tokio::spawn(async move { editor.simple_query("SELECT pg_sleep(1)").await.map(|_| ()) });
-        state.remove(&id).await.unwrap().close().await;
-        let finished = tokio::time::timeout(std::time::Duration::from_secs(5), running).await;
-        assert!(finished.is_ok(), "the running query must end within 5s");
+        let (cancel, tls) = (editor.cancel_token(), driver.link().await.unwrap().tls);
+        let running = tokio::spawn(async move { editor.simple_query("SELECT pg_sleep(30)").await.map(|_| ()) });
+        // Let the query reach the server
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let closing = tokio::time::timeout(std::time::Duration::from_secs(5), state.remove(&id).await.unwrap().close()).await;
+        assert!(closing.is_ok(), "close() must not wait for the running query");
+        assert!(!running.is_finished(), "the query is still running when close() returns");
         assert_eq!(state.driver(&id).await.err().unwrap(), "Session not found");
+        // A command that still holds the driver gets the same answer
+        assert_eq!(driver.client().await.err().unwrap(), "Session not found");
+        assert_eq!(driver.editor_client().await.err().unwrap(), "Session not found");
+
+        // Don't leave the long query running on the server
+        cancel.cancel_query(tls).await.unwrap();
+        let finished = tokio::time::timeout(std::time::Duration::from_secs(5), running).await;
+        assert!(finished.is_ok(), "the cancelled query must end within 5s");
     }
 
     #[tokio::test]
