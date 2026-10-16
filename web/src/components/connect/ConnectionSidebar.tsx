@@ -75,7 +75,6 @@ function ConnectionRow({
       onKeyDown={(e) => {
         if (e.key === "Enter") onConnect();
       }}
-      title="Double-click to connect"
       className={cn(
         "group relative flex h-12 items-center gap-2.5 rounded-lg px-2 cursor-pointer outline-none",
         "focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -92,7 +91,7 @@ function ConnectionRow({
           variant="ghost-muted"
           size="icon-xs"
           className="bg-chrome"
-          title="Connect"
+          aria-label="Connect"
           onClick={(e) => { e.stopPropagation(); onConnect(); }}
         >
           <ArrowRight />
@@ -101,7 +100,7 @@ function ConnectionRow({
           variant="ghost-muted"
           size="icon-xs"
           className="bg-chrome hover:bg-destructive/10 hover:text-destructive-foreground"
-          title="Delete"
+          aria-label="Delete"
           onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
         >
           <Trash2 />
@@ -160,7 +159,7 @@ export default function ConnectionSidebar({
             <span className="text-[13px] font-semibold">Connections</span>
             {count > 0 && <Badge>{count}</Badge>}
           </div>
-          <Button variant="ghost-muted" size="icon-sm" onClick={onNew} title="New connection">
+          <Button variant="ghost-muted" size="icon-sm" onClick={onNew} aria-label="New connection">
             <Plus />
           </Button>
         </div>

@@ -62,7 +62,7 @@ export default function ExportMenu({
 
   return (
     <div ref={ref} className="relative">
-      <Button variant="ghost-muted" size="icon-sm" data-active={open} onClick={() => setOpen((v) => !v)} title="Export data">
+      <Button variant="ghost-muted" size="icon-sm" data-active={open} onClick={() => setOpen((v) => !v)} aria-label="Export data">
         {loading ? <Loader className="animate-spin" /> : <Download />}
       </Button>
 

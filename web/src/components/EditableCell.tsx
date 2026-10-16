@@ -71,7 +71,6 @@ export default function EditableCell({
           <button
             type="button"
             tabIndex={-1}
-            title="Set to NULL (Ctrl/Cmd+Shift+N)"
             onMouseDown={(e) => {
               e.preventDefault();
               onSetNull();

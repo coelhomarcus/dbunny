@@ -426,7 +426,7 @@ export default function ConnectPage() {
                   </Badge>
                 )}
                 <div className="flex-1" />
-                <Button variant="outline" onClick={handleSave} disabled={!canSave || isSaving} title={canSave ? undefined : "Give it a name to save"}>
+                <Button variant="outline" onClick={handleSave} disabled={!canSave || isSaving}>
                   {isSaving && <Loader className="animate-spin" />}
                   {editing ? "Update" : "Save"}
                 </Button>

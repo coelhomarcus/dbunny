@@ -67,7 +67,7 @@ export default function TableViewHeader({
               type="button"
               onClick={onCountExactly}
               disabled={counting}
-              title="Estimated from the table statistics. Click for an exact count."
+              aria-label="Estimated row count, click for an exact count"
               className="flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-default"
             >
               {counting ? <Loader size={11} className="animate-spin" /> : "~"}
@@ -113,7 +113,7 @@ export default function TableViewHeader({
           </div>
         )}
 
-        <Button variant="ghost-muted" size="sm" onClick={onInsertRow} title="Insert a row">
+        <Button variant="ghost-muted" size="sm" onClick={onInsertRow}>
           <Plus />
           Insert
         </Button>
@@ -123,14 +123,13 @@ export default function TableViewHeader({
           size="sm"
           data-active={filtersOpen || filterCount > 0}
           onClick={onToggleFilters}
-          title="Filter rows"
         >
           <ListFilter />
           Filter
           {filterCount > 0 && <Badge variant="info">{filterCount}</Badge>}
         </Button>
 
-        <Button variant="ghost-muted" size="icon-sm" onClick={onRefresh} disabled={refreshing || loading} title="Refresh">
+        <Button variant="ghost-muted" size="icon-sm" onClick={onRefresh} disabled={refreshing || loading} aria-label="Refresh">
           <RefreshCw
             key={spinKey}
             className={
@@ -144,7 +143,7 @@ export default function TableViewHeader({
         </Button>
 
         {hasCustomWidths && (
-          <Button variant="ghost-muted" size="icon-sm" onClick={onResetWidths} title="Reset column widths">
+          <Button variant="ghost-muted" size="icon-sm" onClick={onResetWidths} aria-label="Reset column widths">
             <Columns3 />
           </Button>
         )}

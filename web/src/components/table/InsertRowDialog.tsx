@@ -144,7 +144,6 @@ function InsertForm({
                       <button
                         type="button"
                         tabIndex={-1}
-                        title="Insert NULL"
                         onClick={() => update(column.name, { touched: true, isNull: true, text: "" })}
                         className={cn(
                           "absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[11px] font-medium cursor-pointer transition-colors",

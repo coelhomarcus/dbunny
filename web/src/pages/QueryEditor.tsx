@@ -357,7 +357,7 @@ export default function QueryEditor() {
                 </button>
               );
             })}
-            <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={addTab} title="New query tab">
+            <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={addTab} aria-label="New query tab">
               <Plus />
             </Button>
           </div>
@@ -403,16 +403,16 @@ export default function QueryEditor() {
               size="sm"
               className={safeMode ? "text-success-foreground" : undefined}
               onClick={() => setSafeMode((v) => !v)}
-              title={safeMode ? "Safe Mode ON - click to disable" : "Safe Mode OFF - click to enable"}
+              aria-pressed={safeMode}
             >
               {safeMode ? <ShieldCheck /> : <ShieldOff />}
               {safeMode ? "Safe" : "Unsafe"}
             </Button>
-            <Button variant="ghost-muted" size="sm" onClick={importQuery} title="Import .sql file">
+            <Button variant="ghost-muted" size="sm" onClick={importQuery}>
               <Upload />
               Import
             </Button>
-            <Button variant="ghost-muted" size="sm" onClick={exportQuery} title="Export as .sql file">
+            <Button variant="ghost-muted" size="sm" onClick={exportQuery}>
               <Download />
               Export SQL
             </Button>
