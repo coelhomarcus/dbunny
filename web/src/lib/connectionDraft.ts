@@ -1,4 +1,4 @@
-import type { SavedConnection, SavedConnectionInput, SavedTag, SshConfig } from "@/types";
+import type { Engine, SavedConnection, SavedConnectionInput, SavedTag, SshConfig } from "@/types";
 // With the extension, so Node's test runner can load it too
 import { type ConnectionFields, buildConnectionUrl, isSocketHost, parseConnectionUrl, tlsFieldsOf, tlsSettingsOf } from "./connectionUrl.ts";
 
@@ -11,7 +11,7 @@ export const DEFAULT_COLOR = "#3b82f6";
 // Colour tags to tell environments apart (prod, staging, local...)
 export const COLOR_PRESETS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899"];
 
-export type Engine = "postgres";
+export type { Engine };
 
 export type ConnectionTab = "connection" | "ssl" | "ssh" | "options";
 
@@ -70,7 +70,8 @@ export function newDraft(engine: Engine): ConnectionDraft {
 export function draftFromSaved(conn: SavedConnection): ConnectionDraft {
   return {
     id: conn.id,
-    engine: "postgres",
+    // Saved objects from before the engine was stored are PostgreSQL ones
+    engine: conn.engine ?? "postgres",
     identity: { name: conn.name, color: conn.color || DEFAULT_COLOR, icon: conn.icon ?? "" },
     fields: {
       host: conn.host,
@@ -145,6 +146,7 @@ export function saveInputOf(draft: ConnectionDraft): SavedConnectionInput {
   return {
     id: draft.id ?? undefined,
     name: identity.name.trim(),
+    engine: draft.engine,
     host: fields.host.trim(),
     port: parseInt(fields.port || "5432", 10),
     database: fields.database.trim(),

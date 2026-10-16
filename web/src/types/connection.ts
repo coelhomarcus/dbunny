@@ -1,5 +1,8 @@
 import type { Capabilities } from "./capabilities";
 
+/** The database a connection talks to. */
+export type Engine = "postgres";
+
 export interface ConnectRequest {
   connectionUrl: string;
 }

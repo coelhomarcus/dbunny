@@ -1,4 +1,4 @@
-import type { SshConfig } from "./connection";
+import type { Engine, SshConfig } from "./connection";
 
 /** SSL settings beyond on/off: how the server is checked and the certificate files. */
 export interface TlsSettings {
@@ -14,6 +14,8 @@ export type SslMode = "require" | "verify-ca" | "verify-full";
 export interface SavedConnection {
   id: string;
   name: string;
+  /** Which database it is; decides what the other details mean. */
+  engine: Engine;
   host: string;
   port: number;
   database: string;
@@ -35,6 +37,7 @@ export interface SavedConnection {
 export interface SavedConnectionInput {
   id?: string;
   name: string;
+  engine: Engine;
   host: string;
   port: number;
   database: string;

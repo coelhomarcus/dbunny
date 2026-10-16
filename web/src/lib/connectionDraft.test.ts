@@ -16,6 +16,7 @@ import {
 const saved: SavedConnection = {
   id: "c1",
   name: "Prod",
+  engine: "postgres",
   host: "db.example.com",
   port: 5433,
   database: "app",
@@ -43,6 +44,11 @@ test("a saved draft keeps its id", () => {
   assert.equal(input.id, "c1");
   assert.equal(input.port, 5433);
   assert.equal(input.name, "Prod");
+});
+
+test("the save input carries the engine", () => {
+  assert.equal(saveInputOf(draftFromSaved(saved)).engine, "postgres");
+  assert.equal(saveInputOf(newDraft("postgres")).engine, "postgres");
 });
 
 test("applying a url keeps the id and identity", () => {

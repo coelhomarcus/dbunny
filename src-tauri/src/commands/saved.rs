@@ -3,6 +3,7 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::db::postgres::ssh::SshConfig;
+use crate::db::Engine;
 use super::state::AppState;
 use super::storage::{save_connections_to_file, SavedConnection, SavedConnectionInfo, TlsSettings};
 
@@ -11,6 +12,9 @@ use super::storage::{save_connections_to_file, SavedConnection, SavedConnectionI
 pub struct SavedConnectionInput {
     pub id: Option<String>,
     pub name: String,
+    /// Missing from frontends that only knew PostgreSQL.
+    #[serde(default)]
+    pub engine: Engine,
     pub host: String,
     pub port: u16,
     pub database: String,
@@ -62,6 +66,7 @@ pub async fn save_connection(
         let (read_only, icon) = (connection.read_only, connection.icon.clone());
         connections[pos] = SavedConnection::new(
             &state.encryption_key,
+            connection.engine,
             id.clone(),
             connection.name,
             connection.host,
@@ -84,6 +89,7 @@ pub async fn save_connection(
         let (read_only, icon) = (connection.read_only, connection.icon.clone());
         let mut new_connection = SavedConnection::new(
             &state.encryption_key,
+            connection.engine,
             Uuid::new_v4().to_string(),
             connection.name,
             connection.host,

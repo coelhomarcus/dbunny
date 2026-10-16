@@ -6,6 +6,7 @@ import { mask, summaryOf } from "./connectionSummary.ts";
 const saved: SavedConnection = {
   id: "c1",
   name: "Prod",
+  engine: "postgres",
   host: "db.example.com",
   port: 5433,
   database: "app",

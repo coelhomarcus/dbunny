@@ -2,7 +2,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -10,11 +10,12 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 use crate::db::postgres::ssh::SshConfig;
+use crate::db::Engine;
 
 const PBKDF2_SALT: &[u8] = b"dbunny-connection-salt-v1";
 const PBKDF2_ITERATIONS: u32 = 100_000;
 
-/// Sensitive connection data — encrypted at rest as a JSON blob.
+/// Sensitive data of a PostgreSQL connection — encrypted at rest as a JSON blob.
 #[derive(Serialize, Deserialize)]
 struct SensitiveData {
     host: String,
@@ -50,6 +51,10 @@ pub struct TlsSettings {
 pub struct SavedConnection {
     pub id: String,
     pub name: String,
+    /// Which database it is, and so what `encrypted_data` holds; missing in files from
+    /// older versions, which only knew PostgreSQL.
+    #[serde(default)]
+    pub engine: Engine,
     pub encrypted_data: String,
     pub ssl: bool,
     /// Every transaction starts read-only; missing in files from older versions.
@@ -69,6 +74,7 @@ pub struct SavedConnection {
 pub struct SavedConnectionInfo {
     pub id: String,
     pub name: String,
+    pub engine: Engine,
     pub host: String,
     pub port: u16,
     pub database: String,
@@ -283,6 +289,7 @@ impl SavedConnection {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         key: &[u8; 32],
+        engine: Engine,
         id: String,
         name: String,
         host: String,
@@ -297,22 +304,25 @@ impl SavedConnection {
         created_at: String,
         updated_at: String,
     ) -> Result<Self, String> {
-        let sensitive = SensitiveData {
-            host,
-            port,
-            database,
-            user,
-            password,
-            ssh,
-            tls,
-        };
-        let json = serde_json::to_string(&sensitive)
-            .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?;
+        // What gets encrypted depends on the engine
+        let json = match engine {
+            Engine::Postgres => serde_json::to_string(&SensitiveData {
+                host,
+                port,
+                database,
+                user,
+                password,
+                ssh,
+                tls,
+            }),
+        }
+        .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?;
         let encrypted_data = encrypt(key, &json)?;
 
         Ok(Self {
             id,
             name,
+            engine,
             encrypted_data,
             ssl,
             read_only: false,
@@ -325,12 +335,15 @@ impl SavedConnection {
 
     pub fn to_info(&self, key: &[u8; 32]) -> Result<SavedConnectionInfo, String> {
         let json = decrypt(key, &self.encrypted_data)?;
-        let sensitive: SensitiveData = serde_json::from_str(&json)
-            .map_err(|e| format!("Failed to deserialize sensitive data: {e}"))?;
+        let sensitive = match self.engine {
+            Engine::Postgres => serde_json::from_str::<SensitiveData>(&json),
+        }
+        .map_err(|e| format!("Failed to deserialize sensitive data: {e}"))?;
 
         Ok(SavedConnectionInfo {
             id: self.id.clone(),
             name: self.name.clone(),
+            engine: self.engine,
             host: sensitive.host,
             port: sensitive.port,
             database: sensitive.database,
@@ -365,7 +378,7 @@ mod tests {
     fn the_icon_is_kept_next_to_the_encrypted_details() {
         let key = [7u8; 32];
         let mut conn = SavedConnection::new(
-            &key, "1".into(), "Prod".into(), "db.example.com".into(), 5432, "shop".into(), "me".into(), "secret".into(),
+            &key, Engine::Postgres, "1".into(), "Prod".into(), "db.example.com".into(), 5432, "shop".into(), "me".into(), "secret".into(),
             None, None, true, "#ef4444".into(), "a".into(), "b".into(),
         )
         .unwrap();
@@ -376,6 +389,82 @@ mod tests {
         assert_eq!((info.icon.as_str(), info.host.as_str()), ("rocket", "db.example.com"));
     }
 
+    /// An encrypted payload exactly as versions before the engine field wrote it.
+    fn legacy_payload(key: &[u8; 32]) -> String {
+        let sensitive = r#"{"host":"db.example.com","port":5433,"database":"shop","user":"me","password":"secret","ssh":{"host":"bastion","port":2222,"user":"ubuntu","authMethod":"key","password":"","keyPath":"/home/me/.ssh/id_ed25519","passphrase":"pp"},"tls":{"mode":"verify-full","rootCert":"/ca.pem","cert":"/client.pem","key":"/client.key"}}"#;
+        encrypt(key, sensitive).unwrap()
+    }
+
+    #[test]
+    fn files_without_engine_load_as_postgres() {
+        let key = [7u8; 32];
+        let json = format!(
+            r##"{{"version":1,"connections":[{{"id":"a","name":"x","encryptedData":"{}","ssl":false,"color":"#000","createdAt":"t","updatedAt":"t"}}]}}"##,
+            legacy_payload(&key)
+        );
+        let file: ConnectionsFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(file.connections[0].engine, Engine::Postgres);
+        assert_eq!(file.connections[0].to_info(&key).unwrap().engine, Engine::Postgres);
+    }
+
+    #[test]
+    fn engine_is_written_back() {
+        let key = [7u8; 32];
+        let conn = SavedConnection::new(
+            &key, Engine::Postgres, "1".into(), "Prod".into(), "db.example.com".into(), 5432, "shop".into(), "me".into(), "secret".into(),
+            None, None, true, "#ef4444".into(), "a".into(), "b".into(),
+        )
+        .unwrap();
+        let json = serde_json::to_value(&conn).unwrap();
+        assert_eq!(json["engine"], "postgres");
+        let info = serde_json::to_value(conn.to_info(&key).unwrap()).unwrap();
+        assert_eq!(info["engine"], "postgres");
+    }
+
+    #[test]
+    fn a_file_from_the_previous_version_loads_and_is_written_back_with_its_engine() {
+        let key = [9u8; 32];
+        let path = std::env::temp_dir().join(format!("dbunny-legacy-connections-{}.json", uuid::Uuid::new_v4()));
+        let legacy = format!(
+            r##"{{"version":1,"connections":[{{"id":"a","name":"Prod","encryptedData":"{}","ssl":true,"readOnly":true,"color":"#ef4444","icon":"rocket","createdAt":"t1","updatedAt":"t2"}}]}}"##,
+            legacy_payload(&key)
+        );
+        fs::write(&path, &legacy).unwrap();
+
+        let check = |connections: &[SavedConnection]| {
+            assert_eq!(connections.len(), 1);
+            assert_eq!(connections[0].engine, Engine::Postgres);
+            let info = connections[0].to_info(&key).unwrap();
+            assert_eq!(info.engine, Engine::Postgres);
+            assert_eq!(
+                (info.host.as_str(), info.port, info.database.as_str(), info.user.as_str(), info.password.as_str()),
+                ("db.example.com", 5433, "shop", "me", "secret")
+            );
+            let ssh = info.ssh.expect("the ssh settings");
+            assert_eq!(
+                (ssh.host.as_str(), ssh.port, ssh.user.as_str(), ssh.auth_method.as_str(), ssh.key_path.as_str(), ssh.passphrase.as_str()),
+                ("bastion", 2222, "ubuntu", "key", "/home/me/.ssh/id_ed25519", "pp")
+            );
+            let tls = info.tls.expect("the tls settings");
+            assert_eq!(
+                (tls.mode.as_str(), tls.root_cert.as_str(), tls.cert.as_str(), tls.key.as_str()),
+                ("verify-full", "/ca.pem", "/client.pem", "/client.key")
+            );
+            assert!(info.ssl && info.read_only);
+            assert_eq!((info.name.as_str(), info.icon.as_str(), info.created_at.as_str(), info.updated_at.as_str()), ("Prod", "rocket", "t1", "t2"));
+        };
+
+        let loaded = load_connections_from_path(&path);
+        check(&loaded);
+
+        write_connections(&path, &loaded).unwrap();
+        let written: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(written["connections"][0]["engine"], "postgres");
+        check(&load_connections_from_path(&path));
+
+        let _ = fs::remove_file(&path);
+    }
+
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("dbunny-storage-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
@@ -384,7 +473,7 @@ mod tests {
 
     fn connection(key: &[u8; 32], name: &str) -> SavedConnection {
         SavedConnection::new(
-            key, name.into(), name.into(), "db.example.com".into(), 5432, "shop".into(), "me".into(), "secret".into(),
+            key, Engine::Postgres, name.into(), name.into(), "db.example.com".into(), 5432, "shop".into(), "me".into(), "secret".into(),
             None, None, false, "#3b82f6".into(), "a".into(), "b".into(),
         )
         .unwrap()
