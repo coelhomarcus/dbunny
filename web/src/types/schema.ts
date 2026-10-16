@@ -8,13 +8,30 @@ export interface TableInfo {
   type: "table" | "view";
 }
 
+/** A foreign key: `columns` of this table point at `refColumns` of `schema.table`. */
+export interface ForeignKeyRef {
+  constraint: string;
+  schema: string;
+  table: string;
+  columns: string[];
+  refColumns: string[];
+}
+
 export interface ColumnInfo {
   name: string;
+  /** Standard type name ("USER-DEFINED" for enums, "ARRAY" for arrays). */
   dataType: string;
+  /** The type as Postgres prints it: "varchar(80)", "mood", "integer[]". */
+  typeName: string;
   isNullable: boolean;
   defaultValue: string | null;
   ordinalPosition: number;
   isPrimaryKey: boolean;
+  /** Computed by the server (generated column or identity ALWAYS), so read-only. */
+  isGenerated: boolean;
+  comment: string | null;
+  enumValues: string[] | null;
+  foreignKey: ForeignKeyRef | null;
 }
 
 export interface FunctionInfo {
