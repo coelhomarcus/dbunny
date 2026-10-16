@@ -94,13 +94,14 @@ export default function DatabaseSwitcher() {
 
   return (
     <>
+      <div className="relative min-w-0 flex-1">
       <button
         ref={anchorRef}
         type="button"
         onClick={toggle}
         aria-expanded={open}
         aria-label="Switch database"
-        className="group flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-left cursor-pointer transition-colors hover:bg-accent aria-expanded:bg-accent"
+        className="group flex w-full min-w-0 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-left cursor-pointer transition-colors hover:bg-accent aria-expanded:bg-accent"
       >
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium leading-tight">{connectionName || "Connection"}</div>
@@ -111,7 +112,7 @@ export default function DatabaseSwitcher() {
         </div>
         <ChevronsUpDown size={12} className="shrink-0 text-muted-foreground/70 group-hover:text-muted-foreground" />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} className="w-64 p-1">
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} dock className="p-1">
         <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Databases on this server</div>
         {databases === null && !error ? (
           <div className="flex justify-center py-3">
@@ -173,6 +174,7 @@ export default function DatabaseSwitcher() {
           )}
         </div>
       </Popover>
+      </div>
       <ContainerDialog request={container} onRun={(options) => runContainer(container!, options)} onClose={() => setContainer(null)} />
     </>
   );
