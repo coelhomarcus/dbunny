@@ -3,44 +3,12 @@
 //! types, defaults and index expressions are SQL the user writes, so they're checked
 //! to be a single fragment (no `;`) and the generated SQL is shown before it runs.
 
-use serde::Deserialize;
 use tauri::State;
 
 use super::query::db_message;
 use super::state::AppState;
 use super::tablefilter::quote_ident;
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
-pub enum StructureChange {
-    AddColumn { name: String, data_type: String, nullable: bool, default: Option<String>, comment: Option<String> },
-    RenameColumn { name: String, new_name: String },
-    DropColumn { name: String, cascade: bool },
-    SetNullable { name: String, nullable: bool },
-    SetDefault { name: String, default: Option<String> },
-    SetComment { name: String, comment: Option<String> },
-    /// `columns` are column names or expressions such as `lower(email)`.
-    CreateIndex { name: Option<String>, columns: Vec<String>, unique: bool, method: String, concurrently: bool },
-    DropIndex { name: String, cascade: bool },
-    /// `using` converts the existing values when there's no automatic cast, e.g. `price::numeric`.
-    SetType { name: String, data_type: String, using: Option<String> },
-    AddForeignKey {
-        name: Option<String>,
-        columns: Vec<String>,
-        ref_schema: String,
-        ref_table: String,
-        ref_columns: Vec<String>,
-        on_update: String,
-        on_delete: String,
-    },
-    AddUnique { name: Option<String>, columns: Vec<String> },
-    AddCheck { name: Option<String>, expression: String },
-    DropConstraint { name: String, cascade: bool },
-    SetTriggerEnabled { name: String, enabled: bool },
-    /// `grantee` is a role name, or PUBLIC for everyone.
-    Grant { grantee: String, privileges: Vec<String>, grant_option: bool },
-    Revoke { grantee: String, privileges: Vec<String> },
-}
+use crate::db::model::{NewColumn, StructureChange};
 
 /// Table privileges that can be granted (MAINTAIN only exists from PostgreSQL 17 on).
 const TABLE_PRIVILEGES: &[&str] = &["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"];
@@ -282,16 +250,6 @@ pub(crate) async fn apply(client: &tokio_postgres::Client, schema: &str, table: 
         return Err(db_message(&e));
     }
     Ok(())
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct NewColumn {
-    pub name: String,
-    pub data_type: String,
-    pub nullable: bool,
-    pub primary_key: bool,
-    pub default: Option<String>,
 }
 
 /// `CREATE TABLE` from the table builder. Several primary key columns make a composite key.

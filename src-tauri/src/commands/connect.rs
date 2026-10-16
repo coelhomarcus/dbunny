@@ -5,7 +5,8 @@ use tokio_postgres::config::SslMode;
 use uuid::Uuid;
 
 use super::ssh::{open_tunnel, KnownHosts, SshConfig, Tunnel};
-use super::state::{AppState, Endpoint, Link, Notice, Notices, Session};
+use super::state::{AppState, Endpoint, Link, Notices, Session};
+use crate::db::model::{DatabaseInfo, Notice};
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -352,16 +353,6 @@ pub async fn connect_database(
         endpoint_for_database(&session.endpoint, &database)?
     };
     open_session(&state, endpoint, None).await
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DatabaseInfo {
-    pub name: String,
-    pub size_bytes: Option<i64>,
-    pub is_current: bool,
-    /// The user may connect to it.
-    pub can_connect: bool,
 }
 
 #[tauri::command]

@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use serde::Serialize;
 use serde_json::Value as JsonValue;
 use tauri::State;
 use tokio_postgres::error::SqlState;
@@ -13,6 +12,7 @@ use super::connect::open_connection;
 use super::query::{db_message, pg_error_in_script};
 use super::sqlsplit::split_statements;
 use super::state::{AppState, Link, Notices};
+use crate::db::model::ExplainResult;
 
 /// Asks the server to stop whatever the query editor's connection is running.
 #[tauri::command]
@@ -92,15 +92,6 @@ pub async fn rollback_transaction(state: State<'_, AppState>, session_id: String
 #[tauri::command]
 pub async fn transaction_open(state: State<'_, AppState>, session_id: String) -> Result<bool, String> {
     state.in_transaction(&session_id).await
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExplainResult {
-    /// Postgres' JSON plan: `[{ "Plan": {...}, "Planning Time": .., "Execution Time": .. }]`.
-    pub plan: JsonValue,
-    /// The statement was actually run (ANALYZE), then rolled back.
-    pub analyzed: bool,
 }
 
 const SAVEPOINT: &str = "dbunny_explain";

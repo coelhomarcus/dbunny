@@ -1,6 +1,5 @@
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tauri::State;
 use tokio_postgres::types::{ToSql, Type};
@@ -9,65 +8,10 @@ use uuid::Uuid;
 
 use super::pgtext::{int_to_json, is_native, text_to_json};
 use super::sqlsplit::split_statements;
-use super::state::{AppState, Notice};
+use super::state::AppState;
 use super::tableedit::{build_delete, build_import_batches, build_insert, build_update};
-use super::tablefilter::{build_where, quote_ident, TableFilter, TextParam};
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QueryColumn {
-    pub name: String,
-    pub data_type: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QueryResult {
-    pub columns: Vec<QueryColumn>,
-    pub rows: Vec<Vec<JsonValue>>,
-    pub row_count: usize,
-    pub rows_affected: Option<u64>,
-    pub duration: u64,
-    /// How many statements the script had (1 for a plain query).
-    pub statement_count: usize,
-    /// Notices the server sent while the script ran (`RAISE NOTICE`, warnings).
-    pub notices: Vec<Notice>,
-    /// The script ran inside the editor's open transaction.
-    pub in_transaction: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TableDataResponse {
-    pub columns: Vec<QueryColumn>,
-    pub rows: Vec<Vec<JsonValue>>,
-    pub total_rows: i64,
-    /// True when `total_rows` comes from the table statistics instead of an exact count.
-    pub total_rows_estimated: bool,
-    pub page: i64,
-    pub page_size: i64,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TableDataParams {
-    pub page: Option<i64>,
-    pub page_size: Option<i64>,
-    pub sort_column: Option<String>,
-    pub sort_direction: Option<String>,
-    /// Several sort keys, first one first; takes over from sort_column when given.
-    pub sort: Option<Vec<SortKey>>,
-    pub filters: Option<Vec<TableFilter>>,
-    /// "any" joins the filters with OR; anything else (or none) with AND.
-    pub filter_mode: Option<String>,
-}
-
-#[derive(Deserialize, Clone, Debug)]
-pub struct SortKey {
-    pub column: String,
-    /// "desc" for descending; anything else ascends.
-    pub direction: Option<String>,
-}
+use super::tablefilter::{build_where, quote_ident, TextParam};
+use crate::db::model::{QueryColumn, QueryResult, RowChange, SortKey, TableDataParams, TableDataResponse};
 
 /// ` ORDER BY ...` for the sort keys that name real columns (others are ignored).
 pub(crate) fn order_clause(keys: &[SortKey], valid_columns: &[String]) -> String {
@@ -781,14 +725,6 @@ pub async fn count_table_rows(
         .map_err(|e| db_message(&e))
 }
 
-/// One edited row: its primary key and the new values.
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct RowChange {
-    pub primary_key: serde_json::Map<String, JsonValue>,
-    pub updates: serde_json::Map<String, JsonValue>,
-}
-
 /// Saves edited rows all at once: a separate connection runs them in one transaction, so
 /// either every row is saved or none is.
 #[tauri::command]
@@ -959,6 +895,7 @@ mod tests {
 #[cfg(test)]
 mod server_tests {
     use super::*;
+    use crate::commands::tablefilter::TableFilter;
     use serde_json::json;
 
     async fn connect() -> tokio_postgres::Client {

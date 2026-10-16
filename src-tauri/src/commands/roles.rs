@@ -1,31 +1,11 @@
 //! The server's roles, for the Roles page.
 
-use serde::Serialize;
 use tauri::State;
 use tokio_postgres::Client;
 
 use super::query::db_message;
 use super::state::AppState;
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoleInfo {
-    pub name: String,
-    pub can_login: bool,
-    pub superuser: bool,
-    pub create_db: bool,
-    pub create_role: bool,
-    pub replication: bool,
-    pub bypass_rls: bool,
-    /// -1 when unlimited.
-    pub connection_limit: i32,
-    pub valid_until: Option<String>,
-    /// Roles this one is a member of (inherits their rights unless NOINHERIT).
-    pub member_of: Vec<String>,
-    pub is_current: bool,
-    /// Built in (pg_*), hidden unless asked for.
-    pub is_builtin: bool,
-}
+use crate::db::model::RoleInfo;
 
 #[tauri::command]
 pub async fn get_roles(state: State<'_, AppState>, session_id: String) -> Result<Vec<RoleInfo>, String> {

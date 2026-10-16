@@ -1,43 +1,12 @@
 //! What the server is doing right now: its sessions (pg_stat_activity), which of them
 //! block others, and cancelling or ending one.
 
-use serde::Serialize;
 use tauri::State;
 use tokio_postgres::Client;
 
 use super::query::db_message;
 use super::state::AppState;
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ServerSession {
-    pub pid: i32,
-    pub user: Option<String>,
-    pub database: Option<String>,
-    pub application: Option<String>,
-    pub client: Option<String>,
-    /// active, idle, idle in transaction, ...
-    pub state: Option<String>,
-    /// What it waits for, e.g. "Lock: transactionid".
-    pub waiting_for: Option<String>,
-    /// Seconds since the current (or last) query started.
-    pub query_seconds: Option<f64>,
-    /// Seconds since the open transaction started.
-    pub transaction_seconds: Option<f64>,
-    pub query: Option<String>,
-    /// Sessions holding locks this one waits on.
-    pub blocked_by: Vec<i32>,
-    /// The connection DBunny itself uses for this query.
-    pub is_self: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ServerActivity {
-    pub sessions: Vec<ServerSession>,
-    /// The role may only see its own sessions' queries without pg_read_all_stats.
-    pub limited_view: bool,
-}
+use crate::db::model::{ServerActivity, ServerSession};
 
 #[tauri::command]
 pub async fn get_server_activity(

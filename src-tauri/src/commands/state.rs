@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 use tokio_postgres::Client;
 
 use super::storage::SavedConnection;
+use crate::db::model::Notice;
 
 pub struct Session {
     // Shared so commands can use the client without holding the sessions lock
@@ -40,16 +41,6 @@ pub struct Endpoint {
 pub struct Link {
     pub config: tokio_postgres::Config,
     pub tls: postgres_native_tls::MakeTlsConnector,
-}
-
-/// A notice, warning or other non-error message sent by the server.
-#[derive(Clone, Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Notice {
-    pub severity: String,
-    pub message: String,
-    pub detail: Option<String>,
-    pub hint: Option<String>,
 }
 
 pub type Notices = Arc<std::sync::Mutex<Vec<Notice>>>;

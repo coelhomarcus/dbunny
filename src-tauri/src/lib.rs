@@ -1,4 +1,5 @@
 mod commands;
+mod db;
 
 use commands::state::AppState;
 use commands::storage;

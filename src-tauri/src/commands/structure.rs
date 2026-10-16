@@ -1,115 +1,15 @@
 //! Everything the Structure tab shows about a table or view, in one call.
 
-use serde::Serialize;
 use tauri::State;
 use tokio_postgres::Client;
 
 use super::query::db_message;
-use super::schema::{table_columns, ColumnInfo};
+use super::schema::table_columns;
 use super::state::AppState;
 use super::tablefilter::quote_ident;
-
-#[derive(Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct TableMeta {
-    /// "table", "view", "materialized view", "partitioned table" or "foreign table".
-    pub kind: String,
-    pub owner: String,
-    pub comment: Option<String>,
-    /// From the statistics; None when the table was never analyzed.
-    pub row_estimate: Option<i64>,
-    pub table_bytes: Option<i64>,
-    pub indexes_bytes: Option<i64>,
-    pub total_bytes: Option<i64>,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct IndexInfo {
-    pub name: String,
-    /// Indexed columns or expressions, in order.
-    pub columns: Vec<String>,
-    pub method: String,
-    pub is_unique: bool,
-    pub is_primary: bool,
-    /// Created by a PRIMARY KEY / UNIQUE / EXCLUDE constraint (so the constraint's DDL covers it).
-    pub backs_constraint: bool,
-    /// WHERE clause of a partial index.
-    pub predicate: Option<String>,
-    pub definition: String,
-    pub bytes: Option<i64>,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ConstraintInfo {
-    pub name: String,
-    /// "primary key", "unique", "check", "foreign key" or "exclusion".
-    pub kind: String,
-    pub definition: String,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ForeignKeyInfo {
-    pub name: String,
-    pub columns: Vec<String>,
-    pub ref_schema: String,
-    pub ref_table: String,
-    pub ref_columns: Vec<String>,
-    pub on_update: String,
-    pub on_delete: String,
-}
-
-/// A foreign key in another table that points at this one.
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ReferencedBy {
-    pub name: String,
-    pub schema: String,
-    pub table: String,
-    pub columns: Vec<String>,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TriggerInfo {
-    pub name: String,
-    /// BEFORE, AFTER or INSTEAD OF.
-    pub timing: String,
-    pub events: Vec<String>,
-    /// ROW or STATEMENT.
-    pub level: String,
-    pub function: String,
-    pub enabled: bool,
-    pub definition: String,
-}
-
-/// What one role (or PUBLIC) may do on the table.
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TablePrivilege {
-    pub grantee: String,
-    pub privileges: Vec<String>,
-    /// Privileges it may grant on to others.
-    pub grantable: Vec<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TableStructure {
-    pub meta: TableMeta,
-    pub columns: Vec<ColumnInfo>,
-    pub indexes: Vec<IndexInfo>,
-    pub constraints: Vec<ConstraintInfo>,
-    pub foreign_keys: Vec<ForeignKeyInfo>,
-    pub referenced_by: Vec<ReferencedBy>,
-    pub triggers: Vec<TriggerInfo>,
-    pub privileges: Vec<TablePrivilege>,
-    pub ddl: String,
-    /// Sections that couldn't be read (usually permissions), shown instead of failing the whole tab.
-    pub warnings: Vec<String>,
-}
+use crate::db::model::{
+    ConstraintInfo, ForeignKeyInfo, IndexInfo, ReferencedBy, TableMeta, TablePrivilege, TableStructure, TriggerInfo,
+};
 
 #[tauri::command]
 pub async fn get_table_structure(

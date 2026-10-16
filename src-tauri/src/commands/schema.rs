@@ -1,64 +1,10 @@
-use serde::Serialize;
 use tauri::State;
 
 use super::state::AppState;
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ColumnInfo {
-    pub name: String,
-    pub data_type: String,
-    /// The type as Postgres prints it (`varchar(80)`, `mood`, `integer[]`), unlike the
-    /// standard `data_type` which says `USER-DEFINED` or `ARRAY` for those.
-    pub type_name: String,
-    pub is_nullable: bool,
-    pub default_value: Option<String>,
-    pub ordinal_position: i32,
-    pub is_primary_key: bool,
-    /// Generated or `GENERATED ALWAYS AS IDENTITY`: the server computes it, so it can't be written.
-    pub is_generated: bool,
-    pub comment: Option<String>,
-    /// Labels of the column's enum type, in their declared order.
-    pub enum_values: Option<Vec<String>>,
-    /// The first foreign key that includes this column.
-    pub foreign_key: Option<ForeignKeyRef>,
-}
-
-/// A foreign key constraint: `columns` of this table point at `ref_columns` of the referenced one.
-#[derive(Serialize, Clone, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ForeignKeyRef {
-    pub constraint: String,
-    pub schema: String,
-    pub table: String,
-    pub columns: Vec<String>,
-    pub ref_columns: Vec<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FunctionInfo {
-    pub name: String,
-    pub schema: String,
-    pub return_type: String,
-    pub argument_types: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FunctionDetail {
-    pub name: String,
-    pub schema: String,
-    pub return_type: String,
-    pub argument_types: String,
-    pub language: String,
-    pub source: String,
-    pub kind: String,
-    pub volatility: String,
-    pub is_strict: bool,
-    pub owner: String,
-    pub description: Option<String>,
-}
+use crate::db::model::{
+    ColumnInfo, CompletionColumn, CompletionRelation, CompletionSchema, ExplorerObject, ExplorerPartition, ExplorerSchema,
+    ExplorerTree, ExtensionInfo, ForeignKeyRef, FunctionDetail, FunctionInfo, ObjectDefinition,
+};
 
 /// The user's schemas, for a query on `pg_namespace n`: leaves out the system catalogs and
 /// the `pg_toast*` / `pg_temp_*` schemas the server makes for its own use and for each
@@ -270,15 +216,6 @@ async fn table_foreign_keys(
         .collect())
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExtensionInfo {
-    pub name: String,
-    pub version: String,
-    pub schema: String,
-    pub comment: Option<String>,
-}
-
 #[tauri::command]
 pub async fn get_extensions(state: State<'_, AppState>, session_id: String) -> Result<Vec<ExtensionInfo>, String> {
     let client = state.client(&session_id).await?;
@@ -295,16 +232,6 @@ pub async fn get_extensions(state: State<'_, AppState>, session_id: String) -> R
         .iter()
         .map(|r| ExtensionInfo { name: r.get("name"), version: r.get("version"), schema: r.get("schema"), comment: r.get("comment") })
         .collect())
-}
-
-/// What the explorer shows for a sequence or a type: a few facts and its DDL.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ObjectDefinition {
-    pub kind: String,
-    pub facts: Vec<(String, String)>,
-    pub comment: Option<String>,
-    pub ddl: String,
 }
 
 #[tauri::command]
@@ -432,33 +359,6 @@ pub(crate) async fn type_definition(client: &tokio_postgres::Client, schema: &st
     Ok(ObjectDefinition { kind: kind.into(), facts, comment: None, ddl })
 }
 
-/// One object in the explorer.
-#[derive(Serialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ExplorerObject {
-    pub name: String,
-    /// table, view, matview, sequence, function, procedure or type.
-    pub kind: String,
-    /// Arguments of a function, a type's kind (enum, domain...), or "partitioned" and
-    /// "foreign" for those tables.
-    pub detail: String,
-    /// A partitioned table's partitions; empty for everything else.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub partitions: Vec<ExplorerPartition>,
-}
-
-/// One partition, which may itself be partitioned.
-#[derive(Serialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ExplorerPartition {
-    pub schema: String,
-    pub name: String,
-    /// The values it holds, e.g. `FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')`.
-    pub bound: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub partitions: Vec<ExplorerPartition>,
-}
-
 /// Partitions of `parent`, nested, from the flat (parent, partition) list.
 fn partitions_of(parent: (&str, &str), all: &[(String, String, String, String, String)]) -> Vec<ExplorerPartition> {
     all.iter()
@@ -470,21 +370,6 @@ fn partitions_of(parent: (&str, &str), all: &[(String, String, String, String, S
             partitions: partitions_of((schema, name), all),
         })
         .collect()
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ExplorerSchema {
-    pub name: String,
-    pub objects: Vec<ExplorerObject>,
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ExplorerTree {
-    pub schemas: Vec<ExplorerSchema>,
-    /// The first schema of the search path, opened first in the explorer.
-    pub default_schema: Option<String>,
 }
 
 /// Every schema with its objects, in one round trip, so the explorer can filter and
@@ -561,31 +446,6 @@ pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<Explorer
         }
     }
     Ok(ExplorerTree { schemas: tree, default_schema })
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompletionRelation {
-    pub schema: String,
-    pub name: String,
-    #[serde(rename = "type")]
-    pub relation_type: String,
-    pub columns: Vec<CompletionColumn>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompletionColumn {
-    pub name: String,
-    pub data_type: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompletionSchema {
-    pub current_schema: Option<String>,
-    pub relations: Vec<CompletionRelation>,
-    pub functions: Vec<FunctionInfo>,
 }
 
 /// Everything the SQL editor needs for autocomplete, fetched in a couple of
