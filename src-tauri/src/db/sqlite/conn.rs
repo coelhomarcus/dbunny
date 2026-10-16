@@ -41,7 +41,8 @@ impl SqliteConn {
         } else {
             OpenFlags::SQLITE_OPEN_READ_WRITE
         };
-        // Without SQLITE_OPEN_URI a name like "file:x?mode=ro" is just a file name
+        // The bundled SQLite reads "file:..." names as URIs whatever the flags say, so the driver
+        // hands over absolute paths only (see SqliteDriver::open)
         let flags = mode | OpenFlags::SQLITE_OPEN_NO_MUTEX;
         let fail = |e: rusqlite::Error| map_error(&e, path, false);
 

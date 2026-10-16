@@ -50,6 +50,8 @@ impl SqliteDriver {
     /// Opens `path` as a new session. Nothing is created unless `opts.create` asks for it.
     pub async fn open(path: PathBuf, opts: OpenOptions) -> Result<Arc<SqliteDriver>, String> {
         tokio::task::spawn_blocking(move || {
+            // Always an absolute path: a relative "file:..." name would be read as a URI
+            let path = std::path::absolute(&path).unwrap_or(path);
             let tables = SqliteConn::open(&path, &opts)?;
             let editor = SqliteConn::open(&path, &opts)?;
             let info = ConnectionInfo {
@@ -180,6 +182,36 @@ mod tests {
         assert!(d.catalog().explorer().await.is_err());
         assert!(d.data().count_rows("main", "t").await.is_err());
         assert!(d.console().is_none() && d.admin().is_none());
+    }
+
+    /// Removes a file when it goes out of scope (also if an assertion fails first).
+    struct RemoveOnDrop(PathBuf);
+    impl Drop for RemoveOnDrop {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_name_that_looks_like_a_uri_is_a_plain_file_name() {
+        // The bundled SQLite turns URI names on for every connection, so a relative name such as
+        // "file:x?mode=memory" would open an in-memory database instead of a file
+        let name = format!("file:dbunny-test-{}.db?mode=memory", uuid::Uuid::new_v4());
+        let on_disk = std::env::current_dir().unwrap().join(&name);
+        let _cleanup = RemoveOnDrop(on_disk.clone());
+        let d = SqliteDriver::open(PathBuf::from(&name), OpenOptions { create: true, ..Default::default() })
+            .await
+            .unwrap();
+        let file: String = d
+            .tables()
+            .run(|c| {
+                c.query_row("SELECT file FROM pragma_database_list WHERE name = 'main'", [], |row| row.get(0))
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap();
+        assert!(!file.is_empty(), "the database is a file, not an in-memory one");
+        assert_eq!(d.info().host, on_disk.display().to_string(), "the session shows the absolute path");
     }
 
     #[tokio::test]
