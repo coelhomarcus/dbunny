@@ -45,6 +45,8 @@ interface PaginationProps {
   pageSize: number;
   pageSizeOptions: number[];
   onPageSizeChange: (size: number) => void;
+  /** Shown on the left: row count and the table's secondary tools. */
+  start?: React.ReactNode;
 }
 
 export default function Pagination({
@@ -56,15 +58,18 @@ export default function Pagination({
   pageSize,
   pageSizeOptions,
   onPageSizeChange,
+  start,
 }: PaginationProps) {
   return (
-    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-muted text-sm text-muted-foreground select-none">
-      <div className="flex items-center gap-2">
-        <span>Rows per page</span>
+    <div className="flex h-10 shrink-0 items-center gap-3 border-t border-border px-2.5 text-xs text-muted-foreground select-none">
+      <div className="flex min-w-0 items-center gap-1">{start}</div>
+      <div className="flex-1" />
+      <label className="flex items-center gap-1.5">
+        Per page
         <select
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
-          className={cn(selectClass, "h-7 px-1.5 shadow-xs shadow-black/10")}
+          className={cn(selectClass, "h-7 px-1.5 text-xs shadow-xs shadow-black/10")}
         >
           {pageSizeOptions.map((opt) => (
             <option key={opt} value={opt}>
@@ -72,7 +77,7 @@ export default function Pagination({
             </option>
           ))}
         </select>
-      </div>
+      </label>
 
       {totalPages > 1 && (
         <div className="flex items-center gap-1.5">

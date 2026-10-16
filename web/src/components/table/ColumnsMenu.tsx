@@ -8,6 +8,7 @@ import { cn } from "../../lib/cn";
 
 /** Show, hide and reorder the table's columns. */
 export default function ColumnsMenu({ layout }: { layout: ColumnLayoutApi }) {
+  // Compact: an icon (with the hidden count) in the bar under the table
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const last = layout.ordered.length - 1;
@@ -17,16 +18,14 @@ export default function ColumnsMenu({ layout }: { layout: ColumnLayoutApi }) {
       <Button
         ref={anchorRef}
         variant="ghost-muted"
-        size="sm"
+        size={layout.hiddenCount > 0 ? "xs" : "icon-xs"}
         data-active={open || layout.hiddenCount > 0}
         aria-expanded={open}
+        aria-label="Show, hide and reorder columns"
         onClick={() => setOpen((v) => !v)}
       >
         <Columns3 />
-        Columns
-        {layout.hiddenCount > 0 && (
-          <span className="rounded bg-primary/15 px-1 text-[11px] font-medium text-primary tabular-nums">{layout.hiddenCount} hidden</span>
-        )}
+        {layout.hiddenCount > 0 && <span className="tabular-nums text-primary">{layout.hiddenCount} hidden</span>}
       </Button>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} className="w-64 p-1">
         <div className="max-h-80 overflow-y-auto">

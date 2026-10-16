@@ -17,6 +17,7 @@ import { useRowSelection } from "../hooks/useRowSelection";
 import { useColumnResize } from "../hooks/useColumnResize";
 import { useColumnLayout } from "../hooks/useColumnLayout";
 import ColumnsMenu from "../components/table/ColumnsMenu";
+import TableTools from "../components/table/TableTools";
 import { usePendingChanges } from "../hooks/usePendingChanges";
 import { useDiscardGuard } from "../hooks/useDiscardGuard";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -317,10 +318,6 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       <TableViewHeader
         schema={schema!}
         table={table!}
-        totalRows={data?.totalRows}
-        totalRowsEstimated={data?.totalRowsEstimated}
-        counting={tableData.counting}
-        onCountExactly={tableData.countExactly}
         hasNoPk={hasNoPk}
         readOnly={readOnly}
         selectedCount={selection.selectedRows.size}
@@ -339,21 +336,10 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
           setSqlCopied(false);
           setReviewSql(pendingChangesToSql(schema!, table!, pending.changedRows()));
         }}
-        refreshing={tableData.refreshing}
-        loading={loading}
-        spinKey={tableData.spinKey}
-        onRefresh={guard(tableData.refresh)}
-        hasCustomWidths={resize.hasCustomWidths}
-        onResetWidths={resize.resetWidths}
         onInsertRow={guard(() => setInsert({}))}
-        onImportCsv={guard(() => setImportOpen({}))}
         filterCount={tableData.filters.length}
         filtersOpen={filtersOpen}
         onToggleFilters={() => setFiltersOpen((open) => !open)}
-        columns={data?.columns}
-        rows={data?.rows}
-        onFetchAllRows={fetchAllRows}
-        columnsMenu={data && <ColumnsMenu layout={layout} />}
       />
 
       {filtersOpen && columnInfos.length > 0 && (
@@ -530,6 +516,28 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
             pageSize={tableData.pageSize}
             pageSizeOptions={tableData.pageSizeOptions}
             onPageSizeChange={guard(tableData.setPageSize)}
+            start={
+              <TableTools
+                schema={schema!}
+                table={table!}
+                totalRows={data.totalRows}
+                totalRowsEstimated={data.totalRowsEstimated}
+                counting={tableData.counting}
+                onCountExactly={tableData.countExactly}
+                refreshing={tableData.refreshing}
+                loading={loading}
+                spinKey={tableData.spinKey}
+                onRefresh={guard(tableData.refresh)}
+                columnsMenu={<ColumnsMenu layout={layout} />}
+                readOnly={readOnly}
+                onImportCsv={guard(() => setImportOpen({}))}
+                hasCustomWidths={resize.hasCustomWidths}
+                onResetWidths={resize.resetWidths}
+                columns={data.columns}
+                rows={data.rows}
+                onFetchAllRows={fetchAllRows}
+              />
+            }
           />
         </div>
       )}

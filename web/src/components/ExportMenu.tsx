@@ -13,6 +13,8 @@ interface ExportMenuProps {
   /** The total is an estimate: shown with a ~ and counted exactly before exporting. */
   totalRowsEstimated?: boolean;
   onFetchAll?: () => Promise<{ columns: QueryColumn[]; rows: unknown[][] }>;
+  /** Smaller trigger, for toolbars at the bottom of a view. */
+  compact?: boolean;
 }
 
 const formats: { value: ExportFormat; label: string }[] = [
@@ -22,7 +24,7 @@ const formats: { value: ExportFormat; label: string }[] = [
 
 export default function ExportMenu({
   columns, rows, defaultName,
-  side = "down", totalRows, totalRowsEstimated, onFetchAll,
+  side = "down", totalRows, totalRowsEstimated, onFetchAll, compact,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -54,15 +56,16 @@ export default function ExportMenu({
     }
   }
 
+  // Compact menus sit at the left of a bottom bar, so they open towards the right
   const posClass = side === "up"
-    ? "bottom-full mb-1.5 right-0"
+    ? `bottom-full mb-1.5 ${compact ? "left-0" : "right-0"}`
     : "top-full mt-1.5 right-0";
 
   const showAllOption = onFetchAll && totalRows && totalRows > rows.length;
 
   return (
     <div ref={ref} className="relative">
-      <Button variant="ghost-muted" size="icon-sm" data-active={open} onClick={() => setOpen((v) => !v)} aria-label="Export data">
+      <Button variant="ghost-muted" size={compact ? "icon-xs" : "icon-sm"} data-active={open} onClick={() => setOpen((v) => !v)} aria-label="Export data">
         {loading ? <Loader className="animate-spin" /> : <Download />}
       </Button>
 
