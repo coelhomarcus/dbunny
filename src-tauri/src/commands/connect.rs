@@ -119,6 +119,13 @@ pub(crate) fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Confi
     Ok((config, MakeTlsConnector::new(connector)))
 }
 
+/// The socket folder when the URL's host is one (`postgresql://user@%2Ftmp/db`, as libpq
+/// writes it), None for a host name.
+pub(crate) fn socket_dir(url: &url::Url) -> Option<String> {
+    let host = percent_decode(url.host_str()?);
+    host.starts_with('/').then_some(host)
+}
+
 /// Opens the session's connection: the SSH tunnel first when there is one, then the
 /// database. Used on connect and again to reconnect after the connection was lost.
 pub(crate) async fn establish(
@@ -128,6 +135,14 @@ pub(crate) async fn establish(
 ) -> Result<(tokio_postgres::Client, Link, Option<std::sync::Arc<Tunnel>>), String> {
     let host = endpoint.url.host_str().unwrap_or("localhost").to_string();
     let port = endpoint.url.port().unwrap_or(5432);
+    if socket_dir(&endpoint.url).is_some() {
+        if cfg!(windows) {
+            return Err("Unix sockets aren't available on Windows: use the host name and port".into());
+        }
+        if endpoint.ssh.is_some() {
+            return Err("A socket is a local file, so it can't be reached through an SSH tunnel".into());
+        }
+    }
 
     // Through SSH, the driver connects to a local port forwarded to the database host
     let (url, tunnel) = match (&endpoint.ssh, &endpoint.known_hosts) {
@@ -243,7 +258,8 @@ async fn open_session(state: &AppState, endpoint: Endpoint, trust_host_key: Opti
         "" => "postgres".to_string(),
         name => percent_decode(name),
     };
-    let host = endpoint.url.host_str().unwrap_or("localhost").to_string();
+    // A socket shows as its folder
+    let host = socket_dir(&endpoint.url).unwrap_or_else(|| endpoint.url.host_str().unwrap_or("localhost").to_string());
     let port = endpoint.url.port().unwrap_or(5432);
     let notices: Notices = Default::default();
     let (client, link, tunnel) = establish(&endpoint, &notices, trust_host_key).await?;
@@ -484,6 +500,19 @@ mod tests {
     }
 
     #[test]
+    fn a_socket_folder_as_host_connects_through_the_socket() {
+        let url = url::Url::parse("postgresql://me:secret@%2Fvar%2Frun%2Fpostgresql:5433/shop").unwrap();
+        assert_eq!(socket_dir(&url).as_deref(), Some("/var/run/postgresql"));
+        let (config, _) = connection_config(&url).unwrap();
+        #[cfg(unix)]
+        assert!(matches!(&config.get_hosts()[0], tokio_postgres::config::Host::Unix(p) if p == std::path::Path::new("/var/run/postgresql")));
+        assert_eq!(config.get_ports(), &[5433]);
+        assert_eq!(config.get_user(), Some("me"));
+        assert_eq!(config.get_dbname(), Some("shop"));
+        assert_eq!(socket_dir(&url::Url::parse("postgresql://u@db.example.com/x").unwrap()), None);
+    }
+
+    #[test]
     fn config_without_query_still_parses() {
         let url = url::Url::parse("postgresql://u@localhost/db").unwrap();
         let (config, _) = connection_config(&url).unwrap();
@@ -575,6 +604,32 @@ mod database_server_tests {
         // The first session is untouched
         let current: String = client.query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
         assert_eq!(current, first.database);
+    }
+
+    /// DBUNNY_TEST_SOCKET_URL: a URL whose host is a socket folder, e.g.
+    /// postgresql://user:pass@%2Ftmp%2Fpg:5432/db
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_SOCKET_URL"]
+    async fn a_unix_socket_opens_a_session() {
+        let url = url::Url::parse(&std::env::var("DBUNNY_TEST_SOCKET_URL").unwrap()).unwrap();
+        let folder = socket_dir(&url).expect("the URL's host must be a socket folder");
+        let state = AppState { sessions: Default::default(), saved_connections: Default::default(), encryption_key: [0; 32] };
+        let session = open_session(&state, Endpoint { url: url.clone(), ssh: None, known_hosts: None }, None).await.unwrap();
+        assert_eq!(session.host, folder, "the socket folder stands for the host");
+        let one: i32 = state.client(&session.session_id).await.unwrap().query_one("SELECT 1", &[]).await.unwrap().get(0);
+        assert_eq!(one, 1);
+
+        let ssh = SshConfig {
+            host: "bastion".into(),
+            port: 22,
+            user: "u".into(),
+            auth_method: "password".into(),
+            password: "p".into(),
+            key_path: String::new(),
+            passphrase: String::new(),
+        };
+        let err = open_session(&state, Endpoint { url, ssh: Some(ssh), known_hosts: None }, None).await.err().unwrap();
+        assert!(err.contains("SSH"), "{err}");
     }
 }
 
