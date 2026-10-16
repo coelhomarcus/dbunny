@@ -5,7 +5,7 @@ import { tabState } from "../lib/tabState";
 import type { CompletionSchema, ExplainResult, QueryResult } from "@/types";
 import QueryResults from "../components/QueryResults";
 import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
-import { Plus, X, Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, History, Bookmark, Check, MoreHorizontal, AlignLeft } from "lucide-react";
+import { Plus, X, Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, History, Check, MoreHorizontal, AlignLeft, Save } from "lucide-react";
 import RunButton from "../components/query/RunButton";
 import TransactionButton from "../components/query/TransactionButton";
 import ResultsBar from "../components/query/ResultsBar";
@@ -719,10 +719,16 @@ export default function QueryEditor() {
                   {safeMode ? <ShieldCheck /> : <ShieldOff />}
                 </Button>
               </Tooltip>
-              <Tooltip label={`Save the query (${MOD}S)`} side="top">
-                <Button variant="ghost-muted" size="sm" onClick={() => saveActiveQuery()} disabled={!savedStorageKey}>
-                  {justSaved ? <Check /> : <Bookmark />}
-                  {justSaved ? "Saved" : "Save"}
+              <Tooltip label={justSaved ? "Saved" : `Save the query (${MOD}S)`} side="top">
+                <Button
+                  variant="ghost-muted"
+                  size="icon-sm"
+                  className={justSaved ? "text-success-foreground hover:text-success-foreground" : undefined}
+                  onClick={() => saveActiveQuery()}
+                  disabled={!savedStorageKey}
+                  aria-label="Save the query"
+                >
+                  {justSaved ? <Check /> : <Save />}
                 </Button>
               </Tooltip>
               <Tooltip label="More actions" side="top">
@@ -835,7 +841,7 @@ export default function QueryEditor() {
       <Dialog
         open={saveName !== null}
         onClose={() => setSaveName(null)}
-        icon={<Bookmark />}
+        icon={<Save />}
         title="Save query"
         description="Kept for this database, in Saved next to the history."
         footer={
