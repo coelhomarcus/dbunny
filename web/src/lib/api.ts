@@ -16,6 +16,7 @@ import type {
   SavedConnection,
   SavedConnectionInput,
   TableStructure,
+  StructureChange,
   ExplainResult,
   SchemaObject,
   ExtensionInfo,
@@ -144,6 +145,15 @@ export function createSessionApi(sessionId: string | null) {
     /** Indexes, constraints, keys, triggers, sizes and DDL of a table or view. */
     async getTableStructure(schema: string, table: string) {
       return invoke<TableStructure>("get_table_structure", { sessionId, schema, table });
+    },
+
+    /** The SQL a structure change would run. */
+    async previewStructureChange(schema: string, table: string, change: StructureChange) {
+      return invoke<string>("preview_structure_change", { schema, table, change });
+    },
+
+    async applyStructureChange(schema: string, table: string, change: StructureChange) {
+      return invoke<void>("apply_structure_change", { sessionId, schema, table, change });
     },
 
     async getCompletionSchema() {

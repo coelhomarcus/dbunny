@@ -70,3 +70,14 @@ export interface TableStructure {
   /** Sections that couldn't be read, usually for lack of permission. */
   warnings: string[];
 }
+
+/** A change made from the Structure tab; the backend turns it into DDL. */
+export type StructureChange =
+  | { kind: "addColumn"; name: string; dataType: string; nullable: boolean; default: string | null; comment: string | null }
+  | { kind: "renameColumn"; name: string; newName: string }
+  | { kind: "dropColumn"; name: string; cascade: boolean }
+  | { kind: "setNullable"; name: string; nullable: boolean }
+  | { kind: "setDefault"; name: string; default: string | null }
+  | { kind: "setComment"; name: string; comment: string | null }
+  | { kind: "createIndex"; name: string | null; columns: string[]; unique: boolean; method: string; concurrently: boolean }
+  | { kind: "dropIndex"; name: string; cascade: boolean };

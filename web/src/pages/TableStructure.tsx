@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useNavigate, useParams } from "react-router";
-import { ArrowUpRight, Check, Copy, KeyRound, Link2, Sparkles, TriangleAlert } from "lucide-react";
+import { ArrowUpRight, Ban, Check, Copy, KeyRound, Link2, MessageSquare, MoreHorizontal, PenLine, Plus, Sparkles, Trash2, TriangleAlert, Asterisk, Equal } from "lucide-react";
+import ContextMenu, { type ContextMenuItem } from "../components/ui/ContextMenu";
+import StructureChangeDialog, { type ChangeDraft } from "../components/structure/StructureChangeDialog";
 import type { ColumnInfo, TableStructure as Structure } from "@/types";
 import { segmentedItemClass, segmentedListClass } from "../components/ui/styles";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
@@ -9,7 +11,7 @@ import SegmentedTabs from "../components/ui/SegmentedTabs";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import SqlViewer from "../components/SqlViewer";
-import { useApi } from "../contexts/useConnection";
+import { useApi, useConnection } from "../contexts/useConnection";
 import { foreignKeyTarget, shortType } from "../lib/columnMeta";
 import { cn } from "../lib/cn";
 import { formatBytes } from "../lib/format";
@@ -62,9 +64,14 @@ function TableLink({ schema, table, children }: { schema: string; table: string;
   );
 }
 
-function ColumnsSection({ columns }: { columns: ColumnInfo[] }) {
+/** Toolbar above a section's table, for its "add" action. */
+function SectionBar({ children }: { children: ReactNode }) {
+  return <div className="flex items-center justify-end gap-2 border-b border-border px-3 py-1.5">{children}</div>;
+}
+
+function ColumnsSection({ columns, onColumnMenu }: { columns: ColumnInfo[]; onColumnMenu?: (column: ColumnInfo, x: number, y: number) => void }) {
   return (
-    <Grid headers={["#", "Column", "Type", "Nullable", "Default", "Comment"]} empty="No columns">
+    <Grid headers={["#", "Column", "Type", "Nullable", "Default", "Comment", ...(onColumnMenu ? [""] : [])]} empty="No columns">
       {columns.map((col) => {
         const target = foreignKeyTarget(col);
         return (
@@ -106,6 +113,21 @@ function ColumnsSection({ columns }: { columns: ColumnInfo[] }) {
               )}
             </td>
             <td className={cn(td, "max-w-80 text-muted-foreground")}>{col.comment ?? ""}</td>
+            {onColumnMenu && (
+              <td className={cn(td, "w-px py-1.5")}>
+                <Button
+                  variant="ghost-muted"
+                  size="icon-xs"
+                  aria-label={`Change ${col.name}`}
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    onColumnMenu(col, r.left, r.bottom + 4);
+                  }}
+                >
+                  <MoreHorizontal />
+                </Button>
+              </td>
+            )}
           </tr>
         );
       })}
@@ -113,9 +135,9 @@ function ColumnsSection({ columns }: { columns: ColumnInfo[] }) {
   );
 }
 
-function IndexesSection({ structure }: { structure: Structure }) {
+function IndexesSection({ structure, onDrop }: { structure: Structure; onDrop?: (index: string) => void }) {
   return (
-    <Grid headers={["Index", "Columns", "Type", "Size"]} empty="No indexes">
+    <Grid headers={["Index", "Columns", "Type", "Size", ...(onDrop ? [""] : [])]} empty="No indexes">
       {structure.indexes.map((index) => (
         <tr key={index.name}>
           <td className={td}>
@@ -142,6 +164,16 @@ function IndexesSection({ structure }: { structure: Structure }) {
           <td className={cn(td, "whitespace-nowrap tabular-nums text-muted-foreground")}>
             {index.bytes !== null ? formatBytes(index.bytes) : "—"}
           </td>
+          {onDrop && (
+            <td className={cn(td, "w-px py-1.5")}>
+              {/* Constraint indexes go away with their constraint */}
+              {!index.backsConstraint && (
+                <Button variant="destructive-ghost" size="icon-xs" aria-label={`Drop index ${index.name}`} onClick={() => onDrop(index.name)}>
+                  <Trash2 />
+                </Button>
+              )}
+            </td>
+          )}
         </tr>
       ))}
     </Grid>
@@ -284,6 +316,12 @@ export default function TableStructure() {
   const key = `${schema}.${table}`;
   const [result, setResult] = useState<{ key: string; structure?: Structure; error?: string } | null>(null);
   const [section, setSection] = useState<Section>("columns");
+  const readOnly = useConnection().connectionInfo?.readOnly ?? false;
+  // Bumped after a change to load the structure again
+  const [version, setVersion] = useState(0);
+  const [draft, setDraft] = useState<ChangeDraft | null>(null);
+  const [columnMenu, setColumnMenu] = useState<{ column: ColumnInfo; x: number; y: number } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!schema || !table) return;
@@ -296,12 +334,37 @@ export default function TableStructure() {
     return () => {
       stale = true;
     };
-  }, [schema, table, api]);
+  }, [schema, table, api, version]);
 
   const loading = !result || result.key !== key;
   const structure = loading ? undefined : result.structure;
   const meta = structure?.meta;
   const isView = meta?.kind === "view" || meta?.kind === "materialized view";
+  const canEdit = !readOnly && !isView && structure !== undefined;
+
+  function columnMenuItems(column: ColumnInfo): ContextMenuItem[] {
+    return [
+      { label: "Rename…", icon: <PenLine />, onSelect: () => setDraft({ kind: "renameColumn", column }) },
+      {
+        label: column.isNullable ? "Make required (NOT NULL)" : "Allow NULL",
+        icon: column.isNullable ? <Asterisk /> : <Ban />,
+        disabled: column.isPrimaryKey,
+        onSelect: () => {
+          api
+            .applyStructureChange(schema!, table!, { kind: "setNullable", name: column.name, nullable: !column.isNullable })
+            .then(() => {
+              setNotice(null);
+              setVersion((v) => v + 1);
+            })
+            .catch((err) => setNotice(typeof err === "string" ? err : "The change failed"));
+        },
+      },
+      { label: "Default…", icon: <Equal />, disabled: column.isGenerated, onSelect: () => setDraft({ kind: "setDefault", column }) },
+      { label: "Comment…", icon: <MessageSquare />, onSelect: () => setDraft({ kind: "setComment", column }) },
+      "separator",
+      { label: "Drop column…", icon: <Trash2 />, destructive: true, onSelect: () => setDraft({ kind: "dropColumn", column }) },
+    ];
+  }
 
   const count = (n: number) => <span className="text-xs tabular-nums text-muted-foreground">{n}</span>;
   const sections: { value: Section; label: ReactNode }[] = structure
@@ -362,6 +425,16 @@ export default function TableStructure() {
             <p className="shrink-0 border-b border-border px-4 py-2 text-[13px] text-muted-foreground">{meta!.comment}</p>
           )}
 
+          {notice && (
+            <button
+              type="button"
+              onClick={() => setNotice(null)}
+              className="shrink-0 border-b border-border bg-destructive/5 px-4 py-2 text-left text-[13px] text-destructive-foreground cursor-pointer"
+            >
+              {notice}
+            </button>
+          )}
+
           {structure.warnings.length > 0 && (
             <div className="flex shrink-0 items-start gap-2 border-b border-border bg-warning/8 px-4 py-2 text-[13px] text-warning-foreground">
               <TriangleAlert size={14} className="mt-0.5 shrink-0" />
@@ -370,8 +443,33 @@ export default function TableStructure() {
           )}
 
           <div className={cn("min-h-0 flex-1", shown === "ddl" ? "overflow-hidden" : "overflow-auto")}>
-            {shown === "columns" && <ColumnsSection columns={structure.columns} />}
-            {shown === "indexes" && <IndexesSection structure={structure} />}
+            {shown === "columns" && (
+              <>
+                {canEdit && (
+                  <SectionBar>
+                    <Button variant="ghost-muted" size="xs" onClick={() => setDraft({ kind: "addColumn" })}>
+                      <Plus /> Add column
+                    </Button>
+                  </SectionBar>
+                )}
+                <ColumnsSection
+                  columns={structure.columns}
+                  onColumnMenu={canEdit ? (column, x, y) => setColumnMenu({ column, x, y }) : undefined}
+                />
+              </>
+            )}
+            {shown === "indexes" && (
+              <>
+                {canEdit && (
+                  <SectionBar>
+                    <Button variant="ghost-muted" size="xs" onClick={() => setDraft({ kind: "createIndex" })}>
+                      <Plus /> Create index
+                    </Button>
+                  </SectionBar>
+                )}
+                <IndexesSection structure={structure} onDrop={canEdit ? (index) => setDraft({ kind: "dropIndex", index }) : undefined} />
+              </>
+            )}
             {shown === "constraints" && <ConstraintsSection structure={structure} />}
             {shown === "keys" && <KeysSection structure={structure} />}
             {shown === "triggers" && <TriggersSection structure={structure} />}
@@ -379,6 +477,19 @@ export default function TableStructure() {
           </div>
         </>
       )}
+      <ContextMenu
+        position={columnMenu}
+        items={columnMenu ? columnMenuItems(columnMenu.column) : []}
+        onClose={() => setColumnMenu(null)}
+      />
+      <StructureChangeDialog
+        draft={draft}
+        schema={schema!}
+        table={table!}
+        columns={structure?.columns ?? []}
+        onDone={() => setVersion((v) => v + 1)}
+        onClose={() => setDraft(null)}
+      />
     </div>
   );
 }
