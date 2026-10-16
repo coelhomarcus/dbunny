@@ -163,6 +163,65 @@ pub(crate) async fn apply(client: &tokio_postgres::Client, schema: &str, table: 
     Ok(())
 }
 
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct NewColumn {
+    pub name: String,
+    pub data_type: String,
+    pub nullable: bool,
+    pub primary_key: bool,
+    pub default: Option<String>,
+}
+
+/// `CREATE TABLE` from the table builder. Several primary key columns make a composite key.
+pub(crate) fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
+    let target = format!("{}.{}", quote_ident(schema), name("table name", table)?);
+    if columns.is_empty() {
+        return Err("Add at least one column".into());
+    }
+    let mut seen = Vec::new();
+    let mut lines = Vec::new();
+    for column in columns {
+        let col = name("column name", &column.name)?;
+        if seen.contains(&col) {
+            return Err(format!("Column {} appears twice", column.name.trim()));
+        }
+        seen.push(col.clone());
+        let mut line = format!("{col} {}", fragment("type", &column.data_type)?);
+        if let Some(default) = column.default.as_deref().filter(|d| !d.trim().is_empty()) {
+            line += &format!(" DEFAULT {}", fragment("default", default)?);
+        }
+        // A primary key is NOT NULL anyway
+        if !column.nullable && !column.primary_key {
+            line += " NOT NULL";
+        }
+        lines.push(line);
+    }
+    let keys: Vec<String> = columns.iter().filter(|c| c.primary_key).map(|c| quote_ident(c.name.trim())).collect();
+    if !keys.is_empty() {
+        lines.push(format!("PRIMARY KEY ({})", keys.join(", ")));
+    }
+    Ok(format!("CREATE TABLE {target} (\n    {}\n)", lines.join(",\n    ")))
+}
+
+#[tauri::command]
+pub fn preview_create_table(schema: String, table: String, columns: Vec<NewColumn>) -> Result<String, String> {
+    Ok(create_table_sql(&schema, &table, &columns)? + ";")
+}
+
+#[tauri::command]
+pub async fn create_table(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    table: String,
+    columns: Vec<NewColumn>,
+) -> Result<(), String> {
+    let sql = create_table_sql(&schema, &table, &columns)?;
+    let client = state.client(&session_id).await?;
+    client.batch_execute(&sql).await.map_err(|e| db_message(&e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +250,33 @@ mod tests {
         assert!(sql(StructureChange::AddColumn { name: "x".into(), data_type: "int; DROP TABLE users".into(), nullable: true, default: None, comment: None }).starts_with("ERR"));
         assert!(sql(StructureChange::SetDefault { name: "x".into(), default: Some("1; --".into()) }).starts_with("ERR"));
         assert!(sql(StructureChange::RenameColumn { name: "x".into(), new_name: " ".into() }).starts_with("ERR"));
+    }
+
+    fn new_column(name: &str, data_type: &str, nullable: bool, primary_key: bool) -> NewColumn {
+        NewColumn { name: name.into(), data_type: data_type.into(), nullable, primary_key, default: None }
+    }
+
+    #[test]
+    fn create_table_builds_columns_and_a_composite_key() {
+        let sql = create_table_sql(
+            "public",
+            "order items",
+            &[
+                new_column("order_id", "bigint", false, true),
+                new_column("line", "int", false, true),
+                NewColumn { default: Some("now()".into()), ..new_column("added", "timestamptz", false, false) },
+                new_column("note", "text", true, false),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            sql,
+            "CREATE TABLE \"public\".\"order items\" (\n    \"order_id\" bigint,\n    \"line\" int,\n    \"added\" timestamptz DEFAULT now() NOT NULL,\n    \"note\" text,\n    PRIMARY KEY (\"order_id\", \"line\")\n)"
+        );
+        assert!(create_table_sql("public", "t", &[]).is_err());
+        assert!(create_table_sql("public", " ", &[new_column("a", "int", true, false)]).is_err());
+        assert!(create_table_sql("public", "t", &[new_column("a", "int", true, false), new_column("a", "text", true, false)]).unwrap_err().contains("twice"));
+        assert!(create_table_sql("public", "t", &[new_column("a", "int); DROP TABLE x; --", true, false)]).is_err());
     }
 
     #[test]
@@ -270,6 +356,32 @@ mod server_tests {
         run(StructureChange::DropColumn { name: "points".into(), cascade: false }).await.unwrap();
         let count: i64 = client.query_one(&format!("SELECT count(*) FROM pg_indexes WHERE schemaname = '{s}'"), &[]).await.unwrap().get(0);
         assert_eq!(count, 1, "only the primary key is left");
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn created_tables_work() {
+        let client = connect().await;
+        let s = "dbunny_create_test";
+        client.batch_execute(&format!("DROP SCHEMA IF EXISTS {s} CASCADE; CREATE SCHEMA {s}")).await.unwrap();
+        let sql = create_table_sql(
+            s,
+            "people",
+            &[
+                NewColumn { name: "id".into(), data_type: "bigserial".into(), nullable: false, primary_key: true, default: None },
+                NewColumn { name: "name".into(), data_type: "text".into(), nullable: false, primary_key: false, default: None },
+                NewColumn { name: "joined".into(), data_type: "date".into(), nullable: true, primary_key: false, default: Some("current_date".into()) },
+            ],
+        )
+        .unwrap();
+        client.batch_execute(&sql).await.unwrap();
+        client.batch_execute(&format!("INSERT INTO {s}.people (name) VALUES ('ana')")).await.unwrap();
+        let row = client.query_one(&format!("SELECT id, joined = current_date FROM {s}.people"), &[]).await.unwrap();
+        assert_eq!(row.get::<_, i64>(0), 1);
+        assert!(row.get::<_, bool>(1));
+        let err = client.batch_execute(&format!("INSERT INTO {s}.people (name) VALUES (NULL)")).await.unwrap_err();
+        assert!(db_message(&err).contains("null value"));
         client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
     }
 }

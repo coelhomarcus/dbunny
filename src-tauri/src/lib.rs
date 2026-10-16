@@ -144,6 +144,8 @@ pub fn run() {
             commands::query::import_rows,
             commands::alter::preview_structure_change,
             commands::alter::apply_structure_change,
+            commands::alter::preview_create_table,
+            commands::alter::create_table,
             commands::editor::cancel_query,
             commands::editor::begin_transaction,
             commands::editor::commit_transaction,
