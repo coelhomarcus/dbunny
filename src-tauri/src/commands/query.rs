@@ -55,9 +55,32 @@ pub struct TableDataParams {
     pub page_size: Option<i64>,
     pub sort_column: Option<String>,
     pub sort_direction: Option<String>,
+    /// Several sort keys, first one first; takes over from sort_column when given.
+    pub sort: Option<Vec<SortKey>>,
     pub filters: Option<Vec<TableFilter>>,
     /// "any" joins the filters with OR; anything else (or none) with AND.
     pub filter_mode: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct SortKey {
+    pub column: String,
+    /// "desc" for descending; anything else ascends.
+    pub direction: Option<String>,
+}
+
+/// ` ORDER BY ...` for the sort keys that name real columns (others are ignored).
+pub(crate) fn order_clause(keys: &[SortKey], valid_columns: &[String]) -> String {
+    let parts: Vec<String> = keys
+        .iter()
+        .filter(|k| valid_columns.contains(&k.column))
+        .map(|k| format!("{} {}", quote_ident(&k.column), if k.direction.as_deref() == Some("desc") { "DESC" } else { "ASC" }))
+        .collect();
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ORDER BY {}", parts.join(", "))
+    }
 }
 
 fn try_get_string(row: &Row, i: usize) -> JsonValue {
@@ -338,8 +361,10 @@ async fn get_valid_columns(
 ) -> Result<Vec<String>, String> {
     let rows = client
         .query(
-            "SELECT column_name FROM information_schema.columns \
-             WHERE table_schema = $1 AND table_name = $2",
+            // pg_catalog, so materialized views have columns too
+            "SELECT a.attname::text FROM pg_attribute a \
+             JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped",
             &[&schema, &table],
         )
         .await
@@ -580,17 +605,14 @@ pub async fn get_table_data(
 
     let valid_columns = get_valid_columns(&client, &schema, &table).await?;
 
-    // Build ORDER BY clause
-    let mut order_clause = String::new();
-    if let Some(sort_col) = params.as_ref().and_then(|p| p.sort_column.as_ref()) {
-        if valid_columns.contains(sort_col) {
-            let dir = match params.as_ref().and_then(|p| p.sort_direction.as_deref()) {
-                Some("desc") => "DESC",
-                _ => "ASC",
-            };
-            order_clause = format!(" ORDER BY {} {}", quote_ident(sort_col), dir);
+    let sort_keys = match params.as_ref() {
+        Some(TableDataParams { sort: Some(keys), .. }) => keys.clone(),
+        Some(TableDataParams { sort_column: Some(column), sort_direction, .. }) => {
+            vec![SortKey { column: column.clone(), direction: sort_direction.clone() }]
         }
-    }
+        _ => vec![],
+    };
+    let order_clause = order_clause(&sort_keys, &valid_columns);
 
     // Build WHERE clause from the filters
     let filters = params.as_ref().and_then(|p| p.filters.as_deref()).unwrap_or(&[]);
@@ -727,6 +749,27 @@ async fn delete_from(
     let (sql, params) = build_delete(&relation, primary_keys, &valid_columns)?;
     let refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
     client.execute(sql.as_str(), &refs).await.map_err(|e| db_message(&e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(column: &str, direction: &str) -> SortKey {
+        SortKey { column: column.into(), direction: Some(direction.into()) }
+    }
+
+    #[test]
+    fn several_sort_keys_keep_their_order_and_skip_unknown_columns() {
+        let valid: Vec<String> = ["name", "age", "we\"ird"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            order_clause(&[key("age", "desc"), key("nope; DROP", "asc"), key("name", "asc")], &valid),
+            " ORDER BY \"age\" DESC, \"name\" ASC"
+        );
+        assert_eq!(order_clause(&[key("we\"ird", "sideways")], &valid), " ORDER BY \"we\"\"ird\" ASC");
+        assert_eq!(order_clause(&[key("nope", "asc")], &valid), "");
+        assert_eq!(order_clause(&[], &valid), "");
+    }
 }
 
 /// Tests that need a real server. Run them with:
@@ -1168,5 +1211,27 @@ mod server_tests {
         assert_eq!(delete_from(&client, &schema, "items", &[key(1, 1), key(2, 2)]).await.unwrap(), 2);
         let left: i64 = client.query_one("SELECT count(*) FROM items", &[]).await.unwrap().get(0);
         assert_eq!(left, 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn materialized_views_have_valid_columns_for_sorting_and_filters() {
+        let client = connect().await;
+        client
+            .batch_execute(
+                "DROP SCHEMA IF EXISTS dbunny_sort_test CASCADE; CREATE SCHEMA dbunny_sort_test; \
+                 CREATE MATERIALIZED VIEW dbunny_sort_test.mv AS SELECT g AS n, g % 2 AS parity FROM generate_series(1, 6) g;",
+            )
+            .await
+            .unwrap();
+        let mut columns = get_valid_columns(&client, "dbunny_sort_test", "mv").await.unwrap();
+        columns.sort();
+        assert_eq!(columns, vec!["n", "parity"]);
+
+        let order = order_clause(&[SortKey { column: "parity".into(), direction: None }, SortKey { column: "n".into(), direction: Some("desc".into()) }], &columns);
+        let page = select_table_page(&client, "\"dbunny_sort_test\".\"mv\"", "", &[], &order, 10, 0).await.unwrap();
+        let first: Vec<_> = page.rows.iter().map(|r| r[0].clone()).collect();
+        assert_eq!(first, vec![json!(6), json!(4), json!(2), json!(5), json!(3), json!(1)]);
+        client.batch_execute("DROP SCHEMA dbunny_sort_test CASCADE").await.unwrap();
     }
 }
