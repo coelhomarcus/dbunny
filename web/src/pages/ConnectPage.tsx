@@ -4,10 +4,10 @@ import { getVersion } from "@tauri-apps/api/app";
 import { ArrowRight, Check, Database, Eye, EyeOff, FolderOpen, KeyRound, Link, Loader, PlugZap, ShieldAlert, TriangleAlert, X } from "lucide-react";
 import { useConnection } from "../contexts/useConnection";
 import { useWorkspace } from "../contexts/workspace";
-import { type ConnectionFields, parseConnectionUrl, buildConnectionUrl } from "../lib/connectionUrl";
+import { type ConnectionFields, parseConnectionUrl, buildConnectionUrl, tlsFieldsOf, tlsSettingsOf } from "../lib/connectionUrl";
 import { api } from "../lib/api";
 import { cn } from "../lib/cn";
-import type { SavedConnection, SshAuthMethod, SshConfig, SshHostKeyProblem } from "@/types";
+import type { SavedConnection, SshAuthMethod, SshConfig, SshHostKeyProblem, SslMode } from "@/types";
 import { hostKeyProblem } from "../lib/sshHostKey";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -35,7 +35,19 @@ function toSshFields(ssh: SshConfig): SshFields {
   return { ...ssh, port: ssh.port && ssh.port !== 22 ? String(ssh.port) : "" };
 }
 
-const EMPTY_FIELDS: ConnectionFields = { host: "", port: "", database: "", user: "", password: "", ssl: false, readOnly: false };
+const EMPTY_FIELDS: ConnectionFields = {
+  host: "",
+  port: "",
+  database: "",
+  user: "",
+  password: "",
+  ssl: false,
+  sslMode: "require",
+  sslRootCert: "",
+  sslCert: "",
+  sslKey: "",
+  readOnly: false,
+};
 
 type TestState =
   | { status: "idle" }
@@ -153,6 +165,12 @@ export default function ConnectPage() {
     }
   }
 
+  async function browseCertificate(key: "sslRootCert" | "sslCert" | "sslKey") {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const path = await open({ multiple: false, title: "Choose a certificate or key file" });
+    if (typeof path === "string") updateField(key, path);
+  }
+
   async function browseKey() {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const path = await open({ multiple: false, title: "Choose a private key" });
@@ -199,6 +217,7 @@ export default function ConnectPage() {
       password: conn.password,
       ssl: conn.ssl,
       readOnly: conn.readOnly ?? false,
+      ...tlsFieldsOf(conn.tls),
     });
     setSshEnabled(Boolean(conn.ssh));
     setSsh(conn.ssh ? toSshFields(conn.ssh) : EMPTY_SSH);
@@ -216,6 +235,7 @@ export default function ConnectPage() {
         password: conn.password,
         ssl: conn.ssl,
         readOnly: conn.readOnly ?? false,
+        ...tlsFieldsOf(conn.tls),
       });
       await withHostKeyCheck(async (trustHostKey) => {
         await connect(url, { name: conn.name, color: conn.color }, { ssh: conn.ssh, trustHostKey });
@@ -252,6 +272,7 @@ export default function ConnectPage() {
           password: fields.password,
           ssl: fields.ssl,
           readOnly: fields.readOnly,
+          tls: tlsSettingsOf(fields),
           ssh: sshConfig(),
           color: connectionColor,
         }),
@@ -435,10 +456,58 @@ export default function ConnectPage() {
                 <div className="flex items-center justify-between gap-4">
                   <label htmlFor="conn-ssl" className="select-none">
                     <span className="block text-[13px] font-medium">Require SSL</span>
-                    <span className="block text-xs text-muted-foreground">Encrypt the connection (sslmode=require)</span>
+                    <span className="block text-xs text-muted-foreground">Encrypt the connection</span>
                   </label>
                   <Switch id="conn-ssl" checked={fields.ssl} onChange={(v) => updateField("ssl", v)} />
                 </div>
+                {fields.ssl && (
+                  <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[13px] font-medium">Check the server</span>
+                      <SegmentedTabs<SslMode>
+                        value={fields.sslMode}
+                        onChange={(v) => updateField("sslMode", v)}
+                        options={[
+                          { value: "require", label: "Encrypt only" },
+                          { value: "verify-ca", label: "Certificate" },
+                          { value: "verify-full", label: "Certificate + name" },
+                        ]}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {fields.sslMode === "require"
+                          ? fields.sslRootCert.trim()
+                            ? "With a CA certificate the server's certificate is checked against it."
+                            : "The server's certificate isn't checked (common for managed databases)."
+                          : fields.sslMode === "verify-ca"
+                            ? "The server's certificate must be signed by a trusted CA."
+                            : "The certificate must be trusted and issued for this host name."}
+                      </span>
+                    </div>
+                    {(
+                      [
+                        ["sslRootCert", "CA certificate", "Optional: the CA that signed the server's certificate"],
+                        ["sslCert", "Client certificate", "Optional: for servers that log in by certificate"],
+                        ["sslKey", "Client key", "Unencrypted PKCS#8 PEM"],
+                      ] as const
+                    ).map(([key, label, hint]) => (
+                      <Field key={key} label={label} htmlFor={`conn-${key}`}>
+                        <div className="flex gap-2">
+                          <Input
+                            id={`conn-${key}`}
+                            value={fields[key]}
+                            onChange={(e) => updateField(key, e.target.value)}
+                            placeholder={hint}
+                            spellCheck={false}
+                            className="font-mono text-xs"
+                          />
+                          <Button variant="outline" onClick={() => browseCertificate(key)} aria-label={`Choose the ${label.toLowerCase()} file`}>
+                            <FolderOpen />
+                          </Button>
+                        </div>
+                      </Field>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-4">
                   <label htmlFor="conn-readonly" className="select-none">
                     <span className="block text-[13px] font-medium">Read-only</span>

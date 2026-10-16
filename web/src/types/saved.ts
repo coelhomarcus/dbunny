@@ -1,5 +1,16 @@
 import type { SshConfig } from "./connection";
 
+/** SSL settings beyond on/off: how the server is checked and the certificate files. */
+export interface TlsSettings {
+  mode: SslMode;
+  rootCert: string;
+  cert: string;
+  key: string;
+}
+
+/** "require" encrypts; the verify modes also check the server's certificate (and name). */
+export type SslMode = "require" | "verify-ca" | "verify-full";
+
 export interface SavedConnection {
   id: string;
   name: string;
@@ -10,6 +21,7 @@ export interface SavedConnection {
   password: string;
   /** Connect through this SSH server; null for a direct connection. */
   ssh: SshConfig | null;
+  tls?: TlsSettings | null;
   ssl: boolean;
   /** Every transaction starts read-only, so the server refuses writes. */
   readOnly: boolean;
@@ -27,6 +39,7 @@ export interface SavedConnectionInput {
   user: string;
   password: string;
   ssh: SshConfig | null;
+  tls: TlsSettings | null;
   ssl: boolean;
   readOnly: boolean;
   color: string;
