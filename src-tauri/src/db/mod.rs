@@ -18,8 +18,9 @@ pub use capabilities::Capabilities;
 #[allow(unused_imports)]
 pub use capabilities::ExplainFormat;
 pub use driver::Driver;
+pub use driver::{Catalog, Data};
 #[allow(unused_imports)]
-pub use driver::{Catalog, Console, Data, SchemaEditor, ServerAdmin, Transactions};
+pub use driver::{Console, SchemaEditor, ServerAdmin, Transactions};
 pub use model::ConnectionInfo;
 pub use unsupported::unsupported;
 

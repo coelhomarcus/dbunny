@@ -298,7 +298,7 @@ pub(crate) async fn list_databases(client: &tokio_postgres::Client) -> Result<Ve
             &[],
         )
         .await
-        .map_err(|e| crate::commands::query::db_message(&e))?;
+        .map_err(|e| super::data::db_message(&e))?;
     Ok(rows
         .iter()
         .map(|r| DatabaseInfo {

@@ -306,7 +306,7 @@ pub struct TableDataResponse {
     pub page_size: i64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TableDataParams {
     pub page: Option<i64>,

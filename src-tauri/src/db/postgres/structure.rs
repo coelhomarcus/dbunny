@@ -1,26 +1,13 @@
 //! Everything the Structure tab shows about a table or view, in one call.
 
-use tauri::State;
 use tokio_postgres::Client;
 
-use super::query::db_message;
-use super::schema::table_columns;
-use super::state::AppState;
+use super::catalog::table_columns;
+use super::data::db_message;
 use crate::db::sql::filter::quote_ident;
 use crate::db::model::{
     ConstraintInfo, ForeignKeyInfo, IndexInfo, ReferencedBy, TableMeta, TablePrivilege, TableStructure, TriggerInfo,
 };
-
-#[tauri::command]
-pub async fn get_table_structure(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    table: String,
-) -> Result<TableStructure, String> {
-    let client = state.postgres(&session_id).await?.client().await?;
-    table_structure(&client, &schema, &table).await
-}
 
 /// A section that failed becomes a warning and an empty value.
 fn section<T: Default>(warnings: &mut Vec<String>, name: &str, result: Result<T, tokio_postgres::Error>) -> T {

@@ -1,10 +1,13 @@
 //! The PostgreSQL driver: a session's connections (main, query editor, transaction),
 //! reconnection and the SSH tunnel they go through.
 
+pub mod catalog;
 pub mod connect;
+pub mod data;
 mod params;
 pub mod session;
 pub mod ssh;
+pub mod structure;
 pub mod text;
 
 use std::any::Any;
@@ -52,11 +55,11 @@ impl Driver for PostgresDriver {
     }
 
     fn catalog(&self) -> &dyn Catalog {
-        unimplemented!("the commands still reach the catalog through the PostgreSQL driver")
+        self
     }
 
     fn data(&self) -> &dyn Data {
-        unimplemented!("the commands still reach the data through the PostgreSQL driver")
+        self
     }
 
     fn as_any(&self) -> &dyn Any {

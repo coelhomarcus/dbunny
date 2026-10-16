@@ -1,10 +1,10 @@
+pub mod catalog;
 pub mod connect;
+pub mod data;
 pub mod query;
 pub mod saved;
-pub mod schema;
 pub mod state;
 pub mod storage;
-pub mod structure;
 pub mod editor;
 pub mod objects;
 pub mod activity;

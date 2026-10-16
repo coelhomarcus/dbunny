@@ -5,7 +5,7 @@
 use tauri::State;
 use tokio_postgres::Client;
 
-use super::query::db_message;
+use crate::db::postgres::data::db_message;
 use super::state::AppState;
 use crate::db::sql::filter::quote_ident;
 

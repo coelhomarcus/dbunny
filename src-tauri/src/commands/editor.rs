@@ -8,7 +8,8 @@ use tauri::State;
 use tokio_postgres::error::SqlState;
 use tokio_postgres::{Client, SimpleQueryMessage};
 
-use super::query::{db_message, pg_error_in_script};
+use super::query::pg_error_in_script;
+use crate::db::postgres::data::db_message;
 use crate::db::sql::split::split_statements;
 use super::state::AppState;
 use crate::db::model::ExplainResult;

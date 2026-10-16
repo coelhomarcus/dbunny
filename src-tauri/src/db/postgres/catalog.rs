@@ -1,10 +1,15 @@
-use tauri::State;
+//! What a PostgreSQL database holds: the explorer, columns, object definitions, autocomplete.
 
-use super::state::AppState;
+use async_trait::async_trait;
+
+use super::data::db_message;
+use super::structure::table_structure;
+use super::PostgresDriver;
 use crate::db::model::{
     ColumnInfo, CompletionColumn, CompletionRelation, CompletionSchema, ExplorerObject, ExplorerPartition, ExplorerSchema,
-    ExplorerTree, ExtensionInfo, ForeignKeyRef, FunctionDetail, FunctionInfo, ObjectDefinition,
+    ExplorerTree, ExtensionInfo, ForeignKeyRef, FunctionDetail, FunctionInfo, ObjectDefinition, TableStructure,
 };
+use crate::db::Catalog;
 
 /// The user's schemas, for a query on `pg_namespace n`: leaves out the system catalogs and
 /// the `pg_toast*` / `pg_temp_*` schemas the server makes for its own use and for each
@@ -20,16 +25,55 @@ pub(crate) async fn user_schemas(client: &tokio_postgres::Client) -> Result<Vec<
     Ok(rows.iter().map(|r| r.get(0)).collect())
 }
 
-#[tauri::command]
-pub async fn get_function_detail(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    function_name: String,
-    argument_types: String,
-) -> Result<FunctionDetail, String> {
-    let client = state.postgres(&session_id).await?.client().await?;
+#[async_trait]
+impl Catalog for PostgresDriver {
+    async fn explorer(&self) -> Result<ExplorerTree, String> {
+        let client = self.client().await?;
+        explorer(&client).await.map_err(|e| db_message(&e))
+    }
 
+    async fn columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, String> {
+        let client = self.client().await?;
+        table_columns(&client, schema, table).await.map_err(|e| e.to_string())
+    }
+
+    async fn relation_kind(&self, schema: &str, name: &str) -> Result<Option<String>, String> {
+        let client = self.client().await?;
+        relation_kind(&client, schema, name).await.map_err(|e| e.to_string())
+    }
+
+    async fn table_structure(&self, schema: &str, table: &str) -> Result<TableStructure, String> {
+        let client = self.client().await?;
+        table_structure(&client, schema, table).await
+    }
+
+    async fn completion_schema(&self) -> Result<CompletionSchema, String> {
+        let client = self.client().await?;
+        completion_schema(&client).await
+    }
+
+    async fn object_definition(&self, schema: &str, name: &str, kind: &str) -> Result<ObjectDefinition, String> {
+        let client = self.client().await?;
+        object_definition(&client, schema, name, kind).await
+    }
+
+    async fn function_detail(&self, schema: &str, name: &str, args: &str) -> Result<FunctionDetail, String> {
+        let client = self.client().await?;
+        function_detail(&client, schema, name, args).await
+    }
+
+    async fn extensions(&self) -> Result<Vec<ExtensionInfo>, String> {
+        let client = self.client().await?;
+        extensions(&client).await
+    }
+}
+
+pub(crate) async fn function_detail(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    function_name: &str,
+    argument_types: &str,
+) -> Result<FunctionDetail, String> {
     let row = client
         .query_one(
             "SELECT p.proname as name, \
@@ -81,17 +125,6 @@ pub async fn get_function_detail(
 
 /// What a relation is: "table", "partitioned", "foreign", "view" or "matview"; None when
 /// there's no relation by that name.
-#[tauri::command]
-pub async fn get_relation_kind(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-) -> Result<Option<String>, String> {
-    let client = state.postgres(&session_id).await?.client().await?;
-    relation_kind(&client, &schema, &name).await.map_err(|e| e.to_string())
-}
-
 pub(crate) async fn relation_kind(
     client: &tokio_postgres::Client,
     schema: &str,
@@ -107,17 +140,6 @@ pub(crate) async fn relation_kind(
         )
         .await?;
     Ok(row.map(|r| r.get("kind")))
-}
-
-#[tauri::command]
-pub async fn get_columns(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    table: String,
-) -> Result<Vec<ColumnInfo>, String> {
-    let client = state.postgres(&session_id).await?.client().await?;
-    table_columns(&client, &schema, &table).await.map_err(|e| e.to_string())
 }
 
 pub(crate) async fn table_columns(
@@ -216,9 +238,7 @@ async fn table_foreign_keys(
         .collect())
 }
 
-#[tauri::command]
-pub async fn get_extensions(state: State<'_, AppState>, session_id: String) -> Result<Vec<ExtensionInfo>, String> {
-    let client = state.postgres(&session_id).await?.client().await?;
+pub(crate) async fn extensions(client: &tokio_postgres::Client) -> Result<Vec<ExtensionInfo>, String> {
     let rows = client
         .query(
             "SELECT e.extname::text AS name, e.extversion AS version, n.nspname::text AS schema, \
@@ -234,21 +254,18 @@ pub async fn get_extensions(state: State<'_, AppState>, session_id: String) -> R
         .collect())
 }
 
-#[tauri::command]
-pub async fn get_object_definition(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-    kind: String,
+pub(crate) async fn object_definition(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    name: &str,
+    kind: &str,
 ) -> Result<ObjectDefinition, String> {
-    let client = state.postgres(&session_id).await?.client().await?;
-    let result = match kind.as_str() {
-        "sequence" => sequence_definition(&client, &schema, &name).await,
-        "type" => type_definition(&client, &schema, &name).await,
+    let result = match kind {
+        "sequence" => sequence_definition(client, schema, name).await,
+        "type" => type_definition(client, schema, name).await,
         other => return Err(format!("Unknown object kind \"{other}\"")),
     };
-    result.map_err(|e| super::query::db_message(&e))
+    result.map_err(|e| db_message(&e))
 }
 
 fn qualified(schema: &str, name: &str) -> String {
@@ -375,12 +392,6 @@ fn partitions_of(parent: (&str, &str), all: &[(String, String, String, String, S
 /// Every schema with its objects, in one round trip, so the explorer can filter and
 /// count without loading folder by folder. Functions and types that belong to an
 /// extension are left out: they're the extension's, not the database's own.
-#[tauri::command]
-pub async fn get_explorer(state: State<'_, AppState>, session_id: String) -> Result<ExplorerTree, String> {
-    let client = state.postgres(&session_id).await?.client().await?;
-    explorer(&client).await.map_err(|e| super::query::db_message(&e))
-}
-
 pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<ExplorerTree, tokio_postgres::Error> {
     let schemas = user_schemas(client).await?;
     let objects = client
@@ -450,13 +461,7 @@ pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<Explorer
 
 /// Everything the SQL editor needs for autocomplete, fetched in a couple of
 /// catalog queries instead of one `get_columns` call per table.
-#[tauri::command]
-pub async fn get_completion_schema(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<CompletionSchema, String> {
-    let client = state.postgres(&session_id).await?.client().await?;
-
+pub(crate) async fn completion_schema(client: &tokio_postgres::Client) -> Result<CompletionSchema, String> {
     let current_schema: Option<String> = client
         .query_one("SELECT current_schema()::text AS name", &[])
         .await
