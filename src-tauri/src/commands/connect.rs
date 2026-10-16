@@ -187,16 +187,7 @@ pub async fn connect(
         return Err("Invalid protocol. Must be postgres:// or postgresql://".into());
     }
 
-    // Parse URL for metadata
     let url = url::Url::parse(&connection_url).map_err(|e| format!("Invalid URL: {}", e))?;
-    let database = url.path().trim_start_matches('/').to_string();
-    let database = if database.is_empty() {
-        "postgres".to_string()
-    } else {
-        database
-    };
-    let host = url.host_str().unwrap_or("localhost").to_string();
-    let port = url.port().unwrap_or(5432);
 
     let known_hosts = match ssh {
         Some(_) => {
@@ -210,6 +201,17 @@ pub async fn connect(
         None => None,
     };
     let endpoint = Endpoint { url, ssh, known_hosts };
+    open_session(&state, endpoint, trust_host_key).await
+}
+
+/// Connects to `endpoint` and registers the new session.
+async fn open_session(state: &AppState, endpoint: Endpoint, trust_host_key: Option<String>) -> Result<ConnectResponse, String> {
+    let database = match endpoint.url.path().trim_start_matches('/') {
+        "" => "postgres".to_string(),
+        name => percent_decode(name),
+    };
+    let host = endpoint.url.host_str().unwrap_or("localhost").to_string();
+    let port = endpoint.url.port().unwrap_or(5432);
     let notices: Notices = Default::default();
     let (client, link, tunnel) = establish(&endpoint, &notices, trust_host_key).await?;
 
@@ -264,6 +266,80 @@ pub async fn connect(
         server_version,
         read_only,
     })
+}
+
+fn percent_decode(text: &str) -> String {
+    url::form_urlencoded::parse(format!("x={}", text.replace('+', "%2B")).as_bytes())
+        .next()
+        .map(|(_, v)| v.into_owned())
+        .unwrap_or_else(|| text.to_string())
+}
+
+/// The endpoint of an open session, pointed at another database of the same server.
+pub(crate) fn endpoint_for_database(endpoint: &Endpoint, database: &str) -> Result<Endpoint, String> {
+    if database.trim().is_empty() {
+        return Err("Choose a database".into());
+    }
+    let mut url = endpoint.url.clone();
+    url.path_segments_mut()
+        .map_err(|_| "Can't change the database of this connection".to_string())?
+        .clear()
+        .push(database);
+    Ok(Endpoint { url, ..endpoint.clone() })
+}
+
+/// Opens a new session on another database of the same server, with the same login,
+/// SSL, read-only and SSH settings as `session_id`.
+#[tauri::command]
+pub async fn connect_database(
+    state: State<'_, AppState>,
+    session_id: String,
+    database: String,
+) -> Result<ConnectResponse, String> {
+    let endpoint = {
+        let sessions = state.sessions.lock().await;
+        let session = sessions.get(&session_id).ok_or_else(|| "Session not found".to_string())?;
+        endpoint_for_database(&session.endpoint, &database)?
+    };
+    open_session(&state, endpoint, None).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseInfo {
+    pub name: String,
+    pub size_bytes: Option<i64>,
+    pub is_current: bool,
+    /// The user may connect to it.
+    pub can_connect: bool,
+}
+
+#[tauri::command]
+pub async fn get_databases(state: State<'_, AppState>, session_id: String) -> Result<Vec<DatabaseInfo>, String> {
+    let client = state.client(&session_id).await?;
+    list_databases(&client).await
+}
+
+pub(crate) async fn list_databases(client: &tokio_postgres::Client) -> Result<Vec<DatabaseInfo>, String> {
+    let rows = client
+        .query(
+            "SELECT datname::text AS name, \
+             CASE WHEN has_database_privilege(datname, 'CONNECT') THEN pg_database_size(datname) END AS size_bytes, \
+             datname = current_database() AS is_current, has_database_privilege(datname, 'CONNECT') AS can_connect \
+             FROM pg_database WHERE NOT datistemplate AND datallowconn ORDER BY datname",
+            &[],
+        )
+        .await
+        .map_err(|e| super::query::db_message(&e))?;
+    Ok(rows
+        .iter()
+        .map(|r| DatabaseInfo {
+            name: r.get("name"),
+            size_bytes: r.get("size_bytes"),
+            is_current: r.get("is_current"),
+            can_connect: r.get("can_connect"),
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -345,6 +421,21 @@ mod tests {
     }
 
     #[test]
+    fn another_database_keeps_everything_else() {
+        let endpoint = Endpoint {
+            url: url::Url::parse("postgresql://u:p%40ss@db.example.com:6543/shop?sslmode=require").unwrap(),
+            ssh: None,
+            known_hosts: None,
+        };
+        let other = endpoint_for_database(&endpoint, "my db/2").unwrap();
+        assert_eq!(other.url.as_str(), "postgresql://u:p%40ss@db.example.com:6543/my%20db%2F2?sslmode=require");
+        let (config, _) = connection_config(&other.url).unwrap();
+        assert_eq!(config.get_dbname(), Some("my db/2"));
+        assert_eq!(percent_decode("my%20db%2F2"), "my db/2");
+        assert!(endpoint_for_database(&endpoint, " ").is_err());
+    }
+
+    #[test]
     fn config_without_query_still_parses() {
         let url = url::Url::parse("postgresql://u@localhost/db").unwrap();
         let (config, _) = connection_config(&url).unwrap();
@@ -401,5 +492,40 @@ mod server_tests {
     async fn verify_modes_refuse_a_certificate_nobody_trusts() {
         assert!(connect_with("verify-ca").await.is_err());
         assert!(connect_with("verify-full").await.is_err());
+    }
+}
+
+/// Switching databases against a real server, see `query::server_tests`.
+#[cfg(test)]
+mod database_server_tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL and a second database named dbunny_second"]
+    async fn another_database_opens_as_its_own_session() {
+        let url = url::Url::parse(&std::env::var("DBUNNY_TEST_DATABASE_URL").unwrap()).unwrap();
+        let state = AppState {
+            sessions: Default::default(),
+            saved_connections: Default::default(),
+            encryption_key: [0; 32],
+        };
+        let first = open_session(&state, Endpoint { url, ssh: None, known_hosts: None }, None).await.unwrap();
+
+        let client = state.client(&first.session_id).await.unwrap();
+        let databases = list_databases(&client).await.unwrap();
+        let names: Vec<_> = databases.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"dbunny_second"), "{names:?}");
+        assert!(!names.contains(&"template1"));
+        assert!(databases.iter().find(|d| d.is_current).unwrap().size_bytes.unwrap() > 0);
+
+        let endpoint = endpoint_for_database(&state.sessions.lock().await[&first.session_id].endpoint, "dbunny_second").unwrap();
+        let second = open_session(&state, endpoint, None).await.unwrap();
+        assert_eq!(second.database, "dbunny_second");
+        assert_ne!(second.session_id, first.session_id);
+        let current: String = state.client(&second.session_id).await.unwrap().query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
+        assert_eq!(current, "dbunny_second");
+        // The first session is untouched
+        let current: String = client.query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
+        assert_eq!(current, first.database);
     }
 }

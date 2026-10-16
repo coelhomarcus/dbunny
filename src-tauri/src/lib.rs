@@ -139,6 +139,8 @@ pub fn run() {
             commands::objects::duplicate_table,
             commands::activity::get_server_activity,
             commands::activity::signal_backend,
+            commands::connect::connect_database,
+            commands::connect::get_databases,
             commands::editor::cancel_query,
             commands::editor::begin_transaction,
             commands::editor::commit_transaction,
