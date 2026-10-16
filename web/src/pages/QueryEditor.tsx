@@ -9,6 +9,8 @@ import { Plus, X, Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, GitCo
 import RunButton from "../components/query/RunButton";
 import ResultsBar from "../components/query/ResultsBar";
 import Tooltip from "../components/Tooltip";
+import { createPortal } from "react-dom";
+import { useRightPanel } from "../contexts/rightPanel";
 import type { RunScope } from "../components/SqlEditor";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
 import Popover from "../components/ui/Popover";
@@ -133,6 +135,8 @@ function repairQueryEditorState(saved: QueryEditorState) {
 
 export default function QueryEditor() {
   const { tabId, isActive } = useTab();
+  const rightPanel = useRightPanel();
+  const renderSidePanel = (panel: React.ReactNode) => (rightPanel ? createPortal(panel, rightPanel) : null);
   const { api, sessionId, connectionInfo } = useConnection();
   const historyStorageKey = connectionInfo ? historyKey(connectionInfo) : null;
   const [history, setHistory] = useState<HistoryEntry[]>(() => (historyStorageKey ? loadHistory(historyStorageKey) : []));
@@ -774,7 +778,8 @@ export default function QueryEditor() {
           />
         </div>
       </div>
-      {historyOpen && (
+      {/* In the layout's side card, so it's a panel of its own */}
+      {historyOpen && renderSidePanel(
         <HistoryPanel
           view={libraryView}
           onViewChange={setLibraryView}

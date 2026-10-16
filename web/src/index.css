@@ -19,6 +19,8 @@
   /* Sidebar inside a tab's container: the container's own colour, so the active tab
      above it joins seamlessly; a line separates it from the page */
   --sidebar: var(--card);
+  /* Inside a tab's container, around its panels (the gaps between the cards) */
+  --surface: #f4f4f5;
   --card-foreground: #18181b;
   --popover: #ffffff;
   --popover-foreground: #18181b;
@@ -67,6 +69,7 @@
   --chrome: #19191b;
   --card: #111112;
   --sidebar: var(--card);
+  --surface: #161617;
   --card-foreground: #f4f4f5;
   --popover: #161617;
   --popover-foreground: #f4f4f5;
@@ -110,6 +113,7 @@
   --color-background: var(--background);
   --color-chrome: var(--chrome);
   --color-sidebar: var(--sidebar);
+  --color-surface: var(--surface);
   /* Opaque line of the window frame, so the sidebar edge and the title bar line meet cleanly */
   --color-frame-line: color-mix(in srgb, var(--foreground) 12%, var(--card));
   --color-foreground: var(--foreground);
@@ -253,7 +257,8 @@ body {
 /* Window title bar: one tab per connection. The active tab takes the body's
    card colour, so it flows into the page below it. */
 .tab-strip.window-tabs {
-  --tab-bg: var(--card);
+  /* The active tab takes its container's colour, so the two read as one piece */
+  --tab-bg: var(--surface);
   --tab-border: var(--color-frame-line);
   --tab-radius: 10px;
   /* No line of its own: the page card's top border runs right under the tabs */

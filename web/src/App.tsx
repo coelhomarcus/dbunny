@@ -74,7 +74,7 @@ function TabPane({
           the active tab above joins its top edge */}
       <div
         className={cn(
-          "absolute inset-x-1.5 top-0 bottom-1.5 flex flex-col overflow-hidden rounded-[10px] border border-frame-line bg-card",
+          "absolute inset-x-1.5 top-0 bottom-1.5 flex flex-col overflow-hidden rounded-[10px] border border-frame-line bg-surface p-1.5 pb-0",
           !active && "hidden",
         )}
       >

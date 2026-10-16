@@ -344,7 +344,7 @@ export default function ConnectPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 gap-1.5">
         <ConnectionSidebar
           connections={savedConnections}
           selectedId={selectedId}
@@ -355,7 +355,7 @@ export default function ConnectPage() {
           onNew={handleNewConnection}
         />
 
-        <main className="flex min-w-0 flex-1 flex-col bg-card overflow-hidden">
+        <main className="flex min-w-0 flex-1 flex-col rounded-lg border border-border bg-card overflow-hidden">
           <PageHeader>
             <HeaderTitle label={editing ? "Saved connection" : "Connection"} icon={<Database />}>
               {editing ? connectionName || "Unnamed" : "New connection"}

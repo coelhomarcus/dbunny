@@ -10,6 +10,7 @@ import DatabaseSwitcher from "../components/layout/DatabaseSwitcher";
 import { cn } from "../lib/cn";
 import { Terminal, Folder, Activity, Users } from "lucide-react";
 import type { SchemaInfo } from "@/types";
+import { RightPanelContext } from "../contexts/rightPanel";
 
 export default function DatabaseLayout() {
   const { isConnected, connectionInfo, disconnect, api } = useConnection();
@@ -18,6 +19,7 @@ export default function DatabaseLayout() {
   const { sidebarOpen: sidebarExpanded, setSidebarOpen: setSidebarExpanded } = useWorkspace();
   const [schemas, setSchemas] = useState<SchemaInfo[]>([]);
   const [schemaToExpand, setSchemaToExpand] = useState<string | null>(null);
+  const [rightPanel, setRightPanel] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!isConnected) {
@@ -46,10 +48,11 @@ export default function DatabaseLayout() {
 
   return (
     <div className="h-full flex flex-col text-foreground">
-      <div className="flex flex-1 min-h-0">
+      {/* Each part is a card of its own, with a small gap between them */}
+      <div className="flex flex-1 min-h-0 gap-1.5">
         <aside
           className={cn(
-            "relative shrink-0 select-none border-r border-border bg-sidebar transition-[width] duration-300 ease-in-out overflow-hidden",
+            "relative shrink-0 select-none rounded-lg border border-border bg-sidebar transition-[width] duration-300 ease-in-out overflow-hidden",
             sidebarExpanded ? "w-64" : "w-12",
           )}
         >
@@ -160,9 +163,13 @@ export default function DatabaseLayout() {
           </div>
         </aside>
 
-        <main className="flex-1 min-w-0 bg-card overflow-hidden">
-          <Outlet />
+        <main className="flex-1 min-w-0 rounded-lg border border-border bg-card overflow-hidden">
+          <RightPanelContext.Provider value={rightPanel}>
+            <Outlet />
+          </RightPanelContext.Provider>
         </main>
+        {/* Filled by the page (e.g. the query library); hidden while empty */}
+        <div ref={setRightPanel} className="flex w-80 shrink-0 overflow-hidden rounded-lg border border-border bg-card empty:hidden" />
       </div>
 
       <StatusBar
