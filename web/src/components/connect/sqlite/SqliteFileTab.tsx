@@ -58,7 +58,9 @@ export default function SqliteFileTab({
           id="sqlite-path"
           autoFocus
           value={draft.sqlitePath}
-          onChange={(e) => onChange({ ...draft, sqlitePath: e.target.value })}
+          // Typing a path means opening it: a new database comes from "Create new…", so a typo
+          // never makes an empty file
+          onChange={(e) => onChange({ ...draft, sqlitePath: e.target.value, sqliteCreate: false })}
           placeholder="/path/to/database.sqlite"
           spellCheck={false}
           className="font-mono text-xs"
