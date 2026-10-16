@@ -177,6 +177,11 @@ export function createSessionApi(sessionId: string | null) {
     },
 
     /** Exact row count, for tables whose total is only an estimate. */
+    /** Inserts rows (e.g. from a CSV file) in one transaction; nothing is kept if a row fails. */
+    async importRows(schema: string, table: string, columns: string[], rows: (string | null)[][]) {
+      return invoke<number>("import_rows", { sessionId, schema, table, columns, rows });
+    },
+
     async countTableRows(schema: string, table: string) {
       return invoke<number>("count_table_rows", { sessionId, schema, table });
     },

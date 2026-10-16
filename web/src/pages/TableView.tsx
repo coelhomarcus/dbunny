@@ -22,6 +22,7 @@ import { useDiscardGuard } from "../hooks/useDiscardGuard";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import FilterBar from "../components/table/FilterBar";
 import InsertRowDialog from "../components/table/InsertRowDialog";
+import ImportCsvDialog from "../components/table/ImportCsvDialog";
 import Button from "../components/ui/Button";
 import { ArrowUpRight, Ban, Braces, Copy, CopyPlus, Database, Filter, Sheet, TriangleAlert } from "lucide-react";
 import ContextMenu, { type ContextMenuItem } from "../components/ui/ContextMenu";
@@ -105,6 +106,8 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   const [menu, setMenu] = useState<{ x: number; y: number; rowIndex: number; colName: string } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const [reviewSql, setReviewSql] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
   const [sqlCopied, setSqlCopied] = useState(false);
 
   const editing = useCellEditing({
@@ -327,6 +330,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         hasCustomWidths={resize.hasCustomWidths}
         onResetWidths={resize.resetWidths}
         onInsertRow={guard(() => setInsert({}))}
+        onImportCsv={guard(() => setImportOpen(true))}
         filterCount={tableData.filters.length}
         filtersOpen={filtersOpen}
         onToggleFilters={() => setFiltersOpen((open) => !open)}
@@ -346,6 +350,15 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       )}
 
       {error && <div className="px-4 py-3 text-destructive-foreground text-sm border-b border-border bg-destructive/5">{error}</div>}
+      {importNotice && (
+        <button
+          type="button"
+          onClick={() => setImportNotice(null)}
+          className="px-4 py-2 text-left text-[13px] text-success-foreground border-b border-border bg-success/5 cursor-pointer"
+        >
+          {importNotice}
+        </button>
+      )}
 
       {loading && !data && <TableSkeleton columns={6} rows={14} />}
 
@@ -557,6 +570,20 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         nullable={editingColumn?.isNullable ?? true}
         onApply={editing.commitEdit}
         onCancel={editing.cancelEdit}
+      />
+
+      <ImportCsvDialog
+        open={importOpen}
+        schema={schema!}
+        table={table!}
+        columns={columnInfos}
+        onClose={() => setImportOpen(false)}
+        onImport={async (columns, rows) => {
+          const count = await api.importRows(schema!, table!, columns, rows);
+          setImportNotice(`Imported ${count.toLocaleString()} row${count === 1 ? "" : "s"}`);
+          await tableData.refresh();
+          return count;
+        }}
       />
 
       <InsertRowDialog

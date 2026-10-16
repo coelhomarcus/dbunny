@@ -8,6 +8,7 @@ import {
   ListFilter,
   Lock,
   FileCode,
+  FileUp,
   Loader,
   Plus,
 } from "lucide-react";
@@ -46,6 +47,7 @@ interface TableViewHeaderProps {
   hasCustomWidths: boolean;
   onResetWidths: () => void;
   onInsertRow: () => void;
+  onImportCsv: () => void;
   /** Show/hide/reorder control for the columns. */
   columnsMenu?: React.ReactNode;
   filterCount: number;
@@ -62,7 +64,7 @@ export default function TableViewHeader({
   hasPendingChanges, dirtyRowCount, saveError, saving, onSave, onDiscard, onReviewSql,
   refreshing, loading, spinKey, onRefresh,
   hasCustomWidths, onResetWidths,
-  onInsertRow, columnsMenu, filterCount, filtersOpen, onToggleFilters,
+  onInsertRow, onImportCsv, columnsMenu, filterCount, filtersOpen, onToggleFilters,
   columns, rows, onFetchAllRows,
 }: TableViewHeaderProps) {
   return (
@@ -135,6 +137,12 @@ export default function TableViewHeader({
           <Button variant="ghost-muted" size="sm" onClick={onInsertRow}>
             <Plus />
             Insert
+          </Button>
+        )}
+
+        {!readOnly && (
+          <Button variant="ghost-muted" size="icon-sm" onClick={onImportCsv} aria-label="Import CSV">
+            <FileUp />
           </Button>
         )}
 
