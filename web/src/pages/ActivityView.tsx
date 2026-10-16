@@ -6,7 +6,7 @@ import { useConnection } from "../contexts/useConnection";
 import { useTab } from "../contexts/workspace";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { TableSkeleton } from "../components/Skeleton";
-import SqlViewer from "../components/SqlViewer";
+import SqlPreview from "../components/schema/SqlPreview";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -391,8 +391,14 @@ function SessionPanel({
         {session.blockedBy.length > 0 && <Field label="Blocked by" value={session.blockedBy.join(", ")} />}
       </dl>
 
-      <div className="min-h-0 flex-1">
-        {sql ? <SqlViewer value={sql} /> : <p className="px-3 py-6 text-sm text-muted-foreground">No query.</p>}
+      <div className="min-h-0 flex-1 overflow-auto">
+        {sql ? (
+          <div className="px-3 py-2 font-mono text-xs">
+            <SqlPreview source={sql} />
+          </div>
+        ) : (
+          <p className="px-3 py-6 text-sm text-muted-foreground">No query.</p>
+        )}
       </div>
 
       {!session.isSelf && !readOnly && (
