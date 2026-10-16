@@ -28,12 +28,6 @@ function ConnectionIcon({ color, size = "md" }: { color: string; size?: "sm" | "
   );
 }
 
-/** "db.acme.io · shop", with the port only when it isn't the default. */
-function connectionSummary(conn: SavedConnection) {
-  const host = conn.port && conn.port !== 5432 ? `${conn.host}:${conn.port}` : conn.host;
-  return `${host} · ${conn.database}`;
-}
-
 function ConnectionRow({
   conn,
   selected,
@@ -84,7 +78,10 @@ function ConnectionRow({
       <ConnectionIcon color={conn.color || DEFAULT_COLOR} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium leading-snug">{conn.name || "Unnamed"}</div>
-        <div className="truncate text-xs leading-snug text-muted-foreground">{connectionSummary(conn)}</div>
+        <div className="flex items-center gap-1 text-xs leading-snug text-muted-foreground">
+          <Database className="size-3 shrink-0" aria-hidden />
+          <span className="truncate">{conn.database}</span>
+        </div>
       </div>
       <div className="absolute right-1.5 flex items-center gap-0.5 rounded-md opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
         <Button
