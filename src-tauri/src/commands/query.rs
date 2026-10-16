@@ -468,7 +468,7 @@ pub async fn execute_query(
 }
 
 /// The server's own message for a failed statement, without the driver's prefix.
-fn db_message(e: &tokio_postgres::Error) -> String {
+pub(crate) fn db_message(e: &tokio_postgres::Error) -> String {
     match e.as_db_error() {
         Some(db) => db.message().to_string(),
         None => e.to_string(),

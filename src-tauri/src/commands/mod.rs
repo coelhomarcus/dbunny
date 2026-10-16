@@ -8,3 +8,4 @@ pub mod pgtext;
 pub mod sqlsplit;
 pub mod tablefilter;
 pub mod tableedit;
+pub mod structure;
