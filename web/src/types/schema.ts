@@ -1,16 +1,3 @@
-export interface TableInfo {
-  name: string;
-  schema: string;
-  type: "table" | "view" | "matview";
-}
-
-/** A sequence or type listed in the explorer. */
-export interface SchemaObject {
-  name: string;
-  /** For types: "enum", "domain", "composite" or "range". */
-  kind: string;
-}
-
 export interface ExtensionInfo {
   name: string;
   version: string;

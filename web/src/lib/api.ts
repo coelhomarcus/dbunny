@@ -2,8 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ConnectResponse,
   SshConfig,
-  TableInfo,
-  FunctionInfo,
   FunctionDetail,
   ColumnInfo,
   CompletionSchema,
@@ -18,7 +16,6 @@ import type {
   StructureChange,
   NewColumn,
   ExplainResult,
-  SchemaObject,
   ExtensionInfo,
   ObjectDefinition,
   ServerActivity,
@@ -62,29 +59,9 @@ export const api = {
  */
 export function createSessionApi(sessionId: string | null) {
   return {
-    async getTables(schema: string) {
-      return invoke<TableInfo[]>("get_tables", { sessionId, schema });
-    },
-
-    async getViews(schema: string) {
-      return invoke<TableInfo[]>("get_views", { sessionId, schema });
-    },
-
     /** Every schema with its objects, for the explorer. */
     async getExplorer() {
       return invoke<ExplorerTree>("get_explorer", { sessionId });
-    },
-
-    async getMaterializedViews(schema: string) {
-      return invoke<TableInfo[]>("get_materialized_views", { sessionId, schema });
-    },
-
-    async getSequences(schema: string) {
-      return invoke<SchemaObject[]>("get_sequences", { sessionId, schema });
-    },
-
-    async getTypes(schema: string) {
-      return invoke<SchemaObject[]>("get_types", { sessionId, schema });
     },
 
     async getExtensions() {
@@ -137,10 +114,6 @@ export function createSessionApi(sessionId: string | null) {
     /** Cancels a session's query, or with `terminate` ends the session. */
     async signalBackend(pid: number, terminate: boolean) {
       return invoke<boolean>("signal_backend", { sessionId, pid, terminate });
-    },
-
-    async getFunctions(schema: string) {
-      return invoke<FunctionInfo[]>("get_functions", { sessionId, schema });
     },
 
     async getFunctionDetail(schema: string, functionName: string, argumentTypes: string) {

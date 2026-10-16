@@ -4,14 +4,6 @@ use tauri::State;
 use super::state::AppState;
 
 #[derive(Serialize)]
-pub struct TableInfo {
-    pub name: String,
-    pub schema: String,
-    #[serde(rename = "type")]
-    pub table_type: String,
-}
-
-#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ColumnInfo {
     pub name: String,
@@ -80,98 +72,6 @@ pub(crate) async fn user_schemas(client: &tokio_postgres::Client) -> Result<Vec<
         .query(&format!("SELECT n.nspname::text FROM pg_namespace n WHERE {USER_SCHEMAS} ORDER BY n.nspname"), &[])
         .await?;
     Ok(rows.iter().map(|r| r.get(0)).collect())
-}
-
-#[tauri::command]
-pub async fn get_tables(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<TableInfo>, String> {
-    let client = state.client(&session_id).await?;
-
-    let rows = client
-        .query(
-            "SELECT table_name as name, table_schema as schema, \
-             CASE WHEN table_type = 'BASE TABLE' THEN 'table' ELSE 'view' END as type \
-             FROM information_schema.tables \
-             WHERE table_schema = $1 AND table_type = 'BASE TABLE' \
-             ORDER BY table_name",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(rows
-        .iter()
-        .map(|r| TableInfo {
-            name: r.get("name"),
-            schema: r.get("schema"),
-            table_type: r.get("type"),
-        })
-        .collect())
-}
-
-#[tauri::command]
-pub async fn get_views(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<TableInfo>, String> {
-    let client = state.client(&session_id).await?;
-
-    let rows = client
-        .query(
-            "SELECT table_name as name, table_schema as schema, 'view' as type \
-             FROM information_schema.tables \
-             WHERE table_schema = $1 AND table_type = 'VIEW' \
-             ORDER BY table_name",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(rows
-        .iter()
-        .map(|r| TableInfo {
-            name: r.get("name"),
-            schema: r.get("schema"),
-            table_type: r.get("type"),
-        })
-        .collect())
-}
-
-#[tauri::command]
-pub async fn get_functions(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<FunctionInfo>, String> {
-    let client = state.client(&session_id).await?;
-
-    let rows = client
-        .query(
-            "SELECT p.proname as name, n.nspname as schema, \
-             pg_get_function_result(p.oid) as return_type, \
-             pg_get_function_arguments(p.oid) as argument_types \
-             FROM pg_proc p \
-             JOIN pg_namespace n ON p.pronamespace = n.oid \
-             WHERE n.nspname = $1 AND p.prokind IN ('f', 'p') \
-             ORDER BY p.proname",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(rows
-        .iter()
-        .map(|r| FunctionInfo {
-            name: r.get("name"),
-            schema: r.get("schema"),
-            return_type: r.get("return_type"),
-            argument_types: r.get("argument_types"),
-        })
-        .collect())
 }
 
 #[tauri::command]
@@ -368,77 +268,6 @@ async fn table_foreign_keys(
             ref_columns: r.get("ref_columns"),
         })
         .collect())
-}
-
-#[tauri::command]
-pub async fn get_materialized_views(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<TableInfo>, String> {
-    let client = state.client(&session_id).await?;
-    let rows = client
-        .query(
-            "SELECT matviewname::text AS name FROM pg_matviews WHERE schemaname = $1 ORDER BY matviewname",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(rows
-        .iter()
-        .map(|r| TableInfo { name: r.get("name"), schema: schema.clone(), table_type: "matview".into() })
-        .collect())
-}
-
-/// A sequence, type or other schema object listed in the explorer.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SchemaObject {
-    pub name: String,
-    /// For types: "enum", "domain", "composite" or "range".
-    pub kind: String,
-}
-
-#[tauri::command]
-pub async fn get_sequences(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<SchemaObject>, String> {
-    let client = state.client(&session_id).await?;
-    let rows = client
-        .query(
-            "SELECT c.relname::text AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
-             WHERE c.relkind = 'S' AND n.nspname = $1 ORDER BY c.relname",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(rows.iter().map(|r| SchemaObject { name: r.get("name"), kind: "sequence".into() }).collect())
-}
-
-#[tauri::command]
-pub async fn get_types(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<SchemaObject>, String> {
-    let client = state.client(&session_id).await?;
-    // Composite types made for tables and views (their row types) are left out
-    let rows = client
-        .query(
-            "SELECT t.typname::text AS name, \
-             CASE t.typtype WHEN 'e' THEN 'enum' WHEN 'd' THEN 'domain' WHEN 'c' THEN 'composite' WHEN 'r' THEN 'range' END AS kind \
-             FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
-             LEFT JOIN pg_class c ON c.oid = t.typrelid \
-             WHERE n.nspname = $1 AND t.typtype IN ('e', 'd', 'c', 'r') \
-               AND (t.typtype <> 'c' OR c.relkind = 'c') \
-             ORDER BY t.typname",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(rows.iter().map(|r| SchemaObject { name: r.get("name"), kind: r.get("kind") }).collect())
 }
 
 #[derive(Serialize)]
