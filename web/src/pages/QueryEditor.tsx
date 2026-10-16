@@ -5,13 +5,16 @@ import { tabState } from "../lib/tabState";
 import type { CompletionSchema, ExplainResult, QueryResult } from "@/types";
 import QueryResults from "../components/QueryResults";
 import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
-import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle, Square, Workflow, ChevronDown, GitCommitVertical, History } from "lucide-react";
+import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle, Square, Workflow, ChevronDown, GitCommitVertical, History, Bookmark, Check } from "lucide-react";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
 import Popover from "../components/ui/Popover";
 import Badge from "../components/ui/Badge";
 import PlanView from "../components/query/PlanView";
 import NoticeList from "../components/query/NoticeList";
-import HistoryPanel from "../components/query/HistoryPanel";
+import HistoryPanel, { type LibraryView } from "../components/query/HistoryPanel";
+import Dialog from "../components/ui/Dialog";
+import Input from "../components/ui/Input";
+import { loadSaved, removeSaved, saveQuery, savedKey, type SavedQuery } from "../lib/savedQueries";
 import { addToHistory, clearHistory, errorSummary, historyKey, loadHistory, removeFromHistory, type HistoryEntry } from "../lib/queryHistory";
 import ExportMenu from "../components/ExportMenu";
 import Button from "../components/ui/Button";
@@ -20,6 +23,8 @@ import ConfirmDialog from "../components/ui/ConfirmDialog";
 type TabMeta = {
   id: number;
   label: string;
+  /** The saved query this tab was opened from or saved as; saving again updates it. */
+  savedId?: string;
 };
 
 type ResultView = "results" | "messages" | "plan";
@@ -129,6 +134,12 @@ export default function QueryEditor() {
   const historyStorageKey = connectionInfo ? historyKey(connectionInfo) : null;
   const [history, setHistory] = useState<HistoryEntry[]>(() => (historyStorageKey ? loadHistory(historyStorageKey) : []));
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [libraryView, setLibraryView] = useState<LibraryView>("history");
+  const savedStorageKey = connectionInfo ? savedKey(connectionInfo) : null;
+  const [savedQueries, setSavedQueries] = useState<SavedQuery[]>(() => (savedStorageKey ? loadSaved(savedStorageKey) : []));
+  // Name being typed when saving a query for the first time
+  const [saveName, setSaveName] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
   const saved = tabState(tabId, "queryEditor", createQueryEditorState);
   repairQueryEditorState(saved);
   const [tabMetas, setTabMetas] = useState<TabMeta[]>(saved.tabMetas);
@@ -210,12 +221,12 @@ export default function QueryEditor() {
     setView(payload.view ?? "results");
   }
 
-  function addTab() {
+  function addTab(options: { label?: string; savedId?: string } = {}) {
     saveCurrentSql();
     const id = saved.nextId++;
-    const label = `Query ${id}`;
+    const label = options.label ?? `Query ${id}`;
     saved.payloads.set(id, { sql: "", result: null, error: null });
-    const newMetas = [...tabMetas, { id, label }];
+    const newMetas = [...tabMetas, { id, label, savedId: options.savedId }];
     setTabMetas(newMetas);
     saved.tabMetas = newMetas;
     setActiveId(id);
@@ -228,11 +239,38 @@ export default function QueryEditor() {
   }
 
   /** Opens SQL from the history in a new query tab, leaving the current one as it is. */
-  function openFromHistory(sql: string) {
-    addTab();
+  function openFromHistory(sql: string, options: { label?: string; savedId?: string } = {}) {
+    // A saved query that's already open is shown instead of opened twice
+    const open = options.savedId && tabMetas.find((t) => t.savedId === options.savedId);
+    if (open) return switchTab(open.id);
+    addTab(options);
     const payload = saved.payloads.get(saved.activeId);
     if (payload) payload.sql = sql;
     editorRef.current?.setValue(sql);
+  }
+
+  function updateTabMeta(id: number, patch: Partial<TabMeta>) {
+    const newMetas = tabMetas.map((t) => (t.id === id ? { ...t, ...patch } : t));
+    setTabMetas(newMetas);
+    saved.tabMetas = newMetas;
+  }
+
+  /** Saves the active tab's SQL: updates its saved query, or asks for a name the first time. */
+  function saveActiveQuery(name?: string) {
+    if (!savedStorageKey) return;
+    const meta = tabMetas.find((t) => t.id === activeId);
+    const sql = editorRef.current?.getValue() ?? "";
+    const existing = meta?.savedId ? savedQueries.find((q) => q.id === meta.savedId) : undefined;
+    if (!existing && name === undefined) {
+      setSaveName(/^Query \d+$/.test(meta?.label ?? "") ? "" : (meta?.label ?? ""));
+      return;
+    }
+    const { list, saved: stored } = saveQuery(savedStorageKey, { id: existing?.id, name: name ?? existing!.name, sql });
+    setSavedQueries(list);
+    updateTabMeta(activeId, { label: stored.name, savedId: stored.id });
+    setSaveName(null);
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 1500);
   }
 
   function closeTab(e: React.MouseEvent, id: number) {
@@ -472,7 +510,7 @@ export default function QueryEditor() {
                   </button>
                 );
               })}
-              <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={addTab} aria-label="New query tab">
+              <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={() => addTab()} aria-label="New query tab">
                 <Plus />
               </Button>
             </div>
@@ -483,10 +521,11 @@ export default function QueryEditor() {
               data-active={historyOpen}
               aria-pressed={historyOpen}
               onClick={() => {
-              // Other tabs on the same database may have added runs since this one loaded
-              if (!historyOpen && historyStorageKey) setHistory(loadHistory(historyStorageKey));
-              setHistoryOpen((open) => !open);
-            }}
+                // Other tabs on the same database may have changed them since this one loaded
+                if (!historyOpen && historyStorageKey) setHistory(loadHistory(historyStorageKey));
+                if (!historyOpen && savedStorageKey) setSavedQueries(loadSaved(savedStorageKey));
+                setHistoryOpen((open) => !open);
+              }}
             >
               <History />
               History
@@ -593,6 +632,10 @@ export default function QueryEditor() {
                 {safeMode ? <ShieldCheck /> : <ShieldOff />}
                 {safeMode ? "Safe" : "Unsafe"}
               </Button>
+              <Button variant="ghost-muted" size="sm" onClick={() => saveActiveQuery()} disabled={!savedStorageKey}>
+                {justSaved ? <Check /> : <Bookmark />}
+                {justSaved ? "Saved" : "Save"}
+              </Button>
               <Button variant="ghost-muted" size="sm" onClick={importQuery}>
                 <Upload />
                 Import
@@ -642,8 +685,20 @@ export default function QueryEditor() {
       </div>
       {historyOpen && (
         <HistoryPanel
+          view={libraryView}
+          onViewChange={setLibraryView}
           entries={history}
-          onOpen={openFromHistory}
+          saved={savedQueries}
+          onOpen={(sql) => openFromHistory(sql)}
+          onOpenSaved={(query) => openFromHistory(query.sql, { label: query.name, savedId: query.id })}
+          onRemoveSaved={(id) => {
+            if (!savedStorageKey) return;
+            setSavedQueries(removeSaved(savedStorageKey, id));
+            // Tabs keep their SQL, just no longer linked to the deleted query
+            const newMetas = tabMetas.map((t) => (t.savedId === id ? { ...t, savedId: undefined } : t));
+            setTabMetas(newMetas);
+            saved.tabMetas = newMetas;
+          }}
           onRemove={(id) => historyStorageKey && setHistory(removeFromHistory(historyStorageKey, id))}
           onClear={() => {
             if (historyStorageKey) clearHistory(historyStorageKey);
@@ -652,6 +707,32 @@ export default function QueryEditor() {
           onClose={() => setHistoryOpen(false)}
         />
       )}
+      <Dialog
+        open={saveName !== null}
+        onClose={() => setSaveName(null)}
+        icon={<Bookmark />}
+        title="Save query"
+        description="Kept for this database, in Saved next to the history."
+        footer={
+          <>
+            <Button variant="neutral" size="sm" onClick={() => setSaveName(null)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" disabled={!saveName?.trim()} onClick={() => saveActiveQuery(saveName ?? "")}>
+              Save
+            </Button>
+          </>
+        }
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (saveName?.trim()) saveActiveQuery(saveName);
+          }}
+        >
+          <Input value={saveName ?? ""} onChange={(e) => setSaveName(e.target.value)} placeholder="e.g. Orders this month" autoFocus aria-label="Name" />
+        </form>
+      </Dialog>
     </div>
   );
 }
