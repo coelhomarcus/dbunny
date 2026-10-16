@@ -64,26 +64,35 @@ fn written_columns(c: &Connection, schema: &str, table: &str) -> rusqlite::Resul
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().filter(|(_, hidden)| *hidden == 0).map(|(n, _)| n).collect())
 }
 
-/// An index item: one of the table's columns (or a plain word) is quoted as a name,
-/// anything else is an expression.
+/// Every column of `table`, generated and hidden ones included: an index can use them all.
+fn all_columns(c: &Connection, schema: &str, table: &str) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = c.prepare(&format!("PRAGMA {}.table_xinfo({})", quote(schema), quote(table)))?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>("name"))?;
+    rows.collect()
+}
+
+/// The column of `columns` that `item` names, compared as SQLite does (ASCII case aside).
+fn column_named<'a>(columns: &'a [String], item: &str) -> Option<&'a str> {
+    columns.iter().find(|c| c.eq_ignore_ascii_case(item.trim())).map(String::as_str)
+}
+
+/// An index item: one of the table's columns is quoted as its name; anything else is an
+/// expression. A word that isn't a column stays unquoted so that SQLite reports it as an
+/// unknown column: in double quotes it would read it as a string and index a constant.
 fn index_item(columns: &[String], item: &str) -> Result<String, Failure> {
-    let item = item.trim();
-    let is_column = columns.iter().any(|c| c.eq_ignore_ascii_case(item));
-    let is_word = !item.is_empty() && item.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
-    if is_column || is_word {
-        Ok(quote(item))
-    } else {
-        Ok(format!("({})", fragment("index expression", item)?))
+    match column_named(columns, item) {
+        Some(column) => Ok(quote(column)),
+        None => Ok(format!("({})", fragment("index expression", item)?)),
     }
 }
 
 /// What an index item adds to a generated index name, as PostgreSQL names it: the
 /// column, the function an expression calls, or `expr`.
 fn index_name_part(columns: &[String], item: &str) -> String {
-    let item = item.trim();
-    if columns.iter().any(|c| c.eq_ignore_ascii_case(item)) {
-        return item.to_string();
+    if let Some(column) = column_named(columns, item) {
+        return column.to_string();
     }
+    let item = item.trim();
     let word: String = item.chars().take_while(|ch| ch.is_alphanumeric() || *ch == '_').collect();
     if word.len() == item.len() || (!word.is_empty() && item[word.len()..].trim_start().starts_with('(')) {
         word
@@ -138,7 +147,7 @@ fn change_sql(c: &Connection, schema: &str, table: &str, change: &StructureChang
             if items.is_empty() {
                 return Err(Failure::message("Choose at least one column".into()));
             }
-            let columns = written_columns(c, schema, table)?;
+            let columns = all_columns(c, schema, table)?;
             let list = items.iter().map(|item| index_item(&columns, item)).collect::<Result<Vec<_>, _>>()?;
             let index = match index.as_deref().filter(|n| !n.trim().is_empty()) {
                 Some(given) => name("index name", given)?,
@@ -483,6 +492,63 @@ mod tests {
         assert_eq!(err, "Cannot add a NOT NULL column with default value NULL");
         let err = editor(&d).apply_change("main", "people", StructureChange::DropColumn { name: "nope".into(), cascade: false }).await.unwrap_err();
         assert!(err.contains("no such column"), "{err}");
+    }
+
+    /// The (column number, name) of each item of index `name`: -2 and no name for an expression.
+    async fn indexed(d: &SqliteDriver, name: &str) -> Vec<Vec<JsonValue>> {
+        query(d, &format!("SELECT cid, name FROM pragma_index_info('{}') ORDER BY seqno", name.replace('\'', "''"))).await
+    }
+
+    #[tokio::test]
+    async fn an_index_item_is_a_column_or_an_expression() {
+        let f = TempDb::with(
+            "CREATE TABLE people (id INTEGER PRIMARY KEY, Email TEXT, \"it's \"\"odd\"\"\" TEXT, first TEXT, last TEXT,
+                 \"full name\" TEXT GENERATED ALWAYS AS (first || ' ' || last) VIRTUAL,
+                 initials TEXT GENERATED ALWAYS AS (substr(first, 1, 1) || substr(last, 1, 1)) STORED);
+             INSERT INTO people (id, Email, first, last) VALUES (1, 'a@x.io', 'Ana', 'Lima'), (2, 'b@x.io', 'Bia', 'Reis');",
+        );
+        let d = open(&f).await;
+        let indexes = "SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name";
+
+        // A word that isn't a column is an expression, which SQLite refuses, rather than
+        // the string 'emial' it would read in double quotes: an index of a constant
+        for unique in [false, true] {
+            let change = index(None, &["emial"], unique);
+            let create = if unique { "CREATE UNIQUE INDEX" } else { "CREATE INDEX" };
+            let preview = editor(&d).preview_change("main", "people", &change).await.unwrap();
+            assert_eq!(preview, format!("{create} \"main\".\"people_emial_idx\" ON \"people\" ((emial));"));
+            let err = editor(&d).apply_change("main", "people", change).await.unwrap_err();
+            assert!(err.contains("no such column: emial"), "{err}");
+        }
+        let err = editor(&d).apply_change("main", "people", index(Some("by_typo"), &["id", "emial"], true)).await.unwrap_err();
+        assert!(err.contains("no such column: emial"), "{err}");
+        assert_eq!(query(&d, indexes).await, Vec::<Vec<JsonValue>>::new(), "no index was made");
+
+        // A column in any case is that column, named as the table names it
+        let preview = preview_then_apply(&d, "main", "people", index(None, &["EMAIL"], true)).await;
+        assert_eq!(preview, "CREATE UNIQUE INDEX \"main\".\"people_Email_idx\" ON \"people\" (\"Email\");");
+        assert_eq!(indexed(&d, "people_Email_idx").await, vec![vec![json!(1), json!("Email")]]);
+        let err = exec(&d, "INSERT INTO people (id, Email) VALUES (3, 'a@x.io')").await.unwrap_err();
+        assert!(err.contains("UNIQUE"), "{err}");
+
+        // Quotes and spaces in a column's name
+        let preview = preview_then_apply(&d, "main", "people", index(Some("by_odd"), &["it's \"odd\""], false)).await;
+        assert_eq!(preview, "CREATE INDEX \"main\".\"by_odd\" ON \"people\" (\"it's \"\"odd\"\"\");");
+        assert_eq!(indexed(&d, "by_odd").await, vec![vec![json!(2), json!("it's \"odd\"")]]);
+
+        // Generated columns, virtual or stored, are columns whatever their names
+        let preview = preview_then_apply(&d, "main", "people", index(None, &["full name", "Initials"], true)).await;
+        assert_eq!(preview, "CREATE UNIQUE INDEX \"main\".\"people_full name_initials_idx\" ON \"people\" (\"full name\", \"initials\");");
+        assert_eq!(indexed(&d, "people_full name_initials_idx").await, vec![vec![json!(5), json!("full name")], vec![json!(6), json!("initials")]]);
+
+        // Anything else is an expression
+        let preview = preview_then_apply(&d, "main", "people", index(None, &["lower(email)"], false)).await;
+        assert_eq!(preview, "CREATE INDEX \"main\".\"people_lower_idx\" ON \"people\" ((lower(email)));");
+        assert_eq!(indexed(&d, "people_lower_idx").await, vec![vec![json!(-2), JsonValue::Null]]);
+
+        let made = query(&d, indexes).await;
+        let expected = ["by_odd", "people_Email_idx", "people_full name_initials_idx", "people_lower_idx"];
+        assert_eq!(made, expected.map(|n| vec![json!(n)]).to_vec());
     }
 
     #[tokio::test]
