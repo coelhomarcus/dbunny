@@ -267,21 +267,13 @@ export function createSessionApi(sessionId: string | null) {
       return invoke<ExplainResult>("explain_query", { sessionId, sql, analyze });
     },
 
-    async updateRow(
+    /** Saves edited rows in one transaction: all of them, or none if any fails or is gone. */
+    async updateRows(
       schema: string,
       table: string,
-      payload: {
-        primaryKey: Record<string, unknown>;
-        updates: Record<string, unknown>;
-      }
+      changes: { primaryKey: Record<string, unknown>; updates: Record<string, unknown> }[],
     ) {
-      return invoke<{ rowsAffected: number }>("update_row", {
-        sessionId,
-        schema,
-        table,
-        primaryKey: payload.primaryKey,
-        updates: payload.updates,
-      });
+      return invoke<number>("update_rows", { sessionId, schema, table, changes });
     },
 
     async deleteRows(

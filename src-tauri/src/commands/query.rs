@@ -693,18 +693,50 @@ pub async fn count_table_rows(
         .map_err(|e| db_message(&e))
 }
 
+/// One edited row: its primary key and the new values.
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RowChange {
+    pub primary_key: serde_json::Map<String, JsonValue>,
+    pub updates: serde_json::Map<String, JsonValue>,
+}
+
+/// Saves edited rows all at once: a separate connection runs them in one transaction, so
+/// either every row is saved or none is.
 #[tauri::command]
-pub async fn update_row(
+pub async fn update_rows(
     state: State<'_, AppState>,
     session_id: String,
     schema: String,
     table: String,
-    primary_key: serde_json::Map<String, JsonValue>,
-    updates: serde_json::Map<String, JsonValue>,
-) -> Result<serde_json::Value, String> {
-    let client = state.client(&session_id).await?;
-    let affected = update_in(&client, &schema, &table, &primary_key, &updates).await?;
-    Ok(serde_json::json!({ "rowsAffected": affected }))
+    changes: Vec<RowChange>,
+) -> Result<u64, String> {
+    let link = state.link(&session_id).await?;
+    let notices = state.notices(&session_id).await?;
+    let client = super::connect::open_connection(&link, &notices)
+        .await
+        .map_err(|e| format!("Couldn't open a connection to save: {e}"))?;
+    save_rows(&client, &schema, &table, &changes).await
+}
+
+/// Each change must find exactly its row: one that was changed or deleted elsewhere since
+/// it was read (or a key that matches several rows) stops the save instead of passing silently.
+pub(crate) async fn save_rows(client: &tokio_postgres::Client, schema: &str, table: &str, changes: &[RowChange]) -> Result<u64, String> {
+    client.batch_execute("BEGIN").await.map_err(|e| db_message(&e))?;
+    let total = changes.len();
+    for (i, change) in changes.iter().enumerate() {
+        let failure = match update_in(client, schema, table, &change.primary_key, &change.updates).await {
+            Ok(1) => continue,
+            Ok(0) => "it wasn't found, so it was changed or deleted since it was loaded".to_string(),
+            Ok(n) => format!("its key matched {n} rows"),
+            Err(e) => e,
+        };
+        let _ = client.batch_execute("ROLLBACK").await;
+        let which = if total > 1 { format!("Row {} of {total}", i + 1) } else { "The row".to_string() };
+        return Err(format!("Nothing was saved. {which}: {failure}"));
+    }
+    client.batch_execute("COMMIT").await.map_err(|e| format!("Nothing was saved: {}", db_message(&e)))?;
+    Ok(total as u64)
 }
 
 async fn update_in(
@@ -1267,6 +1299,32 @@ mod server_tests {
         assert_eq!(delete_from(&client, &schema, "snow", &[key]).await.unwrap(), 1);
         let left: i64 = client.query_one("SELECT count(*) FROM snow WHERE id = 1234567890123456800", &[]).await.unwrap().get(0);
         assert_eq!(left, 1, "the neighbour a rounded key would have hit is still there");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn saving_edited_rows_is_all_or_nothing_and_needs_each_row() {
+        let client = connect().await;
+        client.batch_execute("CREATE TEMP TABLE edits (id int PRIMARY KEY, qty int CHECK (qty >= 0)); INSERT INTO edits VALUES (1, 1), (2, 2), (3, 3)").await.unwrap();
+        let schema = temp_schema(&client).await;
+        let change = |id: i32, qty: i32| RowChange { primary_key: values(json!({"id": id})), updates: values(json!({"qty": qty})) };
+        async fn qty(client: &tokio_postgres::Client) -> Vec<i32> {
+            client.query("SELECT qty FROM edits ORDER BY id", &[]).await.unwrap().iter().map(|r| r.get(0)).collect()
+        }
+
+        // The second row breaks a constraint: the first isn't saved either
+        let err = save_rows(&client, &schema, "edits", &[change(1, 10), change(2, -1), change(3, 30)]).await.unwrap_err();
+        assert!(err.starts_with("Nothing was saved. Row 2 of 3") && err.contains("check constraint"), "{err}");
+        assert_eq!(qty(&client).await, vec![1, 2, 3]);
+
+        // A row deleted elsewhere since it was loaded stops the save
+        client.batch_execute("DELETE FROM edits WHERE id = 3").await.unwrap();
+        let err = save_rows(&client, &schema, "edits", &[change(1, 10), change(3, 30)]).await.unwrap_err();
+        assert!(err.contains("Row 2 of 2") && err.contains("wasn't found"), "{err}");
+        assert_eq!(qty(&client).await, vec![1, 2]);
+
+        assert_eq!(save_rows(&client, &schema, "edits", &[change(1, 10), change(2, 20)]).await.unwrap(), 2);
+        assert_eq!(qty(&client).await, vec![10, 20]);
     }
 
     #[tokio::test]

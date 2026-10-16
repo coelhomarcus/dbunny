@@ -62,16 +62,19 @@ export function usePendingChanges({
     setSaveError(null);
 
     try {
-      for (const [rowIdxStr, updates] of Object.entries(pendingChanges)) {
-        const rowIndex = parseInt(rowIdxStr);
-        const row = data.rows[rowIndex];
-        const primaryKey: Record<string, unknown> = {};
-        for (const pkCol of pkColumns) {
-          const colIdx = data.columns.findIndex((c) => c.name === pkCol.name);
-          primaryKey[pkCol.name] = row[colIdx];
-        }
-        await api.updateRow(schema, table, { primaryKey, updates });
-      }
+      // Sent together, in row order, so the server saves all of them or none
+      const changes = Object.entries(pendingChanges)
+        .sort(([a], [b]) => Number(a) - Number(b))
+        .map(([rowIdxStr, updates]) => {
+          const row = data.rows[Number(rowIdxStr)];
+          const primaryKey: Record<string, unknown> = {};
+          for (const pkCol of pkColumns) {
+            const colIdx = data.columns.findIndex((c) => c.name === pkCol.name);
+            primaryKey[pkCol.name] = row[colIdx];
+          }
+          return { primaryKey, updates };
+        });
+      await api.updateRows(schema, table, changes);
       const fresh = await fetchData(schema, table, page, pageSize, sorting, filters, filterMode);
       setData(fresh);
       setPendingChanges({});
