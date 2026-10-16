@@ -9,26 +9,13 @@ use tokio_postgres::Row;
 use uuid::Uuid;
 
 use super::PostgresDriver;
-use crate::db::model::{JsonMap, QueryColumn, RowChange, SortKey, TableDataParams, TableDataResponse};
+use crate::db::model::{JsonMap, QueryColumn, RowChange, TableDataParams, TableDataResponse};
 use crate::db::postgres::text::{is_native, text_to_json};
 use crate::db::sql::edit::{build_delete, build_import_batches, build_insert, build_update};
 use crate::db::sql::filter::{build_where, quote_ident, TextParam};
 use crate::db::sql::json::int_to_json;
+use crate::db::sql::order::{order_clause, sort_keys};
 use crate::db::Data;
-
-/// ` ORDER BY ...` for the sort keys that name real columns (others are ignored).
-pub(crate) fn order_clause(keys: &[SortKey], valid_columns: &[String]) -> String {
-    let parts: Vec<String> = keys
-        .iter()
-        .filter(|k| valid_columns.contains(&k.column))
-        .map(|k| format!("{} {}", quote_ident(&k.column), if k.direction.as_deref() == Some("desc") { "DESC" } else { "ASC" }))
-        .collect();
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!(" ORDER BY {}", parts.join(", "))
-    }
-}
 
 fn try_get_string(row: &Row, i: usize) -> JsonValue {
     match row.try_get::<_, Option<String>>(i) {
@@ -403,14 +390,7 @@ impl Data for PostgresDriver {
 
         let valid_columns = get_valid_columns(&client, schema, table).await?;
 
-        let sort_keys = match &params {
-            TableDataParams { sort: Some(keys), .. } => keys.clone(),
-            TableDataParams { sort_column: Some(column), sort_direction, .. } => {
-                vec![SortKey { column: column.clone(), direction: sort_direction.clone() }]
-            }
-            _ => vec![],
-        };
-        let order_clause = order_clause(&sort_keys, &valid_columns);
+        let order_clause = order_clause(&sort_keys(&params), &valid_columns);
 
         // Build WHERE clause from the filters
         let filters = params.filters.as_deref().unwrap_or(&[]);
@@ -596,32 +576,12 @@ pub(crate) async fn import_into(
     Ok(inserted)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn key(column: &str, direction: &str) -> SortKey {
-        SortKey { column: column.into(), direction: Some(direction.into()) }
-    }
-
-    #[test]
-    fn several_sort_keys_keep_their_order_and_skip_unknown_columns() {
-        let valid: Vec<String> = ["name", "age", "we\"ird"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(
-            order_clause(&[key("age", "desc"), key("nope; DROP", "asc"), key("name", "asc")], &valid),
-            " ORDER BY \"age\" DESC, \"name\" ASC"
-        );
-        assert_eq!(order_clause(&[key("we\"ird", "sideways")], &valid), " ORDER BY \"we\"\"ird\" ASC");
-        assert_eq!(order_clause(&[key("nope", "asc")], &valid), "");
-        assert_eq!(order_clause(&[], &valid), "");
-    }
-}
-
 /// Tests that need a real server, see `console::server_tests`.
 #[cfg(test)]
 mod server_tests {
     use super::*;
     use crate::db::postgres::console::run_statement;
+    use crate::db::model::SortKey;
     use crate::db::sql::filter::TableFilter;
     use serde_json::json;
 

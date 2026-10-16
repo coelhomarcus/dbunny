@@ -237,7 +237,17 @@ fn foreign_keys(c: &Connection, db: &str, table: &str) -> rusqlite::Result<Vec<R
 /// The names the rowid of a table answers to, in the order the synthetic column takes them.
 const ROWID_NAMES: [&str; 3] = ["rowid", "_rowid_", "oid"];
 
-fn table_columns(c: &Connection, db: &str, table: &str) -> rusqlite::Result<Vec<ColumnInfo>> {
+/// The position of the synthetic rowid column; real columns count from 1.
+const SYNTHETIC_POSITION: i32 = 0;
+
+/// The name of the synthetic rowid column that leads `columns` (from `table_columns`), if any.
+pub(super) fn synthetic_rowid(columns: &[ColumnInfo]) -> Option<&str> {
+    columns.first().filter(|c| c.ordinal_position == SYNTHETIC_POSITION).map(|c| c.name.as_str())
+}
+
+/// The columns of a table or view as the screens see them, the synthetic rowid first
+/// when the table is edited by it.
+pub(super) fn table_columns(c: &Connection, db: &str, table: &str) -> rusqlite::Result<Vec<ColumnInfo>> {
     let raw = raw_columns(c, db, table)?;
     let keys = foreign_keys(c, db, table)?;
     let entry = table_entry(c, db, table)?;
@@ -281,7 +291,7 @@ fn table_columns(c: &Connection, db: &str, table: &str) -> rusqlite::Result<Vec<
                     type_name: "INTEGER".into(),
                     is_nullable: false,
                     default_value: None,
-                    ordinal_position: 0,
+                    ordinal_position: SYNTHETIC_POSITION,
                     is_primary_key: true,
                     is_generated: true,
                     comment: None,

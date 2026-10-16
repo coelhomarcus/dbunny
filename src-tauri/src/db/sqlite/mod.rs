@@ -3,6 +3,7 @@
 
 mod catalog;
 mod conn;
+mod data;
 pub mod errors;
 #[cfg(test)]
 mod tests_support;
@@ -16,7 +17,6 @@ use async_trait::async_trait;
 
 pub(crate) use conn::SqliteConn;
 
-use super::model::{JsonMap, RowChange, TableDataParams, TableDataResponse};
 use super::{Capabilities, Catalog, ConnectionInfo, Data, Driver, Engine};
 
 /// How a file is opened.
@@ -105,35 +105,7 @@ impl Driver for SqliteDriver {
     }
 
     fn data(&self) -> &dyn Data {
-        &NotReady
-    }
-}
-
-/// TEMPORARY: the data of a SQLite session answers an error until the SQLite data
-/// (Task 4) replaces this stand-in.
-struct NotReady;
-
-const DATA_NOT_READY: &str = "Table data isn't ready yet for SQLite";
-
-#[async_trait]
-impl Data for NotReady {
-    async fn table_page(&self, _: &str, _: &str, _: TableDataParams) -> Result<TableDataResponse, String> {
-        Err(DATA_NOT_READY.into())
-    }
-    async fn count_rows(&self, _: &str, _: &str) -> Result<i64, String> {
-        Err(DATA_NOT_READY.into())
-    }
-    async fn insert_row(&self, _: &str, _: &str, _: JsonMap) -> Result<u64, String> {
-        Err(DATA_NOT_READY.into())
-    }
-    async fn save_rows(&self, _: &str, _: &str, _: Vec<RowChange>) -> Result<u64, String> {
-        Err(DATA_NOT_READY.into())
-    }
-    async fn delete_rows(&self, _: &str, _: &str, _: Vec<JsonMap>) -> Result<u64, String> {
-        Err(DATA_NOT_READY.into())
-    }
-    async fn import_rows(&self, _: &str, _: &str, _: Vec<String>, _: Vec<Vec<Option<String>>>) -> Result<u64, String> {
-        Err(DATA_NOT_READY.into())
+        self
     }
 }
 
@@ -143,12 +115,12 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn the_stand_in_data_answers_errors() {
+    async fn the_session_answers_as_sqlite() {
         let f = TempDb::with("CREATE TABLE t(x)");
         let d = SqliteDriver::open(f.path(), OpenOptions::default()).await.unwrap();
         assert_eq!(d.engine(), Engine::Sqlite);
         assert_eq!(d.capabilities(), &Capabilities::sqlite());
-        assert!(d.data().count_rows("main", "t").await.is_err());
+        assert_eq!(d.data().count_rows("main", "t").await, Ok(0));
         assert!(d.console().is_none() && d.admin().is_none());
     }
 
