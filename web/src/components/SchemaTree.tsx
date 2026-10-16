@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, type ComponentType } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import { useApi } from "../contexts/useConnection";
+import { useApi, useConnection } from "../contexts/useConnection";
+import type { RelationKind } from "../lib/api";
+import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
+import RelationActionDialog, { type RelationAction, type RelationTarget } from "./schema/RelationActionDialog";
+import { quoteIdent } from "../lib/copyRows";
 import type { SchemaInfo, TableInfo, FunctionInfo, SchemaObject, ExtensionInfo } from "@/types";
 import type { SessionApi } from "../lib/api";
 import {
@@ -14,6 +18,14 @@ import {
   Shapes,
   Puzzle,
   Loader,
+  Copy,
+  PenLine,
+  Trash2,
+  Eraser,
+  RefreshCw,
+  Table as TableIcon,
+  Columns3,
+  CopyPlus,
   type LucideProps,
 } from "lucide-react";
 
@@ -42,6 +54,8 @@ interface FolderSpec {
   color: string;
   icon: ComponentType<LucideProps>;
   load: (api: SessionApi, schema: string) => Promise<FolderItem[]>;
+  /** Tables and views get the right-click actions. */
+  relationKind?: RelationKind;
   view: (item: FolderItem, schema: string) => ItemView;
 }
 
@@ -53,6 +67,7 @@ const FOLDERS: FolderSpec[] = [
     label: "Tables",
     color: "text-success-foreground",
     icon: Table2,
+    relationKind: "table",
     load: (api, schema) => api.getTables(schema),
     view: (item, schema) => ({ key: item.name, label: item.name, path: relationPath(schema, item.name) }),
   },
@@ -61,6 +76,7 @@ const FOLDERS: FolderSpec[] = [
     label: "Views",
     color: "text-info-foreground",
     icon: Eye,
+    relationKind: "view",
     load: (api, schema) => api.getViews(schema),
     view: (item, schema) => ({ key: item.name, label: item.name, path: relationPath(schema, item.name) }),
   },
@@ -69,6 +85,7 @@ const FOLDERS: FolderSpec[] = [
     label: "Materialized views",
     color: "text-cyan-500",
     icon: Layers,
+    relationKind: "matview",
     load: (api, schema) => api.getMaterializedViews(schema),
     view: (item, schema) => ({ key: item.name, label: item.name, path: relationPath(schema, item.name) }),
   },
@@ -127,6 +144,10 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
   const location = useLocation();
   const params = useParams();
   const api = useApi();
+  const readOnly = useConnection().connectionInfo?.readOnly ?? false;
+  const [menu, setMenu] = useState<{ x: number; y: number; target: RelationTarget } | null>(null);
+  const [action, setAction] = useState<{ action: RelationAction; target: RelationTarget } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -169,6 +190,91 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
     },
     [folderData, api],
   );
+
+  /** Loads a folder again after something in it changed. */
+  const reloadFolder = useCallback(
+    async (schema: string, kind: RelationKind) => {
+      const spec = FOLDERS.find((f) => f.relationKind === kind);
+      if (!spec) return;
+      try {
+        const items = await spec.load(api, schema);
+        setFolderData((prev) => ({ ...prev, [`${schema}:${spec.kind}`]: { items, loaded: true, loading: false } }));
+      } catch {
+        // the old list stays until the next reload
+      }
+    },
+    [api],
+  );
+
+  const relationPathOf = (t: RelationTarget) => relationPath(t.schema, t.name);
+  const isOpen = (t: RelationTarget) => {
+    const current = decodeURIComponent(location.pathname);
+    const target = decodeURIComponent(relationPathOf(t));
+    return current === target || current.startsWith(`${target}/`);
+  };
+
+  async function runAction(
+    { action: kind, target }: { action: RelationAction; target: RelationTarget },
+    options: { newName: string; withData: boolean; cascade: boolean; restartIdentity: boolean },
+  ) {
+    if (kind === "rename") {
+      await api.renameRelation(target.schema, target.name, target.kind, options.newName);
+      if (isOpen(target)) navigate(relationPath(target.schema, options.newName));
+    } else if (kind === "duplicate") {
+      await api.duplicateTable(target.schema, target.name, options.newName, options.withData);
+    } else if (kind === "truncate") {
+      await api.truncateTable(target.schema, target.name, options.restartIdentity, options.cascade);
+      // Reopen so the emptied table is shown
+      if (isOpen(target)) navigate(relationPathOf(target));
+    } else {
+      await api.dropRelation(target.schema, target.name, target.kind, options.cascade);
+      if (isOpen(target)) navigate("/db/query");
+    }
+    reloadFolder(target.schema, target.kind);
+    // CASCADE can take views with it
+    if (options.cascade) {
+      reloadFolder(target.schema, "view");
+      reloadFolder(target.schema, "matview");
+    }
+  }
+
+  function menuItems(target: RelationTarget): ContextMenuItem[] {
+    const qualified = `${quoteIdent(target.schema)}.${quoteIdent(target.name)}`;
+    const items: ContextMenuItem[] = [
+      { label: "Open data", icon: <TableIcon />, onSelect: () => navigate(relationPathOf(target)) },
+      { label: "Open structure", icon: <Columns3 />, onSelect: () => navigate(`${relationPathOf(target)}/structure`) },
+      "separator",
+      { label: "Copy name", icon: <Copy />, onSelect: () => navigator.clipboard.writeText(qualified) },
+      { label: "Copy SELECT", icon: <Copy />, onSelect: () => navigator.clipboard.writeText(`SELECT * FROM ${qualified} LIMIT 100;`) },
+    ];
+    if (readOnly) return items;
+    items.push("separator", { label: "Rename…", icon: <PenLine />, onSelect: () => setAction({ action: "rename", target }) });
+    if (target.kind === "table") {
+      items.push({ label: "Duplicate…", icon: <CopyPlus />, onSelect: () => setAction({ action: "duplicate", target }) });
+    }
+    if (target.kind === "matview") {
+      items.push({
+        label: "Refresh data",
+        icon: <RefreshCw />,
+        onSelect: () => {
+          setNotice(`Refreshing ${target.name}…`);
+          api
+            .refreshMaterializedView(target.schema, target.name)
+            .then(() => {
+              setNotice(null);
+              if (isOpen(target)) navigate(relationPathOf(target));
+            })
+            .catch((err) => setNotice(typeof err === "string" ? err : "Refresh failed"));
+        },
+      });
+    }
+    items.push("separator");
+    if (target.kind === "table") {
+      items.push({ label: "Truncate…", icon: <Eraser />, destructive: true, onSelect: () => setAction({ action: "truncate", target }) });
+    }
+    items.push({ label: "Drop…", icon: <Trash2 />, destructive: true, onSelect: () => setAction({ action: "drop", target }) });
+    return items;
+  }
 
   const toggleFolder = useCallback(
     (schema: string, spec: FolderSpec) => {
@@ -236,6 +342,11 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                         <button
                           key={view.key}
                           onClick={() => navigate(view.path)}
+                          onContextMenu={(e) => {
+                            if (!spec.relationKind) return;
+                            e.preventDefault();
+                            setMenu({ x: e.clientX, y: e.clientY, target: { schema: schema.name, name: item.name, kind: spec.relationKind } });
+                          }}
                           className={`w-full flex h-7 items-center gap-2 rounded-md pl-11 pr-2 text-sm transition-colors ${
                             active ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent"
                           }`}
@@ -252,6 +363,12 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
           </div>
         );
       })}
+
+      {notice && (
+        <div className="mx-1.5 my-1 rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground" role="status" onClick={() => setNotice(null)}>
+          {notice}
+        </div>
+      )}
 
       {schemas.length === 0 && (
         <div className="px-3 py-6 text-muted-foreground/70 text-center text-sm">
@@ -287,6 +404,14 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
             </div>
           ))
         ))}
+
+      <ContextMenu position={menu} items={menu ? menuItems(menu.target) : []} onClose={() => setMenu(null)} />
+      <RelationActionDialog
+        action={action?.action ?? null}
+        target={action?.target ?? null}
+        onRun={(options) => runAction(action!, options)}
+        onClose={() => setAction(null)}
+      />
     </div>
   );
 }

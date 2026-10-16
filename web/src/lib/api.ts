@@ -21,6 +21,9 @@ import type {
   ObjectDefinition,
 } from "@/types";
 
+/** Relation kinds as the explorer names them. */
+export type RelationKind = "table" | "view" | "matview";
+
 /** Calls that don't belong to a connection. */
 export const api = {
   /** Connects, optionally through SSH. `trustHostKey` is an SSH host key fingerprint the user confirmed. */
@@ -82,6 +85,27 @@ export function createSessionApi(sessionId: string | null) {
     /** Facts and DDL of a sequence or a type. */
     async getObjectDefinition(schema: string, name: string, kind: "sequence" | "type") {
       return invoke<ObjectDefinition>("get_object_definition", { sessionId, schema, name, kind });
+    },
+
+    async renameRelation(schema: string, name: string, kind: RelationKind, newName: string) {
+      return invoke<void>("rename_relation", { sessionId, schema, name, kind, newName });
+    },
+
+    async dropRelation(schema: string, name: string, kind: RelationKind, cascade: boolean) {
+      return invoke<void>("drop_relation", { sessionId, schema, name, kind, cascade });
+    },
+
+    async truncateTable(schema: string, name: string, restartIdentity: boolean, cascade: boolean) {
+      return invoke<void>("truncate_table", { sessionId, schema, name, restartIdentity, cascade });
+    },
+
+    async refreshMaterializedView(schema: string, name: string) {
+      return invoke<void>("refresh_materialized_view", { sessionId, schema, name });
+    },
+
+    /** Copies a table's structure (and optionally its rows) under a new name. */
+    async duplicateTable(schema: string, name: string, newName: string, withData: boolean) {
+      return invoke<void>("duplicate_table", { sessionId, schema, name, newName, withData });
     },
 
     async getFunctions(schema: string) {
