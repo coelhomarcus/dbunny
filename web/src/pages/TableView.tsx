@@ -106,7 +106,8 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   const [menu, setMenu] = useState<{ x: number; y: number; rowIndex: number; colName: string } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const [reviewSql, setReviewSql] = useState<string | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
+  // Open with no text: choose a file; with text: rows pasted into the table
+  const [importOpen, setImportOpen] = useState<{ text?: string } | false>(false);
   const [importNotice, setImportNotice] = useState<string | null>(null);
   const [sqlCopied, setSqlCopied] = useState(false);
 
@@ -157,6 +158,21 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing, pending, isActive, editorDialogOpen]);
+
+  // Pasting rows (from a spreadsheet, say) onto the table offers to insert them
+  useEffect(() => {
+    if (!isActive || readOnly || importOpen !== false) return;
+    function onPaste(e: ClipboardEvent) {
+      if (editing.editingCell || (e.target as HTMLElement)?.closest("input, textarea, select, [contenteditable=true], [role=dialog]")) return;
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      // A single value isn't rows
+      if (!text.includes("\t") && !text.trim().includes("\n")) return;
+      e.preventDefault();
+      setImportOpen({ text });
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [isActive, readOnly, importOpen, editing.editingCell]);
 
   const fetchAllRows = useCallback(async () => {
     // An estimated total could miss rows, so count exactly before exporting everything
@@ -330,7 +346,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         hasCustomWidths={resize.hasCustomWidths}
         onResetWidths={resize.resetWidths}
         onInsertRow={guard(() => setInsert({}))}
-        onImportCsv={guard(() => setImportOpen(true))}
+        onImportCsv={guard(() => setImportOpen({}))}
         filterCount={tableData.filters.length}
         filtersOpen={filtersOpen}
         onToggleFilters={() => setFiltersOpen((open) => !open)}
@@ -573,7 +589,10 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       />
 
       <ImportCsvDialog
-        open={importOpen}
+        open={importOpen !== false}
+        // Remounted for each paste, so it starts from the new data
+        key={importOpen ? importOpen.text ?? "file" : "closed"}
+        initialText={importOpen ? importOpen.text : undefined}
         schema={schema!}
         table={table!}
         columns={columnInfos}

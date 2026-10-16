@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileUp, FolderOpen, Loader } from "lucide-react";
 import type { ColumnInfo } from "@/types";
-import { detectDelimiter, matchColumns, parseCsv } from "../../lib/csv";
+import { detectDelimiter, looksLikeHeader, matchColumns, parseCsv } from "../../lib/csv";
 import { cn } from "../../lib/cn";
 import Dialog from "../ui/Dialog";
 import Button from "../ui/Button";
@@ -29,25 +29,41 @@ function ImportForm({
   schema,
   table,
   columns,
+  initialText,
   onImport,
   onClose,
 }: {
   schema: string;
   table: string;
   columns: ColumnInfo[];
+  /** Pasted data to start from, instead of choosing a file. */
+  initialText?: string;
   onImport: (columns: string[], rows: (string | null)[][]) => Promise<number>;
   onClose: () => void;
 }) {
-  const [file, setFile] = useState<{ name: string; text: string } | null>(null);
-  const [delimiter, setDelimiter] = useState(",");
-  const [hasHeader, setHasHeader] = useState(true);
+  const writable = columns.filter((c) => !c.isGenerated).map((c) => c.name);
+  // Pasted data starts parsed: delimiter, header and column mapping are guessed from it
+  const initial = (() => {
+    if (!initialText) return null;
+    const delimiter = detectDelimiter(initialText);
+    const rows = parseCsv(initialText, delimiter);
+    const header = looksLikeHeader(rows[0] ?? [], writable);
+    const first = rows[0] ?? [];
+    return {
+      delimiter,
+      header,
+      mapping: header ? matchColumns(first, writable) : first.map((_, i) => writable[i] ?? null),
+    };
+  })();
+  const [file, setFile] = useState<{ name: string; text: string } | null>(initialText ? { name: "Pasted data", text: initialText } : null);
+  const [delimiter, setDelimiter] = useState(initial?.delimiter ?? ",");
+  const [hasHeader, setHasHeader] = useState(initial?.header ?? true);
   const [emptyAsNull, setEmptyAsNull] = useState(true);
   // Per CSV column: the table column it goes into, or null to skip it
-  const [mapping, setMapping] = useState<(string | null)[]>([]);
+  const [mapping, setMapping] = useState<(string | null)[]>(initial?.mapping ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const writable = columns.filter((c) => !c.isGenerated).map((c) => c.name);
   const parsed = useMemo(() => (file ? parseCsv(file.text, delimiter) : []), [file, delimiter]);
   const width = parsed.reduce((max, r) => Math.max(max, r.length), 0);
   const headers = hasHeader ? (parsed[0] ?? []) : Array.from({ length: width }, (_, i) => `Column ${i + 1}`);
@@ -96,6 +112,24 @@ function ImportForm({
     }
   }
 
+  // Pasting while the dialog is open replaces the data
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (!text.trim() || (e.target as HTMLElement)?.closest("input, textarea, select")) return;
+      e.preventDefault();
+      const detected = detectDelimiter(text);
+      const rows = parseCsv(text, detected);
+      const header = looksLikeHeader(rows[0] ?? [], writable);
+      setFile({ name: "Pasted data", text });
+      setDelimiter(detected);
+      setHasHeader(header);
+      remap(rows, header);
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  });
+
   const canImport = file !== null && used.length > 0 && duplicates.length === 0 && dataRows.length > 0 && !busy;
 
   return (
@@ -106,7 +140,7 @@ function ImportForm({
       icon={<FileUp />}
       title={
         <>
-          Import CSV <span className="font-normal text-muted-foreground">into {schema}.{table}</span>
+          {initialText ? "Paste rows" : "Import CSV"} <span className="font-normal text-muted-foreground">into {schema}.{table}</span>
         </>
       }
       description="All rows are inserted in one transaction: if one fails, nothing is imported."
@@ -134,6 +168,7 @@ function ImportForm({
             {file ? "Choose another file" : "Choose a CSV file"}
           </Button>
           {file && <span className="truncate font-mono text-xs text-muted-foreground">{file.name}</span>}
+          {!file && <span className="text-xs text-muted-foreground">or paste rows copied from a spreadsheet (⌘V / Ctrl+V)</span>}
         </div>
 
         {file && (

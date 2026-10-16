@@ -51,6 +51,11 @@ export function detectDelimiter(text: string): string {
   return candidates.reduce((best, d) => (count(d) > count(best) ? d : best), ",");
 }
 
+/** Whether the first row looks like column names: every field matches a column. */
+export function looksLikeHeader(firstRow: string[], columns: string[]): boolean {
+  return firstRow.length > 0 && matchColumns(firstRow, columns).every((m) => m !== null);
+}
+
 /** Matches CSV headers to table columns by name, ignoring case, spaces and underscores. */
 export function matchColumns(headers: string[], columns: string[]): (string | null)[] {
   const key = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
