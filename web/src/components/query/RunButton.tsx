@@ -17,7 +17,7 @@ function MenuItem({ icon, label, hint, shortcut, onClick }: { icon: React.ReactN
       className="flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left cursor-pointer hover:bg-accent [&_svg]:mt-0.5 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:text-muted-foreground"
     >
       {icon}
-      <span className="min-w-0 flex-1">
+      <span className="min-w-0 flex-1 pr-4">
         <span className="block text-[13px]">{label}</span>
         {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
       </span>
@@ -65,7 +65,7 @@ export default function RunButton({
       >
         <ChevronDown />
       </Button>
-      <Popover open={open} onClose={() => setOpen(false)} anchorRef={arrowRef} className="w-72 p-1">
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={arrowRef} className="w-max min-w-64 max-w-[min(28rem,calc(100vw-2rem))] p-1">
         <div role="menu">
           <MenuItem icon={<Play />} label="Run statement" hint="The selection, or the statement at the cursor" shortcut={`${MOD}↵`} onClick={pick(() => onRun("current"))} />
           <MenuItem icon={<Play />} label="Run all" hint="Every statement in the editor, in order" shortcut={`${SHIFT}${MOD}↵`} onClick={pick(() => onRun("all"))} />
