@@ -146,6 +146,7 @@ pub fn run() {
             commands::alter::apply_structure_change,
             commands::alter::preview_create_table,
             commands::alter::create_table,
+            commands::roles::get_roles,
             commands::editor::cancel_query,
             commands::editor::begin_transaction,
             commands::editor::commit_transaction,

@@ -14,3 +14,4 @@ pub mod ssh;
 pub mod objects;
 pub mod activity;
 pub mod alter;
+pub mod roles;
