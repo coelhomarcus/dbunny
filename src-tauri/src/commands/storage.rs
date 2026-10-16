@@ -320,9 +320,11 @@ impl SavedConnection {
                 password,
                 ssh,
                 tls,
-            }),
-        }
-        .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?;
+            })
+            .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?,
+            // Saved SQLite connections come with their own sensitive data in a later step
+            Engine::Sqlite => return Err("SQLite connections can't be saved yet".into()),
+        };
         let encrypted_data = encrypt(key, &json)?;
 
         Ok(Self {
@@ -350,9 +352,11 @@ impl SavedConnection {
             .ok_or_else(|| format!("This version doesn't support {} connections", self.engine))?;
         let json = decrypt(key, &self.encrypted_data)?;
         let sensitive = match engine {
-            Engine::Postgres => serde_json::from_str::<SensitiveData>(&json),
-        }
-        .map_err(|e| format!("Failed to deserialize sensitive data: {e}"))?;
+            Engine::Postgres => serde_json::from_str::<SensitiveData>(&json)
+                .map_err(|e| format!("Failed to deserialize sensitive data: {e}"))?,
+            // Saved SQLite connections come with their own sensitive data in a later step
+            Engine::Sqlite => return Err("SQLite connections can't be read yet".into()),
+        };
 
         Ok(SavedConnectionInfo {
             id: self.id.clone(),

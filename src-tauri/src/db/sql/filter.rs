@@ -27,12 +27,15 @@ pub fn quote_ident(name: &str) -> String {
     Dialect::Postgres.quote_ident(name)
 }
 
+/// The comma-separated values of an IN filter, trimmed, without empty ones.
+fn list_items(list: &str) -> Vec<&str> {
+    list.split(',').map(str::trim).filter(|item| !item.is_empty()).collect()
+}
+
 /// `{"a","b"}` for the comma-separated values of an IN filter.
 fn array_literal(list: &str) -> Option<String> {
-    let items: Vec<String> = list
-        .split(',')
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
+    let items: Vec<String> = list_items(list)
+        .into_iter()
         .map(|item| format!("\"{}\"", item.replace('\\', "\\\\").replace('"', "\\\"")))
         .collect();
     (!items.is_empty()).then(|| format!("{{{}}}", items.join(",")))
@@ -73,7 +76,12 @@ pub fn build_where_in(
             // Pattern matching only makes sense on text, so other types are compared as text
             op @ ("like" | "not like" | "ilike" | "not ilike") => {
                 params.push(TextParam(filter.value.clone()));
-                format!("{} {} {next}", dialect.as_text(&column), op.to_uppercase())
+                let keyword = match dialect {
+                    Dialect::Postgres => op.to_uppercase(),
+                    // SQLite's LIKE already ignores ASCII case, and it has no ILIKE
+                    Dialect::Sqlite => if op.starts_with("not") { "NOT LIKE" } else { "LIKE" }.to_string(),
+                };
+                format!("{} {keyword} {next}", dialect.as_text(&column))
             }
             op @ ("in" | "not in") => match dialect {
                 Dialect::Postgres => {
@@ -85,6 +93,22 @@ pub fn build_where_in(
                     } else {
                         format!("{column} <> ALL({next})")
                     }
+                }
+                // No arrays: one parameter per value
+                Dialect::Sqlite => {
+                    let items = list_items(&filter.value);
+                    if items.is_empty() {
+                        return Err(format!("Enter at least one value for {}", filter.column));
+                    }
+                    let placeholders: Vec<String> = items
+                        .into_iter()
+                        .map(|item| {
+                            params.push(TextParam(item.to_string()));
+                            dialect.param(params.len())
+                        })
+                        .collect();
+                    let keyword = if op == "in" { "IN" } else { "NOT IN" };
+                    format!("{column} {keyword} ({})", placeholders.join(", "))
                 }
             },
             "is null" => format!("{column} IS NULL"),
@@ -208,5 +232,26 @@ mod tests {
         let (sql, params) = build_where(&[filter("name", "=", "x'; DROP TABLE users; --")], false, &columns()).unwrap();
         assert!(!sql.contains("DROP"));
         assert_eq!(params[0].0, "x'; DROP TABLE users; --");
+    }
+
+    #[test]
+    fn sqlite_filters_use_numbered_question_marks_and_expand_in_lists() {
+        let cols: Vec<String> = vec!["id".into(), "name".into()];
+        let f = |column: &str, operator: &str, value: &str| TableFilter { column: column.into(), operator: operator.into(), value: value.into() };
+        let (sql, params) = build_where_in(Dialect::Sqlite, &[f("id", ">", "3"), f("name", "in", "a, b")], false, &cols).unwrap();
+        assert_eq!(sql, " WHERE (\"id\" > ?1 AND \"name\" IN (?2, ?3))");
+        assert_eq!(params, vec![TextParam("3".into()), TextParam("a".into()), TextParam("b".into())]);
+        let (sql, _) = build_where_in(Dialect::Sqlite, &[f("id", "not in", "1")], false, &cols).unwrap();
+        assert_eq!(sql, " WHERE (\"id\" NOT IN (?1))");
+        let err = build_where_in(Dialect::Sqlite, &[f("id", "in", " , ")], false, &cols).unwrap_err();
+        assert_eq!(err, "Enter at least one value for id");
+    }
+
+    #[test]
+    fn sqlite_pattern_filters_compare_as_text_with_like() {
+        let (sql, _) = build_where_in(Dialect::Sqlite, &[TableFilter { column: "name".into(), operator: "not ilike".into(), value: "%x%".into() }], false, &["name".into()]).unwrap();
+        assert_eq!(sql, " WHERE (CAST(\"name\" AS TEXT) NOT LIKE ?1)");
+        let (sql, _) = build_where_in(Dialect::Sqlite, &[filter("name", "ilike", "a%"), filter("name", "like", "b%"), filter("name", "not like", "c%")], false, &columns()).unwrap();
+        assert_eq!(sql, " WHERE (CAST(\"name\" AS TEXT) LIKE ?1 AND CAST(\"name\" AS TEXT) LIKE ?2 AND CAST(\"name\" AS TEXT) NOT LIKE ?3)");
     }
 }

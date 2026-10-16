@@ -25,6 +25,7 @@ pub use unsupported::unsupported;
 pub enum Engine {
     #[default]
     Postgres,
+    Sqlite,
 }
 
 impl Engine {
@@ -32,6 +33,7 @@ impl Engine {
     pub fn as_str(self) -> &'static str {
         match self {
             Engine::Postgres => "postgres",
+            Engine::Sqlite => "sqlite",
         }
     }
 
@@ -39,6 +41,7 @@ impl Engine {
     pub fn from_name(name: &str) -> Option<Engine> {
         match name {
             "postgres" => Some(Engine::Postgres),
+            "sqlite" => Some(Engine::Sqlite),
             _ => None,
         }
     }
@@ -47,6 +50,21 @@ impl Engine {
     pub fn label(self) -> &'static str {
         match self {
             Engine::Postgres => "PostgreSQL",
+            Engine::Sqlite => "SQLite",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sqlite_engine_has_its_names() {
+        assert_eq!(serde_json::to_value(Engine::Sqlite).unwrap(), "sqlite");
+        assert_eq!(serde_json::from_value::<Engine>("sqlite".into()).unwrap(), Engine::Sqlite);
+        assert_eq!(Engine::Sqlite.as_str(), "sqlite");
+        assert_eq!(Engine::from_name("sqlite"), Some(Engine::Sqlite));
+        assert_eq!(Engine::Sqlite.label(), "SQLite");
     }
 }

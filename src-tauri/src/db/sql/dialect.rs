@@ -3,13 +3,15 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dialect {
     Postgres,
+    #[allow(dead_code)] // Used once the SQLite driver lands
+    Sqlite,
 }
 
 impl Dialect {
     /// `"name"`, with embedded quotes doubled.
     pub fn quote_ident(self, name: &str) -> String {
         match self {
-            Dialect::Postgres => format!("\"{}\"", name.replace('"', "\"\"")),
+            Dialect::Postgres | Dialect::Sqlite => format!("\"{}\"", name.replace('"', "\"\"")),
         }
     }
 
@@ -17,6 +19,7 @@ impl Dialect {
     pub fn param(self, n: usize) -> String {
         match self {
             Dialect::Postgres => format!("${n}"),
+            Dialect::Sqlite => format!("?{n}"),
         }
     }
 
@@ -24,6 +27,7 @@ impl Dialect {
     pub fn as_text(self, expr: &str) -> String {
         match self {
             Dialect::Postgres => format!("{expr}::text"),
+            Dialect::Sqlite => format!("CAST({expr} AS TEXT)"),
         }
     }
 
@@ -32,6 +36,8 @@ impl Dialect {
         match self {
             // The protocol counts them in 16 bits
             Dialect::Postgres => 65_535,
+            // SQLITE_MAX_VARIABLE_NUMBER since 3.32
+            Dialect::Sqlite => 32_766,
         }
     }
 }

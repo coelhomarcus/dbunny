@@ -318,4 +318,27 @@ mod tests {
         let err = build_import_batches("t", &["name".into()], &[vec![None], vec![None, None]], &columns()).unwrap_err();
         assert!(err.contains("Row 2"), "{err}");
     }
+
+    fn json_map(pairs: &[(&str, JsonValue)]) -> serde_json::Map<String, JsonValue> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    }
+
+    #[test]
+    fn sqlite_updates_number_their_parameters() {
+        let key = json_map(&[("id", json!(1))]);
+        let set = json_map(&[("name", json!("x"))]);
+        let (sql, _) = build_update_in(Dialect::Sqlite, "\"main\".\"t\"", &key, &set, &["id".into(), "name".into()]).unwrap();
+        assert_eq!(sql, "UPDATE \"main\".\"t\" SET \"name\" = ?1 WHERE \"id\" = ?2");
+    }
+
+    #[test]
+    fn sqlite_imports_split_below_its_parameter_limit() {
+        let columns: Vec<String> = (0..10).map(|i| format!("c{i}")).collect();
+        let rows = vec![vec![Some("1".to_string()); 10]; 5_000];
+        let batches = build_import_batches_in(Dialect::Sqlite, "\"t\"", &columns, &rows, &columns).unwrap();
+        assert!(batches.iter().all(|(_, _, params)| params.len() <= 32_766));
+        assert_eq!(batches.iter().map(|(_, _, p)| p.len()).sum::<usize>(), 50_000);
+        assert!(batches[0].1.starts_with("INSERT INTO \"t\" (\"c0\", "), "{}", &batches[0].1[..40]);
+        assert!(batches[0].1.contains("VALUES (?1, ?2, "));
+    }
 }

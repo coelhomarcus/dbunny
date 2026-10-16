@@ -43,6 +43,9 @@ pub struct Capabilities {
 pub enum ExplainFormat {
     /// `EXPLAIN (FORMAT JSON)`.
     PostgresJson,
+    /// The rows of `EXPLAIN QUERY PLAN`.
+    #[allow(dead_code)] // Used once the SQLite driver lands
+    SqliteQueryPlan,
 }
 
 impl Capabilities {
@@ -78,6 +81,41 @@ impl Capabilities {
             ssl: true,
         }
     }
+
+    /// SQLite is a file: it has the console, transactions and schema editing, but no
+    /// server administration, schemas, databases or server-side objects.
+    #[allow(dead_code)] // Used once the SQLite driver lands
+    pub fn sqlite() -> Self {
+        Self {
+            console: true,
+            transactions: true,
+            schema_editing: true,
+            admin: false,
+            schemas: false,
+            databases: false,
+            materialized_views: false,
+            partitions: false,
+            functions: false,
+            sequences: false,
+            types: false,
+            extensions: false,
+            comments: false,
+            alter_column: false,
+            constraints: false,
+            trigger_toggle: false,
+            permissions: false,
+            index_methods: false,
+            concurrent_index: false,
+            cascade: false,
+            truncate_options: false,
+            duplicate_table: true,
+            explain_analyze: false,
+            explain_format: ExplainFormat::SqliteQueryPlan,
+            returning: true,
+            ssh: false,
+            ssl: false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -96,5 +134,21 @@ mod tests {
     fn postgres_has_every_piece() {
         let c = Capabilities::postgres();
         assert!(c.console && c.transactions && c.schema_editing && c.admin);
+    }
+
+    #[test]
+    fn sqlite_has_no_server_pieces() {
+        let c = Capabilities::sqlite();
+        assert!(c.console && c.transactions && c.schema_editing && !c.admin && !c.schemas && !c.permissions);
+        assert_eq!(c.explain_format, ExplainFormat::SqliteQueryPlan);
+    }
+
+    #[test]
+    fn sqlite_capabilities_serialize_in_camel_case() {
+        let json = serde_json::to_value(Capabilities::sqlite()).unwrap();
+        assert_eq!(json["explainFormat"], "sqliteQueryPlan");
+        assert_eq!(json["duplicateTable"], true);
+        assert_eq!(json["returning"], true);
+        assert_eq!(json["databases"], false);
     }
 }

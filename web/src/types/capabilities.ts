@@ -1,5 +1,5 @@
 /** How the plan from EXPLAIN is shaped, so it's drawn the right way. */
-export type ExplainFormat = "postgresJson";
+export type ExplainFormat = "postgresJson" | "sqliteQueryPlan";
 
 /** What the connected engine supports: screens and actions it lacks are hidden. */
 export interface Capabilities {

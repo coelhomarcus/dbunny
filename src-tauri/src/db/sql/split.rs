@@ -103,6 +103,8 @@ pub fn split_statements(sql: &str) -> Vec<Statement> {
 pub fn split_statements_in(dialect: Dialect, sql: &str) -> Vec<Statement> {
     match dialect {
         Dialect::Postgres => split_postgres(sql),
+        // Placeholder until the SQLite splitter lands (plan task 5 replaces this arm)
+        Dialect::Sqlite => split_postgres(sql),
     }
 }
 
