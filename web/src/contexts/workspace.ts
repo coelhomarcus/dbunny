@@ -10,12 +10,14 @@ export interface WorkspaceTab {
   subtitle: string | null;
   /** Colour of the saved connection, if any. */
   color: string | null;
+  /** Icon of the saved connection, if any. */
+  icon: string | null;
   sessionId: string | null;
   /** A session this tab opens with, instead of starting on the connect screen. */
   initialSession?: InitialSession;
 }
 
-export type TabSessionInfo = Pick<WorkspaceTab, "title" | "subtitle" | "color" | "sessionId">;
+export type TabSessionInfo = Pick<WorkspaceTab, "title" | "subtitle" | "color" | "icon" | "sessionId">;
 
 export interface WorkspaceValue {
   tabs: WorkspaceTab[];

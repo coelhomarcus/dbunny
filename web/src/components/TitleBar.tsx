@@ -5,6 +5,7 @@ import { Database, Minus, PanelLeft, Plus, X } from "lucide-react";
 import { isMac } from "../lib/platform";
 import { cn } from "../lib/cn";
 import { useWorkspace, type WorkspaceTab } from "../contexts/workspace";
+import ConnectionGlyph from "./ConnectionGlyph";
 import Button from "./ui/Button";
 import Tooltip from "./Tooltip";
 
@@ -116,7 +117,9 @@ function WindowTab({
           : "pb-0.5 mb-1 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground hover:transition-colors",
       )}
     >
-      {tab.color ? (
+      {tab.icon ? (
+        <ConnectionGlyph icon={tab.icon} size={13} className="shrink-0" style={tab.color ? { color: tab.color } : undefined} />
+      ) : tab.color ? (
         <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: tab.color }} />
       ) : (
         <Database size={13} className={cn("shrink-0", tab.sessionId ? "text-primary" : "opacity-60")} />

@@ -26,6 +26,8 @@ export interface SavedConnection {
   /** Every transaction starts read-only, so the server refuses writes. */
   readOnly: boolean;
   color: string;
+  /** An id from CONNECTION_ICONS; empty for the default. */
+  icon: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,4 +45,5 @@ export interface SavedConnectionInput {
   ssl: boolean;
   readOnly: boolean;
   color: string;
+  icon: string;
 }

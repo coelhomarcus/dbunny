@@ -15,7 +15,7 @@ function readSidebarOpen() {
 }
 
 function newTab(initialSession?: InitialSession): WorkspaceTab {
-  return { id: crypto.randomUUID(), title: null, subtitle: null, color: null, sessionId: null, initialSession };
+  return { id: crypto.randomUUID(), title: null, subtitle: null, color: null, icon: null, sessionId: null, initialSession };
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {

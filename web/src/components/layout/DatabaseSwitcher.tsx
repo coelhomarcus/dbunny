@@ -56,8 +56,11 @@ export default function DatabaseSwitcher() {
     setError(null);
     try {
       const response = await api.connectDatabase(name);
-      const color = tabs.find((t) => t.id === tabId)?.color ?? null;
-      openTab({ response, saved: { name: savedConnectionName ? `${savedConnectionName} / ${name}` : name, color } });
+      const tab = tabs.find((t) => t.id === tabId);
+      openTab({
+        response,
+        saved: { name: savedConnectionName ? `${savedConnectionName} / ${name}` : name, color: tab?.color ?? null, icon: tab?.icon ?? null },
+      });
       setOpen(false);
     } catch (err) {
       setError(typeof err === "string" ? err : "Couldn't open the database");

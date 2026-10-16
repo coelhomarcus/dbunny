@@ -6,6 +6,7 @@ import { useConnection } from "../contexts/useConnection";
 import { useWorkspace } from "../contexts/workspace";
 import { type ConnectionFields, parseConnectionUrl, buildConnectionUrl, tlsFieldsOf, tlsSettingsOf, isSocketHost } from "../lib/connectionUrl";
 import { isWindows } from "../lib/platform";
+import { CONNECTION_ICONS } from "../lib/connectionIcons";
 import { api } from "../lib/api";
 import { cn } from "../lib/cn";
 import type { SavedConnection, SshAuthMethod, SshConfig, SshHostKeyProblem, SslMode } from "@/types";
@@ -23,6 +24,7 @@ import Badge from "../components/ui/Badge";
 import Dialog from "../components/ui/Dialog";
 import Popover from "../components/ui/Popover";
 import ColorPicker from "../components/ui/ColorPicker";
+import Tooltip from "../components/Tooltip";
 
 const DEFAULT_COLOR = "#3b82f6";
 // Colour tags to tell environments apart (prod, staging, local...)
@@ -101,6 +103,8 @@ export default function ConnectPage() {
   const [fields, setFields] = useState<ConnectionFields>(EMPTY_FIELDS);
   const [connectionName, setConnectionName] = useState("");
   const [connectionColor, setConnectionColor] = useState(DEFAULT_COLOR);
+  // "" is the default icon
+  const [connectionIcon, setConnectionIcon] = useState("");
   const [showImport, setShowImport] = useState(false);
   const [importUrl, setImportUrl] = useState("");
   const [importError, setImportError] = useState(false);
@@ -210,6 +214,7 @@ export default function ConnectPage() {
     setSelectedId(conn.id);
     setConnectionName(conn.name);
     setConnectionColor(conn.color || DEFAULT_COLOR);
+    setConnectionIcon(conn.icon ?? "");
     setFields({
       host: conn.host,
       port: conn.port.toString(),
@@ -239,7 +244,7 @@ export default function ConnectPage() {
         ...tlsFieldsOf(conn.tls),
       });
       await withHostKeyCheck(async (trustHostKey) => {
-        await connect(url, { name: conn.name, color: conn.color }, { ssh: conn.ssh, trustHostKey });
+        await connect(url, { name: conn.name, color: conn.color, icon: conn.icon }, { ssh: conn.ssh, trustHostKey });
         navigate("/db/query");
       });
     } catch {
@@ -251,6 +256,7 @@ export default function ConnectPage() {
     setSelectedId(null);
     setConnectionName("");
     setConnectionColor(DEFAULT_COLOR);
+    setConnectionIcon("");
     setFields(EMPTY_FIELDS);
     setSshEnabled(false);
     setSsh(EMPTY_SSH);
@@ -276,6 +282,7 @@ export default function ConnectPage() {
           tls: tlsSettingsOf(fields),
           ssh: sshConfig(),
           color: connectionColor,
+          icon: connectionIcon,
         }),
         new Promise((r) => setTimeout(r, 400)),
       ]);
@@ -325,7 +332,7 @@ export default function ConnectPage() {
       await withHostKeyCheck(async (trustHostKey) => {
         await connect(
           buildConnectionUrl(fields),
-          savedName ? { name: savedName, color: connectionColor } : undefined,
+          savedName ? { name: savedName, color: connectionColor, icon: connectionIcon } : undefined,
           { ssh: sshConfig(), trustHostKey },
         );
         navigate("/db/query");
@@ -652,6 +659,41 @@ export default function ConnectPage() {
                     <Popover open={colorPickerOpen} onClose={() => setColorPickerOpen(false)} anchorRef={customColorRef} className="p-3">
                       <ColorPicker value={connectionColor} onChange={setConnectionColor} />
                     </Popover>
+                  </div>
+                </Field>
+                <Field label="Icon" hint="Shown in the sidebar and on the tab, in the colour above.">
+                  <div role="radiogroup" aria-label="Icon" className="flex flex-wrap gap-1">
+                    {CONNECTION_ICONS.map(({ id, label, Icon }, i) => {
+                      // The first one is the default, stored as ""
+                      const value = i === 0 ? "" : id;
+                      const selected = connectionIcon === value;
+                      return (
+                        <Tooltip key={id} label={label} side="top">
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-label={label}
+                            aria-checked={selected}
+                            onClick={() => setConnectionIcon(value)}
+                            className={cn(
+                              "flex size-8 items-center justify-center rounded-lg text-muted-foreground cursor-pointer outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+                              selected && "hover:bg-transparent",
+                            )}
+                            style={
+                              selected
+                                ? {
+                                    color: connectionColor,
+                                    backgroundColor: `color-mix(in srgb, ${connectionColor} 16%, transparent)`,
+                                    boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${connectionColor} 40%, transparent)`,
+                                  }
+                                : undefined
+                            }
+                          >
+                            <Icon size={15} />
+                          </button>
+                        </Tooltip>
+                      );
+                    })}
                   </div>
                 </Field>
               </Section>

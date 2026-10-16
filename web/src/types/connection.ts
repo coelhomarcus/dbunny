@@ -56,8 +56,15 @@ export interface DatabaseInfo {
   canConnect: boolean;
 }
 
+/** How a saved connection presents itself: its name, colour and icon. */
+export interface SavedTag {
+  name: string;
+  color?: string | null;
+  icon?: string | null;
+}
+
 /** A session opened elsewhere (e.g. another database) that a new tab starts with. */
 export interface InitialSession {
   response: ConnectResponse;
-  saved?: { name: string; color?: string | null };
+  saved?: SavedTag;
 }

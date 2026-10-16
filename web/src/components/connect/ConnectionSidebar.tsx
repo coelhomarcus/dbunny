@@ -1,5 +1,6 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { ArrowRight, Database, Plus, Search, Trash2 } from "lucide-react";
+import ConnectionGlyph from "../ConnectionGlyph";
 import type { SavedConnection } from "@/types";
 import { cn } from "../../lib/cn";
 import Button from "../ui/Button";
@@ -8,7 +9,7 @@ import Badge from "../ui/Badge";
 const DEFAULT_COLOR = "#3b82f6";
 
 /** Rounded tile tinted with the connection colour: the row's visual anchor. */
-function ConnectionIcon({ color }: { color: string }) {
+function ConnectionIcon({ color, icon }: { color: string; icon: string }) {
   const style: CSSProperties = {
     color,
     backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)`,
@@ -16,7 +17,7 @@ function ConnectionIcon({ color }: { color: string }) {
   };
   return (
     <span className="flex size-8 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4" style={style}>
-      <Database />
+      <ConnectionGlyph icon={icon} />
     </span>
   );
 }
@@ -68,7 +69,7 @@ function ConnectionRow({
         selected ? "bg-accent" : "hover:bg-muted",
       )}
     >
-      <ConnectionIcon color={conn.color || DEFAULT_COLOR} />
+      <ConnectionIcon color={conn.color || DEFAULT_COLOR} icon={conn.icon} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium leading-snug">{conn.name || "Unnamed"}</div>
         <div className="truncate text-xs leading-snug text-muted-foreground">{conn.database}</div>

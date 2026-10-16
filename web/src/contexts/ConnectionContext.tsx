@@ -1,11 +1,11 @@
 import { useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { api, createSessionApi } from "../lib/api";
-import type { ConnectionInfo, ConnectResponse, InitialSession, SshConfig } from "@/types";
+import type { ConnectionInfo, ConnectResponse, InitialSession, SavedTag, SshConfig } from "@/types";
 import { hostKeyProblem } from "../lib/sshHostKey";
 import type { TabSessionInfo } from "./workspace";
 import { ConnectionContext } from "./connection";
 
-const DISCONNECTED: TabSessionInfo = { title: null, subtitle: null, color: null, sessionId: null };
+const DISCONNECTED: TabSessionInfo = { title: null, subtitle: null, color: null, icon: null, sessionId: null };
 
 /** One per window tab: owns that tab's database session. */
 function infoOf(response: ConnectResponse): ConnectionInfo {
@@ -18,11 +18,12 @@ function infoOf(response: ConnectResponse): ConnectionInfo {
   };
 }
 
-function tabInfo(response: ConnectResponse, saved?: { name: string; color?: string | null }): TabSessionInfo {
+function tabInfo(response: ConnectResponse, saved?: SavedTag): TabSessionInfo {
   return {
     title: saved?.name || response.database,
     subtitle: `${response.host}:${response.port}/${response.database}`,
     color: saved?.color ?? null,
+    icon: saved?.icon ?? null,
     sessionId: response.sessionId,
   };
 }
@@ -55,7 +56,7 @@ export function ConnectionProvider({
   const connect = useCallback(
     async (
       url: string,
-      saved?: { name: string; color?: string | null },
+      saved?: SavedTag,
       tunnel?: { ssh?: SshConfig | null; trustHostKey?: string },
     ) => {
       setIsConnecting(true);
