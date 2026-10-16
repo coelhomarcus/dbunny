@@ -13,6 +13,7 @@ import type {
   TableDataResponse,
   SavedConnection,
   SavedConnectionInput,
+  TableStructure,
 } from "@/types";
 
 /** Calls that don't belong to a connection. */
@@ -66,6 +67,11 @@ export function createSessionApi(sessionId: string | null) {
 
     async getColumns(schema: string, table: string) {
       return invoke<ColumnInfo[]>("get_columns", { sessionId, schema, table });
+    },
+
+    /** Indexes, constraints, keys, triggers, sizes and DDL of a table or view. */
+    async getTableStructure(schema: string, table: string) {
+      return invoke<TableStructure>("get_table_structure", { sessionId, schema, table });
     },
 
     async getCompletionSchema() {
