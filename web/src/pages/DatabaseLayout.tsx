@@ -8,7 +8,7 @@ import Button from "../components/ui/Button";
 import StatusBar from "../components/layout/StatusBar";
 import { HeaderTitle } from "../components/layout/PageHeader";
 import { cn } from "../lib/cn";
-import { Terminal, Folder } from "lucide-react";
+import { Terminal, Folder, Activity } from "lucide-react";
 import type { SchemaInfo } from "@/types";
 
 export default function DatabaseLayout() {
@@ -72,6 +72,10 @@ export default function DatabaseLayout() {
                 <Terminal size={15} className="shrink-0" />
                 Query
               </NavLink>
+              <NavLink to="/db/activity" className={navItemClass}>
+                <Activity size={15} className="shrink-0" />
+                Activity
+              </NavLink>
             </nav>
 
             <div className="px-3 pt-1 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">
@@ -101,6 +105,20 @@ export default function DatabaseLayout() {
                 }
               >
                 <Terminal size={15} />
+              </NavLink>
+            </Tooltip>
+            <Tooltip label="Activity">
+              <NavLink
+                to="/db/activity"
+                aria-label="Activity"
+                className={({ isActive }) =>
+                  cn(
+                    "size-7 flex items-center justify-center rounded-lg transition-colors",
+                    isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )
+                }
+              >
+                <Activity size={15} />
               </NavLink>
             </Tooltip>
             {schemas.length > 0 && (

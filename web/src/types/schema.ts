@@ -105,3 +105,26 @@ export interface CompletionSchema {
   relations: CompletionRelation[];
   functions: FunctionInfo[];
 }
+
+/** One server session from pg_stat_activity. */
+export interface ServerSession {
+  pid: number;
+  user: string | null;
+  database: string | null;
+  application: string | null;
+  client: string | null;
+  state: string | null;
+  waitingFor: string | null;
+  querySeconds: number | null;
+  transactionSeconds: number | null;
+  query: string | null;
+  blockedBy: number[];
+  /** The connection DBunny used to read this list. */
+  isSelf: boolean;
+}
+
+export interface ServerActivity {
+  sessions: ServerSession[];
+  /** Without pg_read_all_stats, other roles' queries are hidden by the server. */
+  limitedView: boolean;
+}

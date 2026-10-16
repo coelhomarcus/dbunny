@@ -19,6 +19,7 @@ import type {
   SchemaObject,
   ExtensionInfo,
   ObjectDefinition,
+  ServerActivity,
 } from "@/types";
 
 /** Relation kinds as the explorer names them. */
@@ -106,6 +107,15 @@ export function createSessionApi(sessionId: string | null) {
     /** Copies a table's structure (and optionally its rows) under a new name. */
     async duplicateTable(schema: string, name: string, newName: string, withData: boolean) {
       return invoke<void>("duplicate_table", { sessionId, schema, name, newName, withData });
+    },
+
+    async getServerActivity(allDatabases: boolean) {
+      return invoke<ServerActivity>("get_server_activity", { sessionId, allDatabases });
+    },
+
+    /** Cancels a session's query, or with `terminate` ends the session. */
+    async signalBackend(pid: number, terminate: boolean) {
+      return invoke<boolean>("signal_backend", { sessionId, pid, terminate });
     },
 
     async getFunctions(schema: string) {

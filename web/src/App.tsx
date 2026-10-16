@@ -12,6 +12,7 @@ import TableView from "./pages/TableView";
 import TableStructure from "./pages/TableStructure";
 import FunctionView from "./pages/FunctionView";
 import ObjectView from "./pages/ObjectView";
+import ActivityView from "./pages/ActivityView";
 
 export default function App() {
   useEffect(() => {
@@ -73,6 +74,7 @@ function TabPane({
               <Route path="/db" element={<DatabaseLayout />}>
                 <Route index element={<Navigate to="query" replace />} />
                 <Route path="query" element={<QueryEditor />} />
+                <Route path="activity" element={<ActivityView />} />
                 <Route path=":schema/:table" element={<TableView />} />
                 <Route path=":schema/:table/structure" element={<TableStructure />} />
                 <Route path=":schema/function/:name" element={<FunctionView />} />
