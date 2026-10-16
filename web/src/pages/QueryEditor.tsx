@@ -5,8 +5,9 @@ import { tabState } from "../lib/tabState";
 import type { CompletionSchema, ExplainResult, QueryResult } from "@/types";
 import QueryResults from "../components/QueryResults";
 import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
-import { Plus, X, Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, GitCommitVertical, History, Bookmark, Check, MoreHorizontal, AlignLeft, Undo2 } from "lucide-react";
+import { Plus, X, Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, History, Bookmark, Check, MoreHorizontal, AlignLeft } from "lucide-react";
 import RunButton from "../components/query/RunButton";
+import TransactionButton from "../components/query/TransactionButton";
 import ResultsBar from "../components/query/ResultsBar";
 import Tooltip from "../components/Tooltip";
 import { createPortal } from "react-dom";
@@ -698,47 +699,13 @@ export default function QueryEditor() {
             <RunButton disabled={running || txBusy} onRun={runQuery} onExplain={explain} />
             {formatError && <span className="min-w-0 truncate text-xs text-destructive-foreground">Couldn't format: {formatError}</span>}
             <div className="ml-auto flex items-center gap-0.5">
-              {/* The same spot holds the transaction while it's open: its state, then how to end it */}
-              {inTransaction ? (
-                <div className="mr-1 flex h-7 items-center overflow-hidden rounded-lg border border-warning/40 bg-warning/8 text-[13px]">
-                  <span className="flex items-center gap-1.5 pl-2.5 pr-2 font-medium text-warning-foreground">
-                    <span className="relative flex size-1.5">
-                      <span className="absolute inline-flex size-full animate-ping rounded-full bg-warning opacity-60" />
-                      <span className="relative inline-flex size-1.5 rounded-full bg-warning" />
-                    </span>
-                    Transaction
-                  </span>
-                  <Tooltip label="Commit: keep every change made since it began" side="top">
-                    <button
-                      type="button"
-                      onClick={() => runTransaction("commit")}
-                      disabled={txBusy || running}
-                      className="flex h-7 items-center gap-1.5 border-l border-warning/30 px-2.5 font-medium text-success-foreground transition-colors cursor-pointer hover:bg-success/12 disabled:cursor-default disabled:opacity-50"
-                    >
-                      <Check size={14} />
-                      Commit
-                    </button>
-                  </Tooltip>
-                  <Tooltip label="Rollback: undo every change made since it began" side="top">
-                    <button
-                      type="button"
-                      onClick={() => runTransaction("rollback")}
-                      disabled={txBusy || running}
-                      className="flex h-7 items-center gap-1.5 border-l border-warning/30 px-2.5 text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-default disabled:opacity-50"
-                    >
-                      <Undo2 size={14} />
-                      Rollback
-                    </button>
-                  </Tooltip>
-                </div>
-              ) : (
-                <Tooltip label="Begin a transaction: runs join it until commit or rollback" side="top">
-                  <Button variant="ghost-muted" size="sm" onClick={() => runTransaction("begin")} disabled={txBusy || running}>
-                    <GitCommitVertical />
-                    Transaction
-                  </Button>
-                </Tooltip>
-              )}
+              <TransactionButton
+                open={inTransaction}
+                disabled={txBusy || running}
+                onBegin={() => runTransaction("begin")}
+                onCommit={() => runTransaction("commit")}
+                onRollback={() => runTransaction("rollback")}
+              />
               <Tooltip label={safeMode ? "Safe mode: asks before destructive statements" : "Safe mode off: destructive statements run directly"} side="top">
                 <Button
                   variant="ghost-muted"
