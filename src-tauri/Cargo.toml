@@ -7,6 +7,11 @@ edition = "2021"
 name = "dbunny_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
+# The executable carries the app's name, so it reads "DBunny" in dev too (menu bar, Dock, task manager)
+[[bin]]
+name = "DBunny"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
