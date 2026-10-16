@@ -9,6 +9,7 @@ import Button from "../ui/Button";
 import Input from "../ui/Input";
 import Checkbox from "../Checkbox";
 import { selectClass } from "../ui/styles";
+import { useCapabilities } from "../../hooks/useCapabilities";
 
 /** Which form to show; fields not chosen yet come from the column being changed. */
 export type ChangeDraft =
@@ -81,6 +82,7 @@ function ChangeForm({
   onClose: () => void;
 }) {
   const api = useApi();
+  const capabilities = useCapabilities();
   const column = "column" in draft ? draft.column : null;
   const [name, setName] = useState(column?.name ?? "");
   const [dataType, setDataType] = useState(draft.kind === "setType" ? draft.column.typeName : "text");
@@ -294,7 +296,7 @@ function ChangeForm({
             <Input value={defaultValue} onChange={(e) => setDefaultValue(e.target.value)} placeholder="none, e.g. 0, now(), 'text'" spellCheck={false} className="font-mono" autoFocus={draft.kind === "setDefault"} />
           </Field>
         )}
-        {(draft.kind === "addColumn" || draft.kind === "setComment") && (
+        {((draft.kind === "addColumn" && capabilities.comments) || draft.kind === "setComment") && (
           <Field label="Comment">
             <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="optional" autoFocus={draft.kind === "setComment"} />
           </Field>
@@ -309,18 +311,22 @@ function ChangeForm({
               <Field label="Name">
                 <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="automatic" spellCheck={false} className="font-mono" />
               </Field>
-              <Field label="Method">
-                <select value={method} onChange={(e) => setMethod(e.target.value)} className={cn(selectClass, "w-full")}>
-                  {INDEX_METHODS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              {capabilities.indexMethods && (
+                <Field label="Method">
+                  <select value={method} onChange={(e) => setMethod(e.target.value)} className={cn(selectClass, "w-full")}>
+                    {INDEX_METHODS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
             </div>
             <CheckOption checked={unique} onChange={setUnique} label="Unique" hint="Refuses rows that repeat these values" />
-            <CheckOption checked={concurrently} onChange={setConcurrently} label="Build concurrently" hint="Slower, but doesn't block writes to the table meanwhile" />
+            {capabilities.concurrentIndex && (
+              <CheckOption checked={concurrently} onChange={setConcurrently} label="Build concurrently" hint="Slower, but doesn't block writes to the table meanwhile" />
+            )}
           </>
         )}
         {(draft.kind === "addUnique" || draft.kind === "addForeignKey") && (
@@ -393,7 +399,7 @@ function ChangeForm({
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="automatic" spellCheck={false} className="font-mono" />
           </Field>
         )}
-        {destructive && (
+        {destructive && capabilities.cascade && (
           <CheckOption checked={cascade} onChange={setCascade} label="Cascade" hint="Also drops views and constraints that depend on it" />
         )}
 

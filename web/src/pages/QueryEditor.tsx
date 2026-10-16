@@ -26,6 +26,8 @@ import Button from "../components/ui/Button";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { isMac } from "../lib/platform";
 import { getSettings } from "../lib/settings";
+import { notAvailableFor } from "../lib/engines";
+import { useCapabilities } from "../hooks/useCapabilities";
 
 const MOD = isMac ? "⌘" : "Ctrl+";
 const SHIFT = isMac ? "⇧" : "Shift+";
@@ -139,11 +141,27 @@ function repairQueryEditorState(saved: QueryEditorState) {
   }
 }
 
+/** The SQL editor, when the engine has one; otherwise a note that it doesn't. */
 export default function QueryEditor() {
+  const { connectionInfo } = useConnection();
+  const capabilities = useCapabilities();
+  if (!capabilities.console) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
+        <p className="text-[13px] font-medium">SQL editor</p>
+        <p className="text-xs text-muted-foreground">{connectionInfo ? notAvailableFor(connectionInfo.engine) : ""}</p>
+      </div>
+    );
+  }
+  return <QueryEditorPanel />;
+}
+
+function QueryEditorPanel() {
   const { tabId, isActive } = useTab();
   const rightPanel = useRightPanel();
   const renderSidePanel = (panel: React.ReactNode) => (rightPanel ? createPortal(panel, rightPanel) : null);
   const { api, sessionId, connectionInfo } = useConnection();
+  const capabilities = useCapabilities();
   const historyStorageKey = connectionInfo ? historyKey(connectionInfo) : null;
   const [history, setHistory] = useState<HistoryEntry[]>(() => (historyStorageKey ? loadHistory(historyStorageKey) : []));
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -698,16 +716,18 @@ export default function QueryEditor() {
 
           {/* Actions: run on the left, the rest quieter on the right */}
           <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-2.5 select-none">
-            <RunButton disabled={running} onRun={runQuery} onExplain={explain} />
+            <RunButton disabled={running} explainAnalyze={capabilities.explainAnalyze} onRun={runQuery} onExplain={explain} />
             {formatError && <span className="min-w-0 truncate text-xs text-destructive-foreground">Couldn't format: {formatError}</span>}
             <div className="ml-auto flex items-center gap-0.5">
-              <TransactionButton
-                open={inTransaction}
-                disabled={txBusy || running}
-                onBegin={() => runTransaction("begin")}
-                onCommit={() => runTransaction("commit")}
-                onRollback={() => runTransaction("rollback")}
-              />
+              {capabilities.transactions && (
+                <TransactionButton
+                  open={inTransaction}
+                  disabled={txBusy || running}
+                  onBegin={() => runTransaction("begin")}
+                  onCommit={() => runTransaction("commit")}
+                  onRollback={() => runTransaction("rollback")}
+                />
+              )}
               <Tooltip label={safeMode ? "Safe mode: asks before destructive statements" : "Safe mode off: destructive statements run directly"} side="top">
                 <Button
                   variant="ghost-muted"

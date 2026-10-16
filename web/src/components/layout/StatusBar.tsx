@@ -3,6 +3,7 @@ import Tooltip from "../Tooltip";
 import { showUpdate, useUpdate } from "../../lib/updater";
 import type { ConnectionInfo } from "@/types";
 import { mask } from "../../lib/connectionSummary";
+import { engineLabel } from "../../lib/engines";
 
 /** Brings back the update notice after "Later": an update is waiting or installed. */
 function UpdateIndicator() {
@@ -62,7 +63,11 @@ export default function StatusBar({
       </Tooltip>
       <div className="ml-auto flex items-center gap-1">
         <UpdateIndicator />
-        {connectionInfo?.serverVersion && <span className="mr-1.5">PostgreSQL {connectionInfo.serverVersion.split(" ")[0]}</span>}
+        {connectionInfo?.serverVersion && (
+          <span className="mr-1.5">
+            {engineLabel(connectionInfo.engine)} {connectionInfo.serverVersion.split(" ")[0]}
+          </span>
+        )}
         <button
           onClick={onDisconnect}
           className="flex h-5 items-center gap-1 rounded-md px-1.5 hover:bg-destructive/10 hover:text-destructive-foreground transition-colors cursor-pointer"

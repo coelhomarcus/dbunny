@@ -7,6 +7,7 @@ import { formatBytes } from "../../lib/format";
 import { cn } from "../../lib/cn";
 import Popover from "../ui/Popover";
 import ContainerDialog, { type ContainerOptions, type ContainerRequest } from "../schema/ContainerDialog";
+import { useCapabilities } from "../../hooks/useCapabilities";
 
 /**
  * The connection name at the top of the sidebar, with the database in use under it; opens
@@ -24,6 +25,7 @@ export default function DatabaseSwitcher() {
   const [error, setError] = useState<string | null>(null);
   const [container, setContainer] = useState<ContainerRequest | null>(null);
   const readOnly = connectionInfo?.readOnly ?? false;
+  const capabilities = useCapabilities();
 
   function loadDatabases() {
     setError(null);
@@ -74,6 +76,9 @@ export default function DatabaseSwitcher() {
   const connectionName = savedConnectionName?.endsWith(` / ${database}`)
     ? savedConnectionName.slice(0, -(database.length + 3))
     : savedConnectionName;
+
+  // An engine with a single database has nothing to switch to
+  if (!capabilities.databases) return null;
 
   return (
     <>

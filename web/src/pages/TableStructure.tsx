@@ -18,6 +18,8 @@ import { foreignKeyTarget, shortType } from "../lib/columnMeta";
 import { cn } from "../lib/cn";
 import { formatBytes } from "../lib/format";
 import { writeClipboardText } from "../lib/clipboard";
+import { notAvailableFor } from "../lib/engines";
+import { useCapabilities } from "../hooks/useCapabilities";
 
 type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "permissions" | "ddl";
 
@@ -72,9 +74,36 @@ function SectionBar({ children }: { children: ReactNode }) {
   return <div className="flex items-center justify-end gap-2 border-b border-border px-3 py-1.5">{children}</div>;
 }
 
-function ColumnsSection({ columns, onColumnMenu }: { columns: ColumnInfo[]; onColumnMenu?: (column: ColumnInfo, x: number, y: number) => void }) {
+/** A section's "add" action; disabled, saying why, when the engine can't do it. */
+function SectionAction({ unavailable, onClick, children }: { unavailable?: string; onClick: () => void; children: ReactNode }) {
+  if (!unavailable) {
+    return (
+      <Button variant="ghost-muted" size="xs" onClick={onClick}>
+        {children}
+      </Button>
+    );
+  }
   return (
-    <Grid headers={["#", "Column", "Type", "Nullable", "Default", "Comment", ...(onColumnMenu ? [""] : [])]} empty="No columns">
+    <Tooltip label={unavailable} side="bottom">
+      <Button variant="ghost-muted" size="xs" disabled>
+        {children}
+      </Button>
+    </Tooltip>
+  );
+}
+
+function ColumnsSection({
+  columns,
+  comments,
+  onColumnMenu,
+}: {
+  columns: ColumnInfo[];
+  /** The engine keeps comments on columns. */
+  comments: boolean;
+  onColumnMenu?: (column: ColumnInfo, x: number, y: number) => void;
+}) {
+  return (
+    <Grid headers={["#", "Column", "Type", "Nullable", "Default", ...(comments ? ["Comment"] : []), ...(onColumnMenu ? [""] : [])]} empty="No columns">
       {columns.map((col) => {
         const target = foreignKeyTarget(col);
         return (
@@ -115,7 +144,7 @@ function ColumnsSection({ columns, onColumnMenu }: { columns: ColumnInfo[]; onCo
                 <span className="text-muted-foreground/60">—</span>
               )}
             </td>
-            <td className={cn(td, "max-w-80 text-muted-foreground")}>{col.comment ?? ""}</td>
+            {comments && <td className={cn(td, "max-w-80 text-muted-foreground")}>{col.comment ?? ""}</td>}
             {onColumnMenu && (
               <td className={cn(td, "w-px py-1.5")}>
                 <Button
@@ -189,12 +218,12 @@ const CONSTRAINT_BADGE: Record<string, "warning" | "info" | "success" | "neutral
   unique: "success",
 };
 
-/** A row's drop button, in the last column of an editable section. */
-function DropCell({ label, onClick }: { label: string; onClick: () => void }) {
+/** A row's drop button, in the last column of an editable section; disabled, saying why, when the engine can't do it. */
+function DropCell({ label, unavailable, onClick }: { label: string; unavailable?: string; onClick: () => void }) {
   return (
     <td className={cn(td, "w-px py-1.5")}>
-      <Tooltip label={label} side="left">
-        <Button variant="destructive-ghost" size="icon-xs" aria-label={label} onClick={onClick}>
+      <Tooltip label={unavailable || label} side="left">
+        <Button variant="destructive-ghost" size="icon-xs" aria-label={label} onClick={onClick} disabled={!!unavailable}>
           <Trash2 />
         </Button>
       </Tooltip>
@@ -202,7 +231,15 @@ function DropCell({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function ConstraintsSection({ structure, onDrop }: { structure: Structure; onDrop?: (constraint: string) => void }) {
+function ConstraintsSection({
+  structure,
+  unavailable,
+  onDrop,
+}: {
+  structure: Structure;
+  unavailable?: string;
+  onDrop?: (constraint: string) => void;
+}) {
   return (
     <Grid headers={["Constraint", "Kind", "Definition", ...(onDrop ? [""] : [])]} empty="No constraints">
       {structure.constraints.map((c) => (
@@ -216,14 +253,14 @@ function ConstraintsSection({ structure, onDrop }: { structure: Structure; onDro
           <td className={td}>
             <Mono className="text-muted-foreground">{c.definition}</Mono>
           </td>
-          {onDrop && <DropCell label={`Drop constraint ${c.name}`} onClick={() => onDrop(c.name)} />}
+          {onDrop && <DropCell label={`Drop constraint ${c.name}`} unavailable={unavailable} onClick={() => onDrop(c.name)} />}
         </tr>
       ))}
     </Grid>
   );
 }
 
-function KeysSection({ structure, onDrop }: { structure: Structure; onDrop?: (constraint: string) => void }) {
+function KeysSection({ structure, unavailable, onDrop }: { structure: Structure; unavailable?: string; onDrop?: (constraint: string) => void }) {
   return (
     <div className="pb-6">
       <Grid headers={["Foreign key", "Columns", "References", "On update", "On delete", ...(onDrop ? [""] : [])]} empty="This table has no foreign keys">
@@ -244,7 +281,7 @@ function KeysSection({ structure, onDrop }: { structure: Structure; onDrop?: (co
             <td className={cn(td, "text-xs", fk.onDelete === "CASCADE" ? "text-destructive-foreground" : "text-muted-foreground")}>
               {fk.onDelete}
             </td>
-            {onDrop && <DropCell label={`Drop foreign key ${fk.name}`} onClick={() => onDrop(fk.name)} />}
+            {onDrop && <DropCell label={`Drop foreign key ${fk.name}`} unavailable={unavailable} onClick={() => onDrop(fk.name)} />}
           </tr>
         ))}
       </Grid>
@@ -271,7 +308,16 @@ function KeysSection({ structure, onDrop }: { structure: Structure; onDrop?: (co
   );
 }
 
-function TriggersSection({ structure, onToggle }: { structure: Structure; onToggle?: (trigger: string, enabled: boolean) => void }) {
+function TriggersSection({
+  structure,
+  unavailable,
+  onToggle,
+}: {
+  structure: Structure;
+  /** Why the toggle is disabled, when the engine can't switch triggers. */
+  unavailable?: string;
+  onToggle?: (trigger: string, enabled: boolean) => void;
+}) {
   return (
     <Grid headers={["Trigger", "When", "For each", "Function", "Status"]} empty="No triggers">
       {structure.triggers.map((t) => (
@@ -287,7 +333,13 @@ function TriggersSection({ structure, onToggle }: { structure: Structure; onTogg
             <Mono className="text-muted-foreground">{t.function}()</Mono>
           </td>
           <td className={td}>
-            {onToggle ? (
+            {onToggle && unavailable ? (
+              <Tooltip label={unavailable} side="left">
+                <button type="button" disabled className="rounded-md disabled:pointer-events-none disabled:opacity-55">
+                  <Badge variant={t.enabled ? "success" : "neutral"}>{t.enabled ? "enabled" : "disabled"}</Badge>
+                </button>
+              </Tooltip>
+            ) : onToggle ? (
               <Tooltip label={t.enabled ? "Disable: it stops firing until enabled again" : "Enable: it fires again"} side="left">
                 <button type="button" onClick={() => onToggle(t.name, !t.enabled)} className="cursor-pointer rounded-md transition-opacity hover:opacity-80">
                   <Badge variant={t.enabled ? "success" : "neutral"}>{t.enabled ? "enabled" : "disabled"}</Badge>
@@ -342,7 +394,11 @@ export default function TableStructure() {
   const key = `${schema}.${table}`;
   const [result, setResult] = useState<{ key: string; structure?: Structure; error?: string } | null>(null);
   const [section, setSection] = useState<Section>("columns");
-  const readOnly = useConnection().connectionInfo?.readOnly ?? false;
+  const { connectionInfo } = useConnection();
+  const readOnly = connectionInfo?.readOnly ?? false;
+  const capabilities = useCapabilities();
+  /** Tooltip of the actions the engine can't do. */
+  const unavailable = connectionInfo ? notAvailableFor(connectionInfo.engine) : "";
   // Bumped after a change to load the structure again
   const [version, setVersion] = useState(0);
   const [draft, setDraft] = useState<ChangeDraft | null>(null);
@@ -382,15 +438,21 @@ export default function TableStructure() {
   function columnMenuItems(column: ColumnInfo): ContextMenuItem[] {
     return [
       { label: "Rename…", icon: <PenLine />, onSelect: () => setDraft({ kind: "renameColumn", column }) },
-      { label: "Change type…", icon: <Type />, onSelect: () => setDraft({ kind: "setType", column }) },
-      {
-        label: column.isNullable ? "Make required (NOT NULL)" : "Allow NULL",
-        icon: column.isNullable ? <Asterisk /> : <Ban />,
-        disabled: column.isPrimaryKey,
-        onSelect: () => applyNow({ kind: "setNullable", name: column.name, nullable: !column.isNullable }),
-      },
-      { label: "Default…", icon: <Equal />, disabled: column.isGenerated, onSelect: () => setDraft({ kind: "setDefault", column }) },
-      { label: "Comment…", icon: <MessageSquare />, onSelect: () => setDraft({ kind: "setComment", column }) },
+      ...(capabilities.alterColumn
+        ? ([
+            { label: "Change type…", icon: <Type />, onSelect: () => setDraft({ kind: "setType", column }) },
+            {
+              label: column.isNullable ? "Make required (NOT NULL)" : "Allow NULL",
+              icon: column.isNullable ? <Asterisk /> : <Ban />,
+              disabled: column.isPrimaryKey,
+              onSelect: () => applyNow({ kind: "setNullable", name: column.name, nullable: !column.isNullable }),
+            },
+            { label: "Default…", icon: <Equal />, disabled: column.isGenerated, onSelect: () => setDraft({ kind: "setDefault", column }) },
+          ] as ContextMenuItem[])
+        : []),
+      ...(capabilities.comments
+        ? ([{ label: "Comment…", icon: <MessageSquare />, onSelect: () => setDraft({ kind: "setComment", column }) }] as ContextMenuItem[])
+        : []),
       "separator",
       { label: "Drop column…", icon: <Trash2 />, destructive: true, onSelect: () => setDraft({ kind: "dropColumn", column }) },
     ];
@@ -407,7 +469,7 @@ export default function TableStructure() {
               { value: "constraints", label: <>Constraints {count(structure.constraints.length)}</> },
               { value: "keys", label: <>Foreign keys {count(structure.foreignKeys.length + structure.referencedBy.length)}</> },
               { value: "triggers", label: <>Triggers {count(structure.triggers.length)}</> },
-              { value: "permissions", label: <>Permissions {count(structure.privileges.length)}</> },
+              ...(capabilities.permissions ? [{ value: "permissions", label: <>Permissions {count(structure.privileges.length)}</> }] : []),
             ] as { value: Section; label: ReactNode }[])),
         { value: "ddl", label: "DDL" },
       ]
@@ -485,6 +547,7 @@ export default function TableStructure() {
                 )}
                 <ColumnsSection
                   columns={structure.columns}
+                  comments={capabilities.comments}
                   onColumnMenu={canEdit ? (column, x, y) => setColumnMenu({ column, x, y }) : undefined}
                 />
               </>
@@ -505,31 +568,43 @@ export default function TableStructure() {
               <>
                 {canEdit && (
                   <SectionBar>
-                    <Button variant="ghost-muted" size="xs" onClick={() => setDraft({ kind: "addUnique" })}>
+                    <SectionAction unavailable={capabilities.constraints ? undefined : unavailable} onClick={() => setDraft({ kind: "addUnique" })}>
                       <Plus /> Add unique
-                    </Button>
-                    <Button variant="ghost-muted" size="xs" onClick={() => setDraft({ kind: "addCheck" })}>
+                    </SectionAction>
+                    <SectionAction unavailable={capabilities.constraints ? undefined : unavailable} onClick={() => setDraft({ kind: "addCheck" })}>
                       <Plus /> Add check
-                    </Button>
+                    </SectionAction>
                   </SectionBar>
                 )}
-                <ConstraintsSection structure={structure} onDrop={canEdit ? (constraint) => setDraft({ kind: "dropConstraint", constraint }) : undefined} />
+                <ConstraintsSection
+                  structure={structure}
+                  unavailable={capabilities.constraints ? undefined : unavailable}
+                  onDrop={canEdit ? (constraint) => setDraft({ kind: "dropConstraint", constraint }) : undefined}
+                />
               </>
             )}
             {shown === "keys" && (
               <>
                 {canEdit && (
                   <SectionBar>
-                    <Button variant="ghost-muted" size="xs" onClick={() => setDraft({ kind: "addForeignKey" })}>
+                    <SectionAction unavailable={capabilities.constraints ? undefined : unavailable} onClick={() => setDraft({ kind: "addForeignKey" })}>
                       <Plus /> Add foreign key
-                    </Button>
+                    </SectionAction>
                   </SectionBar>
                 )}
-                <KeysSection structure={structure} onDrop={canEdit ? (constraint) => setDraft({ kind: "dropConstraint", constraint }) : undefined} />
+                <KeysSection
+                  structure={structure}
+                  unavailable={capabilities.constraints ? undefined : unavailable}
+                  onDrop={canEdit ? (constraint) => setDraft({ kind: "dropConstraint", constraint }) : undefined}
+                />
               </>
             )}
             {shown === "triggers" && (
-              <TriggersSection structure={structure} onToggle={canEdit ? (name, enabled) => applyNow({ kind: "setTriggerEnabled", name, enabled }) : undefined} />
+              <TriggersSection
+                structure={structure}
+                unavailable={capabilities.triggerToggle ? undefined : unavailable}
+                onToggle={canEdit ? (name, enabled) => applyNow({ kind: "setTriggerEnabled", name, enabled }) : undefined}
+              />
             )}
             {shown === "permissions" && (
               <PermissionsEditor
