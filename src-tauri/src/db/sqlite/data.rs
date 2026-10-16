@@ -185,7 +185,7 @@ impl Data for SqliteDriver {
 
 impl SqliteDriver {
     /// Runs `f` on the tables' connection, putting a failure in the app's words.
-    async fn on_tables<T: Send + 'static>(
+    pub(super) async fn on_tables<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> Result<T, Failure> + Send + 'static,
     ) -> Result<T, String> {
@@ -198,7 +198,7 @@ impl SqliteDriver {
     /// The message of a failure. A busy database is explained by who holds it, which is
     /// the editor when its connection has a transaction open. That is read without
     /// waiting for the editor, which may be running a long statement.
-    fn describe(&self, failure: Failure) -> String {
+    pub(super) fn describe(&self, failure: Failure) -> String {
         let reason = match failure.cause {
             Cause::Message(message) => message,
             Cause::Sqlite(e) => map_statement_error(&e, self.editor().in_transaction()),
@@ -208,7 +208,7 @@ impl SqliteDriver {
 }
 
 /// Why a call failed, before it's put in words.
-struct Failure {
+pub(super) struct Failure {
     /// What comes before the reason, such as "Nothing was saved. Row 2 of 3: ".
     context: String,
     cause: Cause,
@@ -220,12 +220,12 @@ enum Cause {
 }
 
 impl Failure {
-    fn message(message: String) -> Failure {
+    pub(super) fn message(message: String) -> Failure {
         Failure { context: String::new(), cause: Cause::Message(message) }
     }
 
     /// The same failure with `context` before what it already says.
-    fn after(mut self, context: &str) -> Failure {
+    pub(super) fn after(mut self, context: &str) -> Failure {
         self.context.insert_str(0, context);
         self
     }
@@ -296,7 +296,7 @@ impl OperandBinder for TableShape {
 }
 
 /// `"schema"."table"`.
-fn relation(schema: &str, table: &str) -> String {
+pub(super) fn relation(schema: &str, table: &str) -> String {
     format!("{}.{}", SQLITE.quote_ident(schema), SQLITE.quote_ident(table))
 }
 
@@ -306,7 +306,7 @@ fn count(c: &Connection, relation: &str, where_sql: &str, params: &[Value]) -> r
 
 /// Runs `f` in one `BEGIN IMMEDIATE` transaction: committed when it succeeds, rolled back
 /// when it or the commit fails. `commit_context` comes before the reason a commit failed.
-fn in_transaction<T>(
+pub(super) fn in_transaction<T>(
     c: &Connection,
     commit_context: &str,
     f: impl FnOnce(&Connection) -> Result<T, Failure>,

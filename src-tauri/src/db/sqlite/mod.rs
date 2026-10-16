@@ -5,6 +5,7 @@ mod catalog;
 mod conn;
 mod console;
 mod data;
+mod schema_edit;
 pub mod errors;
 pub(crate) mod split;
 #[cfg(test)]
@@ -20,7 +21,7 @@ use async_trait::async_trait;
 
 pub(crate) use conn::SqliteConn;
 
-use super::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, Transactions};
+use super::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, SchemaEditor, Transactions};
 
 /// How a file is opened.
 pub struct OpenOptions {
@@ -117,6 +118,10 @@ impl Driver for SqliteDriver {
     fn transactions(&self) -> Option<&dyn Transactions> {
         Some(self)
     }
+
+    fn schema_editor(&self) -> Option<&dyn SchemaEditor> {
+        Some(self)
+    }
 }
 
 #[cfg(test)]
@@ -132,7 +137,7 @@ mod tests {
         assert_eq!(d.capabilities(), &Capabilities::sqlite());
         assert_eq!(d.data().count_rows("main", "t").await, Ok(0));
         assert!(d.console().is_some() && d.transactions().is_some());
-        assert!(d.schema_editor().is_none() && d.admin().is_none());
+        assert!(d.schema_editor().is_some() && d.admin().is_none());
     }
 
     /// Removes a file when it goes out of scope (also if an assertion fails first).

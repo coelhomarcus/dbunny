@@ -547,7 +547,7 @@ fn completion_schema(c: &Connection) -> rusqlite::Result<CompletionSchema> {
 // partial index's WHERE clause and the text of an index's expressions.
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Token<'a> {
+pub(super) enum Token<'a> {
     Word(&'a str),
     /// A string or a quoted name.
     Quoted,
@@ -555,7 +555,7 @@ enum Token<'a> {
 }
 
 /// The tokens of `sql` with their byte ranges, leaving out spaces and comments.
-fn tokens(sql: &str) -> Vec<(Token<'_>, usize, usize)> {
+pub(super) fn tokens(sql: &str) -> Vec<(Token<'_>, usize, usize)> {
     let b = sql.as_bytes();
     let word_byte = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || c >= 0x80;
     let mut out = Vec::new();
@@ -618,7 +618,7 @@ fn tokens(sql: &str) -> Vec<(Token<'_>, usize, usize)> {
     out
 }
 
-fn is_word(token: Option<&(Token<'_>, usize, usize)>, word: &str) -> bool {
+pub(super) fn is_word(token: Option<&(Token<'_>, usize, usize)>, word: &str) -> bool {
     matches!(token, Some((Token::Word(w), ..)) if w.eq_ignore_ascii_case(word))
 }
 
