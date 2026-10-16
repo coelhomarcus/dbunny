@@ -62,7 +62,7 @@ impl SavedConnectionInput {
                 ssl: self.ssl,
             }),
             Engine::Sqlite => {
-                if self.path.is_empty() {
+                if self.path.trim().is_empty() {
                     return Err("path is required".into());
                 }
                 Ok(ConnectionDetails::Sqlite { path: self.path })
@@ -168,6 +168,10 @@ mod tests {
     fn a_sqlite_connection_without_a_path_isnt_saved() {
         let mut connections = Vec::new();
         let err = upsert(&mut connections, &KEY, input("sqlite", None, ""), "now".into()).err().unwrap();
+        assert_eq!(err, "path is required");
+        assert!(connections.is_empty());
+        // Blank space isn't a path either
+        let err = upsert(&mut connections, &KEY, input("sqlite", None, "  \t "), "now".into()).err().unwrap();
         assert_eq!(err, "path is required");
         assert!(connections.is_empty());
 
