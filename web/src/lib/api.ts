@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ConnectResponse,
+  SshConfig,
   SchemaInfo,
   TableInfo,
   FunctionInfo,
@@ -19,8 +20,9 @@ import type {
 
 /** Calls that don't belong to a connection. */
 export const api = {
-  async connect(connectionUrl: string) {
-    return invoke<ConnectResponse>("connect", { connectionUrl });
+  /** Connects, optionally through SSH. `trustHostKey` is an SSH host key fingerprint the user confirmed. */
+  async connect(connectionUrl: string, ssh?: SshConfig | null, trustHostKey?: string) {
+    return invoke<ConnectResponse>("connect", { connectionUrl, ssh: ssh ?? null, trustHostKey: trustHostKey ?? null });
   },
 
   async disconnect(sessionId: string) {

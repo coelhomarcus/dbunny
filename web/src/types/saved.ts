@@ -1,3 +1,5 @@
+import type { SshConfig } from "./connection";
+
 export interface SavedConnection {
   id: string;
   name: string;
@@ -6,6 +8,8 @@ export interface SavedConnection {
   database: string;
   user: string;
   password: string;
+  /** Connect through this SSH server; null for a direct connection. */
+  ssh: SshConfig | null;
   ssl: boolean;
   /** Every transaction starts read-only, so the server refuses writes. */
   readOnly: boolean;
@@ -22,6 +26,7 @@ export interface SavedConnectionInput {
   database: string;
   user: string;
   password: string;
+  ssh: SshConfig | null;
   ssl: boolean;
   readOnly: boolean;
   color: string;

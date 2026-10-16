@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { getVersion } from "@tauri-apps/api/app";
-import { ArrowRight, Check, Database, Eye, EyeOff, Link, Loader, PlugZap, TriangleAlert, X } from "lucide-react";
+import { ArrowRight, Check, Database, Eye, EyeOff, FolderOpen, KeyRound, Link, Loader, PlugZap, ShieldAlert, TriangleAlert, X } from "lucide-react";
 import { useConnection } from "../contexts/useConnection";
 import { useWorkspace } from "../contexts/workspace";
 import { type ConnectionFields, parseConnectionUrl, buildConnectionUrl } from "../lib/connectionUrl";
 import { api } from "../lib/api";
 import { cn } from "../lib/cn";
-import type { SavedConnection } from "@/types";
+import type { SavedConnection, SshAuthMethod, SshConfig, SshHostKeyProblem } from "@/types";
+import { hostKeyProblem } from "../lib/sshHostKey";
+import SegmentedTabs from "../components/ui/SegmentedTabs";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 import ConnectionSidebar from "../components/connect/ConnectionSidebar";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { IdleStatusBar } from "../components/layout/StatusBar";
@@ -23,6 +26,14 @@ import ColorPicker from "../components/ui/ColorPicker";
 const DEFAULT_COLOR = "#3b82f6";
 // Colour tags to tell environments apart (prod, staging, local...)
 const COLOR_PRESETS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899"];
+
+/** The SSH form keeps the port as typed; it becomes a number when used. */
+type SshFields = Omit<SshConfig, "port"> & { port: string };
+const EMPTY_SSH: SshFields = { host: "", port: "", user: "", authMethod: "password", password: "", keyPath: "", passphrase: "" };
+
+function toSshFields(ssh: SshConfig): SshFields {
+  return { ...ssh, port: ssh.port && ssh.port !== 22 ? String(ssh.port) : "" };
+}
 
 const EMPTY_FIELDS: ConnectionFields = { host: "", port: "", database: "", user: "", password: "", ssl: false, readOnly: false };
 
@@ -61,6 +72,17 @@ function Section({
   );
 }
 
+function HostKeyFingerprint({ problem }: { problem: SshHostKeyProblem }) {
+  return (
+    <div className="rounded-lg border border-border bg-muted px-3 py-2.5">
+      <div className="text-xs text-muted-foreground">
+        {problem.host}:{problem.port} · {problem.algorithm}
+      </div>
+      <code className="mt-1 block break-all font-mono text-xs">{problem.fingerprint}</code>
+    </div>
+  );
+}
+
 export default function ConnectPage() {
   const [fields, setFields] = useState<ConnectionFields>(EMPTY_FIELDS);
   const [connectionName, setConnectionName] = useState("");
@@ -76,6 +98,11 @@ export default function ConnectPage() {
   const [version, setVersion] = useState<string | null>(null);
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const customColorRef = useRef<HTMLButtonElement>(null);
+  const [sshEnabled, setSshEnabled] = useState(false);
+  const [ssh, setSsh] = useState<SshFields>(EMPTY_SSH);
+  const [showSshSecret, setShowSshSecret] = useState(false);
+  // An SSH server key waiting for the user's decision, and how to retry once trusted
+  const [hostKeyPrompt, setHostKeyPrompt] = useState<{ problem: SshHostKeyProblem; retry: () => void } | null>(null);
 
   const { connect, isConnecting, error } = useConnection();
   const { sidebarOpen } = useWorkspace();
@@ -92,6 +119,43 @@ export default function ConnectPage() {
     } catch {
       setSavedConnections([]);
     }
+  }
+
+  function updateSsh<K extends keyof SshFields>(key: K, value: SshFields[K]) {
+    setSsh((prev) => ({ ...prev, [key]: value }));
+    setTest({ status: "idle" });
+  }
+
+  /** The SSH settings to connect with, or null for a direct connection. */
+  function sshConfig(): SshConfig | null {
+    if (!sshEnabled) return null;
+    return { ...ssh, host: ssh.host.trim(), user: ssh.user.trim(), port: parseInt(ssh.port || "22", 10) };
+  }
+
+  /**
+   * Runs a connection attempt; if the SSH server's key needs the user's say, asks, and
+   * runs it again with the fingerprint they accepted.
+   */
+  async function withHostKeyCheck(attempt: (trustHostKey?: string) => Promise<void>) {
+    try {
+      await attempt();
+    } catch (err) {
+      const problem = hostKeyProblem(err);
+      if (!problem) throw err;
+      setHostKeyPrompt({
+        problem,
+        retry: () => {
+          setHostKeyPrompt(null);
+          attempt(problem.fingerprint).catch(() => {});
+        },
+      });
+    }
+  }
+
+  async function browseKey() {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const path = await open({ multiple: false, title: "Choose a private key" });
+    if (typeof path === "string") updateSsh("keyPath", path);
   }
 
   function updateField(key: keyof ConnectionFields, value: string | boolean) {
@@ -135,6 +199,8 @@ export default function ConnectPage() {
       ssl: conn.ssl,
       readOnly: conn.readOnly ?? false,
     });
+    setSshEnabled(Boolean(conn.ssh));
+    setSsh(conn.ssh ? toSshFields(conn.ssh) : EMPTY_SSH);
     setTest({ status: "idle" });
   }
 
@@ -150,8 +216,10 @@ export default function ConnectPage() {
         ssl: conn.ssl,
         readOnly: conn.readOnly ?? false,
       });
-      await connect(url, { name: conn.name, color: conn.color });
-      navigate("/db/query");
+      await withHostKeyCheck(async (trustHostKey) => {
+        await connect(url, { name: conn.name, color: conn.color }, { ssh: conn.ssh, trustHostKey });
+        navigate("/db/query");
+      });
     } catch {
       // the error is shown by the connection context
     }
@@ -162,6 +230,8 @@ export default function ConnectPage() {
     setConnectionName("");
     setConnectionColor(DEFAULT_COLOR);
     setFields(EMPTY_FIELDS);
+    setSshEnabled(false);
+    setSsh(EMPTY_SSH);
     setTest({ status: "idle" });
   }
 
@@ -181,6 +251,7 @@ export default function ConnectPage() {
           password: fields.password,
           ssl: fields.ssl,
           readOnly: fields.readOnly,
+          ssh: sshConfig(),
           color: connectionColor,
         }),
         new Promise((r) => setTimeout(r, 400)),
@@ -207,28 +278,44 @@ export default function ConnectPage() {
 
   /** Opens and closes a session to check the details, without leaving the form. */
   async function handleTest() {
-    setTest({ status: "testing" });
-    try {
-      const res = await api.connect(buildConnectionUrl(fields));
-      api.disconnect(res.sessionId).catch(() => {});
-      setTest({ status: "ok", version: res.serverVersion.split(" ")[0] });
-    } catch (err) {
-      setTest({ status: "error", message: errorMessage(err) });
-    }
+    const attempt = async (trustHostKey?: string) => {
+      setTest({ status: "testing" });
+      try {
+        const res = await api.connect(buildConnectionUrl(fields), sshConfig(), trustHostKey);
+        api.disconnect(res.sessionId).catch(() => {});
+        setTest({ status: "ok", version: res.serverVersion.split(" ")[0] });
+      } catch (err) {
+        if (hostKeyProblem(err)) {
+          setTest({ status: "idle" });
+          throw err;
+        }
+        setTest({ status: "error", message: errorMessage(err) });
+      }
+    };
+    await withHostKeyCheck(attempt).catch(() => {});
   }
 
   async function handleSubmit(e: { preventDefault: () => void }) {
     e.preventDefault();
     try {
       const savedName = connectionName.trim();
-      await connect(buildConnectionUrl(fields), savedName ? { name: savedName, color: connectionColor } : undefined);
-      navigate("/db/query");
+      await withHostKeyCheck(async (trustHostKey) => {
+        await connect(
+          buildConnectionUrl(fields),
+          savedName ? { name: savedName, color: connectionColor } : undefined,
+          { ssh: sshConfig(), trustHostKey },
+        );
+        navigate("/db/query");
+      });
     } catch {
       // the error is shown by the connection context
     }
   }
 
-  const canConnect = Boolean(fields.host.trim() && fields.database.trim());
+  const sshReady =
+    !sshEnabled ||
+    Boolean(ssh.host.trim() && ssh.user.trim() && (ssh.authMethod !== "key" || ssh.keyPath.trim()));
+  const canConnect = Boolean(fields.host.trim() && fields.database.trim()) && sshReady;
   const canSave = canConnect && Boolean(connectionName.trim());
   const editing = selectedId !== null;
   const isCustomColor = !COLOR_PRESETS.includes(connectionColor);
@@ -360,6 +447,83 @@ export default function ConnectPage() {
                 </div>
               </Section>
 
+              <Section
+                title="SSH tunnel"
+                description={
+                  sshEnabled
+                    ? "Host and port above are the database as seen from the SSH server."
+                    : "Reach the database through an SSH server."
+                }
+                action={<Switch id="conn-ssh" checked={sshEnabled} onChange={(v) => { setSshEnabled(v); setTest({ status: "idle" }); }} aria-label="Connect through SSH" />}
+              >
+                {sshEnabled && (
+                  <>
+                    <div className="grid grid-cols-[1fr_6.5rem] gap-3">
+                      <Field label="SSH host" htmlFor="ssh-host">
+                        <Input id="ssh-host" value={ssh.host} onChange={(e) => updateSsh("host", e.target.value)} placeholder="bastion.example.com" spellCheck={false} />
+                      </Field>
+                      <Field label="Port" htmlFor="ssh-port">
+                        <Input id="ssh-port" inputMode="numeric" value={ssh.port} onChange={(e) => updateSsh("port", e.target.value)} placeholder="22" className="font-mono" />
+                      </Field>
+                    </div>
+                    <Field label="SSH user" htmlFor="ssh-user">
+                      <Input id="ssh-user" value={ssh.user} onChange={(e) => updateSsh("user", e.target.value)} placeholder="ubuntu" spellCheck={false} autoComplete="off" />
+                    </Field>
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[13px] font-medium">Log in with</span>
+                      <SegmentedTabs<SshAuthMethod>
+                        value={ssh.authMethod}
+                        onChange={(v) => updateSsh("authMethod", v)}
+                        options={[
+                          { value: "password", label: "Password" },
+                          { value: "key", label: "Private key" },
+                          { value: "agent", label: "SSH agent" },
+                        ]}
+                      />
+                    </div>
+                    {ssh.authMethod === "password" && (
+                      <Field label="SSH password" htmlFor="ssh-password">
+                        <div className="relative">
+                          <Input
+                            id="ssh-password"
+                            type={showSshSecret ? "text" : "password"}
+                            value={ssh.password}
+                            onChange={(e) => updateSsh("password", e.target.value)}
+                            className="pr-9"
+                            autoComplete="off"
+                          />
+                          <Button variant="ghost-muted" size="icon-xs" className="absolute right-1 top-1/2 -translate-y-1/2" aria-label={showSshSecret ? "Hide password" : "Show password"} onClick={() => setShowSshSecret((v) => !v)}>
+                            {showSshSecret ? <EyeOff /> : <Eye />}
+                          </Button>
+                        </div>
+                      </Field>
+                    )}
+                    {ssh.authMethod === "key" && (
+                      <>
+                        <Field label="Private key" htmlFor="ssh-key">
+                          <div className="flex gap-2">
+                            <Input id="ssh-key" value={ssh.keyPath} onChange={(e) => updateSsh("keyPath", e.target.value)} placeholder="~/.ssh/id_ed25519" spellCheck={false} className="font-mono text-xs" />
+                            <Button variant="outline" onClick={browseKey}>
+                              <FolderOpen />
+                              Browse
+                            </Button>
+                          </div>
+                        </Field>
+                        <Field label="Passphrase" htmlFor="ssh-passphrase">
+                          <Input id="ssh-passphrase" type="password" value={ssh.passphrase} onChange={(e) => updateSsh("passphrase", e.target.value)} placeholder="Only if the key is encrypted" autoComplete="off" />
+                        </Field>
+                      </>
+                    )}
+                    {ssh.authMethod === "agent" && (
+                      <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <KeyRound size={13} className="shrink-0" />
+                        Uses the keys loaded in your running SSH agent (ssh-add).
+                      </p>
+                    )}
+                  </>
+                )}
+              </Section>
+
               <Section title="Save as" description="Optional. Keeps the connection in the sidebar for one-click access.">
                 <Field label="Name" htmlFor="conn-name">
                   <Input
@@ -463,6 +627,43 @@ export default function ConnectPage() {
       </div>
 
       <IdleStatusBar version={version} />
+
+      {/* The SSH server's key: first time, or different from before */}
+      {hostKeyPrompt && hostKeyPrompt.problem.inUserKnownHosts ? (
+        <Dialog
+          open
+          onClose={() => setHostKeyPrompt(null)}
+          icon={<ShieldAlert />}
+          tone="destructive"
+          title="The SSH server's key changed"
+          description={`${hostKeyPrompt.problem.host} presented a different key than the one in ~/.ssh/known_hosts. Someone may be intercepting the connection. If the server was reinstalled, remove its old entry from known_hosts and try again.`}
+          footer={
+            <Button variant="neutral" size="sm" onClick={() => setHostKeyPrompt(null)}>
+              Close
+            </Button>
+          }
+        >
+          <HostKeyFingerprint problem={hostKeyPrompt.problem} />
+        </Dialog>
+      ) : (
+        <ConfirmDialog
+          open={hostKeyPrompt !== null}
+          onClose={() => setHostKeyPrompt(null)}
+          onConfirm={() => hostKeyPrompt?.retry()}
+          icon={<ShieldAlert />}
+          tone={hostKeyPrompt?.problem.status === "changed" ? "destructive" : "warning"}
+          title={hostKeyPrompt?.problem.status === "changed" ? "The SSH server's key changed" : "Trust this SSH server?"}
+          description={
+            hostKeyPrompt?.problem.status === "changed"
+              ? "It's different from the key accepted before. Someone may be intercepting the connection; trust the new key only if you know the server changed."
+              : "This is the first connection to this server. Check that the fingerprint matches the one your server administrator gives you."
+          }
+          cancelLabel="Cancel"
+          confirmLabel={hostKeyPrompt?.problem.status === "changed" ? "Trust the new key" : "Trust and connect"}
+        >
+          {hostKeyPrompt && <HostKeyFingerprint problem={hostKeyPrompt.problem} />}
+        </ConfirmDialog>
+      )}
 
       <Dialog
         open={showImport}
