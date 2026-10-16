@@ -1,15 +1,13 @@
+pub mod admin;
 pub mod catalog;
 pub mod connect;
 pub mod console;
 pub mod data;
 pub mod saved;
+pub mod schema_edit;
 pub mod state;
 pub mod storage;
 pub mod transactions;
-pub mod objects;
-pub mod activity;
-pub mod alter;
-pub mod roles;
 
 use crate::db::{unsupported, Engine};
 

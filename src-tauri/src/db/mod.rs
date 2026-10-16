@@ -3,9 +3,6 @@
 //! administration) and the capabilities the frontend reads to show or hide screens.
 
 pub mod capabilities;
-// The pieces aren't wired into the commands yet; these `allow`s go away as the tasks
-// that move the commands behind them land.
-#[allow(dead_code)]
 pub mod driver;
 pub mod model;
 pub mod postgres;
@@ -18,9 +15,7 @@ pub use capabilities::Capabilities;
 #[allow(unused_imports)]
 pub use capabilities::ExplainFormat;
 pub use driver::Driver;
-pub use driver::{Catalog, Console, Data, Transactions};
-#[allow(unused_imports)]
-pub use driver::{SchemaEditor, ServerAdmin};
+pub use driver::{Catalog, Console, Data, SchemaEditor, ServerAdmin, Transactions};
 pub use model::ConnectionInfo;
 pub use unsupported::unsupported;
 

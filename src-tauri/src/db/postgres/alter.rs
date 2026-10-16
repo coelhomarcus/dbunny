@@ -3,12 +3,14 @@
 //! types, defaults and index expressions are SQL the user writes, so they're checked
 //! to be a single fragment (no `;`) and the generated SQL is shown before it runs.
 
-use tauri::State;
+use async_trait::async_trait;
 
-use crate::db::postgres::data::db_message;
-use super::state::AppState;
+use super::data::db_message;
+use super::objects::{drop_sql, duplicate, relation, rename_sql, run, truncate_sql};
+use super::PostgresDriver;
 use crate::db::sql::filter::quote_ident;
 use crate::db::model::{NewColumn, StructureChange};
+use crate::db::SchemaEditor;
 
 /// Table privileges that can be granted (MAINTAIN only exists from PostgreSQL 17 on).
 const TABLE_PRIVILEGES: &[&str] = &["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"];
@@ -218,25 +220,6 @@ pub(crate) fn change_sql(schema: &str, table: &str, change: &StructureChange) ->
     Ok((stmts, false))
 }
 
-/// The SQL a change would run, for showing before running it.
-#[tauri::command]
-pub fn preview_structure_change(schema: String, table: String, change: StructureChange) -> Result<String, String> {
-    let (stmts, _) = change_sql(&schema, &table, &change)?;
-    Ok(stmts.iter().map(|s| format!("{s};")).collect::<Vec<_>>().join("\n"))
-}
-
-#[tauri::command]
-pub async fn apply_structure_change(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    table: String,
-    change: StructureChange,
-) -> Result<(), String> {
-    let client = state.postgres(&session_id).await?.client().await?;
-    apply(&client, &schema, &table, &change).await
-}
-
 pub(crate) async fn apply(client: &tokio_postgres::Client, schema: &str, table: &str, change: &StructureChange) -> Result<(), String> {
     let (stmts, outside_transaction) = change_sql(schema, table, change)?;
     if outside_transaction {
@@ -283,22 +266,49 @@ pub(crate) fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn])
     Ok(format!("CREATE TABLE {target} (\n    {}\n)", lines.join(",\n    ")))
 }
 
-#[tauri::command]
-pub fn preview_create_table(schema: String, table: String, columns: Vec<NewColumn>) -> Result<String, String> {
-    Ok(create_table_sql(&schema, &table, &columns)? + ";")
-}
+#[async_trait]
+impl SchemaEditor for PostgresDriver {
+    /// The SQL a change would run, for showing before running it.
+    fn preview_change(&self, schema: &str, table: &str, change: &StructureChange) -> Result<String, String> {
+        let (stmts, _) = change_sql(schema, table, change)?;
+        Ok(stmts.iter().map(|s| format!("{s};")).collect::<Vec<_>>().join("\n"))
+    }
 
-#[tauri::command]
-pub async fn create_table(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    table: String,
-    columns: Vec<NewColumn>,
-) -> Result<(), String> {
-    let sql = create_table_sql(&schema, &table, &columns)?;
-    let client = state.postgres(&session_id).await?.client().await?;
-    client.batch_execute(&sql).await.map_err(|e| db_message(&e))
+    async fn apply_change(&self, schema: &str, table: &str, change: StructureChange) -> Result<(), String> {
+        let client = self.client().await?;
+        apply(&client, schema, table, &change).await
+    }
+
+    fn preview_create_table(&self, schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
+        Ok(create_table_sql(schema, table, columns)? + ";")
+    }
+
+    async fn create_table(&self, schema: &str, table: &str, columns: Vec<NewColumn>) -> Result<(), String> {
+        let sql = create_table_sql(schema, table, &columns)?;
+        let client = self.client().await?;
+        client.batch_execute(&sql).await.map_err(|e| db_message(&e))
+    }
+
+    async fn rename_relation(&self, schema: &str, name: &str, kind: &str, new_name: &str) -> Result<(), String> {
+        run(self, &rename_sql(schema, name, kind, new_name)?).await
+    }
+
+    async fn drop_relation(&self, schema: &str, name: &str, kind: &str, cascade: bool) -> Result<(), String> {
+        run(self, &drop_sql(schema, name, kind, cascade)?).await
+    }
+
+    async fn truncate_table(&self, schema: &str, name: &str, restart_identity: bool, cascade: bool) -> Result<(), String> {
+        run(self, &truncate_sql(schema, name, restart_identity, cascade)).await
+    }
+
+    async fn duplicate_table(&self, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
+        let client = self.client().await?;
+        duplicate(&client, schema, name, new_name, with_data).await
+    }
+
+    async fn refresh_materialized_view(&self, schema: &str, name: &str) -> Result<(), String> {
+        run(self, &format!("REFRESH MATERIALIZED VIEW {}", relation(schema, name))).await
+    }
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ use crate::db::Console;
 /// Error as JSON for the UI. `offset` shifts the position to be relative to the whole
 /// script, and `statement` is the (1-based index, total) of the failing statement
 /// when the script had more than one.
-pub(crate) fn pg_error_in_script(e: tokio_postgres::Error, offset: i64, statement: Option<(usize, usize)>) -> String {
+fn pg_error_in_script(e: tokio_postgres::Error, offset: i64, statement: Option<(usize, usize)>) -> String {
     if let Some(db) = e.as_db_error() {
         let position = match db.position() {
             Some(tokio_postgres::error::ErrorPosition::Original(p)) => Some((*p as i64 + offset).max(1)),
@@ -43,7 +43,7 @@ pub(crate) fn pg_error_in_script(e: tokio_postgres::Error, offset: i64, statemen
 /// Types the binary decoders know are read directly. If any column has another type
 /// (enum, interval, inet, money, range, domain...), the statement runs through the
 /// text protocol and each value is converted from its text form.
-pub(crate) async fn run_statement(
+pub(super) async fn run_statement(
     client: &tokio_postgres::Client,
     sql: &str,
 ) -> Result<StatementOutput, tokio_postgres::Error> {

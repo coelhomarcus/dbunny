@@ -101,7 +101,7 @@ impl PostgresDriver {
     /// the editor's own connection (opened, or opened again, here). A lost transaction
     /// connection can't be resumed: its transaction is gone, so it's dropped and reported,
     /// and the next run goes on without it.
-    pub async fn editor_client(&self) -> Result<(Arc<Client>, bool), String> {
+    pub(super) async fn editor_client(&self) -> Result<(Arc<Client>, bool), String> {
         if let Some(client) = self.open_editor().await? {
             return Ok(client);
         }
@@ -140,20 +140,20 @@ impl PostgresDriver {
     }
 
     /// What the editor may be running right now (to cancel it), without opening anything.
-    pub async fn running_editor(&self) -> Result<Option<Arc<Client>>, String> {
+    pub(super) async fn running_editor(&self) -> Result<Option<Arc<Client>>, String> {
         let state = self.state.lock().await;
         let session = state.as_ref().ok_or_else(|| "Session not found".to_string())?;
         Ok(session.transaction.as_ref().or(session.editor.as_ref()).filter(|c| !c.is_closed()).cloned())
     }
 
     /// Whether a transaction opened from the editor is still going.
-    pub async fn in_transaction(&self) -> Result<bool, String> {
+    pub(super) async fn in_transaction(&self) -> Result<bool, String> {
         let state = self.state.lock().await;
         let session = state.as_ref().ok_or_else(|| "Session not found".to_string())?;
         Ok(session.transaction.as_ref().is_some_and(|tx| !tx.is_closed()))
     }
 
-    pub async fn notices(&self) -> Result<Notices, String> {
+    pub(super) async fn notices(&self) -> Result<Notices, String> {
         self.state
             .lock()
             .await
@@ -162,7 +162,7 @@ impl PostgresDriver {
             .ok_or_else(|| "Session not found".to_string())
     }
 
-    pub async fn link(&self) -> Result<Link, String> {
+    pub(super) async fn link(&self) -> Result<Link, String> {
         self.state
             .lock()
             .await

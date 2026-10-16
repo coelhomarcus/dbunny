@@ -154,7 +154,7 @@ export function createSessionApi(sessionId: string | null) {
     },
 
     async previewStructureChange(schema: string, table: string, change: StructureChange) {
-      return invoke<string>("preview_structure_change", { schema, table, change });
+      return invoke<string>("preview_structure_change", { sessionId, schema, table, change });
     },
 
     async applyStructureChange(schema: string, table: string, change: StructureChange) {
@@ -162,7 +162,7 @@ export function createSessionApi(sessionId: string | null) {
     },
 
     async previewCreateTable(schema: string, table: string, columns: NewColumn[]) {
-      return invoke<string>("preview_create_table", { schema, table, columns });
+      return invoke<string>("preview_create_table", { sessionId, schema, table, columns });
     },
 
     async createTable(schema: string, table: string, columns: NewColumn[]) {

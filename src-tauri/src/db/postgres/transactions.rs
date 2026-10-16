@@ -65,7 +65,7 @@ async fn take_transaction(driver: &PostgresDriver) -> Result<Arc<Client>, String
 
 /// Commits, unless a statement failed: Postgres would silently roll back on COMMIT
 /// then, so that case is reported as an error. The connection closes either way.
-pub(crate) async fn finish_commit(client: &Client) -> Result<(), String> {
+async fn finish_commit(client: &Client) -> Result<(), String> {
     if let Err(e) = client.simple_query("SELECT 1").await {
         if e.code() == Some(&SqlState::IN_FAILED_SQL_TRANSACTION) {
             let _ = client.batch_execute("ROLLBACK").await;

@@ -1,5 +1,5 @@
-//! Opening a PostgreSQL session: TLS settings from the URL, the SSH tunnel, the
-//! connections themselves and the server's databases.
+//! Opening a PostgreSQL session: TLS settings from the URL, the SSH tunnel and the
+//! connections themselves.
 
 use postgres_native_tls::MakeTlsConnector;
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use tokio_postgres::config::SslMode;
 use super::session::{Endpoint, Link, Notices, PgState};
 use super::ssh::{open_tunnel, KnownHosts, Tunnel};
 use super::PostgresDriver;
-use crate::db::model::{DatabaseInfo, Notice};
+use crate::db::model::Notice;
 use crate::db::{Capabilities, ConnectionInfo};
 
 /// How the TLS handshake should behave, derived from the URL's `sslmode`.
@@ -275,43 +275,9 @@ fn percent_decode(text: &str) -> String {
         .unwrap_or_else(|| text.to_string())
 }
 
-/// The endpoint of an open session, pointed at another database of the same server.
-pub(crate) fn endpoint_for_database(endpoint: &Endpoint, database: &str) -> Result<Endpoint, String> {
-    if database.trim().is_empty() {
-        return Err("Choose a database".into());
-    }
-    let mut url = endpoint.url.clone();
-    url.path_segments_mut()
-        .map_err(|_| "Can't change the database of this connection".to_string())?
-        .clear()
-        .push(database);
-    Ok(Endpoint { url, ..endpoint.clone() })
-}
-
-pub(crate) async fn list_databases(client: &tokio_postgres::Client) -> Result<Vec<DatabaseInfo>, String> {
-    let rows = client
-        .query(
-            "SELECT datname::text AS name, \
-             CASE WHEN has_database_privilege(datname, 'CONNECT') THEN pg_database_size(datname) END AS size_bytes, \
-             datname = current_database() AS is_current, has_database_privilege(datname, 'CONNECT') AS can_connect \
-             FROM pg_database WHERE NOT datistemplate AND datallowconn ORDER BY datname",
-            &[],
-        )
-        .await
-        .map_err(|e| super::data::db_message(&e))?;
-    Ok(rows
-        .iter()
-        .map(|r| DatabaseInfo {
-            name: r.get("name"),
-            size_bytes: r.get("size_bytes"),
-            is_current: r.get("is_current"),
-            can_connect: r.get("can_connect"),
-        })
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::admin::endpoint_for_database;
     use super::*;
 
     fn plan(mode: Option<&str>) -> TlsPlan {
@@ -491,103 +457,13 @@ mod server_tests {
     }
 }
 
-/// Switching databases against a real server, see `console::server_tests`.
+/// Opening sessions against a real server, see `console::server_tests`.
 #[cfg(test)]
 mod database_server_tests {
     use super::super::ssh::SshConfig;
     use super::*;
     use crate::commands::connect::open_session;
     use crate::commands::state::AppState;
-    use uuid::Uuid;
-
-    #[tokio::test]
-    #[ignore = "needs DBUNNY_TEST_DATABASE_URL and a second database named dbunny_second"]
-    async fn another_database_opens_as_its_own_session() {
-        let url = url::Url::parse(&std::env::var("DBUNNY_TEST_DATABASE_URL").unwrap()).unwrap();
-        let state = AppState {
-            sessions: Default::default(),
-            saved_connections: Default::default(),
-            encryption_key: [0; 32],
-        };
-        let first = open_session(&state, Endpoint { url, ssh: None, known_hosts: None }, None).await.unwrap();
-
-        let client = state.postgres(&first.session_id).await.unwrap().client().await.unwrap();
-        let databases = list_databases(&client).await.unwrap();
-        let names: Vec<_> = databases.iter().map(|d| d.name.as_str()).collect();
-        assert!(names.contains(&"dbunny_second"), "{names:?}");
-        assert!(!names.contains(&"template1"));
-        assert!(databases.iter().find(|d| d.is_current).unwrap().size_bytes.unwrap() > 0);
-
-        let endpoint = endpoint_for_database(&state.postgres(&first.session_id).await.unwrap().endpoint(), "dbunny_second").unwrap();
-        let second = open_session(&state, endpoint, None).await.unwrap();
-        assert_eq!(second.database, "dbunny_second");
-        assert_ne!(second.session_id, first.session_id);
-        let current: String = state.postgres(&second.session_id).await.unwrap().client().await.unwrap().query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
-        assert_eq!(current, "dbunny_second");
-        // The first session is untouched
-        let current: String = client.query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
-        assert_eq!(current, first.database);
-    }
-
-    /// The database switcher through an SSH tunnel: the second database opens through a
-    /// tunnel of its own, and the host key trusted for the first needs no new confirmation.
-    ///   DBUNNY_TEST_SSH=user:password@host:port
-    ///   DBUNNY_TEST_SSH_DATABASE_URL=<database URL as seen from the SSH server>
-    /// and a second database named dbunny_second.
-    #[tokio::test]
-    #[ignore = "needs DBUNNY_TEST_SSH and DBUNNY_TEST_SSH_DATABASE_URL"]
-    async fn another_database_opens_through_the_same_tunnel_settings() {
-        let ssh = std::env::var("DBUNNY_TEST_SSH").unwrap();
-        let (auth, addr) = ssh.split_once('@').unwrap();
-        let (user, password) = auth.split_once(':').unwrap();
-        let (host, port) = addr.rsplit_once(':').unwrap();
-        let ssh = SshConfig {
-            host: host.into(),
-            port: port.parse().unwrap(),
-            user: user.into(),
-            auth_method: "password".into(),
-            password: password.into(),
-            key_path: String::new(),
-            passphrase: String::new(),
-        };
-        let known_hosts = std::env::temp_dir().join(format!("dbunny-switch-test-{}.json", Uuid::new_v4()));
-        let endpoint = Endpoint {
-            url: url::Url::parse(&std::env::var("DBUNNY_TEST_SSH_DATABASE_URL").unwrap()).unwrap(),
-            ssh: Some(ssh),
-            known_hosts: Some(known_hosts.clone()),
-        };
-        let state = AppState { sessions: Default::default(), saved_connections: Default::default(), encryption_key: [0; 32] };
-
-        // First time: the host key is unknown, so the UI asks and retries with its fingerprint
-        let err = open_session(&state, endpoint.clone(), None).await.err().expect("an unknown host key must be confirmed");
-        let problem: serde_json::Value = serde_json::from_str(&err).unwrap_or_else(|_| panic!("not a host key error: {err}"));
-        let fingerprint = problem["sshHostKey"]["fingerprint"].as_str().unwrap().to_string();
-        let first = open_session(&state, endpoint, Some(fingerprint)).await.unwrap();
-
-        // The switcher: list the server's databases through the tunnel, open another one
-        let client = state.postgres(&first.session_id).await.unwrap().client().await.unwrap();
-        let names: Vec<String> = list_databases(&client).await.unwrap().into_iter().map(|d| d.name).collect();
-        assert!(names.iter().any(|n| n == "dbunny_second"), "{names:?}");
-        let other = endpoint_for_database(&state.postgres(&first.session_id).await.unwrap().endpoint(), "dbunny_second").unwrap();
-        assert!(other.ssh.is_some(), "the SSH settings come along");
-        let second = open_session(&state, other, None).await.unwrap();
-        let current: String = state.postgres(&second.session_id).await.unwrap().client().await.unwrap().query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
-        assert_eq!(current, "dbunny_second");
-
-        // Each session has its own tunnel; closing the first leaves the second working
-        let local_port = |driver: Arc<PostgresDriver>| async move {
-            driver.lock().await.as_ref().unwrap().tunnel.as_ref().unwrap().local_port
-        };
-        let (one, two) = (
-            local_port(state.postgres(&first.session_id).await.unwrap()).await,
-            local_port(state.postgres(&second.session_id).await.unwrap()).await,
-        );
-        assert_ne!(one, two);
-        state.sessions.lock().await.remove(&first.session_id);
-        let still: i32 = state.postgres(&second.session_id).await.unwrap().client().await.unwrap().query_one("SELECT 1", &[]).await.unwrap().get(0);
-        assert_eq!(still, 1);
-        let _ = std::fs::remove_file(known_hosts);
-    }
 
     /// DBUNNY_TEST_SOCKET_URL: a URL whose host is a socket folder, e.g.
     /// postgresql://user:pass@%2Ftmp%2Fpg:5432/db

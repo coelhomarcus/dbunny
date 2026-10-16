@@ -2,8 +2,6 @@ use serde::Serialize;
 use tauri::State;
 
 use super::state::AppState;
-use crate::db::model::DatabaseInfo;
-use crate::db::postgres::connect::{endpoint_for_database, list_databases};
 use crate::db::postgres::ssh::SshConfig;
 use crate::db::postgres::{Endpoint, PostgresDriver};
 use crate::db::{Capabilities, Driver, Engine};
@@ -22,6 +20,23 @@ pub struct ConnectResponse {
     pub engine: Engine,
     /// What the session supports, so the app shows only the screens and actions that work.
     pub capabilities: Capabilities,
+}
+
+impl ConnectResponse {
+    /// What the app learns about a session it just opened.
+    pub(crate) fn new(session_id: String, driver: &dyn Driver) -> Self {
+        let info = driver.info();
+        ConnectResponse {
+            session_id,
+            database: info.database,
+            host: info.host,
+            port: info.port,
+            server_version: info.server_version,
+            read_only: info.read_only,
+            engine: driver.engine(),
+            capabilities: driver.capabilities().clone(),
+        }
+    }
 }
 
 #[tauri::command]
@@ -65,35 +80,7 @@ pub(crate) async fn open_session(
 ) -> Result<ConnectResponse, String> {
     let driver = PostgresDriver::open(endpoint, trust_host_key).await?;
     let session_id = state.register(driver.clone()).await?;
-    let info = driver.info();
-    Ok(ConnectResponse {
-        session_id,
-        database: info.database,
-        host: info.host,
-        port: info.port,
-        server_version: info.server_version,
-        read_only: info.read_only,
-        engine: driver.engine(),
-        capabilities: driver.capabilities().clone(),
-    })
-}
-
-/// Opens a new session on another database of the same server, with the same login,
-/// SSL, read-only and SSH settings as `session_id`.
-#[tauri::command]
-pub async fn connect_database(
-    state: State<'_, AppState>,
-    session_id: String,
-    database: String,
-) -> Result<ConnectResponse, String> {
-    let endpoint = endpoint_for_database(&state.postgres(&session_id).await?.endpoint(), &database)?;
-    open_session(&state, endpoint, None).await
-}
-
-#[tauri::command]
-pub async fn get_databases(state: State<'_, AppState>, session_id: String) -> Result<Vec<DatabaseInfo>, String> {
-    let client = state.postgres(&session_id).await?.client().await?;
-    list_databases(&client).await
+    Ok(ConnectResponse::new(session_id, driver.as_ref()))
 }
 
 #[tauri::command]

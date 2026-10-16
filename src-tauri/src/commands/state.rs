@@ -53,7 +53,9 @@ impl AppState {
     }
 
     /// The PostgreSQL driver of a session, for the commands that don't go through the
-    /// driver contract yet.
+    /// driver contract yet. No command uses it anymore, only server tests; it goes with
+    /// the transition.
+    #[allow(dead_code)]
     pub async fn postgres(&self, session_id: &str) -> Result<Arc<PostgresDriver>, String> {
         let driver = self.driver(session_id).await?;
         let engine = driver.engine();

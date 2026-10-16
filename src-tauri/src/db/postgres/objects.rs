@@ -2,11 +2,10 @@
 //! drop and refresh; and creating, renaming and dropping schemas and databases.
 //! Names are always quoted; nothing typed becomes SQL text.
 
-use tauri::State;
 use tokio_postgres::Client;
 
-use crate::db::postgres::data::db_message;
-use super::state::AppState;
+use super::data::db_message;
+use super::PostgresDriver;
 use crate::db::sql::filter::quote_ident;
 
 /// The SQL keyword for a relation kind as the explorer names it.
@@ -19,7 +18,7 @@ fn keyword(kind: &str) -> Result<&'static str, String> {
     }
 }
 
-fn relation(schema: &str, name: &str) -> String {
+pub(super) fn relation(schema: &str, name: &str) -> String {
     format!("{}.{}", quote_ident(schema), quote_ident(name))
 }
 
@@ -51,68 +50,10 @@ pub(crate) fn truncate_sql(schema: &str, name: &str, restart_identity: bool, cas
     )
 }
 
-async fn run(state: &AppState, session_id: &str, sql: &str) -> Result<(), String> {
-    let client = state.postgres(session_id).await?.client().await?;
+/// Runs one statement built here on the session's main connection.
+pub(super) async fn run(driver: &PostgresDriver, sql: &str) -> Result<(), String> {
+    let client = driver.client().await?;
     client.batch_execute(sql).await.map_err(|e| db_message(&e))
-}
-
-#[tauri::command]
-pub async fn rename_relation(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-    kind: String,
-    new_name: String,
-) -> Result<(), String> {
-    run(&state, &session_id, &rename_sql(&schema, &name, &kind, &new_name)?).await
-}
-
-#[tauri::command]
-pub async fn drop_relation(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-    kind: String,
-    cascade: bool,
-) -> Result<(), String> {
-    run(&state, &session_id, &drop_sql(&schema, &name, &kind, cascade)?).await
-}
-
-#[tauri::command]
-pub async fn truncate_table(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-    restart_identity: bool,
-    cascade: bool,
-) -> Result<(), String> {
-    run(&state, &session_id, &truncate_sql(&schema, &name, restart_identity, cascade)).await
-}
-
-#[tauri::command]
-pub async fn refresh_materialized_view(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-) -> Result<(), String> {
-    run(&state, &session_id, &format!("REFRESH MATERIALIZED VIEW {}", relation(&schema, &name))).await
-}
-
-#[tauri::command]
-pub async fn duplicate_table(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-    new_name: String,
-    with_data: bool,
-) -> Result<(), String> {
-    let client = state.postgres(&session_id).await?.client().await?;
-    duplicate(&client, &schema, &name, &new_name, with_data).await
 }
 
 /// A copy with the same columns, defaults, constraints, indexes and comments
@@ -173,32 +114,6 @@ pub(crate) fn create_database_sql(name: &str) -> Result<String, String> {
 /// `force` (PostgreSQL 13+) ends the sessions still connected to it instead of failing.
 pub(crate) fn drop_database_sql(name: &str, force: bool) -> String {
     format!("DROP DATABASE {}{}", quote_ident(name), if force { " WITH (FORCE)" } else { "" })
-}
-
-#[tauri::command]
-pub async fn create_schema(state: State<'_, AppState>, session_id: String, name: String) -> Result<(), String> {
-    run(&state, &session_id, &create_schema_sql(&name)?).await
-}
-
-#[tauri::command]
-pub async fn rename_schema(state: State<'_, AppState>, session_id: String, name: String, new_name: String) -> Result<(), String> {
-    run(&state, &session_id, &rename_schema_sql(&name, &new_name)?).await
-}
-
-#[tauri::command]
-pub async fn drop_schema(state: State<'_, AppState>, session_id: String, name: String, cascade: bool) -> Result<(), String> {
-    run(&state, &session_id, &drop_schema_sql(&name, cascade)).await
-}
-
-/// CREATE and DROP DATABASE refuse to run in a transaction, so they go alone in one message.
-#[tauri::command]
-pub async fn create_database(state: State<'_, AppState>, session_id: String, name: String) -> Result<(), String> {
-    run(&state, &session_id, &create_database_sql(&name)?).await
-}
-
-#[tauri::command]
-pub async fn drop_database(state: State<'_, AppState>, session_id: String, name: String, force: bool) -> Result<(), String> {
-    run(&state, &session_id, &drop_database_sql(&name, force)).await
 }
 
 #[cfg(test)]

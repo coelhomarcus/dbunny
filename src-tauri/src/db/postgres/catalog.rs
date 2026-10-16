@@ -68,7 +68,7 @@ impl Catalog for PostgresDriver {
     }
 }
 
-pub(crate) async fn function_detail(
+async fn function_detail(
     client: &tokio_postgres::Client,
     schema: &str,
     function_name: &str,
@@ -238,7 +238,7 @@ async fn table_foreign_keys(
         .collect())
 }
 
-pub(crate) async fn extensions(client: &tokio_postgres::Client) -> Result<Vec<ExtensionInfo>, String> {
+async fn extensions(client: &tokio_postgres::Client) -> Result<Vec<ExtensionInfo>, String> {
     let rows = client
         .query(
             "SELECT e.extname::text AS name, e.extversion AS version, n.nspname::text AS schema, \
@@ -254,7 +254,7 @@ pub(crate) async fn extensions(client: &tokio_postgres::Client) -> Result<Vec<Ex
         .collect())
 }
 
-pub(crate) async fn object_definition(
+async fn object_definition(
     client: &tokio_postgres::Client,
     schema: &str,
     name: &str,
@@ -461,7 +461,7 @@ pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<Explorer
 
 /// Everything the SQL editor needs for autocomplete, fetched in a couple of
 /// catalog queries instead of one `get_columns` call per table.
-pub(crate) async fn completion_schema(client: &tokio_postgres::Client) -> Result<CompletionSchema, String> {
+async fn completion_schema(client: &tokio_postgres::Client) -> Result<CompletionSchema, String> {
     let current_schema: Option<String> = client
         .query_one("SELECT current_schema()::text AS name", &[])
         .await

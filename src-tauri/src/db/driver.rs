@@ -37,9 +37,11 @@ pub trait Driver: Send + Sync {
         None
     }
     /// Only while the commands move behind the contract: lets the ones not moved yet
-    /// reach the PostgreSQL driver.
+    /// reach the PostgreSQL driver. No command needs it anymore; it goes with the transition.
+    #[allow(dead_code)]
     fn as_any(&self) -> &dyn Any;
     /// The same, keeping the `Arc`: `AppState::postgres` hands out the driver itself.
+    #[allow(dead_code)]
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
 }
 

@@ -1,10 +1,13 @@
 //! The PostgreSQL driver: a session's connections (main, query editor, transaction),
 //! reconnection and the SSH tunnel they go through.
 
+mod admin;
+mod alter;
 pub mod catalog;
 pub mod connect;
 mod console;
 pub mod data;
+mod objects;
 mod params;
 pub mod session;
 pub mod ssh;
@@ -20,7 +23,9 @@ use tokio::sync::Mutex;
 
 pub use session::{Endpoint, Link, Notices, PgState};
 
-use super::{Capabilities, Catalog, ConnectionInfo, Console, Data, Driver, Engine, Transactions};
+use super::{
+    Capabilities, Catalog, ConnectionInfo, Console, Data, Driver, Engine, SchemaEditor, ServerAdmin, Transactions,
+};
 
 /// One open session on a PostgreSQL server.
 pub struct PostgresDriver {
@@ -69,6 +74,14 @@ impl Driver for PostgresDriver {
     }
 
     fn transactions(&self) -> Option<&dyn Transactions> {
+        Some(self)
+    }
+
+    fn schema_editor(&self) -> Option<&dyn SchemaEditor> {
+        Some(self)
+    }
+
+    fn admin(&self) -> Option<&dyn ServerAdmin> {
         Some(self)
     }
 
