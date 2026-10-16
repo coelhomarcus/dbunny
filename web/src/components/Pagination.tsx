@@ -1,6 +1,39 @@
+import { useState } from "react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import Button from "./ui/Button";
-import { selectClass } from "./ui/styles";
+import { inputClass, selectClass } from "./ui/styles";
 import { cn } from "../lib/cn";
+
+/** Page number field: goes to the typed page on Enter or when it loses focus. */
+function PageInput({ page, totalPages, estimated, onPageChange }: {
+  page: number;
+  totalPages: number;
+  estimated?: boolean;
+  onPageChange: (page: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(page));
+  const go = () => {
+    const n = parseInt(draft, 10);
+    // An estimated count can be short, so it doesn't cap the page
+    const target = Number.isFinite(n) ? Math.max(1, estimated ? n : Math.min(totalPages, n)) : page;
+    setDraft(String(target));
+    if (target !== page) onPageChange(target);
+  };
+  return (
+    <input
+      value={draft}
+      inputMode="numeric"
+      aria-label="Page"
+      onChange={(e) => setDraft(e.target.value.replace(/\D/g, ""))}
+      onBlur={go}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") go();
+        if (e.key === "Escape") setDraft(String(page));
+      }}
+      className={cn(inputClass, "h-7 w-14 px-1.5 text-center tabular-nums dark:bg-card")}
+    />
+  );
+}
 interface PaginationProps {
   page: number;
   totalPages: number;
@@ -42,23 +75,39 @@ export default function Pagination({
       </div>
 
       {totalPages > 1 && (
-        <div className="flex items-center gap-3">
-          <span>
-            Page {page} of {estimated ? "~" : ""}{totalPages}
+        <div className="flex items-center gap-1.5">
+          <Button variant="outline" size="icon-sm" aria-label="First page" onClick={() => onPageChange(1)} disabled={page <= 1}>
+            <ChevronsLeft />
+          </Button>
+          <Button variant="outline" size="icon-sm" aria-label="Previous page" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}>
+            <ChevronLeft />
+          </Button>
+          <span className="flex items-center gap-1.5 px-1.5">
+            Page
+            {/* Remounted when the page changes elsewhere, so the field shows it */}
+            <PageInput key={page} page={page} totalPages={totalPages} estimated={estimated} onPageChange={onPageChange} />
+            of {estimated ? "~" : ""}
+            {totalPages.toLocaleString()}
           </span>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}>
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onPageChange(estimated ? page + 1 : Math.min(totalPages, page + 1))}
-              disabled={!(hasNext ?? page < totalPages)}
-            >
-              Next
-            </Button>
-          </div>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label="Next page"
+            onClick={() => onPageChange(estimated ? page + 1 : Math.min(totalPages, page + 1))}
+            disabled={!(hasNext ?? page < totalPages)}
+          >
+            <ChevronRight />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label="Last page"
+            onClick={() => onPageChange(totalPages)}
+            // The last page of an estimated count isn't known
+            disabled={estimated || page >= totalPages}
+          >
+            <ChevronsRight />
+          </Button>
         </div>
       )}
     </div>
