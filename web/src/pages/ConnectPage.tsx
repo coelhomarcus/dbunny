@@ -1,18 +1,17 @@
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { getVersion } from "@tauri-apps/api/app";
-import { ArrowRight, Check, Database, Eye, EyeOff, FolderOpen, KeyRound, Link, Loader, PlugZap, ShieldAlert, TriangleAlert, X } from "lucide-react";
+import { ArrowRight, Check, Database, Eye, EyeOff, FolderOpen, KeyRound, Link, Loader, PlugZap, TriangleAlert, X } from "lucide-react";
 import { useConnection } from "../contexts/useConnection";
 import { useWorkspace } from "../contexts/workspace";
 import { type ConnectionFields, parseConnectionUrl, buildConnectionUrl, tlsFieldsOf, tlsSettingsOf, isSocketHost } from "../lib/connectionUrl";
 import { isWindows } from "../lib/platform";
-import { CONNECTION_ICONS } from "../lib/connectionIcons";
+import { DEFAULT_COLOR } from "../lib/connectionDraft";
 import { api } from "../lib/api";
 import { cn } from "../lib/cn";
-import type { SavedConnection, SshAuthMethod, SshConfig, SshHostKeyProblem, SslMode } from "@/types";
+import type { SavedConnection, SshAuthMethod, SshConfig, SslMode } from "@/types";
 import { hostKeyProblem } from "../lib/sshHostKey";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
-import ConfirmDialog from "../components/ui/ConfirmDialog";
 import ConnectionSidebar from "../components/connect/ConnectionSidebar";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { IdleStatusBar } from "../components/layout/StatusBar";
@@ -21,14 +20,9 @@ import Input from "../components/ui/Input";
 import Field from "../components/ui/Field";
 import Switch from "../components/ui/Switch";
 import Badge from "../components/ui/Badge";
-import Dialog from "../components/ui/Dialog";
-import Popover from "../components/ui/Popover";
-import ColorPicker from "../components/ui/ColorPicker";
-import Tooltip from "../components/Tooltip";
-
-const DEFAULT_COLOR = "#3b82f6";
-// Colour tags to tell environments apart (prod, staging, local...)
-const COLOR_PRESETS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899"];
+import IdentityEditor from "../components/connect/IdentityEditor";
+import ImportUrlDialog from "../components/connect/ImportUrlDialog";
+import { useHostKeyCheck } from "../hooks/useHostKeyCheck";
 
 /** The SSH form keeps the port as typed; it becomes a number when used. */
 type SshFields = Omit<SshConfig, "port"> & { port: string };
@@ -88,17 +82,6 @@ function Section({
   );
 }
 
-function HostKeyFingerprint({ problem }: { problem: SshHostKeyProblem }) {
-  return (
-    <div className="rounded-lg border border-border bg-muted px-3 py-2.5">
-      <div className="text-xs text-muted-foreground">
-        {problem.host}:{problem.port} · {problem.algorithm}
-      </div>
-      <code className="mt-1 block break-all font-mono text-xs">{problem.fingerprint}</code>
-    </div>
-  );
-}
-
 export default function ConnectPage() {
   const [fields, setFields] = useState<ConnectionFields>(EMPTY_FIELDS);
   const [connectionName, setConnectionName] = useState("");
@@ -106,25 +89,20 @@ export default function ConnectPage() {
   // "" is the default icon
   const [connectionIcon, setConnectionIcon] = useState("");
   const [showImport, setShowImport] = useState(false);
-  const [importUrl, setImportUrl] = useState("");
-  const [importError, setImportError] = useState(false);
   const [savedConnections, setSavedConnections] = useState<SavedConnection[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [test, setTest] = useState<TestState>({ status: "idle" });
   const [version, setVersion] = useState<string | null>(null);
-  const [colorPickerOpen, setColorPickerOpen] = useState(false);
-  const customColorRef = useRef<HTMLButtonElement>(null);
   const [sshEnabled, setSshEnabled] = useState(false);
   const [ssh, setSsh] = useState<SshFields>(EMPTY_SSH);
   const [showSshSecret, setShowSshSecret] = useState(false);
-  // An SSH server key waiting for the user's decision, and how to retry once trusted
-  const [hostKeyPrompt, setHostKeyPrompt] = useState<{ problem: SshHostKeyProblem; retry: () => void } | null>(null);
 
   const { connect, isConnecting, error } = useConnection();
   const { sidebarOpen } = useWorkspace();
   const navigate = useNavigate();
+  const { withHostKeyCheck, prompt: hostKeyPrompt } = useHostKeyCheck();
 
   useEffect(() => {
     loadSavedConnections();
@@ -148,26 +126,6 @@ export default function ConnectPage() {
   function sshConfig(): SshConfig | null {
     if (!sshEnabled || isSocketHost(fields.host)) return null;
     return { ...ssh, host: ssh.host.trim(), user: ssh.user.trim(), port: parseInt(ssh.port || "22", 10) };
-  }
-
-  /**
-   * Runs a connection attempt; if the SSH server's key needs the user's say, asks, and
-   * runs it again with the fingerprint they accepted.
-   */
-  async function withHostKeyCheck(attempt: (trustHostKey?: string) => Promise<void>) {
-    try {
-      await attempt();
-    } catch (err) {
-      const problem = hostKeyProblem(err);
-      if (!problem) throw err;
-      setHostKeyPrompt({
-        problem,
-        retry: () => {
-          setHostKeyPrompt(null);
-          attempt(problem.fingerprint).catch(() => {});
-        },
-      });
-    }
   }
 
   async function browseCertificate(key: "sslRootCert" | "sslCert" | "sslKey") {
@@ -194,20 +152,6 @@ export default function ConnectPage() {
     setFields((prev) => ({ ...prev, ...parsed }));
     setTest({ status: "idle" });
     return true;
-  }
-
-  function handleImport() {
-    if (!importFromUrl(importUrl)) {
-      setImportError(true);
-      return;
-    }
-    closeImport();
-  }
-
-  function closeImport() {
-    setShowImport(false);
-    setImportUrl("");
-    setImportError(false);
   }
 
   function handleSelectSaved(conn: SavedConnection) {
@@ -349,7 +293,6 @@ export default function ConnectPage() {
   const canConnect = Boolean(fields.host.trim() && fields.database.trim()) && sshReady;
   const canSave = canConnect && Boolean(connectionName.trim());
   const editing = selectedId !== null;
-  const isCustomColor = !COLOR_PRESETS.includes(connectionColor);
 
   return (
     <div className="h-full flex flex-col">
@@ -613,89 +556,15 @@ export default function ConnectPage() {
               )}
 
               <Section title="Save as" description="Optional. Keeps the connection in the sidebar for one-click access.">
-                <Field label="Name" htmlFor="conn-name">
-                  <Input
-                    id="conn-name"
-                    value={connectionName}
-                    onChange={(e) => setConnectionName(e.target.value)}
-                    placeholder="e.g. Production"
-                    spellCheck={false}
-                  />
-                </Field>
-                <Field label="Color" hint="Tag environments, e.g. red for production.">
-                  <div className="flex items-center gap-2">
-                    {COLOR_PRESETS.map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        aria-label={`Color ${color}`}
-                        aria-pressed={connectionColor === color}
-                        onClick={() => setConnectionColor(color)}
-                        className={cn(
-                          "size-5 rounded-full cursor-pointer outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring/50",
-                          connectionColor === color && "ring-2 ring-offset-2 ring-offset-card",
-                        )}
-                        style={{ backgroundColor: color, ["--tw-ring-color" as string]: color }}
-                      />
-                    ))}
-                    <span className="mx-0.5 h-4 w-px bg-border" />
-                    <button
-                      ref={customColorRef}
-                      type="button"
-                      aria-label="Custom color"
-                      aria-expanded={colorPickerOpen}
-                      onClick={() => setColorPickerOpen((v) => !v)}
-                      className={cn(
-                        "size-5 rounded-full cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                        (isCustomColor || colorPickerOpen) && "ring-2 ring-offset-2 ring-offset-card",
-                      )}
-                      style={{
-                        background: isCustomColor
-                          ? connectionColor
-                          : "conic-gradient(#ef4444, #eab308, #22c55e, #3b82f6, #8b5cf6, #ef4444)",
-                        ["--tw-ring-color" as string]: isCustomColor ? connectionColor : "var(--ring)",
-                      }}
-                    />
-                    <Popover open={colorPickerOpen} onClose={() => setColorPickerOpen(false)} anchorRef={customColorRef} className="p-3">
-                      <ColorPicker value={connectionColor} onChange={setConnectionColor} />
-                    </Popover>
-                  </div>
-                </Field>
-                <Field label="Icon" hint="Shown in the sidebar and on the tab, in the colour above.">
-                  <div role="radiogroup" aria-label="Icon" className="flex flex-wrap gap-1">
-                    {CONNECTION_ICONS.map(({ id, label, Icon }, i) => {
-                      // The first one is the default, stored as ""
-                      const value = i === 0 ? "" : id;
-                      const selected = connectionIcon === value;
-                      return (
-                        <Tooltip key={id} label={label} side="top">
-                          <button
-                            type="button"
-                            role="radio"
-                            aria-label={label}
-                            aria-checked={selected}
-                            onClick={() => setConnectionIcon(value)}
-                            className={cn(
-                              "flex size-8 items-center justify-center rounded-lg text-muted-foreground cursor-pointer outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
-                              selected && "hover:bg-transparent",
-                            )}
-                            style={
-                              selected
-                                ? {
-                                    color: connectionColor,
-                                    backgroundColor: `color-mix(in srgb, ${connectionColor} 16%, transparent)`,
-                                    boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${connectionColor} 40%, transparent)`,
-                                  }
-                                : undefined
-                            }
-                          >
-                            <Icon size={15} />
-                          </button>
-                        </Tooltip>
-                      );
-                    })}
-                  </div>
-                </Field>
+                <IdentityEditor
+                  layout="stacked"
+                  identity={{ name: connectionName, color: connectionColor, icon: connectionIcon }}
+                  onChange={(next) => {
+                    setConnectionName(next.name);
+                    setConnectionColor(next.color);
+                    setConnectionIcon(next.icon);
+                  }}
+                />
               </Section>
 
               {error && (
@@ -751,81 +620,17 @@ export default function ConnectPage() {
 
       <IdleStatusBar version={version} />
 
-      {/* The SSH server's key: first time, or different from before */}
-      {hostKeyPrompt && hostKeyPrompt.problem.inUserKnownHosts ? (
-        <Dialog
-          open
-          onClose={() => setHostKeyPrompt(null)}
-          icon={<ShieldAlert />}
-          tone="destructive"
-          title="The SSH server's key changed"
-          description={`${hostKeyPrompt.problem.host} presented a different key than the one in ~/.ssh/known_hosts. Someone may be intercepting the connection. If the server was reinstalled, remove its old entry from known_hosts and try again.`}
-          footer={
-            <Button variant="neutral" size="sm" onClick={() => setHostKeyPrompt(null)}>
-              Close
-            </Button>
-          }
-        >
-          <HostKeyFingerprint problem={hostKeyPrompt.problem} />
-        </Dialog>
-      ) : (
-        <ConfirmDialog
-          open={hostKeyPrompt !== null}
-          onClose={() => setHostKeyPrompt(null)}
-          onConfirm={() => hostKeyPrompt?.retry()}
-          icon={<ShieldAlert />}
-          tone={hostKeyPrompt?.problem.status === "changed" ? "destructive" : "warning"}
-          title={hostKeyPrompt?.problem.status === "changed" ? "The SSH server's key changed" : "Trust this SSH server?"}
-          description={
-            hostKeyPrompt?.problem.status === "changed"
-              ? "It's different from the key accepted before. Someone may be intercepting the connection; trust the new key only if you know the server changed."
-              : "This is the first connection to this server. Check that the fingerprint matches the one your server administrator gives you."
-          }
-          cancelLabel="Cancel"
-          confirmLabel={hostKeyPrompt?.problem.status === "changed" ? "Trust the new key" : "Trust and connect"}
-        >
-          {hostKeyPrompt && <HostKeyFingerprint problem={hostKeyPrompt.problem} />}
-        </ConfirmDialog>
-      )}
+      {hostKeyPrompt}
 
-      <Dialog
+      <ImportUrlDialog
         open={showImport}
-        onClose={closeImport}
-        title="Import from URL"
-        description="Paste a PostgreSQL connection string to fill in the form."
-        footer={
-          <>
-            <Button variant="neutral" size="sm" onClick={closeImport}>
-              Cancel
-            </Button>
-            <Button variant="primary" size="sm" onClick={handleImport} disabled={!importUrl.trim()}>
-              Import
-            </Button>
-          </>
-        }
-      >
-        <Input
-          autoFocus
-          value={importUrl}
-          onChange={(e) => {
-            setImportUrl(e.target.value);
-            setImportError(false);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleImport();
-            }
-          }}
-          placeholder="postgresql://user:password@host:5432/database"
-          spellCheck={false}
-          className="font-mono text-xs"
-          aria-invalid={importError}
-        />
-        {importError && (
-          <p className="mt-2 text-xs text-destructive-foreground">That doesn't look like a postgres:// connection URL.</p>
-        )}
-      </Dialog>
+        onClose={() => setShowImport(false)}
+        onImport={(url) => {
+          if (!importFromUrl(url)) return false;
+          setShowImport(false);
+          return true;
+        }}
+      />
     </div>
   );
 }
