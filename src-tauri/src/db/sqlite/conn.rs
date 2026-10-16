@@ -60,7 +60,6 @@ impl SqliteConn {
     }
 
     /// Runs `f` with the connection, on a blocking thread, once the connection is free.
-    #[allow(dead_code)] // Used once the SQLite catalog and data land
     pub async fn run<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> Result<T, String> + Send + 'static,

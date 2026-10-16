@@ -3,7 +3,6 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dialect {
     Postgres,
-    #[allow(dead_code)] // Used once the SQLite driver lands
     Sqlite,
 }
 

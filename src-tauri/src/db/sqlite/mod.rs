@@ -1,10 +1,12 @@
 //! The SQLite driver: a session on one database file, with two connections, one for
 //! the tables and one for the query editor (and its transaction).
 
+mod catalog;
 mod conn;
 pub mod errors;
 #[cfg(test)]
 mod tests_support;
+pub mod values;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,10 +16,7 @@ use async_trait::async_trait;
 
 pub(crate) use conn::SqliteConn;
 
-use super::model::{
-    ColumnInfo, CompletionSchema, ExplorerTree, ExtensionInfo, FunctionDetail, JsonMap, ObjectDefinition, RowChange,
-    TableDataParams, TableDataResponse, TableStructure,
-};
+use super::model::{JsonMap, RowChange, TableDataParams, TableDataResponse};
 use super::{Capabilities, Catalog, ConnectionInfo, Data, Driver, Engine};
 
 /// How a file is opened.
@@ -68,7 +67,6 @@ impl SqliteDriver {
     }
 
     /// The connection that reads and edits the tables.
-    #[allow(dead_code)] // Used once the SQLite catalog and data land
     pub(crate) fn tables(&self) -> &SqliteConn {
         &self.tables
     }
@@ -103,7 +101,7 @@ impl Driver for SqliteDriver {
     }
 
     fn catalog(&self) -> &dyn Catalog {
-        &NotReady
+        self
     }
 
     fn data(&self) -> &dyn Data {
@@ -111,40 +109,11 @@ impl Driver for SqliteDriver {
     }
 }
 
-/// TEMPORARY: the catalog and the data of a SQLite session answer an error until the
-/// SQLite catalog (Task 3) and data (Task 4) replace this stand-in.
+/// TEMPORARY: the data of a SQLite session answers an error until the SQLite data
+/// (Task 4) replaces this stand-in.
 struct NotReady;
 
-const CATALOG_NOT_READY: &str = "The SQLite catalog isn't ready yet";
 const DATA_NOT_READY: &str = "Table data isn't ready yet for SQLite";
-
-#[async_trait]
-impl Catalog for NotReady {
-    async fn explorer(&self) -> Result<ExplorerTree, String> {
-        Err(CATALOG_NOT_READY.into())
-    }
-    async fn columns(&self, _: &str, _: &str) -> Result<Vec<ColumnInfo>, String> {
-        Err(CATALOG_NOT_READY.into())
-    }
-    async fn relation_kind(&self, _: &str, _: &str) -> Result<Option<String>, String> {
-        Err(CATALOG_NOT_READY.into())
-    }
-    async fn table_structure(&self, _: &str, _: &str) -> Result<TableStructure, String> {
-        Err(CATALOG_NOT_READY.into())
-    }
-    async fn completion_schema(&self) -> Result<CompletionSchema, String> {
-        Err(CATALOG_NOT_READY.into())
-    }
-    async fn object_definition(&self, _: &str, _: &str, _: &str) -> Result<ObjectDefinition, String> {
-        Err(CATALOG_NOT_READY.into())
-    }
-    async fn function_detail(&self, _: &str, _: &str, _: &str) -> Result<FunctionDetail, String> {
-        Err(CATALOG_NOT_READY.into())
-    }
-    async fn extensions(&self) -> Result<Vec<ExtensionInfo>, String> {
-        Err(CATALOG_NOT_READY.into())
-    }
-}
 
 #[async_trait]
 impl Data for NotReady {
@@ -174,12 +143,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn the_stand_in_catalog_and_data_answer_errors() {
+    async fn the_stand_in_data_answers_errors() {
         let f = TempDb::with("CREATE TABLE t(x)");
         let d = SqliteDriver::open(f.path(), OpenOptions::default()).await.unwrap();
         assert_eq!(d.engine(), Engine::Sqlite);
         assert_eq!(d.capabilities(), &Capabilities::sqlite());
-        assert!(d.catalog().explorer().await.is_err());
         assert!(d.data().count_rows("main", "t").await.is_err());
         assert!(d.console().is_none() && d.admin().is_none());
     }
