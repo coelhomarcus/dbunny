@@ -45,6 +45,10 @@ pub struct TlsSettings {
     pub key: String,
 }
 
+fn default_engine() -> String {
+    Engine::default().as_str().to_string()
+}
+
 /// Stored on disk. Only metadata is plaintext; everything else is in `encrypted_data`.
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -52,9 +56,11 @@ pub struct SavedConnection {
     pub id: String,
     pub name: String,
     /// Which database it is, and so what `encrypted_data` holds; missing in files from
-    /// older versions, which only knew PostgreSQL.
-    #[serde(default)]
-    pub engine: Engine,
+    /// older versions, which only knew PostgreSQL. Kept as the stored text: a connection of an
+    /// engine this version doesn't know isn't offered, but it stays in the file untouched
+    /// (see `engine()`).
+    #[serde(default = "default_engine")]
+    pub engine: String,
     pub encrypted_data: String,
     pub ssl: bool,
     /// Every transaction starts read-only; missing in files from older versions.
@@ -322,7 +328,7 @@ impl SavedConnection {
         Ok(Self {
             id,
             name,
-            engine,
+            engine: engine.as_str().to_string(),
             encrypted_data,
             ssl,
             read_only: false,
@@ -333,9 +339,17 @@ impl SavedConnection {
         })
     }
 
+    /// Its engine, or None when it was saved by a newer version for an engine this one doesn't know.
+    pub fn engine(&self) -> Option<Engine> {
+        Engine::from_name(&self.engine)
+    }
+
     pub fn to_info(&self, key: &[u8; 32]) -> Result<SavedConnectionInfo, String> {
+        let engine = self
+            .engine()
+            .ok_or_else(|| format!("This version doesn't support {} connections", self.engine))?;
         let json = decrypt(key, &self.encrypted_data)?;
-        let sensitive = match self.engine {
+        let sensitive = match engine {
             Engine::Postgres => serde_json::from_str::<SensitiveData>(&json),
         }
         .map_err(|e| format!("Failed to deserialize sensitive data: {e}"))?;
@@ -343,7 +357,7 @@ impl SavedConnection {
         Ok(SavedConnectionInfo {
             id: self.id.clone(),
             name: self.name.clone(),
-            engine: self.engine,
+            engine,
             host: sensitive.host,
             port: sensitive.port,
             database: sensitive.database,
@@ -403,7 +417,7 @@ mod tests {
             legacy_payload(&key)
         );
         let file: ConnectionsFile = serde_json::from_str(&json).unwrap();
-        assert_eq!(file.connections[0].engine, Engine::Postgres);
+        assert_eq!(file.connections[0].engine(), Some(Engine::Postgres));
         assert_eq!(file.connections[0].to_info(&key).unwrap().engine, Engine::Postgres);
     }
 
@@ -433,7 +447,7 @@ mod tests {
 
         let check = |connections: &[SavedConnection]| {
             assert_eq!(connections.len(), 1);
-            assert_eq!(connections[0].engine, Engine::Postgres);
+            assert_eq!(connections[0].engine(), Some(Engine::Postgres));
             let info = connections[0].to_info(&key).unwrap();
             assert_eq!(info.engine, Engine::Postgres);
             assert_eq!(
@@ -463,6 +477,70 @@ mod tests {
         check(&load_connections_from_path(&path));
 
         let _ = fs::remove_file(&path);
+    }
+
+    /// A connections file with a PostgreSQL entry and one a newer version wrote for an engine
+    /// this build doesn't know.
+    fn file_with_an_unknown_engine(key: &[u8; 32]) -> (String, String) {
+        let mysql_payload = encrypt(key, r#"{"host":"my.example.com","port":3306,"user":"root","password":"pw"}"#).unwrap();
+        let json = format!(
+            r##"{{"version":2,"connections":[{{"id":"pg","name":"Prod","engine":"postgres","encryptedData":"{}","ssl":true,"color":"#ef4444","createdAt":"t1","updatedAt":"t2"}},{{"id":"my","name":"Shop","engine":"mysql","encryptedData":"{mysql_payload}","ssl":false,"readOnly":true,"color":"#3b82f6","icon":"cart","createdAt":"t3","updatedAt":"t4"}}]}}"##,
+            legacy_payload(key)
+        );
+        (json, mysql_payload)
+    }
+
+    #[test]
+    fn a_connection_of_an_unknown_engine_doesnt_make_the_file_unreadable() {
+        let key = [5u8; 32];
+        let dir = temp_dir();
+        let path = dir.join("db_connections.json");
+        fs::write(&path, file_with_an_unknown_engine(&key).0).unwrap();
+
+        let loaded = load_connections_from_path(&path);
+        assert!(path.exists(), "the file isn't moved aside");
+        assert_eq!(loaded.len(), 2, "both connections are kept");
+        // What get_saved_connections offers: only the engines this build knows
+        let offered: Vec<_> = loaded.iter().filter_map(|c| c.to_info(&key).ok()).collect();
+        assert_eq!(offered.len(), 1);
+        assert_eq!((offered[0].id.as_str(), offered[0].engine), ("pg", Engine::Postgres));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_connection_of_an_unknown_engine_is_written_back_unchanged() {
+        let key = [5u8; 32];
+        let dir = temp_dir();
+        let path = dir.join("db_connections.json");
+        let (json, mysql_payload) = file_with_an_unknown_engine(&key);
+        fs::write(&path, json).unwrap();
+        let unknown = |path: &Path| {
+            let written: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+            let entries = written["connections"].as_array().unwrap().clone();
+            entries.into_iter().find(|c| c["id"] == "my").expect("the mysql connection")
+        };
+        let check = |entry: serde_json::Value| {
+            assert_eq!(entry["engine"], "mysql");
+            assert_eq!(entry["encryptedData"].as_str().unwrap(), mysql_payload);
+            assert_eq!((entry["name"].as_str(), entry["icon"].as_str(), entry["readOnly"].as_bool()), (Some("Shop"), Some("cart"), Some(true)));
+            assert_eq!((entry["createdAt"].as_str(), entry["updatedAt"].as_str()), (Some("t3"), Some("t4")));
+        };
+
+        // Saving the list as it is
+        let loaded = load_connections_from_path(&path);
+        write_connections(&path, &loaded).unwrap();
+        check(unknown(&path));
+
+        // Saving after another connection is added and the PostgreSQL one deleted
+        let mut connections = load_connections_from_path(&path);
+        assert_eq!(connections.len(), 2);
+        connections.push(connection(&key, "new"));
+        connections.retain(|c| c.id != "pg");
+        write_connections(&path, &connections).unwrap();
+        let reloaded = load_connections_from_path(&path);
+        assert_eq!(reloaded.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["my", "new"]);
+        check(unknown(&path));
+        let _ = fs::remove_dir_all(dir);
     }
 
     fn temp_dir() -> PathBuf {

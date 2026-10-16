@@ -28,6 +28,21 @@ pub enum Engine {
 }
 
 impl Engine {
+    /// The name the engine is stored under in saved connections (the same as its serde form).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Engine::Postgres => "postgres",
+        }
+    }
+
+    /// The engine stored under `name`, or None when this version doesn't know it.
+    pub fn from_name(name: &str) -> Option<Engine> {
+        match name {
+            "postgres" => Some(Engine::Postgres),
+            _ => None,
+        }
+    }
+
     /// The name shown to the user.
     pub fn label(self) -> &'static str {
         match self {
