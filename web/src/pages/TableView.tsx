@@ -32,6 +32,7 @@ import SqlViewer from "../components/SqlViewer";
 import Dialog from "../components/ui/Dialog";
 import Checkbox from "../components/Checkbox";
 import TableViewHeader from "../components/TableViewHeader";
+import { writeClipboardText } from "../lib/clipboard";
 import SortableColumnHeader from "../components/SortableColumnHeader";
 import EditableCell from "../components/EditableCell";
 import Pagination from "../components/Pagination";
@@ -259,15 +260,21 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         ? [...selection.selectedRows].sort((a, b) => a - b).map(shownRow)
         : [row];
     const rowsLabel = targetRows.length > 1 ? `${targetRows.length} rows` : "row";
-    const copy = (text: string) => navigator.clipboard.writeText(text);
+    const copy = (text: string) => writeClipboardText(text);
     const link = foreignKeyLink(column, row, data.columns);
     const editable = !editLocked && editorFor(column, value).kind !== "readonly";
 
     const items: ContextMenuItem[] = [
       { label: "Copy value", icon: <Copy />, onSelect: () => copy(valueText(value)) },
-      { label: `Copy ${rowsLabel} as JSON`, icon: <Braces />, onSelect: () => copy(rowsToJson(data.columns, targetRows)) },
-      { label: `Copy ${rowsLabel} as TSV`, icon: <Sheet />, onSelect: () => copy(rowsToTsv(data.columns, targetRows)) },
-      { label: `Copy ${rowsLabel} as INSERT`, icon: <Database />, onSelect: () => copy(rowsToInsertSql(schema!, table!, data.columns, targetRows)) },
+      {
+        label: `Copy ${rowsLabel} as`,
+        icon: <Copy />,
+        items: [
+          { label: "JSON", icon: <Braces />, onSelect: () => copy(rowsToJson(data.columns, targetRows)) },
+          { label: "TSV (for spreadsheets)", icon: <Sheet />, onSelect: () => copy(rowsToTsv(data.columns, targetRows)) },
+          { label: "SQL INSERT", icon: <Database />, onSelect: () => copy(rowsToInsertSql(schema!, table!, data.columns, targetRows)) },
+        ],
+      },
       "separator",
       {
         label: value === null ? `Filter: ${colName} is NULL` : "Filter by this value",
@@ -562,7 +569,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
               size="sm"
               className="mr-auto"
               onClick={async () => {
-                await navigator.clipboard.writeText(reviewSql ?? "");
+                await writeClipboardText(reviewSql ?? "");
                 setSqlCopied(true);
               }}
             >

@@ -17,6 +17,7 @@ import { useApi, useConnection } from "../contexts/useConnection";
 import { foreignKeyTarget, shortType } from "../lib/columnMeta";
 import { cn } from "../lib/cn";
 import { formatBytes } from "../lib/format";
+import { writeClipboardText } from "../lib/clipboard";
 
 type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "permissions" | "ddl";
 
@@ -311,7 +312,7 @@ function DdlSection({ ddl }: { ddl: string }) {
           variant="ghost-muted"
           size="xs"
           onClick={async () => {
-            await navigator.clipboard.writeText(ddl);
+            await writeClipboardText(ddl);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
           }}

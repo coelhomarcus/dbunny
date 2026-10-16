@@ -5,6 +5,7 @@ import { WorkspaceProvider } from "./contexts/WorkspaceProvider";
 import { TabContext, useWorkspace, type TabSessionInfo } from "./contexts/workspace";
 import type { InitialSession } from "@/types";
 import { cn } from "./lib/cn";
+import AppContextMenu from "./components/AppContextMenu";
 import TitleBar from "./components/TitleBar";
 import ConnectPage from "./pages/ConnectPage";
 import DatabaseLayout from "./pages/DatabaseLayout";
@@ -39,6 +40,7 @@ export default function App() {
           <TabPanes />
         </div>
       </div>
+      <AppContextMenu />
     </WorkspaceProvider>
   );
 }
