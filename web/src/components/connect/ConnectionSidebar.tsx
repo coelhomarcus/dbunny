@@ -3,26 +3,19 @@ import { ArrowRight, Database, Plus, Search, Trash2 } from "lucide-react";
 import type { SavedConnection } from "@/types";
 import { cn } from "../../lib/cn";
 import Button from "../ui/Button";
-import Tooltip from "../Tooltip";
 import Badge from "../ui/Badge";
 
 const DEFAULT_COLOR = "#3b82f6";
 
 /** Rounded tile tinted with the connection colour: the row's visual anchor. */
-function ConnectionIcon({ color, size = "md" }: { color: string; size?: "sm" | "md" }) {
+function ConnectionIcon({ color }: { color: string }) {
   const style: CSSProperties = {
     color,
     backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)`,
     boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${color} 22%, transparent)`,
   };
   return (
-    <span
-      className={cn(
-        "flex shrink-0 items-center justify-center rounded-lg",
-        size === "md" ? "size-8 [&_svg]:size-4" : "size-7 [&_svg]:size-3.5",
-      )}
-      style={style}
-    >
+    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4" style={style}>
       <Database />
     </span>
   );
@@ -134,17 +127,18 @@ export default function ConnectionSidebar({
   const count = connections?.length ?? 0;
 
   return (
+    // Open or hidden, nothing in between; hidden, it also gives back the gap
     <aside
+      inert={!expanded}
       className={cn(
-        "relative shrink-0 select-none overflow-hidden rounded-lg border border-border bg-sidebar transition-[width] duration-300 ease-in-out",
-        expanded ? "w-64" : "w-12",
+        "relative shrink-0 select-none overflow-hidden rounded-lg bg-sidebar transition-[width,margin] duration-300 ease-in-out",
+        expanded ? "w-64 border border-border" : "-mr-1.5 w-0",
       )}
     >
-      {/* Expanded */}
       <div
         className={cn(
           "absolute inset-y-0 left-0 flex w-64 flex-col transition-opacity duration-200",
-          expanded ? "opacity-100 delay-75" : "pointer-events-none opacity-0",
+          expanded ? "opacity-100 delay-75" : "opacity-0",
         )}
       >
         <div className="flex h-10 shrink-0 items-center gap-1 pl-3 pr-2">
@@ -201,36 +195,6 @@ export default function ConnectionSidebar({
         </div>
       </div>
 
-      {/* Collapsed: icon rail, one dot per saved connection */}
-      <div
-        className={cn(
-          "absolute inset-0 flex flex-col items-center transition-opacity duration-200",
-          expanded ? "pointer-events-none opacity-0" : "opacity-100 delay-75",
-        )}
-      >
-        <div className="flex flex-col items-center gap-1.5 pt-2">
-          <Tooltip label="New connection">
-            <Button variant="ghost-muted" size="icon-sm" onClick={onNew} aria-label="New connection">
-              <Plus />
-            </Button>
-          </Tooltip>
-          {connections?.map((conn) => (
-            <Tooltip key={conn.id} label={`Connect to ${conn.name || conn.database}`}>
-              <button
-                type="button"
-                aria-label={conn.name}
-                onClick={() => onConnect(conn)}
-                className={cn(
-                  "rounded-lg cursor-pointer outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/50",
-                  conn.id === selectedId && "ring-2 ring-ring/40 ring-offset-1 ring-offset-chrome",
-                )}
-              >
-                <ConnectionIcon color={conn.color || DEFAULT_COLOR} size="sm" />
-              </button>
-            </Tooltip>
-          ))}
-        </div>
-      </div>
     </aside>
   );
 }

@@ -1,7 +1,3 @@
-export interface SchemaInfo {
-  name: string;
-}
-
 export interface TableInfo {
   name: string;
   schema: string;

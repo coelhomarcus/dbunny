@@ -171,17 +171,12 @@ function GroupRow({
   );
 }
 
-interface SchemaTreeProps {
-  schemaToExpand?: string | null;
-  onSchemaExpanded?: () => void;
-}
-
 /**
  * The database's objects: filterable, with pinned tables on top, schemas (when there
  * are several), categories that only show when they have something, and columns
  * under each table.
  */
-export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaTreeProps = {}) {
+export default function SchemaTree() {
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams();
@@ -243,12 +238,6 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
     return () => clearTimeout(timer);
   }, [load]);
 
-  useEffect(() => {
-    if (!schemaToExpand) return;
-    setExpanded((prev) => new Set([...prev, `s:${schemaToExpand}`]));
-    onSchemaExpanded?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schemaToExpand]);
 
   const toggle = useCallback((key: string) => {
     setExpanded((prev) => {

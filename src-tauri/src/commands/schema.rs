@@ -4,11 +4,6 @@ use tauri::State;
 use super::state::AppState;
 
 #[derive(Serialize)]
-pub struct SchemaInfo {
-    pub name: String,
-}
-
-#[derive(Serialize)]
 pub struct TableInfo {
     pub name: String,
     pub schema: String,
@@ -79,17 +74,7 @@ pub struct FunctionDetail {
 const USER_SCHEMAS: &str = "n.nspname NOT IN ('pg_catalog', 'information_schema') \
     AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp%'";
 
-#[tauri::command]
-pub async fn get_schemas(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<Vec<SchemaInfo>, String> {
-    let client = state.client(&session_id).await?;
-
-    Ok(user_schemas(&client).await.map_err(|e| e.to_string())?.into_iter().map(|name| SchemaInfo { name }).collect())
-}
-
-/// The same schemas the explorer lists, so the collapsed sidebar and the explorer agree.
+/// The schemas the explorer lists.
 pub(crate) async fn user_schemas(client: &tokio_postgres::Client) -> Result<Vec<String>, tokio_postgres::Error> {
     let rows = client
         .query(&format!("SELECT n.nspname::text FROM pg_namespace n WHERE {USER_SCHEMAS} ORDER BY n.nspname"), &[])

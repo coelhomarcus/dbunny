@@ -6,6 +6,7 @@ import { isMac } from "../lib/platform";
 import { cn } from "../lib/cn";
 import { useWorkspace, type WorkspaceTab } from "../contexts/workspace";
 import Button from "./ui/Button";
+import Tooltip from "./Tooltip";
 
 function RestoreIcon() {
   return (
@@ -196,14 +197,11 @@ export default function TitleBar() {
       {/* Room for the traffic lights on macOS, then the sidebar toggle; the tabs follow,
           and each tab's container below holds its own sidebar */}
       <div className={cn("flex shrink-0 items-center", trafficLights ? "w-[7.5rem] justify-end pr-1" : "w-12 justify-center")}>
-        <Button
-          variant="ghost-muted"
-          size="icon-sm"
-          onClick={toggleSidebar}
-          aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
-        >
-          <PanelLeft />
-        </Button>
+        <Tooltip label={sidebarOpen ? "Hide sidebar" : "Show sidebar"} side="bottom">
+          <Button variant="ghost-muted" size="icon-sm" onClick={toggleSidebar} aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}>
+            <PanelLeft />
+          </Button>
+        </Tooltip>
       </div>
 
       <div role="tablist" className="tab-strip window-tabs flex min-w-0 flex-1 items-end gap-1 pl-5 pr-2">

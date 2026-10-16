@@ -121,7 +121,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::connect::connect,
             commands::connect::disconnect,
-            commands::schema::get_schemas,
             commands::schema::get_tables,
             commands::schema::get_views,
             commands::schema::get_functions,

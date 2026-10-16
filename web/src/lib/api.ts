@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ConnectResponse,
   SshConfig,
-  SchemaInfo,
   TableInfo,
   FunctionInfo,
   FunctionDetail,
@@ -63,10 +62,6 @@ export const api = {
  */
 export function createSessionApi(sessionId: string | null) {
   return {
-    async getSchemas() {
-      return invoke<SchemaInfo[]>("get_schemas", { sessionId });
-    },
-
     async getTables(schema: string) {
       return invoke<TableInfo[]>("get_tables", { sessionId, schema });
     },
