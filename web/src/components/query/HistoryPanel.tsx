@@ -65,7 +65,7 @@ export default function HistoryPanel({
   }, [entries, search]);
 
   return (
-    <aside className="flex h-full w-full min-w-0 flex-col" aria-label="Query library">
+    <aside className="flex h-full min-h-0 w-full flex-col" aria-label="Query library">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 select-none">
         <SegmentedTabs
           value={view}

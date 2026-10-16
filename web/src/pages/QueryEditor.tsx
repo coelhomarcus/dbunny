@@ -18,6 +18,7 @@ import Popover from "../components/ui/Popover";
 import PlanView from "../components/query/PlanView";
 import NoticeList from "../components/query/NoticeList";
 import HistoryPanel, { type LibraryView } from "../components/query/HistoryPanel";
+import SideCard from "../components/layout/SideCard";
 import Dialog from "../components/ui/Dialog";
 import Input from "../components/ui/Input";
 import { loadSaved, removeSaved, saveQuery, savedKey, type SavedQuery } from "../lib/savedQueries";
@@ -837,30 +838,31 @@ function QueryEditorPanel() {
           />
         </div>
       </div>
-      {/* In the layout's side card, so it's a panel of its own */}
-      {historyOpen && renderSidePanel(
-        <HistoryPanel
-          view={libraryView}
-          onViewChange={setLibraryView}
-          entries={history}
-          saved={savedQueries}
-          onOpen={(sql) => openFromHistory(sql)}
-          onOpenSaved={(query) => openFromHistory(query.sql, { label: query.name, savedId: query.id })}
-          onRemoveSaved={(id) => {
-            if (!savedStorageKey) return;
-            setSavedQueries(removeSaved(savedStorageKey, id));
-            // Tabs keep their SQL, just no longer linked to the deleted query
-            const newMetas = tabMetas.map((t) => (t.savedId === id ? { ...t, savedId: undefined } : t));
-            setTabMetas(newMetas);
-            saved.tabMetas = newMetas;
-          }}
-          onRemove={(id) => historyStorageKey && setHistory(removeFromHistory(historyStorageKey, id))}
-          onClear={() => {
-            if (historyStorageKey) clearHistory(historyStorageKey);
-            setHistory([]);
-          }}
-          onClose={() => setHistoryOpen(false)}
-        />
+      {renderSidePanel(
+        <SideCard open={historyOpen} widthClass="w-80" label="Query library">
+          <HistoryPanel
+            view={libraryView}
+            onViewChange={setLibraryView}
+            entries={history}
+            saved={savedQueries}
+            onOpen={(sql) => openFromHistory(sql)}
+            onOpenSaved={(query) => openFromHistory(query.sql, { label: query.name, savedId: query.id })}
+            onRemoveSaved={(id) => {
+              if (!savedStorageKey) return;
+              setSavedQueries(removeSaved(savedStorageKey, id));
+              // Tabs keep their SQL, just no longer linked to the deleted query
+              const newMetas = tabMetas.map((t) => (t.savedId === id ? { ...t, savedId: undefined } : t));
+              setTabMetas(newMetas);
+              saved.tabMetas = newMetas;
+            }}
+            onRemove={(id) => historyStorageKey && setHistory(removeFromHistory(historyStorageKey, id))}
+            onClear={() => {
+              if (historyStorageKey) clearHistory(historyStorageKey);
+              setHistory([]);
+            }}
+            onClose={() => setHistoryOpen(false)}
+          />
+        </SideCard>,
       )}
       <Dialog
         open={saveName !== null}
