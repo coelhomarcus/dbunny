@@ -5,6 +5,7 @@ import type { RelationKind } from "../lib/api";
 import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
 import RelationActionDialog, { type RelationAction, type RelationTarget } from "./schema/RelationActionDialog";
 import CreateTableDialog from "./schema/CreateTableDialog";
+import { writeClipboardText } from "../lib/clipboard";
 import ContainerDialog, { type ContainerOptions, type ContainerRequest } from "./schema/ContainerDialog";
 import { quoteIdent } from "../lib/copyRows";
 import { shortType } from "../lib/columnMeta";
@@ -350,7 +351,7 @@ export default function SchemaTree() {
         { label: "New schema…", icon: <FolderPlus />, onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }) },
       ];
     }
-    const items: ContextMenuItem[] = [{ label: "Copy name", icon: <Copy />, onSelect: () => navigator.clipboard.writeText(quoteIdent(schema)) }];
+    const items: ContextMenuItem[] = [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(schema)) }];
     if (readOnly) return items;
     return [
       { label: "New table here…", icon: <Table2 />, onSelect: () => setNewTableIn(schema) },
@@ -371,8 +372,8 @@ export default function SchemaTree() {
       { label: "Open structure", icon: <Columns3 />, onSelect: () => navigate(`${relationPath(target.schema, target.name)}/structure`) },
       { label: pinned ? "Unpin" : "Pin to the top", icon: pinned ? <PinOff /> : <Pin />, onSelect: () => togglePin(target.schema, object) },
       "separator",
-      { label: "Copy name", icon: <Copy />, onSelect: () => navigator.clipboard.writeText(qualified) },
-      { label: "Copy SELECT", icon: <Copy />, onSelect: () => navigator.clipboard.writeText(`SELECT * FROM ${qualified} LIMIT 100;`) },
+      { label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(qualified) },
+      { label: "Copy SELECT", icon: <Copy />, onSelect: () => writeClipboardText(`SELECT * FROM ${qualified} LIMIT 100;`) },
     ];
     if (readOnly) return items;
     items.push("separator", { label: "Rename…", icon: <PenLine />, onSelect: () => setAction({ action: "rename", target }) });

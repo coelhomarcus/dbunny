@@ -18,15 +18,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `label` names the files people download: DBunny-<version>-<label>.<ext>
         include:
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            label: Linux-x64
           - platform: macos-latest
             target: aarch64-apple-darwin
+            label: macOS-Apple-Silicon
           - platform: macos-latest
             target: x86_64-apple-darwin
+            label: macOS-Intel
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            label: Windows-x64
 
     runs-on: ${{ matrix.platform }}
 
@@ -72,7 +77,19 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: DBunny ${{ github.ref_name }}
-          releaseBody: 'See the assets below to download DBunny for your platform.'
+          releaseBody: |
+            ## Which file do I need?
+
+            | Your system | Download |
+            |---|---|
+            | macOS on Apple Silicon (M1 and later) | `DBunny-<version>-macOS-Apple-Silicon.dmg` |
+            | macOS on Intel | `DBunny-<version>-macOS-Intel.dmg` |
+            | Windows | `DBunny-<version>-Windows-x64-setup.exe` (or the `.msi`) |
+            | Linux, any distribution | `DBunny-<version>-Linux-x64.AppImage` |
+            | Debian, Ubuntu | `DBunny-<version>-Linux-x64.deb` |
+            | Fedora, openSUSE | `DBunny-<version>-Linux-x64.rpm` |
           releaseDraft: true
           prerelease: false
+          # e.g. DBunny-0.3.0-macOS-Apple-Silicon.dmg, DBunny-0.3.0-Windows-x64-setup.exe
+          assetNamePattern: DBunny-[version]-${{ matrix.label }}[setup][ext]
           args: --target ${{ matrix.target }}

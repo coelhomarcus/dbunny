@@ -5,6 +5,7 @@ import { flattenPlan, formatMs, type PlanRow } from "../../lib/plan";
 import { cn } from "../../lib/cn";
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
+import { writeClipboardText } from "../../lib/clipboard";
 
 /** Share of the execution time a node took by itself, as a colour. */
 function heat(share: number) {
@@ -96,7 +97,7 @@ export default function PlanView({ explain }: { explain: ExplainResult }) {
           size="xs"
           className="ml-auto"
           onClick={async () => {
-            await navigator.clipboard.writeText(JSON.stringify(explain.plan, null, 2));
+            await writeClipboardText(JSON.stringify(explain.plan, null, 2));
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
           }}

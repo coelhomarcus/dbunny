@@ -6,6 +6,7 @@ import { DetailSkeleton } from "../components/Skeleton";
 import { useApi } from "../contexts/useConnection";
 import SqlViewer from "../components/SqlViewer";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
+import { writeClipboardText } from "../lib/clipboard";
 
 /** A sequence or a type: a few facts and its DDL. */
 export default function ObjectView({ kind }: { kind: "sequence" | "type" }) {
@@ -64,7 +65,7 @@ export default function ObjectView({ kind }: { kind: "sequence" | "type" }) {
             <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Definition</span>
             <button
               onClick={async () => {
-                await navigator.clipboard.writeText(definition.ddl);
+                await writeClipboardText(definition.ddl);
                 setCopied(true);
                 setTimeout(() => setCopied(false), 2000);
               }}

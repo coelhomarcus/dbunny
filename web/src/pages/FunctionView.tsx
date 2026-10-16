@@ -6,6 +6,7 @@ import { useApi } from "../contexts/useConnection";
 import SqlViewer from "../components/SqlViewer";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import type { FunctionDetail } from "@/types";
+import { writeClipboardText } from "../lib/clipboard";
 
 export default function FunctionView() {
   const { schema, name } = useParams<{ schema: string; name: string }>();
@@ -43,7 +44,7 @@ export default function FunctionView() {
 
   async function copySource() {
     if (!detail?.source) return;
-    await navigator.clipboard.writeText(detail.source);
+    await writeClipboardText(detail.source);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
