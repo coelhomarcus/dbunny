@@ -1,5 +1,6 @@
 //! Changes to whole tables and views from the explorer: rename, duplicate, truncate,
-//! drop and refresh. Names are always quoted; nothing typed becomes SQL text.
+//! drop and refresh; and creating, renaming and dropping schemas and databases.
+//! Names are always quoted; nothing typed becomes SQL text.
 
 use tauri::State;
 use tokio_postgres::Client;
@@ -150,9 +151,70 @@ pub(crate) async fn duplicate(client: &Client, schema: &str, name: &str, new_nam
     Ok(())
 }
 
+pub(crate) fn create_schema_sql(name: &str) -> Result<String, String> {
+    check_name(name)?;
+    Ok(format!("CREATE SCHEMA {}", quote_ident(name)))
+}
+
+pub(crate) fn rename_schema_sql(name: &str, new_name: &str) -> Result<String, String> {
+    check_name(new_name)?;
+    Ok(format!("ALTER SCHEMA {} RENAME TO {}", quote_ident(name), quote_ident(new_name)))
+}
+
+pub(crate) fn drop_schema_sql(name: &str, cascade: bool) -> String {
+    format!("DROP SCHEMA {}{}", quote_ident(name), if cascade { " CASCADE" } else { "" })
+}
+
+pub(crate) fn create_database_sql(name: &str) -> Result<String, String> {
+    check_name(name)?;
+    Ok(format!("CREATE DATABASE {}", quote_ident(name)))
+}
+
+/// `force` (PostgreSQL 13+) ends the sessions still connected to it instead of failing.
+pub(crate) fn drop_database_sql(name: &str, force: bool) -> String {
+    format!("DROP DATABASE {}{}", quote_ident(name), if force { " WITH (FORCE)" } else { "" })
+}
+
+#[tauri::command]
+pub async fn create_schema(state: State<'_, AppState>, session_id: String, name: String) -> Result<(), String> {
+    run(&state, &session_id, &create_schema_sql(&name)?).await
+}
+
+#[tauri::command]
+pub async fn rename_schema(state: State<'_, AppState>, session_id: String, name: String, new_name: String) -> Result<(), String> {
+    run(&state, &session_id, &rename_schema_sql(&name, &new_name)?).await
+}
+
+#[tauri::command]
+pub async fn drop_schema(state: State<'_, AppState>, session_id: String, name: String, cascade: bool) -> Result<(), String> {
+    run(&state, &session_id, &drop_schema_sql(&name, cascade)).await
+}
+
+/// CREATE and DROP DATABASE refuse to run in a transaction, so they go alone in one message.
+#[tauri::command]
+pub async fn create_database(state: State<'_, AppState>, session_id: String, name: String) -> Result<(), String> {
+    run(&state, &session_id, &create_database_sql(&name)?).await
+}
+
+#[tauri::command]
+pub async fn drop_database(state: State<'_, AppState>, session_id: String, name: String, force: bool) -> Result<(), String> {
+    run(&state, &session_id, &drop_database_sql(&name, force)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schemas_and_databases_are_quoted() {
+        assert_eq!(create_schema_sql("sales data").unwrap(), "CREATE SCHEMA \"sales data\"");
+        assert_eq!(rename_schema_sql("a", "b\"c").unwrap(), "ALTER SCHEMA \"a\" RENAME TO \"b\"\"c\"");
+        assert_eq!(drop_schema_sql("a", true), "DROP SCHEMA \"a\" CASCADE");
+        assert_eq!(create_database_sql("app; DROP").unwrap(), "CREATE DATABASE \"app; DROP\"");
+        assert_eq!(drop_database_sql("old", true), "DROP DATABASE \"old\" WITH (FORCE)");
+        assert!(create_schema_sql(" ").is_err());
+        assert!(create_database_sql(&"d".repeat(64)).is_err());
+    }
 
     #[test]
     fn names_are_quoted_in_every_statement() {
@@ -252,5 +314,25 @@ mod server_tests {
         assert_eq!(count(&client, &format!("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = '{s}' AND relkind IN ('r', 'm')")).await, 0);
 
         client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn schemas_and_databases_come_and_go() {
+        let client = connect().await;
+        client.batch_execute("DROP SCHEMA IF EXISTS dbunny_new_schema CASCADE; DROP SCHEMA IF EXISTS dbunny_renamed_schema CASCADE").await.unwrap();
+        client.batch_execute(&create_schema_sql("dbunny_new_schema").unwrap()).await.unwrap();
+        client.batch_execute("CREATE TABLE dbunny_new_schema.t (id int)").await.unwrap();
+        client.batch_execute(&rename_schema_sql("dbunny_new_schema", "dbunny_renamed_schema").unwrap()).await.unwrap();
+        let err = client.batch_execute(&drop_schema_sql("dbunny_renamed_schema", false)).await.unwrap_err();
+        assert!(db_message(&err).contains("depend"), "{}", db_message(&err));
+        client.batch_execute(&drop_schema_sql("dbunny_renamed_schema", true)).await.unwrap();
+        assert_eq!(count(&client, "SELECT count(*) FROM pg_namespace WHERE nspname LIKE 'dbunny_%_schema'").await, 0);
+
+        client.batch_execute("DROP DATABASE IF EXISTS dbunny_new_db").await.unwrap();
+        client.batch_execute(&create_database_sql("dbunny_new_db").unwrap()).await.unwrap();
+        assert_eq!(count(&client, "SELECT count(*) FROM pg_database WHERE datname = 'dbunny_new_db'").await, 1);
+        client.batch_execute(&drop_database_sql("dbunny_new_db", true)).await.unwrap();
+        assert_eq!(count(&client, "SELECT count(*) FROM pg_database WHERE datname = 'dbunny_new_db'").await, 0);
     }
 }
