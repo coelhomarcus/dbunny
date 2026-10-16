@@ -17,7 +17,9 @@ pub async fn preview_structure_change(
     change: StructureChange,
 ) -> Result<String, String> {
     let driver = state.driver(&session_id).await?;
-    require(driver.schema_editor(), driver.engine(), "Structure editing")?.preview_change(&schema, &table, &change)
+    require(driver.schema_editor(), driver.engine(), "Structure editing")?
+        .preview_change(&schema, &table, &change)
+        .await
 }
 
 #[tauri::command]
@@ -43,7 +45,9 @@ pub async fn preview_create_table(
     columns: Vec<NewColumn>,
 ) -> Result<String, String> {
     let driver = state.driver(&session_id).await?;
-    require(driver.schema_editor(), driver.engine(), "Structure editing")?.preview_create_table(&schema, &table, &columns)
+    require(driver.schema_editor(), driver.engine(), "Structure editing")?
+        .preview_create_table(&schema, &table, &columns)
+        .await
 }
 
 #[tauri::command]

@@ -90,9 +90,9 @@ pub trait Transactions: Send + Sync {
 /// Changing tables and other objects.
 #[async_trait]
 pub trait SchemaEditor: Send + Sync {
-    fn preview_change(&self, schema: &str, table: &str, change: &StructureChange) -> Result<String, String>;
+    async fn preview_change(&self, schema: &str, table: &str, change: &StructureChange) -> Result<String, String>;
     async fn apply_change(&self, schema: &str, table: &str, change: StructureChange) -> Result<(), String>;
-    fn preview_create_table(&self, schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String>;
+    async fn preview_create_table(&self, schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String>;
     async fn create_table(&self, schema: &str, table: &str, columns: Vec<NewColumn>) -> Result<(), String>;
     async fn rename_relation(&self, schema: &str, name: &str, kind: &str, new_name: &str) -> Result<(), String>;
     async fn drop_relation(&self, schema: &str, name: &str, kind: &str, cascade: bool) -> Result<(), String>;
@@ -207,6 +207,50 @@ mod tests {
         async fn import_rows(&self, _: &str, _: &str, _: Vec<String>, _: Vec<Vec<Option<String>>>) -> Result<u64, String> {
             unimplemented!()
         }
+    }
+
+    /// An engine that has to read its catalog (await) before it can tell what a change would run.
+    struct AwaitingEditor;
+
+    #[async_trait]
+    impl SchemaEditor for AwaitingEditor {
+        async fn preview_change(&self, schema: &str, table: &str, _: &StructureChange) -> Result<String, String> {
+            tokio::task::yield_now().await;
+            Ok(format!("-- change {schema}.{table}"))
+        }
+        async fn apply_change(&self, _: &str, _: &str, _: StructureChange) -> Result<(), String> {
+            unimplemented!()
+        }
+        async fn preview_create_table(&self, schema: &str, table: &str, _: &[NewColumn]) -> Result<String, String> {
+            tokio::task::yield_now().await;
+            Ok(format!("-- create {schema}.{table}"))
+        }
+        async fn create_table(&self, _: &str, _: &str, _: Vec<NewColumn>) -> Result<(), String> {
+            unimplemented!()
+        }
+        async fn rename_relation(&self, _: &str, _: &str, _: &str, _: &str) -> Result<(), String> {
+            unimplemented!()
+        }
+        async fn drop_relation(&self, _: &str, _: &str, _: &str, _: bool) -> Result<(), String> {
+            unimplemented!()
+        }
+        async fn truncate_table(&self, _: &str, _: &str, _: bool, _: bool) -> Result<(), String> {
+            unimplemented!()
+        }
+        async fn duplicate_table(&self, _: &str, _: &str, _: &str, _: bool) -> Result<(), String> {
+            unimplemented!()
+        }
+        async fn refresh_materialized_view(&self, _: &str, _: &str) -> Result<(), String> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn previews_can_await() {
+        let editor: &dyn SchemaEditor = &AwaitingEditor;
+        let change = StructureChange::DropColumn { name: "a".into(), cascade: false };
+        assert_eq!(editor.preview_change("s", "t", &change).await.unwrap(), "-- change s.t");
+        assert_eq!(editor.preview_create_table("s", "t", &[]).await.unwrap(), "-- create s.t");
     }
 
     #[tokio::test]

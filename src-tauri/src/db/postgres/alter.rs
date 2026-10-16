@@ -269,7 +269,7 @@ fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<
 #[async_trait]
 impl SchemaEditor for PostgresDriver {
     /// The SQL a change would run, for showing before running it.
-    fn preview_change(&self, schema: &str, table: &str, change: &StructureChange) -> Result<String, String> {
+    async fn preview_change(&self, schema: &str, table: &str, change: &StructureChange) -> Result<String, String> {
         let (stmts, _) = change_sql(schema, table, change)?;
         Ok(stmts.iter().map(|s| format!("{s};")).collect::<Vec<_>>().join("\n"))
     }
@@ -279,7 +279,7 @@ impl SchemaEditor for PostgresDriver {
         apply(&client, schema, table, &change).await
     }
 
-    fn preview_create_table(&self, schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
+    async fn preview_create_table(&self, schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
         Ok(create_table_sql(schema, table, columns)? + ";")
     }
 
