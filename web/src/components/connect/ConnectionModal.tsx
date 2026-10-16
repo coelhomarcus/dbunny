@@ -76,25 +76,31 @@ function ModalBody({
   const [step, setStep] = useState<"engine" | "form">(initial ? "form" : "engine");
   const [draft, setDraft] = useState<ConnectionDraft>(initial ?? newDraft("postgres"));
   const [tab, setTab] = useState<ConnectionTab>("connection");
-  const [showErrors, setShowErrors] = useState(false);
+  // Which action asked for the empty fields to be pointed out; only saving needs a name
+  const [showErrors, setShowErrors] = useState<false | "connect" | "save">(false);
   const [test, setTest] = useState<TestState>({ status: "idle" });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
   const { connect, isConnecting } = useConnection();
   const { withHostKeyCheck, prompt: hostKeyPrompt } = useHostKeyCheck();
 
-  // Escape closes, unless something opened on top of it (a popover, a confirmation) is the one to close
+  // Escape closes, unless something opened on top of it (a popover, a confirmation) is the one to
+  // close. Listened to while capturing, so it's checked before that dialog's own handler removes it
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       const dialogs = document.querySelectorAll("[role=dialog]");
-      if (dialogs[dialogs.length - 1] === dialogRef.current) onClose();
+      if (dialogs[dialogs.length - 1] === dialogRef.current) onCloseRef.current();
     }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, []);
 
   function change(next: ConnectionDraft) {
     setDraft(next);
@@ -105,7 +111,7 @@ function ModalBody({
   function ready(purpose: "connect" | "save") {
     const missing = missingFields(draft, purpose);
     if (missing.length === 0) return true;
-    setShowErrors(true);
+    setShowErrors(purpose);
     const first = missing[0];
     if (first.tab !== "identity") setTab(first.tab);
     // After the tab with the field has rendered; looked up in the modal, whatever is behind it
@@ -167,7 +173,7 @@ function ModalBody({
   const errorTabs = new Set(showErrors ? missingFields(draft, "connect").map((m) => m.tab) : []);
   const socket = isSocketHost(draft.fields.host);
   const engineLabel = ENGINE_CARDS.find((c) => c.id === draft.engine)?.label;
-  const nameMissing = showErrors && !draft.identity.name.trim() && missingFields(draft, "save").some((m) => m.fieldId === "conn-name");
+  const nameMissing = showErrors === "save" && !draft.identity.name.trim();
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -240,68 +246,77 @@ function ModalBody({
                 />
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-                {tab === "options" ? (
-                  <OptionsTab draft={draft} onChange={change} />
-                ) : (
-                  <PostgresTabs tab={tab} draft={draft} onChange={change} showErrors={showErrors} onOpenImport={() => setImportOpen(true)} />
-                )}
-              </div>
-
-              {(error || test.status === "error") && (
-                <div
-                  data-connection-error={error ? "" : undefined}
-                  className="mx-5 mb-3 flex shrink-0 items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2.5 text-sm text-destructive-foreground"
-                >
-                  <TriangleAlert size={15} className="mt-0.5 shrink-0" />
-                  <span className={cn("min-w-0 break-words", !error && "font-mono text-xs leading-5")}>
-                    {error ?? (test.status === "error" ? test.message : null)}
-                  </span>
-                </div>
-              )}
-
-              <footer className="flex shrink-0 items-center gap-2 border-t border-border bg-muted px-5 py-3">
-                {isNew && (
-                  <Button variant="ghost-muted" size="sm" onClick={() => setStep("engine")}>
-                    <ArrowLeft />
-                    Back
-                  </Button>
-                )}
-                {test.status === "ok" && (
-                  <Badge variant="success">
-                    <Check />
-                    OK · {engineLabel} {test.version}
-                  </Badge>
-                )}
-                {test.status === "error" && (
-                  <Badge variant="destructive">
-                    <X />
-                    Connection failed
-                  </Badge>
-                )}
-                <div className="flex-1" />
-                <Button variant="outline" size="sm" onClick={handleTest} disabled={test.status === "testing"}>
-                  {test.status === "testing" ? <Loader className="animate-spin" /> : <PlugZap />}
-                  Test
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleSave} disabled={saving}>
-                  {saving && <Loader className="animate-spin" />}
-                  Save
-                </Button>
-                <Button variant="primary" size="sm" className="group" onClick={handleConnect} disabled={isConnecting}>
-                  {isConnecting ? (
-                    <>
-                      <Loader className="animate-spin" />
-                      Connecting…
-                    </>
+              {/* A form, so Enter in a field connects */}
+              <form
+                className="flex min-h-0 flex-1 flex-col"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleConnect();
+                }}
+              >
+                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                  {tab === "options" ? (
+                    <OptionsTab draft={draft} onChange={change} />
                   ) : (
-                    <>
-                      Connect
-                      <ArrowRight className="transition-transform group-hover:translate-x-0.5" />
-                    </>
+                    <PostgresTabs tab={tab} draft={draft} onChange={change} showErrors={showErrors !== false} onOpenImport={() => setImportOpen(true)} />
                   )}
-                </Button>
-              </footer>
+                </div>
+
+                {(error || test.status === "error") && (
+                  <div
+                    data-connection-error={error ? "" : undefined}
+                    className="mx-5 mb-3 flex shrink-0 items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2.5 text-sm text-destructive-foreground"
+                  >
+                    <TriangleAlert size={15} className="mt-0.5 shrink-0" />
+                    <span className={cn("min-w-0 break-words", !error && "font-mono text-xs leading-5")}>
+                      {error ?? (test.status === "error" ? test.message : null)}
+                    </span>
+                  </div>
+                )}
+
+                <footer className="flex shrink-0 items-center gap-2 border-t border-border bg-muted px-5 py-3">
+                  {isNew && (
+                    <Button variant="ghost-muted" size="sm" onClick={() => setStep("engine")}>
+                      <ArrowLeft />
+                      Back
+                    </Button>
+                  )}
+                  {test.status === "ok" && (
+                    <Badge variant="success">
+                      <Check />
+                      OK · {engineLabel} {test.version}
+                    </Badge>
+                  )}
+                  {test.status === "error" && (
+                    <Badge variant="destructive">
+                      <X />
+                      Connection failed
+                    </Badge>
+                  )}
+                  <div className="flex-1" />
+                  <Button variant="outline" size="sm" onClick={handleTest} disabled={test.status === "testing"}>
+                    {test.status === "testing" ? <Loader className="animate-spin" /> : <PlugZap />}
+                    Test
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleSave} disabled={saving}>
+                    {saving && <Loader className="animate-spin" />}
+                    Save
+                  </Button>
+                  <Button type="submit" variant="primary" size="sm" className="group" disabled={isConnecting}>
+                    {isConnecting ? (
+                      <>
+                        <Loader className="animate-spin" />
+                        Connecting…
+                      </>
+                    ) : (
+                      <>
+                        Connect
+                        <ArrowRight className="transition-transform group-hover:translate-x-0.5" />
+                      </>
+                    )}
+                  </Button>
+                </footer>
+              </form>
             </>
           )}
         </div>
