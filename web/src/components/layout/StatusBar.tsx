@@ -1,4 +1,5 @@
 import { Eye, EyeOff, Lock, LogOut } from "lucide-react";
+import Tooltip from "../Tooltip";
 import type { ConnectionInfo } from "@/types";
 import ThemeToggle from "../ui/ThemeToggle";
 
@@ -33,15 +34,17 @@ export default function StatusBar({
         </span>
       )}
       {/* The toggle sits on the details it reveals */}
-      <button
-        onClick={onToggleReveal}
-        aria-label={revealed ? "Hide connection details" : "Show connection details"}
-        className="group flex h-5 items-center gap-2 rounded-md px-1.5 font-mono transition-colors cursor-pointer hover:bg-accent hover:text-foreground"
-      >
-        <span>{revealed ? host : mask(host)}</span>
-        <span>{revealed ? database : mask(database)}</span>
-        {revealed ? <EyeOff size={11} className="shrink-0" /> : <Eye size={11} className="shrink-0" />}
-      </button>
+      <Tooltip label={revealed ? "Hide the connection details" : "Show the connection details"} side="top">
+        <button
+          onClick={onToggleReveal}
+          aria-label={revealed ? "Hide connection details" : "Show connection details"}
+          className="group flex h-5 items-center gap-2 rounded-md px-1.5 font-mono transition-colors cursor-pointer hover:bg-accent hover:text-foreground"
+        >
+          <span>{revealed ? host : mask(host)}</span>
+          <span>{revealed ? database : mask(database)}</span>
+          {revealed ? <EyeOff size={11} className="shrink-0" /> : <Eye size={11} className="shrink-0" />}
+        </button>
+      </Tooltip>
       <div className="ml-auto flex items-center gap-1">
         {connectionInfo?.serverVersion && <span className="mr-1.5">PostgreSQL {connectionInfo.serverVersion.split(" ")[0]}</span>}
         <ThemeToggle side="top" size="icon-xs" />

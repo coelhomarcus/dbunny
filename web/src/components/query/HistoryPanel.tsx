@@ -5,6 +5,7 @@ import type { SavedQuery } from "../../lib/savedQueries";
 import SegmentedTabs from "../ui/SegmentedTabs";
 import { cn } from "../../lib/cn";
 import Button from "../ui/Button";
+import Tooltip from "../Tooltip";
 import { inputClass } from "../ui/styles";
 
 function dayLabel(date: Date) {
@@ -86,13 +87,17 @@ export default function HistoryPanel({
               </Button>
             </>
           ) : (
-            <Button variant="ghost-muted" size="icon-xs" aria-label="Clear history" onClick={() => setConfirmClear(true)}>
-              <Trash2 />
-            </Button>
+            <Tooltip label="Clear history" side="bottom">
+              <Button variant="ghost-muted" size="icon-xs" aria-label="Clear history" onClick={() => setConfirmClear(true)}>
+                <Trash2 />
+              </Button>
+            </Tooltip>
           ))}
-        <Button variant="ghost-muted" size="icon-xs" aria-label="Close history" onClick={onClose}>
-          <X />
-        </Button>
+        <Tooltip label="Close" side="bottom">
+          <Button variant="ghost-muted" size="icon-xs" aria-label="Close history" onClick={onClose}>
+            <X />
+          </Button>
+        </Tooltip>
       </div>
 
       {(view === "history" ? entries.length > 0 : saved.length > 0) && (

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import Button from "./ui/Button";
+import Tooltip from "./Tooltip";
 import { inputClass, selectClass } from "./ui/styles";
 import { cn } from "../lib/cn";
 
@@ -81,12 +82,16 @@ export default function Pagination({
 
       {totalPages > 1 && (
         <div className="flex items-center gap-1.5">
-          <Button variant="outline" size="icon-sm" aria-label="First page" onClick={() => onPageChange(1)} disabled={page <= 1}>
-            <ChevronsLeft />
-          </Button>
-          <Button variant="outline" size="icon-sm" aria-label="Previous page" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}>
-            <ChevronLeft />
-          </Button>
+          <Tooltip label="First page" side="top">
+            <Button variant="outline" size="icon-sm" aria-label="First page" onClick={() => onPageChange(1)} disabled={page <= 1}>
+              <ChevronsLeft />
+            </Button>
+          </Tooltip>
+          <Tooltip label="Previous page" side="top">
+            <Button variant="outline" size="icon-sm" aria-label="Previous page" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}>
+              <ChevronLeft />
+            </Button>
+          </Tooltip>
           <span className="flex items-center gap-1.5 px-1.5">
             Page
             {/* Remounted when the page changes elsewhere, so the field shows it */}
@@ -94,25 +99,29 @@ export default function Pagination({
             of {estimated ? "~" : ""}
             {totalPages.toLocaleString()}
           </span>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label="Next page"
-            onClick={() => onPageChange(estimated ? page + 1 : Math.min(totalPages, page + 1))}
-            disabled={!(hasNext ?? page < totalPages)}
-          >
-            <ChevronRight />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label="Last page"
-            onClick={() => onPageChange(totalPages)}
-            // The last page of an estimated count isn't known
-            disabled={estimated || page >= totalPages}
-          >
-            <ChevronsRight />
-          </Button>
+          <Tooltip label="Next page" side="top">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Next page"
+              onClick={() => onPageChange(estimated ? page + 1 : Math.min(totalPages, page + 1))}
+              disabled={!(hasNext ?? page < totalPages)}
+            >
+              <ChevronRight />
+            </Button>
+          </Tooltip>
+          <Tooltip label="Last page" side="top">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Last page"
+              onClick={() => onPageChange(totalPages)}
+              // The last page of an estimated count isn't known
+              disabled={estimated || page >= totalPages}
+            >
+              <ChevronsRight />
+            </Button>
+          </Tooltip>
         </div>
       )}
     </div>

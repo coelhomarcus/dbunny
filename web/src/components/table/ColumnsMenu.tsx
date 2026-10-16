@@ -4,6 +4,7 @@ import type { ColumnLayoutApi } from "../../hooks/useColumnLayout";
 import Button from "../ui/Button";
 import Popover from "../ui/Popover";
 import Checkbox from "../Checkbox";
+import Tooltip from "../Tooltip";
 import { cn } from "../../lib/cn";
 
 /** Show, hide and reorder the table's columns. */
@@ -15,18 +16,20 @@ export default function ColumnsMenu({ layout }: { layout: ColumnLayoutApi }) {
 
   return (
     <>
-      <Button
-        ref={anchorRef}
-        variant="ghost-muted"
-        size={layout.hiddenCount > 0 ? "xs" : "icon-xs"}
-        data-active={open || layout.hiddenCount > 0}
-        aria-expanded={open}
-        aria-label="Show, hide and reorder columns"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Columns3 />
-        {layout.hiddenCount > 0 && <span className="tabular-nums text-primary">{layout.hiddenCount} hidden</span>}
-      </Button>
+      <Tooltip label="Show, hide and reorder columns" side="top">
+        <Button
+          ref={anchorRef}
+          variant="ghost-muted"
+          size={layout.hiddenCount > 0 ? "xs" : "icon-xs"}
+          data-active={open || layout.hiddenCount > 0}
+          aria-expanded={open}
+          aria-label="Show, hide and reorder columns"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <Columns3 />
+          {layout.hiddenCount > 0 && <span className="tabular-nums text-primary">{layout.hiddenCount} hidden</span>}
+        </Button>
+      </Tooltip>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} className="w-64 p-1">
         <div className="max-h-80 overflow-y-auto">
           {layout.ordered.map(({ column }, i) => {

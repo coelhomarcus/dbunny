@@ -703,9 +703,11 @@ export default function QueryEditor() {
                 {justSaved ? <Check /> : <Bookmark />}
                 {justSaved ? "Saved" : "Save"}
               </Button>
-              <Button ref={moreButtonRef} variant="ghost-muted" size="icon-sm" onClick={() => setMoreOpen((v) => !v)} aria-label="More" aria-expanded={moreOpen}>
-                <MoreHorizontal />
-              </Button>
+              <Tooltip label="More actions" side="top">
+                <Button ref={moreButtonRef} variant="ghost-muted" size="icon-sm" onClick={() => setMoreOpen((v) => !v)} aria-label="More" aria-expanded={moreOpen}>
+                  <MoreHorizontal />
+                </Button>
+              </Tooltip>
               <Popover open={moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreButtonRef} className="w-52 p-1">
                 <div role="menu" className="[&>button]:flex [&>button]:w-full [&>button]:items-center [&>button]:gap-2.5 [&>button]:rounded-md [&>button]:px-2 [&>button]:py-1.5 [&>button]:text-left [&>button]:text-[13px] [&>button]:cursor-pointer [&>button:hover]:bg-accent [&_svg]:size-3.5 [&_svg]:text-muted-foreground">
                   <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); importQuery(); }}>

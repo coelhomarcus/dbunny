@@ -10,6 +10,7 @@ import { shortType } from "../lib/columnMeta";
 import { cn } from "../lib/cn";
 import type { ColumnInfo, ExplorerObject, ExplorerTree, ExtensionInfo } from "@/types";
 import Button from "./ui/Button";
+import Tooltip from "./Tooltip";
 import {
   ChevronRight,
   Folder,
@@ -521,16 +522,22 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
         )}
         <div className="ml-auto flex items-center">
           {!readOnly && tree && (
-            <Button variant="ghost-muted" size="icon-xs" aria-label="New table" onClick={() => setNewTableIn(defaultSchema)}>
-              <Plus />
-            </Button>
+            <Tooltip label="New table" side="bottom">
+              <Button variant="ghost-muted" size="icon-xs" aria-label="New table" onClick={() => setNewTableIn(defaultSchema)}>
+                <Plus />
+              </Button>
+            </Tooltip>
           )}
-          <Button variant="ghost-muted" size="icon-xs" aria-label="Collapse all" onClick={() => setExpanded(new Set())} disabled={!tree}>
-            <ChevronsDownUp />
-          </Button>
-          <Button variant="ghost-muted" size="icon-xs" aria-label="Refresh the explorer" onClick={() => load(false)} disabled={refreshing}>
-            <RefreshCw className={refreshing ? "animate-spin" : undefined} />
-          </Button>
+          <Tooltip label="Collapse all" side="bottom">
+            <Button variant="ghost-muted" size="icon-xs" aria-label="Collapse all" onClick={() => setExpanded(new Set())} disabled={!tree}>
+              <ChevronsDownUp />
+            </Button>
+          </Tooltip>
+          <Tooltip label="Refresh" side="bottom">
+            <Button variant="ghost-muted" size="icon-xs" aria-label="Refresh the explorer" onClick={() => load(false)} disabled={refreshing}>
+              <RefreshCw className={refreshing ? "animate-spin" : undefined} />
+            </Button>
+          </Tooltip>
         </div>
       </div>
 
