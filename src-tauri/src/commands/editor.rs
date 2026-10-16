@@ -8,20 +8,21 @@ use tauri::State;
 use tokio_postgres::error::SqlState;
 use tokio_postgres::{Client, SimpleQueryMessage};
 
-use super::connect::open_connection;
 use super::query::{db_message, pg_error_in_script};
 use super::sqlsplit::split_statements;
-use super::state::{AppState, Link, Notices};
+use super::state::AppState;
 use crate::db::model::ExplainResult;
+use crate::db::postgres::connect::open_connection;
+use crate::db::postgres::{Link, Notices};
 
 /// Asks the server to stop whatever the query editor's connection is running.
 #[tauri::command]
 pub async fn cancel_query(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
     // Nothing open means nothing running
-    let Some(client) = state.running_editor(&session_id).await? else {
+    let Some(client) = state.postgres(&session_id).await?.running_editor().await? else {
         return Ok(());
     };
-    let link = state.link(&session_id).await?;
+    let link = state.postgres(&session_id).await?.link().await?;
     client.cancel_token().cancel_query(link.tls).await.map_err(|e| e.to_string())
 }
 
@@ -29,15 +30,16 @@ pub async fn cancel_query(state: State<'_, AppState>, session_id: String) -> Res
 /// commit or rollback, while table views keep using the main connection.
 #[tauri::command]
 pub async fn begin_transaction(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
-    if state.in_transaction(&session_id).await? {
+    if state.postgres(&session_id).await?.in_transaction().await? {
         return Err("A transaction is already open".into());
     }
-    let link = state.link(&session_id).await?;
-    let notices = state.notices(&session_id).await?;
+    let link = state.postgres(&session_id).await?.link().await?;
+    let notices = state.postgres(&session_id).await?.notices().await?;
     let client = start_transaction(&link, &notices).await?;
 
-    let mut sessions = state.sessions.lock().await;
-    let session = sessions.get_mut(&session_id).ok_or("Session not found")?;
+    let driver = state.postgres(&session_id).await?;
+    let mut pg = driver.lock().await;
+    let session = pg.as_mut().ok_or("Session not found")?;
     if session.transaction.as_ref().is_some_and(|tx| !tx.is_closed()) {
         return Err("A transaction is already open".into());
     }
@@ -54,8 +56,9 @@ async fn start_transaction(link: &Link, notices: &Notices) -> Result<Client, Str
 }
 
 async fn take_transaction(state: &AppState, session_id: &str) -> Result<Arc<Client>, String> {
-    let mut sessions = state.sessions.lock().await;
-    let session = sessions.get_mut(session_id).ok_or("Session not found")?;
+    let driver = state.postgres(session_id).await?;
+    let mut pg = driver.lock().await;
+    let session = pg.as_mut().ok_or("Session not found")?;
     session.transaction.take().ok_or_else(|| "No transaction is open".to_string())
 }
 
@@ -91,7 +94,7 @@ pub async fn rollback_transaction(state: State<'_, AppState>, session_id: String
 
 #[tauri::command]
 pub async fn transaction_open(state: State<'_, AppState>, session_id: String) -> Result<bool, String> {
-    state.in_transaction(&session_id).await
+    state.postgres(&session_id).await?.in_transaction().await
 }
 
 const SAVEPOINT: &str = "dbunny_explain";
@@ -122,7 +125,7 @@ pub async fn explain_query(
     let shift = statement.offset as i64 - prefix.chars().count() as i64;
     let error = |e: tokio_postgres::Error| pg_error_in_script(e, shift, None);
 
-    let (client, in_transaction) = state.editor_client(&session_id).await?;
+    let (client, in_transaction) = state.postgres(&session_id).await?.editor_client().await?;
     let messages = if !analyze {
         client.simple_query(&explain_sql).await.map_err(error)?
     } else if in_transaction {
@@ -131,8 +134,8 @@ pub async fn explain_query(
         let _ = client.batch_execute(&format!("ROLLBACK TO SAVEPOINT {SAVEPOINT}")).await;
         result.map_err(error)?
     } else {
-        let link = state.link(&session_id).await?;
-        let notices = state.notices(&session_id).await?;
+        let link = state.postgres(&session_id).await?.link().await?;
+        let notices = state.postgres(&session_id).await?.notices().await?;
         let scratch = start_transaction(&link, &notices).await?;
         let result = scratch.simple_query(&explain_sql).await;
         let _ = scratch.batch_execute("ROLLBACK").await;
@@ -158,7 +161,7 @@ fn plan_from_messages(messages: &[SimpleQueryMessage]) -> Result<JsonValue, Stri
 #[cfg(test)]
 mod server_tests {
     use super::*;
-    use crate::commands::connect::connection_config;
+    use crate::db::postgres::connect::connection_config;
 
     fn link() -> Link {
         let url = std::env::var("DBUNNY_TEST_DATABASE_URL")

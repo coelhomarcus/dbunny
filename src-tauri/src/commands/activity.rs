@@ -14,7 +14,7 @@ pub async fn get_server_activity(
     session_id: String,
     all_databases: bool,
 ) -> Result<ServerActivity, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     server_activity(&client, all_databases).await.map_err(|e| db_message(&e))
 }
 
@@ -75,7 +75,7 @@ pub async fn signal_backend(
     pid: i32,
     terminate: bool,
 ) -> Result<bool, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     signal(&client, pid, terminate).await
 }
 

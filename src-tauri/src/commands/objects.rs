@@ -52,7 +52,7 @@ pub(crate) fn truncate_sql(schema: &str, name: &str, restart_identity: bool, cas
 }
 
 async fn run(state: &AppState, session_id: &str, sql: &str) -> Result<(), String> {
-    let client = state.client(session_id).await?;
+    let client = state.postgres(session_id).await?.client().await?;
     client.batch_execute(sql).await.map_err(|e| db_message(&e))
 }
 
@@ -111,7 +111,7 @@ pub async fn duplicate_table(
     new_name: String,
     with_data: bool,
 ) -> Result<(), String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     duplicate(&client, &schema, &name, &new_name, with_data).await
 }
 

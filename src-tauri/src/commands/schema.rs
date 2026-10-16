@@ -28,7 +28,7 @@ pub async fn get_function_detail(
     function_name: String,
     argument_types: String,
 ) -> Result<FunctionDetail, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
 
     let row = client
         .query_one(
@@ -88,7 +88,7 @@ pub async fn get_relation_kind(
     schema: String,
     name: String,
 ) -> Result<Option<String>, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     relation_kind(&client, &schema, &name).await.map_err(|e| e.to_string())
 }
 
@@ -116,7 +116,7 @@ pub async fn get_columns(
     schema: String,
     table: String,
 ) -> Result<Vec<ColumnInfo>, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     table_columns(&client, &schema, &table).await.map_err(|e| e.to_string())
 }
 
@@ -218,7 +218,7 @@ async fn table_foreign_keys(
 
 #[tauri::command]
 pub async fn get_extensions(state: State<'_, AppState>, session_id: String) -> Result<Vec<ExtensionInfo>, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     let rows = client
         .query(
             "SELECT e.extname::text AS name, e.extversion AS version, n.nspname::text AS schema, \
@@ -242,7 +242,7 @@ pub async fn get_object_definition(
     name: String,
     kind: String,
 ) -> Result<ObjectDefinition, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     let result = match kind.as_str() {
         "sequence" => sequence_definition(&client, &schema, &name).await,
         "type" => type_definition(&client, &schema, &name).await,
@@ -377,7 +377,7 @@ fn partitions_of(parent: (&str, &str), all: &[(String, String, String, String, S
 /// extension are left out: they're the extension's, not the database's own.
 #[tauri::command]
 pub async fn get_explorer(state: State<'_, AppState>, session_id: String) -> Result<ExplorerTree, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     explorer(&client).await.map_err(|e| super::query::db_message(&e))
 }
 
@@ -455,7 +455,7 @@ pub async fn get_completion_schema(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<CompletionSchema, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
 
     let current_schema: Option<String> = client
         .query_one("SELECT current_schema()::text AS name", &[])

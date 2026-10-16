@@ -9,7 +9,7 @@ use crate::db::model::RoleInfo;
 
 #[tauri::command]
 pub async fn get_roles(state: State<'_, AppState>, session_id: String) -> Result<Vec<RoleInfo>, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     roles(&client).await.map_err(|e| db_message(&e))
 }
 

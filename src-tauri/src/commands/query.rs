@@ -468,8 +468,8 @@ pub async fn execute_query(
         return Err("SQL query is required".into());
     }
 
-    let (client, in_transaction) = state.editor_client(&session_id).await?;
-    let notices = state.notices(&session_id).await?;
+    let (client, in_transaction) = state.postgres(&session_id).await?.editor_client().await?;
+    let notices = state.postgres(&session_id).await?.notices().await?;
     // Only this run's notices are returned
     notices.lock().unwrap().clear();
     let total = statements.len();
@@ -621,7 +621,7 @@ pub async fn get_table_data(
     table: String,
     params: Option<TableDataParams>,
 ) -> Result<TableDataResponse, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
 
     let page = params.as_ref().and_then(|p| p.page).unwrap_or(1).max(1);
     let page_size = params
@@ -690,7 +690,7 @@ pub async fn insert_row(
     table: String,
     values: serde_json::Map<String, JsonValue>,
 ) -> Result<u64, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     let valid_columns = get_valid_columns(&client, &schema, &table).await?;
     let relation = format!("{}.{}", quote_ident(&schema), quote_ident(&table));
     insert_into(&client, &relation, &values, &valid_columns).await
@@ -718,7 +718,7 @@ pub async fn count_table_rows(
     schema: String,
     table: String,
 ) -> Result<i64, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     let relation = format!("{}.{}", quote_ident(&schema), quote_ident(&table));
     count_rows(&client, &relation, "", &[])
         .await
@@ -735,9 +735,9 @@ pub async fn update_rows(
     table: String,
     changes: Vec<RowChange>,
 ) -> Result<u64, String> {
-    let link = state.link(&session_id).await?;
-    let notices = state.notices(&session_id).await?;
-    let client = super::connect::open_connection(&link, &notices)
+    let link = state.postgres(&session_id).await?.link().await?;
+    let notices = state.postgres(&session_id).await?.notices().await?;
+    let client = crate::db::postgres::connect::open_connection(&link, &notices)
         .await
         .map_err(|e| format!("Couldn't open a connection to save: {e}"))?;
     save_rows(&client, &schema, &table, &changes).await
@@ -785,7 +785,7 @@ pub async fn delete_rows(
     table: String,
     primary_keys: Vec<serde_json::Map<String, JsonValue>>,
 ) -> Result<serde_json::Value, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     let deleted = delete_from(&client, &schema, &table, &primary_keys).await?;
     Ok(serde_json::json!({ "rowsDeleted": deleted }))
 }
@@ -814,9 +814,9 @@ pub async fn import_rows(
     columns: Vec<String>,
     rows: Vec<Vec<Option<String>>>,
 ) -> Result<u64, String> {
-    let link = state.link(&session_id).await?;
-    let notices = state.notices(&session_id).await?;
-    let client = super::connect::open_connection(&link, &notices)
+    let link = state.postgres(&session_id).await?.link().await?;
+    let notices = state.postgres(&session_id).await?.notices().await?;
+    let client = crate::db::postgres::connect::open_connection(&link, &notices)
         .await
         .map_err(|e| format!("Couldn't open a connection for the import: {e}"))?;
     import_into(&client, &schema, &table, &columns, &rows).await

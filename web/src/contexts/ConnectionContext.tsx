@@ -15,6 +15,8 @@ function infoOf(response: ConnectResponse): ConnectionInfo {
     port: response.port,
     serverVersion: response.serverVersion,
     readOnly: response.readOnly,
+    engine: response.engine,
+    capabilities: response.capabilities,
   };
 }
 

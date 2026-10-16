@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
-use super::ssh::SshConfig;
+use crate::db::postgres::ssh::SshConfig;
 
 const PBKDF2_SALT: &[u8] = b"dbunny-connection-salt-v1";
 const PBKDF2_ITERATIONS: u32 = 100_000;

@@ -39,6 +39,8 @@ pub trait Driver: Send + Sync {
     /// Only while the commands move behind the contract: lets the ones not moved yet
     /// reach the PostgreSQL driver.
     fn as_any(&self) -> &dyn Any;
+    /// The same, keeping the `Arc`: `AppState::postgres` hands out the driver itself.
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
 }
 
 /// Reading what the database holds: the explorer, columns, structure, autocomplete.
@@ -162,6 +164,9 @@ mod tests {
             self
         }
         fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
             self
         }
     }

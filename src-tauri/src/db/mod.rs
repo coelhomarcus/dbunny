@@ -2,22 +2,23 @@
 //! implements, optional pieces (SQL console, transactions, schema editing, server
 //! administration) and the capabilities the frontend reads to show or hide screens.
 
-// The contract isn't wired into the commands yet; these `allow`s go away as the tasks
-// that move the commands behind it land.
-#[allow(dead_code)]
 pub mod capabilities;
+// The pieces aren't wired into the commands yet; these `allow`s go away as the tasks
+// that move the commands behind them land.
 #[allow(dead_code)]
 pub mod driver;
 pub mod model;
+pub mod postgres;
 pub mod unsupported;
 
 use serde::{Deserialize, Serialize};
 
+pub use capabilities::Capabilities;
 #[allow(unused_imports)]
-pub use capabilities::{Capabilities, ExplainFormat};
+pub use capabilities::ExplainFormat;
+pub use driver::Driver;
 #[allow(unused_imports)]
-pub use driver::{Catalog, Console, Data, Driver, SchemaEditor, ServerAdmin, Transactions};
-#[allow(unused_imports)]
+pub use driver::{Catalog, Console, Data, SchemaEditor, ServerAdmin, Transactions};
 pub use model::ConnectionInfo;
 pub use unsupported::unsupported;
 

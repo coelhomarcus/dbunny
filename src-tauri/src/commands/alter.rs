@@ -233,7 +233,7 @@ pub async fn apply_structure_change(
     table: String,
     change: StructureChange,
 ) -> Result<(), String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     apply(&client, &schema, &table, &change).await
 }
 
@@ -297,7 +297,7 @@ pub async fn create_table(
     columns: Vec<NewColumn>,
 ) -> Result<(), String> {
     let sql = create_table_sql(&schema, &table, &columns)?;
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     client.batch_execute(&sql).await.map_err(|e| db_message(&e))
 }
 

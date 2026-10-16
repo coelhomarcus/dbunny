@@ -2,7 +2,7 @@ use serde::Deserialize;
 use tauri::State;
 use uuid::Uuid;
 
-use super::ssh::SshConfig;
+use crate::db::postgres::ssh::SshConfig;
 use super::state::AppState;
 use super::storage::{save_connections_to_file, SavedConnection, SavedConnectionInfo, TlsSettings};
 

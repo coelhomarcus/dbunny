@@ -18,7 +18,7 @@ pub async fn get_table_structure(
     schema: String,
     table: String,
 ) -> Result<TableStructure, String> {
-    let client = state.client(&session_id).await?;
+    let client = state.postgres(&session_id).await?.client().await?;
     table_structure(&client, &schema, &table).await
 }
 
