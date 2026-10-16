@@ -99,14 +99,27 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .manage(AppState::new())
         .setup(|app| {
-            let state = app.state::<AppState>();
+            // The app's own key, kept with its data; the hostname key only opens older files
+            let legacy = storage::hostname_key();
+            let key = match app.path().app_data_dir() {
+                Ok(dir) => storage::load_or_create_key(&dir).unwrap_or_else(|e| {
+                    eprintln!("{e}; using the hostname key");
+                    legacy
+                }),
+                Err(_) => legacy,
+            };
+            let state = AppState::new(key);
             if let Ok(path) = storage::get_storage_path(app.handle()) {
-                let connections = storage::load_connections_from_path(&path);
-                let mut cache = state.saved_connections.blocking_lock();
-                *cache = connections;
+                let mut connections = storage::load_connections_from_path(&path);
+                if storage::migrate_to_key(&mut connections, &key, &legacy) {
+                    if let Err(e) = storage::write_connections(&path, &connections) {
+                        eprintln!("Couldn't save the connections under the new key: {e}");
+                    }
+                }
+                *state.saved_connections.blocking_lock() = connections;
             }
+            app.manage(state);
 
             // Windows and Linux: the title bar (tabs and window controls) is drawn by the app
             #[cfg(any(target_os = "windows", target_os = "linux"))]

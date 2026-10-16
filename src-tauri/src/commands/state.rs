@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_postgres::Client;
 
-use super::storage::{get_or_create_key, SavedConnection};
+use super::storage::SavedConnection;
 
 pub struct Session {
     // Shared so commands can use the client without holding the sessions lock
@@ -58,10 +58,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new() -> Self {
-        let encryption_key = get_or_create_key()
-            .expect("Failed to derive encryption key");
-
+    pub fn new(encryption_key: [u8; 32]) -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             saved_connections: Arc::new(Mutex::new(Vec::new())),

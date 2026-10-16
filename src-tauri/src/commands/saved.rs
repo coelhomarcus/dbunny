@@ -47,6 +47,8 @@ pub async fn save_connection(
     connection: SavedConnectionInput,
 ) -> Result<SavedConnectionInfo, String> {
     let mut connections = state.saved_connections.lock().await;
+    // Restored if the file can't be written, so memory and disk don't disagree
+    let previous = connections.clone();
     let now = chrono::Utc::now().to_rfc3339();
 
     let saved = if let Some(ref id) = connection.id {
@@ -103,7 +105,10 @@ pub async fn save_connection(
         new_connection
     };
 
-    let _ = save_connections_to_file(&app_handle, &connections);
+    if let Err(e) = save_connections_to_file(&app_handle, &connections) {
+        *connections = previous;
+        return Err(format!("The connection wasn't saved: {e}"));
+    }
 
     saved.to_info(&state.encryption_key)
 }
@@ -115,14 +120,17 @@ pub async fn delete_saved_connection(
     id: String,
 ) -> Result<bool, String> {
     let mut connections = state.saved_connections.lock().await;
-    let len_before = connections.len();
+    let previous = connections.clone();
     connections.retain(|c| c.id != id);
 
-    if connections.len() == len_before {
+    if connections.len() == previous.len() {
         return Err(format!("Connection with id {} not found", id));
     }
 
-    let _ = save_connections_to_file(&app_handle, &connections);
+    if let Err(e) = save_connections_to_file(&app_handle, &connections) {
+        *connections = previous;
+        return Err(format!("The connection wasn't deleted: {e}"));
+    }
 
     Ok(true)
 }
