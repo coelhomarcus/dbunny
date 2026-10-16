@@ -36,6 +36,11 @@ export const api = {
     return invoke<ConnectResponse>("connect", { connectionUrl, ssh: ssh ?? null, trustHostKey: trustHostKey ?? null });
   },
 
+  /** Opens a SQLite file; `create` makes it when it doesn't exist. */
+  async connectSqlite(path: string, readOnly: boolean, create: boolean) {
+    return invoke<ConnectResponse>("connect_sqlite", { path, readOnly, create });
+  },
+
   async disconnect(sessionId: string) {
     return invoke<boolean>("disconnect", { sessionId });
   },

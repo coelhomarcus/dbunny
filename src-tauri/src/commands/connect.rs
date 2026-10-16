@@ -4,6 +4,7 @@ use tauri::State;
 use super::state::AppState;
 use crate::db::postgres::ssh::SshConfig;
 use crate::db::postgres::{Endpoint, PostgresDriver};
+use crate::db::sqlite::{OpenOptions, SqliteDriver};
 use crate::db::{Capabilities, Driver, Engine};
 
 #[derive(Serialize)]
@@ -79,6 +80,24 @@ pub(crate) async fn open_session(
     trust_host_key: Option<String>,
 ) -> Result<ConnectResponse, String> {
     let driver = PostgresDriver::open(endpoint, trust_host_key).await?;
+    let session_id = state.register(driver.clone()).await?;
+    Ok(ConnectResponse::new(session_id, driver.as_ref()))
+}
+
+/// Opens the SQLite file at `path` as a new session. `create` makes the file when it
+/// doesn't exist (a new database); otherwise a missing file is an error.
+#[tauri::command]
+pub async fn connect_sqlite(
+    state: State<'_, AppState>,
+    path: String,
+    read_only: bool,
+    create: bool,
+) -> Result<ConnectResponse, String> {
+    if path.is_empty() {
+        return Err("path is required".into());
+    }
+    let opts = OpenOptions { read_only, create, ..Default::default() };
+    let driver = SqliteDriver::open(path.into(), opts).await?;
     let session_id = state.register(driver.clone()).await?;
     Ok(ConnectResponse::new(session_id, driver.as_ref()))
 }

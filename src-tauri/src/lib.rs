@@ -152,6 +152,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::connect::connect,
+            commands::connect::connect_sqlite,
             commands::connect::disconnect,
             commands::catalog::get_function_detail,
             commands::catalog::get_columns,

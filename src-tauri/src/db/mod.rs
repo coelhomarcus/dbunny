@@ -7,6 +7,7 @@ pub mod driver;
 pub mod model;
 pub mod postgres;
 pub mod sql;
+pub mod sqlite;
 pub mod unsupported;
 
 use serde::{Deserialize, Serialize};

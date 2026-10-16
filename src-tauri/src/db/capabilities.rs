@@ -44,7 +44,6 @@ pub enum ExplainFormat {
     /// `EXPLAIN (FORMAT JSON)`.
     PostgresJson,
     /// The rows of `EXPLAIN QUERY PLAN`.
-    #[allow(dead_code)] // Used once the SQLite driver lands
     SqliteQueryPlan,
 }
 
@@ -84,7 +83,6 @@ impl Capabilities {
 
     /// SQLite is a file: it has the console, transactions and schema editing, but no
     /// server administration, schemas, databases or server-side objects.
-    #[allow(dead_code)] // Used once the SQLite driver lands
     pub fn sqlite() -> Self {
         Self {
             console: true,
