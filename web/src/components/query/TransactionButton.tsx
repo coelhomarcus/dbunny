@@ -27,15 +27,16 @@ export default function TransactionButton({
     );
   }
   return (
-    <div className="mr-1 flex items-center gap-1.5">
+    // Joined like Run, each half in its own colour
+    <div className="mr-1 flex">
       <Tooltip label="Rollback undoes every change since the transaction began" side="top">
-        <Button variant="outline" size="sm" onClick={onRollback} disabled={disabled}>
+        <Button variant="outline" size="sm" className="rounded-r-none border-r-0" onClick={onRollback} disabled={disabled}>
           <Undo2 />
           Rollback
         </Button>
       </Tooltip>
       <Tooltip label="A transaction is open. Commit keeps its changes" side="top">
-        <Button variant="success" size="sm" onClick={onCommit} disabled={disabled}>
+        <Button variant="success" size="sm" className="rounded-l-none" onClick={onCommit} disabled={disabled}>
           <Check />
           Commit
         </Button>
