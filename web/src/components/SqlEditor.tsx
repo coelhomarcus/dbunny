@@ -18,6 +18,7 @@ import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/sea
 import { appThemeExtension } from "../lib/codemirror/theme";
 import { sqlCompletion, sqlDialect } from "../lib/codemirror/sqlCompletion";
 import { currentStatementHighlight, currentStatementRange } from "../lib/codemirror/currentStatement";
+import { formatSql } from "../lib/formatSql";
 import type { CompletionSchema } from "@/types";
 
 /** "current": the selection, or the statement at the cursor; "all": the whole script. */
@@ -31,6 +32,8 @@ export type SqlEditorHandle = {
   getSelectionOrValue(): string;
   /** The selection, or the statement the cursor is in (empty when there's none). */
   getCurrentStatement(): string;
+  /** Formats the selection, or the whole document, as one undoable edit. */
+  format(): Promise<void>;
 };
 
 type SqlEditorProps = {
@@ -42,9 +45,33 @@ type SqlEditorProps = {
   onRun: (scope: RunScope) => void;
   /** Called with the new text after every edit. */
   onChange?: (sql: string) => void;
+  /** Called when the SQL couldn't be formatted (usually a syntax the formatter doesn't know). */
+  onFormatError?: (message: string) => void;
 };
 
-export default function SqlEditor({ initialValue, schema, onMount, onRun, onChange }: SqlEditorProps) {
+/** Formats the selection, or the whole document; one transaction, so a single undo restores it. */
+async function formatView(view: EditorView, onError?: (message: string) => void) {
+  const { from, to, empty } = view.state.selection.main;
+  const range = empty ? { from: 0, to: view.state.doc.length } : { from, to };
+  const before = view.state.sliceDoc(range.from, range.to);
+  if (!before.trim()) return;
+  let after: string;
+  try {
+    after = await formatSql(before);
+  } catch (err) {
+    onError?.(err instanceof Error ? err.message.split("\n")[0] : "Couldn't format this SQL");
+    return;
+  }
+  // The text may have changed while the formatter loaded
+  if (view.state.sliceDoc(range.from, range.to) !== before || after === before) return;
+  view.dispatch({
+    changes: { ...range, insert: after },
+    selection: empty ? { anchor: Math.min(view.state.selection.main.head, after.length) } : { anchor: range.from, head: range.from + after.length },
+    scrollIntoView: true,
+  });
+}
+
+export default function SqlEditor({ initialValue, schema, onMount, onRun, onChange, onFormatError }: SqlEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const completionRef = useRef(new Compartment());
@@ -53,11 +80,13 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun, onChan
   const onRunRef = useRef(onRun);
 
   const onChangeRef = useRef(onChange);
+  const onFormatErrorRef = useRef(onFormatError);
 
   useEffect(() => {
     onRunRef.current = onRun;
     onChangeRef.current = onChange;
-  }, [onRun, onChange]);
+    onFormatErrorRef.current = onFormatError;
+  }, [onRun, onChange, onFormatError]);
 
   useEffect(() => {
     const createState = (doc: string) =>
@@ -77,6 +106,13 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun, onChan
             key: "Shift-Mod-Enter",
             run: () => {
               onRunRef.current("all");
+              return true;
+            },
+          },
+          {
+            key: "Shift-Alt-f",
+            run: (view) => {
+              formatView(view, onFormatErrorRef.current);
               return true;
             },
           },
@@ -139,6 +175,11 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun, onChan
         if (!state) return "";
         const range = currentStatementRange(state);
         return range ? state.sliceDoc(range.from, range.to) : "";
+      },
+      async format() {
+        const view = viewRef.current;
+        if (view) await formatView(view, onFormatErrorRef.current);
+        view?.focus();
       },
     });
 

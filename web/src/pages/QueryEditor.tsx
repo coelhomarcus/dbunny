@@ -5,7 +5,7 @@ import { tabState } from "../lib/tabState";
 import type { CompletionSchema, ExplainResult, QueryResult } from "@/types";
 import QueryResults from "../components/QueryResults";
 import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
-import { Plus, X, Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, GitCommitVertical, History, Bookmark, Check, MoreHorizontal } from "lucide-react";
+import { Plus, X, Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, GitCommitVertical, History, Bookmark, Check, MoreHorizontal, AlignLeft } from "lucide-react";
 import RunButton from "../components/query/RunButton";
 import ResultsBar from "../components/query/ResultsBar";
 import Tooltip from "../components/Tooltip";
@@ -24,6 +24,10 @@ import { loadSaved, removeSaved, saveQuery, savedKey, type SavedQuery } from "..
 import { addToHistory, clearHistory, errorSummary, historyKey, loadHistory, removeFromHistory, type HistoryEntry } from "../lib/queryHistory";
 import Button from "../components/ui/Button";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
+import { isMac } from "../lib/platform";
+
+const SHIFT = isMac ? "⇧" : "Shift+";
+const ALT = isMac ? "⌥" : "Alt+";
 
 type TabMeta = {
   id: number;
@@ -147,6 +151,14 @@ export default function QueryEditor() {
   // Name being typed when saving a query for the first time
   const [saveName, setSaveName] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  // Why the last format failed, shown for a few seconds next to Run
+  const [formatError, setFormatError] = useState<string | null>(null);
+  const formatErrorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const showFormatError = useCallback((message: string) => {
+    setFormatError(message);
+    clearTimeout(formatErrorTimer.current);
+    formatErrorTimer.current = setTimeout(() => setFormatError(null), 5000);
+  }, []);
   // Tabs of saved queries whose text differs from what's saved
   const [dirtyIds, setDirtyIds] = useState<Set<number>>(() => new Set());
   const [renamingId, setRenamingId] = useState<number | null>(null);
@@ -658,12 +670,14 @@ export default function QueryEditor() {
               schema={completionSchema}
               onRun={runQuery}
               onChange={handleEditorChange}
+              onFormatError={showFormatError}
             />
           </div>
 
           {/* Actions: run on the left, the rest quieter on the right */}
           <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-2.5 select-none">
             <RunButton disabled={running || txBusy} onRun={runQuery} onExplain={explain} />
+            {formatError && <span className="min-w-0 truncate text-xs text-destructive-foreground">Couldn't format: {formatError}</span>}
             {inTransaction && (
               <div className="ml-1 flex items-center gap-1.5">
                 <Badge variant="warning">
@@ -710,6 +724,11 @@ export default function QueryEditor() {
               </Tooltip>
               <Popover open={moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreButtonRef} className="w-52 p-1">
                 <div role="menu" className="[&>button]:flex [&>button]:w-full [&>button]:items-center [&>button]:gap-2.5 [&>button]:rounded-md [&>button]:px-2 [&>button]:py-1.5 [&>button]:text-left [&>button]:text-[13px] [&>button]:cursor-pointer [&>button:hover]:bg-accent [&_svg]:size-3.5 [&_svg]:text-muted-foreground">
+                  <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); editorRef.current?.format(); }}>
+                    <AlignLeft /> Format SQL
+                    <kbd className="ml-auto font-sans text-[11px] text-muted-foreground">{SHIFT}{ALT}F</kbd>
+                  </button>
+                  <div className="mx-1 my-1 h-px bg-border" />
                   <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); importQuery(); }}>
                     <Upload /> Open .sql file…
                   </button>
