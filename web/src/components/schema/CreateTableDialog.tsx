@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { Plus, Table2, X } from "lucide-react";
 import type { NewColumn } from "@/types";
 import { useApi } from "../../contexts/useConnection";
+import { useCapabilities } from "../../hooks/useCapabilities";
 import { useSqlDialect } from "../../hooks/useSqlDialect";
 import { cn } from "../../lib/cn";
 import Dialog from "../ui/Dialog";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
 import Checkbox from "../Checkbox";
+import { selectClass } from "../ui/styles";
+import SqlPreview from "./SqlPreview";
 
 const COMMON_TYPES = ["bigserial", "bigint", "integer", "text", "varchar(255)", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
 // SQLite stores a few kinds of value; the type decides how a column converts what is written to it
@@ -23,6 +26,9 @@ const row = (patch: Partial<NewColumn> = {}): Row => ({
   nullable: true,
   primaryKey: false,
   default: null,
+  unique: false,
+  check: null,
+  comment: null,
   ...patch,
 });
 
@@ -37,6 +43,7 @@ function Builder({
 }) {
   const api = useApi();
   const dialect = useSqlDialect();
+  const capabilities = useCapabilities();
   const suggestedTypes = dialect === "sqlite" ? SQLITE_TYPES : COMMON_TYPES;
   const [table, setTable] = useState("");
   const [rows, setRows] = useState<Row[]>(() =>
@@ -62,6 +69,9 @@ function Builder({
     nullable: r.nullable,
     primaryKey: r.primaryKey,
     default: r.default?.trim() ? r.default : null,
+    unique: r.unique,
+    check: r.check?.trim() ? r.check : null,
+    comment: capabilities.comments && r.comment?.trim() ? r.comment : null,
   }));
   const columnsKey = JSON.stringify(columns);
 
@@ -77,7 +87,7 @@ function Builder({
       stale = true;
       clearTimeout(timer);
     };
-  }, [api, schema, table, columnsKey]);
+  }, [api, schema, table, columnsKey, capabilities.comments]);
 
   const update = (key: number, patch: Partial<NewColumn>) => setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
@@ -104,7 +114,7 @@ function Builder({
           New table <span className="font-normal text-muted-foreground">in {schema}</span>
         </>
       }
-      className="max-w-3xl"
+      className="max-w-5xl"
       footer={
         <>
           {error && <p className="mr-auto min-w-0 flex-1 break-words text-xs text-destructive-foreground">{error}</p>}
@@ -129,9 +139,12 @@ function Builder({
               <tr className="[&>th]:px-2 [&>th]:py-1.5 [&>th]:text-left [&>th]:font-medium">
                 <th>Column</th>
                 <th>Type</th>
-                <th className="w-px whitespace-nowrap">Required</th>
+                <th className="w-px whitespace-nowrap">NOT NULL</th>
                 <th className="w-px whitespace-nowrap">Primary key</th>
+                <th className="w-px whitespace-nowrap">Unique</th>
                 <th>Default</th>
+                <th>Check</th>
+                {capabilities.comments && <th>Comment</th>}
                 <th className="w-px" />
               </tr>
             </thead>
@@ -142,7 +155,18 @@ function Builder({
                     <Input value={r.name} onChange={(e) => update(r.key, { name: e.target.value })} aria-label="Column name" spellCheck={false} className="h-7 font-mono text-xs" />
                   </td>
                   <td>
-                    <Input value={r.dataType} onChange={(e) => update(r.key, { dataType: e.target.value })} aria-label="Type" spellCheck={false} list="dbunny-new-table-types" className="h-7 font-mono text-xs" />
+                    <select
+                      value={r.dataType}
+                      onChange={(e) => update(r.key, { dataType: e.target.value })}
+                      aria-label="Type"
+                      className={cn(selectClass, "h-7 w-full min-w-28 font-mono text-xs")}
+                    >
+                      {(suggestedTypes.includes(r.dataType) ? suggestedTypes : [r.dataType, ...suggestedTypes]).map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td className="text-center">
                     <Checkbox checked={!r.nullable || r.primaryKey} onChange={() => update(r.key, { nullable: !r.nullable })} className={cn(r.primaryKey && "opacity-50")} />
@@ -150,9 +174,20 @@ function Builder({
                   <td className="text-center">
                     <Checkbox checked={r.primaryKey} onChange={() => update(r.key, { primaryKey: !r.primaryKey })} />
                   </td>
+                  <td className="text-center">
+                    <Checkbox checked={r.unique} onChange={() => update(r.key, { unique: !r.unique })} />
+                  </td>
                   <td>
                     <Input value={r.default ?? ""} onChange={(e) => update(r.key, { default: e.target.value })} aria-label="Default" placeholder="none" spellCheck={false} className="h-7 font-mono text-xs" />
                   </td>
+                  <td>
+                    <Input value={r.check ?? ""} onChange={(e) => update(r.key, { check: e.target.value })} aria-label="Check" placeholder="e.g. price >= 0" spellCheck={false} className="h-7 font-mono text-xs" />
+                  </td>
+                  {capabilities.comments && (
+                    <td>
+                      <Input value={r.comment ?? ""} onChange={(e) => update(r.key, { comment: e.target.value })} aria-label="Comment" placeholder="optional" className="h-7 text-xs" />
+                    </td>
+                  )}
                   <td>
                     <Button variant="ghost-muted" size="icon-xs" aria-label={`Remove ${r.name || "column"}`} onClick={() => setRows((prev) => prev.filter((p) => p.key !== r.key))} disabled={rows.length === 1}>
                       <X />
@@ -162,13 +197,8 @@ function Builder({
               ))}
             </tbody>
           </table>
-          <datalist id="dbunny-new-table-types">
-            {suggestedTypes.map((t) => (
-              <option key={t} value={t} />
-            ))}
-          </datalist>
           <div className="border-t border-border p-1">
-            <Button variant="ghost-muted" size="xs" onClick={() => setRows((prev) => [...prev, row()])}>
+            <Button variant="ghost-muted" size="xs" onClick={() => setRows((prev) => [...prev, row(dialect === "sqlite" ? { dataType: "TEXT" } : {})])}>
               <Plus /> Add column
             </Button>
           </div>
@@ -176,9 +206,15 @@ function Builder({
 
         <div>
           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">SQL</span>
-          <pre className={cn("mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted px-3 py-2 font-mono text-xs", previewError && "text-muted-foreground")}>
-            {sql || previewError || "…"}
-          </pre>
+          {sql && !previewError ? (
+            <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-border bg-muted px-3 py-2 font-mono text-xs">
+              <SqlPreview source={sql} />
+            </div>
+          ) : (
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
+              {previewError || "…"}
+            </pre>
+          )}
         </div>
       </div>
     </Dialog>

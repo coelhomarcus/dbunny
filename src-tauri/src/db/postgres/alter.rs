@@ -106,7 +106,7 @@ fn change_sql(schema: &str, table: &str, change: &StructureChange) -> Result<(Ve
     let target = format!("{}.{}", quote_ident(schema), quote_ident(table));
     let alter = format!("ALTER TABLE {target}");
     let stmts = match change {
-        StructureChange::AddColumn { name: column, data_type, nullable, default, comment } => {
+        StructureChange::AddColumn { name: column, data_type, nullable, default, comment, unique, check } => {
             let column = name("column name", column)?;
             let mut add = format!("{alter} ADD COLUMN {column} {}", fragment("type", data_type)?);
             if let Some(default) = default.as_deref().filter(|d| !d.trim().is_empty()) {
@@ -115,6 +115,7 @@ fn change_sql(schema: &str, table: &str, change: &StructureChange) -> Result<(Ve
             if !nullable {
                 add += " NOT NULL";
             }
+            column_flags(&mut add, *unique, check)?;
             let mut stmts = vec![add];
             if let Some(comment) = comment.as_deref().filter(|c| !c.trim().is_empty()) {
                 stmts.push(format!("COMMENT ON COLUMN {target}.{column} IS {}", literal(comment)));
@@ -257,13 +258,31 @@ fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<
         if !column.nullable && !column.primary_key {
             line += " NOT NULL";
         }
+        column_flags(&mut line, column.unique, &column.check)?;
         lines.push(line);
     }
     let keys: Vec<String> = columns.iter().filter(|c| c.primary_key).map(|c| quote_ident(c.name.trim())).collect();
     if !keys.is_empty() {
         lines.push(format!("PRIMARY KEY ({})", keys.join(", ")));
     }
-    Ok(format!("CREATE TABLE {target} (\n    {}\n)", lines.join(",\n    ")))
+    let mut sql = format!("CREATE TABLE {target} (\n    {}\n)", lines.join(",\n    "));
+    for column in columns {
+        let Some(comment) = column.comment.as_deref().filter(|c| !c.trim().is_empty()) else { continue };
+        let col = name("column name", &column.name)?;
+        sql += &format!(";\nCOMMENT ON COLUMN {target}.{col} IS {}", literal(comment));
+    }
+    Ok(sql)
+}
+
+/// `UNIQUE` and `CHECK (...)` on a column definition. An empty check is left off.
+fn column_flags(line: &mut String, unique: bool, check: &Option<String>) -> Result<(), String> {
+    if unique {
+        *line += " UNIQUE";
+    }
+    if let Some(check) = check.as_deref().filter(|c| !c.trim().is_empty()) {
+        *line += &format!(" CHECK ({})", fragment("check", check)?);
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -322,7 +341,7 @@ mod tests {
     #[test]
     fn column_changes_quote_names() {
         assert_eq!(
-            sql(StructureChange::AddColumn { name: "full name".into(), data_type: "varchar(80)".into(), nullable: false, default: Some("'x'".into()), comment: Some("it's".into()) }),
+            sql(StructureChange::AddColumn { name: "full name".into(), data_type: "varchar(80)".into(), nullable: false, default: Some("'x'".into()), comment: Some("it's".into()), unique: false, check: None }),
             "ALTER TABLE \"public\".\"users\" ADD COLUMN \"full name\" varchar(80) DEFAULT 'x' NOT NULL; COMMENT ON COLUMN \"public\".\"users\".\"full name\" IS 'it''s'"
         );
         assert_eq!(
@@ -332,17 +351,22 @@ mod tests {
         assert_eq!(sql(StructureChange::SetNullable { name: "x".into(), nullable: true }), "ALTER TABLE \"public\".\"users\" ALTER COLUMN \"x\" DROP NOT NULL");
         assert_eq!(sql(StructureChange::SetDefault { name: "x".into(), default: Some(" ".into()) }), "ALTER TABLE \"public\".\"users\" ALTER COLUMN \"x\" DROP DEFAULT");
         assert_eq!(sql(StructureChange::SetComment { name: "x".into(), comment: None }), "COMMENT ON COLUMN \"public\".\"users\".\"x\" IS NULL");
+        assert_eq!(
+            sql(StructureChange::AddColumn { name: "amount".into(), data_type: "numeric(12,2)".into(), nullable: false, default: Some("0".into()), comment: None, unique: true, check: Some("amount > 0".into()) }),
+            "ALTER TABLE \"public\".\"users\" ADD COLUMN \"amount\" numeric(12,2) DEFAULT 0 NOT NULL UNIQUE CHECK (amount > 0)"
+        );
     }
 
     #[test]
     fn fragments_with_semicolons_and_empty_names_are_refused() {
-        assert!(sql(StructureChange::AddColumn { name: "x".into(), data_type: "int; DROP TABLE users".into(), nullable: true, default: None, comment: None }).starts_with("ERR"));
+        assert!(sql(StructureChange::AddColumn { name: "x".into(), data_type: "int; DROP TABLE users".into(), nullable: true, default: None, comment: None, unique: false, check: None }).starts_with("ERR"));
+        assert!(sql(StructureChange::AddColumn { name: "x".into(), data_type: "int".into(), nullable: true, default: None, comment: None, unique: false, check: Some("x > 0; --".into()) }).starts_with("ERR"));
         assert!(sql(StructureChange::SetDefault { name: "x".into(), default: Some("1; --".into()) }).starts_with("ERR"));
         assert!(sql(StructureChange::RenameColumn { name: "x".into(), new_name: " ".into() }).starts_with("ERR"));
     }
 
     fn new_column(name: &str, data_type: &str, nullable: bool, primary_key: bool) -> NewColumn {
-        NewColumn { name: name.into(), data_type: data_type.into(), nullable, primary_key, default: None }
+        NewColumn { name: name.into(), data_type: data_type.into(), nullable, primary_key, default: None, unique: false, check: None, comment: None }
     }
 
     #[test]
@@ -366,6 +390,18 @@ mod tests {
         assert!(create_table_sql("public", " ", &[new_column("a", "int", true, false)]).is_err());
         assert!(create_table_sql("public", "t", &[new_column("a", "int", true, false), new_column("a", "text", true, false)]).unwrap_err().contains("twice"));
         assert!(create_table_sql("public", "t", &[new_column("a", "int); DROP TABLE x; --", true, false)]).is_err());
+
+        let flagged = create_table_sql(
+            "public",
+            "prices",
+            &[NewColumn { unique: true, check: Some("amount > 0".into()), comment: Some("unit price".into()), ..new_column("amount", "numeric(12,2)", false, false) }],
+        )
+        .unwrap();
+        assert_eq!(
+            flagged,
+            "CREATE TABLE \"public\".\"prices\" (\n    \"amount\" numeric(12,2) NOT NULL UNIQUE CHECK (amount > 0)\n);\nCOMMENT ON COLUMN \"public\".\"prices\".\"amount\" IS 'unit price'"
+        );
+        assert!(create_table_sql("public", "t", &[NewColumn { check: Some("a > 0; --".into()), ..new_column("a", "int", true, false) }]).is_err());
     }
 
     #[test]
@@ -468,7 +504,7 @@ mod server_tests {
             async move { apply(client, s, "t", &change).await }
         };
 
-        run(StructureChange::AddColumn { name: "score".into(), data_type: "numeric(5,2)".into(), nullable: false, default: Some("0".into()), comment: Some("Points".into()) }).await.unwrap();
+        run(StructureChange::AddColumn { name: "score".into(), data_type: "numeric(5,2)".into(), nullable: false, default: Some("0".into()), comment: Some("Points".into()), unique: false, check: None }).await.unwrap();
         run(StructureChange::RenameColumn { name: "score".into(), new_name: "points".into() }).await.unwrap();
         run(StructureChange::SetDefault { name: "points".into(), default: Some("10".into()) }).await.unwrap();
         run(StructureChange::SetNullable { name: "points".into(), nullable: true }).await.unwrap();
@@ -568,9 +604,9 @@ mod server_tests {
             s,
             "people",
             &[
-                NewColumn { name: "id".into(), data_type: "bigserial".into(), nullable: false, primary_key: true, default: None },
-                NewColumn { name: "name".into(), data_type: "text".into(), nullable: false, primary_key: false, default: None },
-                NewColumn { name: "joined".into(), data_type: "date".into(), nullable: true, primary_key: false, default: Some("current_date".into()) },
+                NewColumn { name: "id".into(), data_type: "bigserial".into(), nullable: false, primary_key: true, default: None, unique: false, check: None, comment: None },
+                NewColumn { name: "name".into(), data_type: "text".into(), nullable: false, primary_key: false, default: None, unique: false, check: None, comment: None },
+                NewColumn { name: "joined".into(), data_type: "date".into(), nullable: true, primary_key: false, default: Some("current_date".into()), unique: false, check: None, comment: None },
             ],
         )
         .unwrap();

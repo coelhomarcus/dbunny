@@ -355,7 +355,17 @@ pub struct ExplainResult {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum StructureChange {
-    AddColumn { name: String, data_type: String, nullable: bool, default: Option<String>, comment: Option<String> },
+    AddColumn {
+        name: String,
+        data_type: String,
+        nullable: bool,
+        default: Option<String>,
+        comment: Option<String>,
+        #[serde(default)]
+        unique: bool,
+        #[serde(default)]
+        check: Option<String>,
+    },
     RenameColumn { name: String, new_name: String },
     DropColumn { name: String, cascade: bool },
     SetNullable { name: String, nullable: bool },
@@ -392,6 +402,15 @@ pub struct NewColumn {
     pub nullable: bool,
     pub primary_key: bool,
     pub default: Option<String>,
+    /// A column-level `UNIQUE`. A primary key is unique on its own.
+    #[serde(default)]
+    pub unique: bool,
+    /// A column-level `CHECK` expression, without a trailing semicolon.
+    #[serde(default)]
+    pub check: Option<String>,
+    /// Shown after `CREATE TABLE` as `COMMENT ON COLUMN`. SQLite has no comments.
+    #[serde(default)]
+    pub comment: Option<String>,
 }
 
 // Databases on the server

@@ -87,6 +87,8 @@ function ChangeForm({
   const [name, setName] = useState(column?.name ?? "");
   const [dataType, setDataType] = useState(draft.kind === "setType" ? draft.column.typeName : "text");
   const [nullable, setNullable] = useState(true);
+  const [columnUnique, setColumnUnique] = useState(false);
+  const [columnCheck, setColumnCheck] = useState("");
   const [defaultValue, setDefaultValue] = useState(column?.defaultValue ?? "");
   const [comment, setComment] = useState(column?.comment ?? "");
   const [cascade, setCascade] = useState(false);
@@ -124,7 +126,7 @@ function ChangeForm({
   const change: StructureChange = (() => {
     switch (draft.kind) {
       case "addColumn":
-        return { kind: "addColumn", name, dataType, nullable, default: defaultValue || null, comment: comment || null };
+        return { kind: "addColumn", name, dataType, nullable, default: defaultValue || null, comment: comment || null, unique: columnUnique, check: columnCheck.trim() || null };
       case "renameColumn":
         return { kind: "renameColumn", name: column!.name, newName: name };
       case "setDefault":
@@ -288,7 +290,11 @@ function ChangeForm({
                 ))}
               </datalist>
             </Field>
-            <CheckOption checked={!nullable} onChange={(v) => setNullable(!v)} label="Required (NOT NULL)" hint="Existing rows need a default to satisfy it" />
+            <CheckOption checked={!nullable} onChange={(v) => setNullable(!v)} label="NOT NULL" hint="Existing rows need a default to satisfy it" />
+            <CheckOption checked={columnUnique} onChange={setColumnUnique} label="Unique" hint="No two rows may share this value" />
+            <Field label="Check (SQL expression)">
+              <Input value={columnCheck} onChange={(e) => setColumnCheck(e.target.value)} placeholder="none, e.g. price >= 0" spellCheck={false} className="font-mono" />
+            </Field>
           </>
         )}
         {(draft.kind === "addColumn" || draft.kind === "setDefault") && (

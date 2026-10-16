@@ -82,7 +82,7 @@ export interface TableStructure {
 
 /** A change made from the Structure tab; the backend turns it into DDL. */
 export type StructureChange =
-  | { kind: "addColumn"; name: string; dataType: string; nullable: boolean; default: string | null; comment: string | null }
+  | { kind: "addColumn"; name: string; dataType: string; nullable: boolean; default: string | null; comment: string | null; unique: boolean; check: string | null }
   | { kind: "renameColumn"; name: string; newName: string }
   | { kind: "dropColumn"; name: string; cascade: boolean }
   | { kind: "setNullable"; name: string; nullable: boolean }
@@ -116,4 +116,9 @@ export interface NewColumn {
   nullable: boolean;
   primaryKey: boolean;
   default: string | null;
+  unique: boolean;
+  /** A SQL expression, without `;`. Empty means no check. */
+  check: string | null;
+  /** PostgreSQL only. Empty means no comment. */
+  comment: string | null;
 }

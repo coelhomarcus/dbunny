@@ -119,7 +119,7 @@ fn free_name(c: &Connection, schema: &str, base: &str) -> rusqlite::Result<Strin
 fn change_sql(c: &Connection, schema: &str, table: &str, change: &StructureChange) -> Result<String, Failure> {
     let alter = format!("ALTER TABLE {}", relation(schema, table));
     let sql = match change {
-        StructureChange::AddColumn { name: column, data_type, nullable, default, comment } => {
+        StructureChange::AddColumn { name: column, data_type, nullable, default, comment, unique, check } => {
             if comment.as_deref().is_some_and(|c| !c.trim().is_empty()) {
                 return Err(not_in_sqlite("Comments"));
             }
@@ -130,6 +130,7 @@ fn change_sql(c: &Connection, schema: &str, table: &str, change: &StructureChang
             if let Some(default) = default.as_deref().filter(|d| !d.trim().is_empty()) {
                 add += &format!(" DEFAULT {}", fragment("default", default)?);
             }
+            column_flags(&mut add, *unique, check)?;
             add
         }
         StructureChange::RenameColumn { name: column, new_name } => {
@@ -205,13 +206,28 @@ fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<
         if let Some(default) = column.default.as_deref().filter(|d| !d.trim().is_empty()) {
             line += &format!(" DEFAULT {}", fragment("default", default)?);
         }
+        column_flags(&mut line, column.unique, &column.check)?;
         lines.push(line);
     }
     if !keys.is_empty() && !rowid_key {
         let list: Vec<String> = keys.iter().map(|c| quote(c.name.trim())).collect();
         lines.push(format!("PRIMARY KEY ({})", list.join(", ")));
     }
+    if columns.iter().any(|c| c.comment.as_deref().is_some_and(|comment| !comment.trim().is_empty())) {
+        return Err(not_in_sqlite("Comments"));
+    }
     Ok(format!("CREATE TABLE {target} (\n    {}\n)", lines.join(",\n    ")))
+}
+
+/// `UNIQUE` and `CHECK (...)` on a column definition. An empty check is left off.
+fn column_flags(line: &mut String, unique: bool, check: &Option<String>) -> Result<(), Failure> {
+    if unique {
+        *line += " UNIQUE";
+    }
+    if let Some(check) = check.as_deref().filter(|c| !c.trim().is_empty()) {
+        *line += &format!(" CHECK ({})", fragment("check", check)?);
+    }
+    Ok(())
 }
 
 /// The `DROP` keyword for an object kind as the explorer names it.
@@ -445,6 +461,8 @@ mod tests {
             nullable,
             default: default.map(String::from),
             comment: None,
+            unique: false,
+            check: None,
         }
     }
 
@@ -459,7 +477,7 @@ mod tests {
     }
 
     fn new_column(name: &str, data_type: &str, nullable: bool, primary_key: bool) -> NewColumn {
-        NewColumn { name: name.into(), data_type: data_type.into(), nullable, primary_key, default: None }
+        NewColumn { name: name.into(), data_type: data_type.into(), nullable, primary_key, default: None, unique: false, check: None, comment: None }
     }
 
     /// The preview, after checking that applying the change runs without an error.
@@ -611,7 +629,7 @@ mod tests {
             (StructureChange::DropConstraint { name: "c".into(), cascade: false }, rebuild("Dropping a constraint")),
             (StructureChange::SetComment { name: "v".into(), comment: Some("x".into()) }, "Comments isn't supported by SQLite".into()),
             (
-                StructureChange::AddColumn { name: "n".into(), data_type: "TEXT".into(), nullable: true, default: None, comment: Some("Notes".into()) },
+                StructureChange::AddColumn { name: "n".into(), data_type: "TEXT".into(), nullable: true, default: None, comment: Some("Notes".into()), unique: false, check: None },
                 "Comments isn't supported by SQLite".into(),
             ),
             (StructureChange::SetTriggerEnabled { name: "tr".into(), enabled: false }, "Turning a trigger on or off isn't supported by SQLite".into()),
@@ -677,6 +695,7 @@ mod tests {
             ("t", vec![new_column("a", " ", true, false)], "The type can't be empty"),
             ("t", vec![new_column("a", "INT", true, false), new_column("A", "TEXT", true, false)], "Column A appears twice"),
             ("t", vec![new_column("a", "INT); DROP TABLE x; --", true, false)], "The type must be a single expression, without ';'"),
+            ("t", vec![NewColumn { check: Some("a > 0; --".into()), ..new_column("a", "INT", true, false) }], "The check must be a single expression, without ';'"),
         ];
         for (table, columns, message) in bad {
             assert_eq!(editor(&d).preview_create_table("main", table, &columns).await.unwrap_err(), message);
@@ -684,6 +703,20 @@ mod tests {
         }
         let err = editor(&d).create_table("main", "order items", vec![new_column("a", "INT", true, false)]).await.unwrap_err();
         assert!(err.contains("already exists"), "{err}");
+
+        let flagged = vec![NewColumn { unique: true, check: Some("n > 0".into()), ..new_column("n", "INTEGER", false, false) }];
+        let preview = editor(&d).preview_create_table("main", "amounts", &flagged).await.unwrap();
+        assert_eq!(preview, "CREATE TABLE \"main\".\"amounts\" (\n    \"n\" INTEGER NOT NULL UNIQUE CHECK (n > 0)\n);");
+        editor(&d).create_table("main", "amounts", flagged).await.unwrap();
+        exec(&d, "INSERT INTO amounts (n) VALUES (1)").await.unwrap();
+        let err = exec(&d, "INSERT INTO amounts (n) VALUES (0)").await.unwrap_err();
+        assert!(err.contains("CHECK"), "{err}");
+        let err = exec(&d, "INSERT INTO amounts (n) VALUES (1)").await.unwrap_err();
+        assert!(err.contains("UNIQUE"), "{err}");
+
+        let added = StructureChange::AddColumn { name: "extra".into(), data_type: "INTEGER".into(), nullable: true, default: None, comment: None, unique: true, check: Some("extra >= 0".into()) };
+        let preview = editor(&d).preview_change("main", "amounts", &added).await.unwrap();
+        assert_eq!(preview, "ALTER TABLE \"main\".\"amounts\" ADD COLUMN \"extra\" INTEGER UNIQUE CHECK (extra >= 0);");
     }
 
     #[tokio::test]

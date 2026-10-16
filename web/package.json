@@ -26,6 +26,7 @@
     "@tauri-apps/plugin-opener": "2.5.3",
     "@tauri-apps/plugin-process": "2.4.0",
     "@tauri-apps/plugin-updater": "2.13.1",
+    "@twinkleplop/sql": "^0.1.7",
     "clsx": "^2.1.1",
     "lucide-react": "^0.577.0",
     "react": "^19.2.0",
