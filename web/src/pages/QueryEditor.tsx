@@ -26,6 +26,7 @@ import Button from "../components/ui/Button";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { isMac } from "../lib/platform";
 
+const MOD = isMac ? "⌘" : "Ctrl+";
 const SHIFT = isMac ? "⇧" : "Shift+";
 const ALT = isMac ? "⌥" : "Alt+";
 
@@ -534,6 +535,25 @@ export default function QueryEditor() {
     api.cancelQuery().catch(() => {});
   }, [api]);
 
+  // Cmd+S (Ctrl+S off the Mac) saves the query: asks for a name the first time, then updates it.
+  // Only the visible tab listens, and not while a dialog is open (the name dialog has its own Enter).
+  const saveRef = useRef(saveActiveQuery);
+  useEffect(() => {
+    saveRef.current = saveActiveQuery;
+  });
+  useEffect(() => {
+    if (!isActive) return;
+    function onKeyDown(e: KeyboardEvent) {
+      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+      if (!mod || e.shiftKey || e.altKey || e.key.toLowerCase() !== "s") return;
+      e.preventDefault();
+      if (document.querySelector("[role=dialog][aria-modal]")) return;
+      saveRef.current();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isActive]);
+
   // Esc stops the running query (only in the visible tab)
   useEffect(() => {
     if (!running || !isActive) return;
@@ -713,10 +733,12 @@ export default function QueryEditor() {
                   {safeMode ? <ShieldCheck /> : <ShieldOff />}
                 </Button>
               </Tooltip>
-              <Button variant="ghost-muted" size="sm" onClick={() => saveActiveQuery()} disabled={!savedStorageKey}>
-                {justSaved ? <Check /> : <Bookmark />}
-                {justSaved ? "Saved" : "Save"}
-              </Button>
+              <Tooltip label={`Save the query (${MOD}S)`} side="top">
+                <Button variant="ghost-muted" size="sm" onClick={() => saveActiveQuery()} disabled={!savedStorageKey}>
+                  {justSaved ? <Check /> : <Bookmark />}
+                  {justSaved ? "Saved" : "Save"}
+                </Button>
+              </Tooltip>
               <Tooltip label="More actions" side="top">
                 <Button ref={moreButtonRef} variant="ghost-muted" size="icon-sm" onClick={() => setMoreOpen((v) => !v)} aria-label="More" aria-expanded={moreOpen}>
                   <MoreHorizontal />
