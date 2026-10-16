@@ -6,7 +6,7 @@ use tokio_postgres::Client;
 use super::query::db_message;
 use super::schema::table_columns;
 use super::state::AppState;
-use super::tablefilter::quote_ident;
+use crate::db::sql::filter::quote_ident;
 use crate::db::model::{
     ConstraintInfo, ForeignKeyInfo, IndexInfo, ReferencedBy, TableMeta, TablePrivilege, TableStructure, TriggerInfo,
 };

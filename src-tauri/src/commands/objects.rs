@@ -7,7 +7,7 @@ use tokio_postgres::Client;
 
 use super::query::db_message;
 use super::state::AppState;
-use super::tablefilter::quote_ident;
+use crate::db::sql::filter::quote_ident;
 
 /// The SQL keyword for a relation kind as the explorer names it.
 fn keyword(kind: &str) -> Result<&'static str, String> {

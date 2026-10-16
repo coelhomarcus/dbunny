@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-use crate::commands::tablefilter::TableFilter;
+use crate::db::sql::filter::TableFilter;
 
 /// A row as column name -> value, for inserts and primary keys.
 pub type JsonMap = serde_json::Map<String, JsonValue>;

@@ -9,7 +9,7 @@ use tokio_postgres::error::SqlState;
 use tokio_postgres::{Client, SimpleQueryMessage};
 
 use super::query::{db_message, pg_error_in_script};
-use super::sqlsplit::split_statements;
+use crate::db::sql::split::split_statements;
 use super::state::AppState;
 use crate::db::model::ExplainResult;
 use crate::db::postgres::connect::open_connection;

@@ -7,7 +7,7 @@ use tauri::State;
 
 use super::query::db_message;
 use super::state::AppState;
-use super::tablefilter::quote_ident;
+use crate::db::sql::filter::quote_ident;
 use crate::db::model::{NewColumn, StructureChange};
 
 /// Table privileges that can be granted (MAINTAIN only exists from PostgreSQL 17 on).

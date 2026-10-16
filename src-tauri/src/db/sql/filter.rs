@@ -5,10 +5,9 @@
 //! also means a bad value ("abc" for an integer column) fails with the server's own
 //! message instead of a broken query.
 
-use bytes::BytesMut;
 use serde::Deserialize;
-use std::error::Error;
-use tokio_postgres::types::{to_sql_checked, Format, IsNull, ToSql, Type};
+
+use super::Dialect;
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -19,30 +18,13 @@ pub struct TableFilter {
     pub value: String,
 }
 
-/// A value sent in PostgreSQL's text format, whatever type the server expects.
+/// A value sent as a text-format parameter, whatever type the server expects.
 #[derive(Debug, PartialEq)]
 pub struct TextParam(pub String);
 
-impl ToSql for TextParam {
-    fn to_sql(&self, _ty: &Type, out: &mut BytesMut) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
-        out.extend_from_slice(self.0.as_bytes());
-        Ok(IsNull::No)
-    }
-
-    fn accepts(_ty: &Type) -> bool {
-        true
-    }
-
-    fn encode_format(&self, _ty: &Type) -> Format {
-        Format::Text
-    }
-
-    to_sql_checked!();
-}
-
 /// `"name"`, with embedded quotes doubled.
 pub fn quote_ident(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
+    Dialect::Postgres.quote_ident(name)
 }
 
 /// `{"a","b"}` for the comma-separated values of an IN filter.
@@ -63,6 +45,16 @@ pub fn build_where(
     match_any: bool,
     valid_columns: &[String],
 ) -> Result<(String, Vec<TextParam>), String> {
+    build_where_in(Dialect::Postgres, filters, match_any, valid_columns)
+}
+
+/// `build_where` in the given dialect.
+pub fn build_where_in(
+    dialect: Dialect,
+    filters: &[TableFilter],
+    match_any: bool,
+    valid_columns: &[String],
+) -> Result<(String, Vec<TextParam>), String> {
     let mut conditions = Vec::new();
     let mut params = Vec::new();
 
@@ -70,29 +62,31 @@ pub fn build_where(
         if !valid_columns.contains(&filter.column) {
             return Err(format!("Invalid column: {}", filter.column));
         }
-        let column = quote_ident(&filter.column);
-        let next = params.len() + 1;
+        let column = dialect.quote_ident(&filter.column);
+        let next = dialect.param(params.len() + 1);
 
         let condition = match filter.operator.as_str() {
             op @ ("=" | "!=" | "<" | "<=" | ">" | ">=") => {
                 params.push(TextParam(filter.value.clone()));
-                format!("{column} {} ${next}", if op == "!=" { "<>" } else { op })
+                format!("{column} {} {next}", if op == "!=" { "<>" } else { op })
             }
             // Pattern matching only makes sense on text, so other types are compared as text
             op @ ("like" | "not like" | "ilike" | "not ilike") => {
                 params.push(TextParam(filter.value.clone()));
-                format!("{column}::text {} ${next}", op.to_uppercase())
+                format!("{} {} {next}", dialect.as_text(&column), op.to_uppercase())
             }
-            op @ ("in" | "not in") => {
-                let literal = array_literal(&filter.value)
-                    .ok_or_else(|| format!("Enter at least one value for {}", filter.column))?;
-                params.push(TextParam(literal));
-                if op == "in" {
-                    format!("{column} = ANY(${next})")
-                } else {
-                    format!("{column} <> ALL(${next})")
+            op @ ("in" | "not in") => match dialect {
+                Dialect::Postgres => {
+                    let literal = array_literal(&filter.value)
+                        .ok_or_else(|| format!("Enter at least one value for {}", filter.column))?;
+                    params.push(TextParam(literal));
+                    if op == "in" {
+                        format!("{column} = ANY({next})")
+                    } else {
+                        format!("{column} <> ALL({next})")
+                    }
                 }
-            }
+            },
             "is null" => format!("{column} IS NULL"),
             "is not null" => format!("{column} IS NOT NULL"),
             other => return Err(format!("Unknown filter operator: {other}")),

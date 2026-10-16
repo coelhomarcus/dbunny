@@ -6,12 +6,13 @@ use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::{Row, SimpleQueryMessage};
 use uuid::Uuid;
 
-use super::pgtext::{int_to_json, is_native, text_to_json};
-use super::sqlsplit::split_statements;
 use super::state::AppState;
-use super::tableedit::{build_delete, build_import_batches, build_insert, build_update};
-use super::tablefilter::{build_where, quote_ident, TextParam};
 use crate::db::model::{QueryColumn, QueryResult, RowChange, SortKey, TableDataParams, TableDataResponse};
+use crate::db::postgres::text::{is_native, text_to_json};
+use crate::db::sql::edit::{build_delete, build_import_batches, build_insert, build_update};
+use crate::db::sql::filter::{build_where, quote_ident, TextParam};
+use crate::db::sql::json::int_to_json;
+use crate::db::sql::split::split_statements;
 
 /// ` ORDER BY ...` for the sort keys that name real columns (others are ignored).
 pub(crate) fn order_clause(keys: &[SortKey], valid_columns: &[String]) -> String {
@@ -895,7 +896,7 @@ mod tests {
 #[cfg(test)]
 mod server_tests {
     use super::*;
-    use crate::commands::tablefilter::TableFilter;
+    use crate::db::sql::filter::TableFilter;
     use serde_json::json;
 
     async fn connect() -> tokio_postgres::Client {

@@ -252,7 +252,7 @@ pub async fn get_object_definition(
 }
 
 fn qualified(schema: &str, name: &str) -> String {
-    format!("{}.{}", super::tablefilter::quote_ident(schema), super::tablefilter::quote_ident(name))
+    format!("{}.{}", crate::db::sql::filter::quote_ident(schema), crate::db::sql::filter::quote_ident(name))
 }
 
 pub(crate) async fn sequence_definition(client: &tokio_postgres::Client, schema: &str, name: &str) -> Result<ObjectDefinition, tokio_postgres::Error> {

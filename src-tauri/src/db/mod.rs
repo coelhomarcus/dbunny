@@ -9,6 +9,7 @@ pub mod capabilities;
 pub mod driver;
 pub mod model;
 pub mod postgres;
+pub mod sql;
 pub mod unsupported;
 
 use serde::{Deserialize, Serialize};

@@ -2,8 +2,10 @@
 //! reconnection and the SSH tunnel they go through.
 
 pub mod connect;
+mod params;
 pub mod session;
 pub mod ssh;
+pub mod text;
 
 use std::any::Any;
 use std::sync::Arc;

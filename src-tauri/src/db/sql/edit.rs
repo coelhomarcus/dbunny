@@ -5,7 +5,8 @@
 
 use serde_json::Value as JsonValue;
 
-use super::tablefilter::{quote_ident, TextParam};
+use super::filter::TextParam;
+use super::Dialect;
 
 /// Text form of a JSON value for a parameter. Null is a real SQL NULL (None).
 pub fn param_for(value: &JsonValue) -> Option<TextParam> {
@@ -23,6 +24,16 @@ pub fn build_insert(
     values: &serde_json::Map<String, JsonValue>,
     valid_columns: &[String],
 ) -> Result<(String, Vec<Option<TextParam>>), String> {
+    build_insert_in(Dialect::Postgres, relation, values, valid_columns)
+}
+
+/// `build_insert` in the given dialect.
+pub fn build_insert_in(
+    dialect: Dialect,
+    relation: &str,
+    values: &serde_json::Map<String, JsonValue>,
+    valid_columns: &[String],
+) -> Result<(String, Vec<Option<TextParam>>), String> {
     for column in values.keys() {
         if !valid_columns.contains(column) {
             return Err(format!("Invalid column: {column}"));
@@ -32,8 +43,8 @@ pub fn build_insert(
         return Ok((format!("INSERT INTO {relation} DEFAULT VALUES"), vec![]));
     }
 
-    let columns: Vec<String> = values.keys().map(|c| quote_ident(c)).collect();
-    let placeholders: Vec<String> = (1..=values.len()).map(|i| format!("${i}")).collect();
+    let columns: Vec<String> = values.keys().map(|c| dialect.quote_ident(c)).collect();
+    let placeholders: Vec<String> = (1..=values.len()).map(|i| dialect.param(i)).collect();
     let params = values.values().map(param_for).collect();
     Ok((
         format!(
@@ -54,13 +65,18 @@ fn check_columns<'a>(columns: impl Iterator<Item = &'a String>, valid_columns: &
     Ok(())
 }
 
-/// `col = $n AND ...` for a primary key, numbering parameters from `first`.
-fn key_condition(key: &serde_json::Map<String, JsonValue>, first: usize, params: &mut Vec<Option<TextParam>>) -> String {
+/// `col = $n AND ...` (the placeholder in the dialect's form) for a primary key, numbering parameters from `first`.
+fn key_condition(
+    dialect: Dialect,
+    key: &serde_json::Map<String, JsonValue>,
+    first: usize,
+    params: &mut Vec<Option<TextParam>>,
+) -> String {
     key.iter()
         .enumerate()
         .map(|(i, (column, value))| {
             params.push(param_for(value));
-            format!("{} = ${}", quote_ident(column), first + i)
+            format!("{} = {}", dialect.quote_ident(column), dialect.param(first + i))
         })
         .collect::<Vec<_>>()
         .join(" AND ")
@@ -68,6 +84,17 @@ fn key_condition(key: &serde_json::Map<String, JsonValue>, first: usize, params:
 
 /// `UPDATE` of one row, found by its primary key.
 pub fn build_update(
+    relation: &str,
+    primary_key: &serde_json::Map<String, JsonValue>,
+    updates: &serde_json::Map<String, JsonValue>,
+    valid_columns: &[String],
+) -> Result<(String, Vec<Option<TextParam>>), String> {
+    build_update_in(Dialect::Postgres, relation, primary_key, updates, valid_columns)
+}
+
+/// `build_update` in the given dialect.
+pub fn build_update_in(
+    dialect: Dialect,
     relation: &str,
     primary_key: &serde_json::Map<String, JsonValue>,
     updates: &serde_json::Map<String, JsonValue>,
@@ -87,15 +114,25 @@ pub fn build_update(
         .enumerate()
         .map(|(i, (column, value))| {
             params.push(param_for(value));
-            format!("{} = ${}", quote_ident(column), i + 1)
+            format!("{} = {}", dialect.quote_ident(column), dialect.param(i + 1))
         })
         .collect();
-    let condition = key_condition(primary_key, params.len() + 1, &mut params);
+    let condition = key_condition(dialect, primary_key, params.len() + 1, &mut params);
     Ok((format!("UPDATE {relation} SET {} WHERE {condition}", set.join(", ")), params))
 }
 
 /// One `DELETE` for every row, so either all of them go or none does.
 pub fn build_delete(
+    relation: &str,
+    primary_keys: &[serde_json::Map<String, JsonValue>],
+    valid_columns: &[String],
+) -> Result<(String, Vec<Option<TextParam>>), String> {
+    build_delete_in(Dialect::Postgres, relation, primary_keys, valid_columns)
+}
+
+/// `build_delete` in the given dialect.
+pub fn build_delete_in(
+    dialect: Dialect,
     relation: &str,
     primary_keys: &[serde_json::Map<String, JsonValue>],
     valid_columns: &[String],
@@ -110,17 +147,25 @@ pub fn build_delete(
             return Err("primaryKeys can't contain an empty key".into());
         }
         check_columns(key.keys(), valid_columns)?;
-        conditions.push(format!("({})", key_condition(key, params.len() + 1, &mut params)));
+        conditions.push(format!("({})", key_condition(dialect, key, params.len() + 1, &mut params)));
     }
     Ok((format!("DELETE FROM {relation} WHERE {}", conditions.join(" OR ")), params))
 }
 
-/// Parameters Postgres accepts in one statement (the protocol counts them in 16 bits).
-const MAX_PARAMS: usize = 65_535;
-
 /// Multi-row `INSERT`s for imported rows, split so none goes over the parameter limit.
 /// Each batch also returns the index of its first row, to point errors at a row.
 pub fn build_import_batches(
+    relation: &str,
+    columns: &[String],
+    rows: &[Vec<Option<String>>],
+    valid_columns: &[String],
+) -> Result<Vec<(usize, String, Vec<Option<TextParam>>)>, String> {
+    build_import_batches_in(Dialect::Postgres, relation, columns, rows, valid_columns)
+}
+
+/// `build_import_batches` in the given dialect.
+pub fn build_import_batches_in(
+    dialect: Dialect,
     relation: &str,
     columns: &[String],
     rows: &[Vec<Option<String>>],
@@ -133,8 +178,8 @@ pub fn build_import_batches(
     if let Some((i, row)) = rows.iter().enumerate().find(|(_, r)| r.len() != columns.len()) {
         return Err(format!("Row {} has {} values instead of {}", i + 1, row.len(), columns.len()));
     }
-    let names = columns.iter().map(|c| quote_ident(c)).collect::<Vec<_>>().join(", ");
-    let per_batch = (MAX_PARAMS / columns.len()).clamp(1, 1000);
+    let names = columns.iter().map(|c| dialect.quote_ident(c)).collect::<Vec<_>>().join(", ");
+    let per_batch = (dialect.max_params() / columns.len()).clamp(1, 1000);
     Ok(rows
         .chunks(per_batch)
         .enumerate()
@@ -147,7 +192,7 @@ pub fn build_import_batches(
                         .iter()
                         .map(|value| {
                             params.push(value.clone().map(TextParam));
-                            format!("${}", params.len())
+                            dialect.param(params.len())
                         })
                         .collect();
                     format!("({})", placeholders.join(", "))
@@ -263,7 +308,7 @@ mod tests {
         let wide: Vec<String> = (0..100).map(|i| format!("c{i}")).collect();
         let wide_rows = vec![vec![Some("x".to_string()); 100]; 1000];
         let batches = build_import_batches("t", &wide, &wide_rows, &wide).unwrap();
-        assert!(batches.iter().all(|(_, _, p)| p.len() <= MAX_PARAMS));
+        assert!(batches.iter().all(|(_, _, p)| p.len() <= Dialect::Postgres.max_params()));
     }
 
     #[test]
