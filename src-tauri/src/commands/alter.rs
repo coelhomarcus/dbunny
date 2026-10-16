@@ -1,4 +1,5 @@
-//! Structure changes from the Structure tab: columns and indexes. Names are quoted;
+//! Structure changes from the Structure tab: columns, indexes, constraints, triggers and
+//! permissions. Names are quoted;
 //! types, defaults and index expressions are SQL the user writes, so they're checked
 //! to be a single fragment (no `;`) and the generated SQL is shown before it runs.
 
@@ -21,6 +22,80 @@ pub enum StructureChange {
     /// `columns` are column names or expressions such as `lower(email)`.
     CreateIndex { name: Option<String>, columns: Vec<String>, unique: bool, method: String, concurrently: bool },
     DropIndex { name: String, cascade: bool },
+    /// `using` converts the existing values when there's no automatic cast, e.g. `price::numeric`.
+    SetType { name: String, data_type: String, using: Option<String> },
+    AddForeignKey {
+        name: Option<String>,
+        columns: Vec<String>,
+        ref_schema: String,
+        ref_table: String,
+        ref_columns: Vec<String>,
+        on_update: String,
+        on_delete: String,
+    },
+    AddUnique { name: Option<String>, columns: Vec<String> },
+    AddCheck { name: Option<String>, expression: String },
+    DropConstraint { name: String, cascade: bool },
+    SetTriggerEnabled { name: String, enabled: bool },
+    /// `grantee` is a role name, or PUBLIC for everyone.
+    Grant { grantee: String, privileges: Vec<String>, grant_option: bool },
+    Revoke { grantee: String, privileges: Vec<String> },
+}
+
+/// Table privileges that can be granted (MAINTAIN only exists from PostgreSQL 17 on).
+const TABLE_PRIVILEGES: &[&str] = &["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"];
+
+fn privileges(list: &[String]) -> Result<String, String> {
+    if list.is_empty() {
+        return Err("Choose at least one privilege".into());
+    }
+    let upper = list
+        .iter()
+        .map(|p| {
+            let p = p.trim().to_uppercase();
+            if TABLE_PRIVILEGES.contains(&p.as_str()) {
+                Ok(p)
+            } else {
+                Err(format!("Unknown privilege \"{p}\""))
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(upper.join(", "))
+}
+
+/// A role name, quoted, or the PUBLIC keyword (no role can be called "public").
+fn grantee(value: &str) -> Result<String, String> {
+    if value.trim().eq_ignore_ascii_case("public") {
+        Ok("PUBLIC".into())
+    } else {
+        name("role", value)
+    }
+}
+
+fn referential_action(label: &str, action: &str) -> Result<&'static str, String> {
+    match action.trim().to_uppercase().as_str() {
+        "" | "NO ACTION" => Ok("NO ACTION"),
+        "RESTRICT" => Ok("RESTRICT"),
+        "CASCADE" => Ok("CASCADE"),
+        "SET NULL" => Ok("SET NULL"),
+        "SET DEFAULT" => Ok("SET DEFAULT"),
+        other => Err(format!("Unknown {label} action \"{other}\"")),
+    }
+}
+
+fn column_list(label: &str, columns: &[String]) -> Result<String, String> {
+    if columns.is_empty() {
+        return Err(format!("Choose at least one {label}"));
+    }
+    Ok(columns.iter().map(|c| name(label, c)).collect::<Result<Vec<_>, _>>()?.join(", "))
+}
+
+/// `CONSTRAINT "name" ` when one was given, nothing to let the server pick it.
+fn constraint_name(value: &Option<String>) -> Result<String, String> {
+    match value.as_deref().filter(|n| !n.trim().is_empty()) {
+        Some(n) => Ok(format!("CONSTRAINT {} ", name("constraint name", n)?)),
+        None => Ok(String::new()),
+    }
 }
 
 fn fragment(label: &str, sql: &str) -> Result<String, String> {
@@ -124,6 +199,52 @@ pub(crate) fn change_sql(schema: &str, table: &str, change: &StructureChange) ->
                 name("index name", index)?,
                 if *cascade { " CASCADE" } else { "" }
             )]
+        }
+        StructureChange::SetType { name: column, data_type, using } => {
+            let column = name("column name", column)?;
+            let mut stmt = format!("{alter} ALTER COLUMN {column} TYPE {}", fragment("type", data_type)?);
+            if let Some(using) = using.as_deref().filter(|u| !u.trim().is_empty()) {
+                stmt += &format!(" USING {}", fragment("conversion", using)?);
+            }
+            vec![stmt]
+        }
+        StructureChange::AddForeignKey { name: constraint, columns, ref_schema, ref_table, ref_columns, on_update, on_delete } => {
+            if columns.len() != ref_columns.len() {
+                return Err("Pick as many referenced columns as columns".into());
+            }
+            vec![format!(
+                "{alter} ADD {}FOREIGN KEY ({}) REFERENCES {}.{} ({}) ON UPDATE {} ON DELETE {}",
+                constraint_name(constraint)?,
+                column_list("column", columns)?,
+                name("referenced schema", ref_schema)?,
+                name("referenced table", ref_table)?,
+                column_list("referenced column", ref_columns)?,
+                referential_action("update", on_update)?,
+                referential_action("delete", on_delete)?,
+            )]
+        }
+        StructureChange::AddUnique { name: constraint, columns } => {
+            vec![format!("{alter} ADD {}UNIQUE ({})", constraint_name(constraint)?, column_list("column", columns)?)]
+        }
+        StructureChange::AddCheck { name: constraint, expression } => {
+            vec![format!("{alter} ADD {}CHECK ({})", constraint_name(constraint)?, fragment("check", expression)?)]
+        }
+        StructureChange::DropConstraint { name: constraint, cascade } => {
+            vec![format!("{alter} DROP CONSTRAINT {}{}", name("constraint name", constraint)?, if *cascade { " CASCADE" } else { "" })]
+        }
+        StructureChange::SetTriggerEnabled { name: trigger, enabled } => {
+            let action = if *enabled { "ENABLE" } else { "DISABLE" };
+            vec![format!("{alter} {action} TRIGGER {}", name("trigger name", trigger)?)]
+        }
+        StructureChange::Grant { grantee: role, privileges: list, grant_option } => {
+            let mut stmt = format!("GRANT {} ON TABLE {target} TO {}", privileges(list)?, grantee(role)?);
+            if *grant_option {
+                stmt += " WITH GRANT OPTION";
+            }
+            vec![stmt]
+        }
+        StructureChange::Revoke { grantee: role, privileges: list } => {
+            vec![format!("REVOKE {} ON TABLE {target} FROM {}", privileges(list)?, grantee(role)?)]
         }
     };
     Ok((stmts, false))
@@ -297,6 +418,59 @@ mod tests {
         assert!(sql(StructureChange::CreateIndex { name: None, columns: vec![], unique: false, method: "btree".into(), concurrently: false }).starts_with("ERR"));
         assert_eq!(sql(StructureChange::DropIndex { name: "i".into(), cascade: false }), "DROP INDEX \"public\".\"i\"");
     }
+
+    #[test]
+    fn constraints_and_types_build_their_sql() {
+        assert_eq!(
+            sql(StructureChange::SetType { name: "price".into(), data_type: "numeric(10,2)".into(), using: Some("price::numeric".into()) }),
+            "ALTER TABLE \"public\".\"users\" ALTER COLUMN \"price\" TYPE numeric(10,2) USING price::numeric"
+        );
+        assert!(sql(StructureChange::SetType { name: "x".into(), data_type: "int".into(), using: Some("1; DROP TABLE t".into()) }).starts_with("ERR"));
+        assert_eq!(
+            sql(StructureChange::AddForeignKey {
+                name: Some("users_team_fk".into()),
+                columns: vec!["team_id".into()],
+                ref_schema: "public".into(),
+                ref_table: "teams".into(),
+                ref_columns: vec!["id".into()],
+                on_update: "".into(),
+                on_delete: "set null".into(),
+            }),
+            "ALTER TABLE \"public\".\"users\" ADD CONSTRAINT \"users_team_fk\" FOREIGN KEY (\"team_id\") REFERENCES \"public\".\"teams\" (\"id\") ON UPDATE NO ACTION ON DELETE SET NULL"
+        );
+        let fk = |on_delete: &str, ref_columns: Vec<String>| StructureChange::AddForeignKey {
+            name: None,
+            columns: vec!["a".into()],
+            ref_schema: "public".into(),
+            ref_table: "t".into(),
+            ref_columns,
+            on_update: "CASCADE".into(),
+            on_delete: on_delete.into(),
+        };
+        assert!(sql(fk("DROP TABLE", vec!["id".into()])).starts_with("ERR"));
+        assert!(sql(fk("CASCADE", vec!["id".into(), "x".into()])).contains("as many"));
+        assert_eq!(sql(StructureChange::AddUnique { name: None, columns: vec!["email".into(), "org".into()] }), "ALTER TABLE \"public\".\"users\" ADD UNIQUE (\"email\", \"org\")");
+        assert_eq!(
+            sql(StructureChange::AddCheck { name: Some("age_ok".into()), expression: "age >= 0".into() }),
+            "ALTER TABLE \"public\".\"users\" ADD CONSTRAINT \"age_ok\" CHECK (age >= 0)"
+        );
+        assert_eq!(sql(StructureChange::DropConstraint { name: "age_ok".into(), cascade: true }), "ALTER TABLE \"public\".\"users\" DROP CONSTRAINT \"age_ok\" CASCADE");
+        assert_eq!(sql(StructureChange::SetTriggerEnabled { name: "audit".into(), enabled: false }), "ALTER TABLE \"public\".\"users\" DISABLE TRIGGER \"audit\"");
+    }
+
+    #[test]
+    fn grants_check_privileges_and_quote_roles() {
+        assert_eq!(
+            sql(StructureChange::Grant { grantee: "app user".into(), privileges: vec!["select".into(), "UPDATE".into()], grant_option: true }),
+            "GRANT SELECT, UPDATE ON TABLE \"public\".\"users\" TO \"app user\" WITH GRANT OPTION"
+        );
+        assert_eq!(
+            sql(StructureChange::Revoke { grantee: "public".into(), privileges: vec!["DELETE".into()] }),
+            "REVOKE DELETE ON TABLE \"public\".\"users\" FROM PUBLIC"
+        );
+        assert!(sql(StructureChange::Grant { grantee: "x".into(), privileges: vec!["ALL; DROP TABLE t".into()], grant_option: false }).starts_with("ERR"));
+        assert!(sql(StructureChange::Revoke { grantee: "x".into(), privileges: vec![] }).starts_with("ERR"));
+    }
 }
 
 /// Tests that need a real server, see `query::server_tests`.
@@ -352,11 +526,68 @@ mod server_tests {
         assert!(err.contains("primary key"), "{err}");
         client.query_one("SELECT 1", &[]).await.unwrap();
 
+        // Constraints, a type change, triggers and permissions
+        client
+            .batch_execute(&format!(
+                "CREATE TABLE {s}.teams (id int PRIMARY KEY); INSERT INTO {s}.teams VALUES (7); \
+                 ALTER TABLE {s}.t ADD COLUMN team_id text, ADD COLUMN age int; UPDATE {s}.t SET team_id = '7'; \
+                 CREATE FUNCTION {s}.noop() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; \
+                 CREATE TRIGGER t_noop BEFORE INSERT ON {s}.t FOR EACH ROW EXECUTE FUNCTION {s}.noop(); \
+                 DROP ROLE IF EXISTS dbunny_grant_test; CREATE ROLE dbunny_grant_test"
+            ))
+            .await
+            .unwrap();
+        run(StructureChange::SetType { name: "team_id".into(), data_type: "int".into(), using: Some("team_id::int".into()) }).await.unwrap();
+        run(StructureChange::AddForeignKey {
+            name: Some("t_team_fk".into()),
+            columns: vec!["team_id".into()],
+            ref_schema: s.into(),
+            ref_table: "teams".into(),
+            ref_columns: vec!["id".into()],
+            on_update: "CASCADE".into(),
+            on_delete: "SET NULL".into(),
+        })
+        .await
+        .unwrap();
+        run(StructureChange::AddCheck { name: Some("t_age_ok".into()), expression: "age >= 0".into() }).await.unwrap();
+        run(StructureChange::AddUnique { name: None, columns: vec!["team_id".into(), "age".into()] }).await.unwrap();
+        let err = client.batch_execute(&format!("INSERT INTO {s}.t (id, age) VALUES (5, -1)")).await.unwrap_err();
+        assert!(db_message(&err).contains("t_age_ok"), "{}", db_message(&err));
+        run(StructureChange::DropConstraint { name: "t_age_ok".into(), cascade: false }).await.unwrap();
+        run(StructureChange::DropConstraint { name: "t_team_fk".into(), cascade: false }).await.unwrap();
+        let kinds: Vec<String> = client
+            .query(&format!("SELECT contype::text FROM pg_constraint WHERE conrelid = '{s}.t'::regclass ORDER BY 1"), &[])
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        assert_eq!(kinds, vec!["p", "u"], "the primary key and the unique constraint are left");
+
+        run(StructureChange::SetTriggerEnabled { name: "t_noop".into(), enabled: false }).await.unwrap();
+        let enabled: String = client.query_one("SELECT tgenabled::text FROM pg_trigger WHERE tgname = 't_noop'", &[]).await.unwrap().get(0);
+        assert_eq!(enabled, "D");
+        run(StructureChange::SetTriggerEnabled { name: "t_noop".into(), enabled: true }).await.unwrap();
+
+        run(StructureChange::Grant { grantee: "dbunny_grant_test".into(), privileges: vec!["SELECT".into(), "INSERT".into()], grant_option: false }).await.unwrap();
+        run(StructureChange::Revoke { grantee: "dbunny_grant_test".into(), privileges: vec!["INSERT".into()] }).await.unwrap();
+        let rights: Vec<bool> = client
+            .query_one(
+                &format!("SELECT has_table_privilege('dbunny_grant_test', '{s}.t', 'SELECT'), has_table_privilege('dbunny_grant_test', '{s}.t', 'INSERT')"),
+                &[],
+            )
+            .await
+            .map(|r| vec![r.get(0), r.get(1)])
+            .unwrap();
+        assert_eq!(rights, vec![true, false]);
+        run(StructureChange::Revoke { grantee: "dbunny_grant_test".into(), privileges: vec!["SELECT".into()] }).await.unwrap();
+        client.batch_execute(&format!("ALTER TABLE {s}.t DROP COLUMN team_id, DROP COLUMN age; DROP TABLE {s}.teams")).await.unwrap();
+
         run(StructureChange::DropIndex { name: "t_email_lower".into(), cascade: false }).await.unwrap();
         run(StructureChange::DropColumn { name: "points".into(), cascade: false }).await.unwrap();
         let count: i64 = client.query_one(&format!("SELECT count(*) FROM pg_indexes WHERE schemaname = '{s}'"), &[]).await.unwrap().get(0);
         assert_eq!(count, 1, "only the primary key is left");
-        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE; DROP ROLE dbunny_grant_test")).await.unwrap();
     }
 
     #[tokio::test]
