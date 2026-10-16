@@ -108,7 +108,8 @@ pub fn run() {
                 *cache = connections;
             }
 
-            #[cfg(target_os = "windows")]
+            // Windows and Linux: the title bar (tabs and window controls) is drawn by the app
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_decorations(false);

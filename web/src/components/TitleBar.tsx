@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Database, Minus, PanelLeft, Plus, X } from "lucide-react";
-import { isMac, isWindows } from "../lib/platform";
+import { isMac } from "../lib/platform";
 import { cn } from "../lib/cn";
 import { useWorkspace, type WorkspaceTab } from "../contexts/workspace";
 import Button from "./ui/Button";
@@ -31,21 +31,29 @@ function isDragArea(target: EventTarget) {
   return !(target as HTMLElement).closest("button, [role='tab']");
 }
 
-function WindowControls() {
-  const [maximized, setMaximized] = useState(false);
+/** Whether the window is maximized or in full screen, kept up to date as it resizes. */
+function useWindowState() {
+  const [state, setState] = useState({ maximized: false, fullscreen: false });
 
   useEffect(() => {
-    appWindow.isMaximized().then(setMaximized);
     let cancel = false;
-    const promise = appWindow.onResized(async () => {
-      if (!cancel) setMaximized(await appWindow.isMaximized());
-    });
+    const read = async () => {
+      const [maximized, fullscreen] = await Promise.all([appWindow.isMaximized(), appWindow.isFullscreen()]);
+      if (!cancel) setState((prev) => (prev.maximized === maximized && prev.fullscreen === fullscreen ? prev : { maximized, fullscreen }));
+    };
+    read();
+    const promise = appWindow.onResized(read);
     return () => {
       cancel = true;
       promise.then((fn) => fn());
     };
   }, []);
 
+  return state;
+}
+
+/** Minimize, maximize and close on the right, for Windows and Linux (macOS draws its own). */
+function WindowControls({ maximized }: { maximized: boolean }) {
   const control = "h-full w-12 flex items-center justify-center text-muted-foreground transition-colors cursor-pointer";
   return (
     <div className="flex h-full shrink-0 self-stretch">
@@ -133,11 +141,14 @@ function WindowTab({
 }
 
 /**
- * Window title bar: one tab per database connection, plus the window controls
- * (traffic lights on macOS sit on the left, drawn by the OS).
+ * Window title bar: one tab per database connection, plus the window controls. On macOS
+ * the OS draws the traffic lights on the left (gone in full screen); on Windows and Linux
+ * the window has no native frame, so the controls are drawn here, on the right.
  */
 export default function TitleBar() {
   const { tabs, activeTabId, activateTab, closeTab, openTab, cycleTab, sidebarOpen, toggleSidebar } = useWorkspace();
+  const { maximized, fullscreen } = useWindowState();
+  const trafficLights = isMac && !fullscreen;
 
   // Cmd/Ctrl+T new tab, Ctrl+W close tab, Ctrl+Tab / Ctrl+Shift+Tab cycle, Cmd/Ctrl+1..9 jump
   useEffect(() => {
@@ -184,7 +195,7 @@ export default function TitleBar() {
     >
       {/* Room for the traffic lights on macOS, then the sidebar toggle; the tabs follow,
           and each tab's container below holds its own sidebar */}
-      <div className={cn("flex shrink-0 items-center justify-end", isMac ? "w-[7.5rem] pr-1" : "w-12 justify-center")}>
+      <div className={cn("flex shrink-0 items-center", trafficLights ? "w-[7.5rem] justify-end pr-1" : "w-12 justify-center")}>
         <Button
           variant="ghost-muted"
           size="icon-sm"
@@ -209,7 +220,7 @@ export default function TitleBar() {
           <Plus />
         </Button>
       </div>
-      {isWindows && <WindowControls />}
+      {!isMac && <WindowControls maximized={maximized} />}
     </div>
   );
 }
