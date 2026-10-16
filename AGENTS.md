@@ -2,6 +2,19 @@
 
 Guidance for humans and coding agents working on DBunny. Follow these conventions unless the user asks for something different in the current task.
 
+## No co-authorship
+
+Git history and GitHub metadata on this repo should **not** credit agents, IDEs, or other tools as co-authors. Do not add attribution unless the user explicitly asks for it.
+
+| Where | Rule |
+| --- | --- |
+| **Commits** | No `Co-authored-by`, `Signed-off-by`, `Assisted-by`, or similar trailers in the message. |
+| **Pull requests** | No co-author list, no “written with …”, no agent credits in the title, description, or PR comments. |
+| **Releases** | No tool or agent attribution in release notes or changelog text edited on GitHub. |
+| **Issues & reviews** | No automatic signatures or product credits in comments. |
+
+If the environment appends trailers when you run `git commit`, fix the result before pushing (for example recreate the commit with `git commit-tree` so the message stays exactly what you intended).
+
 ## Repository layout
 
 - **`web/`** — React 19, TypeScript, Tailwind 4, CodeMirror (npm workspace).
@@ -78,7 +91,7 @@ chore: version X.Y.Z
 
 ### What to avoid in commits
 
-- Do not add `Co-authored-by`, `Signed-off-by`, or other agent/tool trailers to commit messages.
+- Do not add co-authorship or agent trailers (see **No co-authorship** above).
 - Do not mention other products or repos as inspiration (e.g. other database clients or tools).
 - Do not push unless the user asks.
 - Do not amend or rewrite published history unless the user asks.
@@ -104,6 +117,8 @@ Structure PR bodies like recent merges on this repo:
 
 Use bullets under sections for scanability. Match the tone of existing PRs: factual, complete, no emojis unless the user wants them.
 
+- No co-authorship or agent attribution in the PR (see **No co-authorship**).
+
 ### Merge
 
 - Prefer a **merge commit** (not squash-only) when the user asks to merge `develop` into `main`, so history on `develop` stays intact on `main`.
@@ -125,7 +140,7 @@ Typical flow used on this project:
 
 6. **Publish** the release when assets are ready.
 
-Patch release notes and README in English. User-facing docs describe DBunny as a **multi-database** client; list supported engines accurately (see `README.md` and `web/src/lib/engines.ts`).
+Patch release notes and README in English. Release text follows **No co-authorship** (no agent or tool credits). User-facing docs describe DBunny as a **multi-database** client; list supported engines accurately (see `README.md` and `web/src/lib/engines.ts`).
 
 ## CI
 
