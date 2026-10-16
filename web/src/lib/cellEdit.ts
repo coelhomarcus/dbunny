@@ -1,5 +1,6 @@
 import type { ColumnInfo } from "@/types";
-import { dateModeOf, type DateMode } from "./dateValue";
+// With the extension, so Node's test runner can load it too
+import { dateModeOf, type DateMode } from "./dateValue.ts";
 
 
 /** Text shown in the editor for a cell value (NULL starts as an empty field). */
@@ -42,7 +43,8 @@ export function editorFor(column: ColumnInfo | undefined, value: unknown): CellE
   if (column?.dataType === "boolean") return { kind: "choice", options: ["true", "false"] };
   if (column?.enumValues?.length) return { kind: "choice", options: column.enumValues };
   const dateMode = dateModeOf(column?.dataType);
-  if (dateMode) return { kind: "datetime", mode: dateMode };
+  // A number in a date column (SQLite keeps dates as Unix times) is edited as the number it is
+  if (dateMode && typeof value !== "number") return { kind: "datetime", mode: dateMode };
   if (column?.dataType === "json" || column?.dataType === "jsonb") return { kind: "long", json: true };
   if (typeof value === "string" && (value.length > LONG_TEXT || value.includes("\n"))) return { kind: "long", json: false };
   return { kind: "text" };
