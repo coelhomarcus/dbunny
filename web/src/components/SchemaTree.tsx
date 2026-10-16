@@ -10,7 +10,8 @@ import ContainerDialog, { type ContainerOptions, type ContainerRequest } from ".
 import { quoteIdent } from "../lib/copyRows";
 import { shortType } from "../lib/columnMeta";
 import { cn } from "../lib/cn";
-import type { ColumnInfo, ExplorerObject, ExplorerPartition, ExplorerTree, ExtensionInfo } from "@/types";
+import type { Capabilities, ColumnInfo, ExplorerObject, ExplorerPartition, ExplorerTree, ExtensionInfo } from "@/types";
+import { useCapabilities } from "../hooks/useCapabilities";
 import Button from "./ui/Button";
 import Tooltip from "./Tooltip";
 import {
@@ -20,6 +21,8 @@ import {
   Eye,
   Layers,
   Braces,
+  ListTree,
+  Zap,
   ListOrdered,
   Shapes,
   Puzzle,
@@ -66,7 +69,17 @@ const CATEGORIES: Category[] = [
   { id: "functions", label: "Functions", kinds: ["function", "procedure"], icon: Braces, color: "text-purple-500" },
   { id: "sequences", label: "Sequences", kinds: ["sequence"], icon: ListOrdered, color: "text-teal-500" },
   { id: "types", label: "Types", kinds: ["type"], icon: Shapes, color: "text-pink-500" },
+  { id: "indexes", label: "Indexes", kinds: ["index"], icon: ListTree, color: "text-orange-500" },
+  { id: "triggers", label: "Triggers", kinds: ["trigger"], icon: Zap, color: "text-yellow-500" },
 ];
+
+/** Categories shown only when the engine has that kind of object. */
+const CATEGORY_CAPABILITY: Partial<Record<string, keyof Capabilities>> = {
+  matviews: "materializedViews",
+  functions: "functions",
+  sequences: "sequences",
+  types: "types",
+};
 
 const RELATION_KINDS: Partial<Record<ObjectKind, RelationKind>> = { table: "table", view: "view", matview: "matview" };
 
@@ -83,6 +96,10 @@ function objectPath(schema: string, object: ExplorerObject): string {
       return `/db/${s}/sequence/${n}`;
     case "type":
       return `/db/${s}/type/${n}`;
+    case "index":
+      return `/db/${s}/index/${n}`;
+    case "trigger":
+      return `/db/${s}/trigger/${n}`;
     default:
       return relationPath(schema, object.name);
   }
@@ -184,6 +201,7 @@ export default function SchemaTree() {
   const api = useApi();
   const { connectionInfo } = useConnection();
   const readOnly = connectionInfo?.readOnly ?? false;
+  const capabilities = useCapabilities();
   const pinsKey = connectionInfo ? `dbunny:pins:${connectionInfo.host}:${connectionInfo.port}/${connectionInfo.database}` : null;
 
   const [tree, setTree] = useState<ExplorerTree | null>(null);
@@ -285,6 +303,12 @@ export default function SchemaTree() {
   // While filtering everything with a match is open, whatever was expanded before
   const isOpen = (key: string) => (query ? !key.startsWith("t:") || expanded.has(key) : expanded.has(key));
 
+  /** The engine has this category of objects. */
+  const categoryShown = (category: Category) => {
+    const capability = CATEGORY_CAPABILITY[category.id];
+    return !capability || capabilities[capability] === true;
+  };
+
   const isCurrent = (t: RelationTarget) => {
     const current = decodeURIComponent(location.pathname);
     const target = decodeURIComponent(relationPath(t.schema, t.name));
@@ -348,7 +372,9 @@ export default function SchemaTree() {
     if (schema === null) {
       return [
         { label: "New table…", icon: <Table2 />, onSelect: () => setNewTableIn(defaultSchema) },
-        { label: "New schema…", icon: <FolderPlus />, onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }) },
+        ...(capabilities.schemas
+          ? [{ label: "New schema…", icon: <FolderPlus />, onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }) }]
+          : []),
       ];
     }
     const items: ContextMenuItem[] = [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(schema)) }];
@@ -377,10 +403,10 @@ export default function SchemaTree() {
     ];
     if (readOnly) return items;
     items.push("separator", { label: "Rename…", icon: <PenLine />, onSelect: () => setAction({ action: "rename", target }) });
-    if (target.kind === "table") {
+    if (target.kind === "table" && capabilities.duplicateTable) {
       items.push({ label: "Duplicate…", icon: <CopyPlus />, onSelect: () => setAction({ action: "duplicate", target }) });
     }
-    if (target.kind === "matview") {
+    if (target.kind === "matview" && capabilities.materializedViews) {
       items.push({
         label: "Refresh data",
         icon: <RefreshCw />,
@@ -441,13 +467,15 @@ export default function SchemaTree() {
     const hint =
       object.kind === "type"
         ? object.detail
-        : object.kind === "procedure"
-          ? "procedure"
-          : object.partitions?.length
-            ? `${object.partitions.length} partition${object.partitions.length > 1 ? "s" : ""}`
-            : object.detail === "foreign"
-              ? "foreign"
-              : null;
+        : object.kind === "index" || object.kind === "trigger"
+          ? `on ${object.detail}`
+          : object.kind === "procedure"
+            ? "procedure"
+            : capabilities.partitions && object.partitions?.length
+              ? `${object.partitions.length} partition${object.partitions.length > 1 ? "s" : ""}`
+              : object.detail === "foreign"
+                ? "foreign"
+                : null;
     return (
       <div key={objectKey(schema, object)}>
         <div className="group relative">
@@ -509,7 +537,7 @@ export default function SchemaTree() {
             </button>
           )}
         </div>
-        {columnsOpen && object.partitions?.length ? partitionRows(object.partitions, depth + 2) : null}
+        {columnsOpen && capabilities.partitions && object.partitions?.length ? partitionRows(object.partitions, depth + 2) : null}
         {columnsOpen && columnRows(schema, object.name, depth + 2)}
       </div>
     );
@@ -571,6 +599,7 @@ export default function SchemaTree() {
   /** The categories of a schema that have something (that matches the filter). */
   function categoryGroups(schema: string, objects: ExplorerObject[], depth: number) {
     return CATEGORIES.map((category) => {
+      if (!categoryShown(category)) return null;
       const items = objects.filter((o) => category.kinds.includes(o.kind) && matches(o.name));
       if (items.length === 0) return null;
       const key = `c:${schema}:${category.id}`;
@@ -598,7 +627,10 @@ export default function SchemaTree() {
       const object = schema?.objects.find((o) => o.name === pin.name && o.kind === pin.kind);
       return object ? { schema: pin.schema, object } : null;
     })
-    .filter((p): p is { schema: string; object: ExplorerObject } => p !== null && matches(p.object.name));
+    .filter(
+      (p): p is { schema: string; object: ExplorerObject } =>
+        p !== null && matches(p.object.name) && CATEGORIES.some((c) => c.kinds.includes(p.object.kind) && categoryShown(c)),
+    );
   const defaultSchema = tree?.defaultSchema ?? tree?.schemas[0]?.name ?? "public";
 
   return (
@@ -611,11 +643,11 @@ export default function SchemaTree() {
         )}
         <div className="ml-auto flex items-center">
           {!readOnly && tree && (
-            <Tooltip label="New table or schema" side="bottom">
+            <Tooltip label={capabilities.schemas ? "New table or schema" : "New table"} side="bottom">
               <Button
                 variant="ghost-muted"
                 size="icon-xs"
-                aria-label="New table or schema"
+                aria-label={capabilities.schemas ? "New table or schema" : "New table"}
                 aria-expanded={schemaMenu?.schema === null}
                 onClick={(e) => {
                   const r = e.currentTarget.getBoundingClientRect();
@@ -745,10 +777,15 @@ export default function SchemaTree() {
                         label={schema.name}
                         count={count}
                         action={newTableButton(schema.name)}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          setSchemaMenu({ x: e.clientX, y: e.clientY, schema: schema.name });
-                        }}
+                        // Without schema support there's nothing to do with one
+                        onContextMenu={
+                          capabilities.schemas
+                            ? (e) => {
+                                e.preventDefault();
+                                setSchemaMenu({ x: e.clientX, y: e.clientY, schema: schema.name });
+                              }
+                            : undefined
+                        }
                       />
                       {isOpen(key) &&
                         (schema.objects.length === 0 ? (
@@ -764,7 +801,7 @@ export default function SchemaTree() {
         )}
 
         {/* Extensions belong to the database, not to one schema */}
-        {tree && !query && (
+        {tree && !query && capabilities.extensions && (
           <div className="mt-1">
             <GroupRow
               depth={0}

@@ -1,4 +1,4 @@
-import { Outlet, useNavigate, NavLink } from "react-router";
+import { Outlet, useNavigate, NavLink, Navigate, useLocation } from "react-router";
 import { useConnection } from "../contexts/useConnection";
 import { useWorkspace } from "../contexts/workspace";
 import { useEffect, useState } from "react";
@@ -9,6 +9,7 @@ import { cn } from "../lib/cn";
 import { Terminal, Activity, Users, GitCommitVertical } from "lucide-react";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { RightPanelContext } from "../contexts/rightPanel";
+import { useCapabilities } from "../hooks/useCapabilities";
 
 export default function DatabaseLayout() {
   const { isConnected, connectionInfo, disconnect, api } = useConnection();
@@ -17,6 +18,10 @@ export default function DatabaseLayout() {
   const { sidebarOpen } = useWorkspace();
   const [rightPanel, setRightPanel] = useState<HTMLElement | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const capabilities = useCapabilities();
+  const { pathname } = useLocation();
+  // Server screens the engine doesn't have, reached by their route, go back to the editor
+  const unavailableRoute = !capabilities.admin && (pathname === "/db/activity" || pathname === "/db/roles");
 
   useEffect(() => {
     if (!isConnected) {
@@ -33,7 +38,7 @@ export default function DatabaseLayout() {
 
   // Disconnecting drops an open transaction, so that asks first
   async function handleDisconnect() {
-    if (await api.transactionOpen().catch(() => false)) setConfirmDisconnect(true);
+    if (capabilities.transactions && (await api.transactionOpen().catch(() => false))) setConfirmDisconnect(true);
     else await disconnectNow();
   }
 
@@ -66,18 +71,24 @@ export default function DatabaseLayout() {
             </div>
 
             <nav className="px-2 pb-2">
-              <NavLink to="/db/query" className={navItemClass}>
-                <Terminal size={15} className="shrink-0" />
-                Query
-              </NavLink>
-              <NavLink to="/db/activity" className={navItemClass}>
-                <Activity size={15} className="shrink-0" />
-                Activity
-              </NavLink>
-              <NavLink to="/db/roles" className={navItemClass}>
-                <Users size={15} className="shrink-0" />
-                Roles
-              </NavLink>
+              {capabilities.console && (
+                <NavLink to="/db/query" className={navItemClass}>
+                  <Terminal size={15} className="shrink-0" />
+                  Query
+                </NavLink>
+              )}
+              {capabilities.admin && (
+                <NavLink to="/db/activity" className={navItemClass}>
+                  <Activity size={15} className="shrink-0" />
+                  Activity
+                </NavLink>
+              )}
+              {capabilities.admin && (
+                <NavLink to="/db/roles" className={navItemClass}>
+                  <Users size={15} className="shrink-0" />
+                  Roles
+                </NavLink>
+              )}
             </nav>
 
             {/* The explorer has its own header, filter and scrolling list */}
@@ -90,7 +101,7 @@ export default function DatabaseLayout() {
 
         <main className="flex-1 min-w-0 rounded-lg border border-border bg-card overflow-hidden">
           <RightPanelContext.Provider value={rightPanel}>
-            <Outlet />
+            {unavailableRoute ? <Navigate to="/db/query" replace /> : <Outlet />}
           </RightPanelContext.Provider>
         </main>
         {/* Filled by the page (e.g. the query library); hidden while empty */}

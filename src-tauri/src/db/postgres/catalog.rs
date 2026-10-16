@@ -1,72 +1,15 @@
-use serde::Serialize;
-use tauri::State;
+//! What a PostgreSQL database holds: the explorer, columns, object definitions, autocomplete.
 
-use super::state::AppState;
+use async_trait::async_trait;
 
-#[derive(Serialize)]
-pub struct TableInfo {
-    pub name: String,
-    pub schema: String,
-    #[serde(rename = "type")]
-    pub table_type: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ColumnInfo {
-    pub name: String,
-    pub data_type: String,
-    /// The type as Postgres prints it (`varchar(80)`, `mood`, `integer[]`), unlike the
-    /// standard `data_type` which says `USER-DEFINED` or `ARRAY` for those.
-    pub type_name: String,
-    pub is_nullable: bool,
-    pub default_value: Option<String>,
-    pub ordinal_position: i32,
-    pub is_primary_key: bool,
-    /// Generated or `GENERATED ALWAYS AS IDENTITY`: the server computes it, so it can't be written.
-    pub is_generated: bool,
-    pub comment: Option<String>,
-    /// Labels of the column's enum type, in their declared order.
-    pub enum_values: Option<Vec<String>>,
-    /// The first foreign key that includes this column.
-    pub foreign_key: Option<ForeignKeyRef>,
-}
-
-/// A foreign key constraint: `columns` of this table point at `ref_columns` of the referenced one.
-#[derive(Serialize, Clone, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ForeignKeyRef {
-    pub constraint: String,
-    pub schema: String,
-    pub table: String,
-    pub columns: Vec<String>,
-    pub ref_columns: Vec<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FunctionInfo {
-    pub name: String,
-    pub schema: String,
-    pub return_type: String,
-    pub argument_types: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FunctionDetail {
-    pub name: String,
-    pub schema: String,
-    pub return_type: String,
-    pub argument_types: String,
-    pub language: String,
-    pub source: String,
-    pub kind: String,
-    pub volatility: String,
-    pub is_strict: bool,
-    pub owner: String,
-    pub description: Option<String>,
-}
+use super::data::db_message;
+use super::structure::table_structure;
+use super::PostgresDriver;
+use crate::db::model::{
+    ColumnInfo, CompletionColumn, CompletionRelation, CompletionSchema, ExplorerObject, ExplorerPartition, ExplorerSchema,
+    ExplorerTree, ExtensionInfo, ForeignKeyRef, FunctionDetail, FunctionInfo, ObjectDefinition, TableStructure,
+};
+use crate::db::Catalog;
 
 /// The user's schemas, for a query on `pg_namespace n`: leaves out the system catalogs and
 /// the `pg_toast*` / `pg_temp_*` schemas the server makes for its own use and for each
@@ -82,108 +25,55 @@ pub(crate) async fn user_schemas(client: &tokio_postgres::Client) -> Result<Vec<
     Ok(rows.iter().map(|r| r.get(0)).collect())
 }
 
-#[tauri::command]
-pub async fn get_tables(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<TableInfo>, String> {
-    let client = state.client(&session_id).await?;
+#[async_trait]
+impl Catalog for PostgresDriver {
+    async fn explorer(&self) -> Result<ExplorerTree, String> {
+        let client = self.client().await?;
+        explorer(&client).await.map_err(|e| db_message(&e))
+    }
 
-    let rows = client
-        .query(
-            "SELECT table_name as name, table_schema as schema, \
-             CASE WHEN table_type = 'BASE TABLE' THEN 'table' ELSE 'view' END as type \
-             FROM information_schema.tables \
-             WHERE table_schema = $1 AND table_type = 'BASE TABLE' \
-             ORDER BY table_name",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+    async fn columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, String> {
+        let client = self.client().await?;
+        table_columns(&client, schema, table).await.map_err(|e| e.to_string())
+    }
 
-    Ok(rows
-        .iter()
-        .map(|r| TableInfo {
-            name: r.get("name"),
-            schema: r.get("schema"),
-            table_type: r.get("type"),
-        })
-        .collect())
+    async fn relation_kind(&self, schema: &str, name: &str) -> Result<Option<String>, String> {
+        let client = self.client().await?;
+        relation_kind(&client, schema, name).await.map_err(|e| e.to_string())
+    }
+
+    async fn table_structure(&self, schema: &str, table: &str) -> Result<TableStructure, String> {
+        let client = self.client().await?;
+        table_structure(&client, schema, table).await
+    }
+
+    async fn completion_schema(&self) -> Result<CompletionSchema, String> {
+        let client = self.client().await?;
+        completion_schema(&client).await
+    }
+
+    async fn object_definition(&self, schema: &str, name: &str, kind: &str) -> Result<ObjectDefinition, String> {
+        let client = self.client().await?;
+        object_definition(&client, schema, name, kind).await
+    }
+
+    async fn function_detail(&self, schema: &str, name: &str, args: &str) -> Result<FunctionDetail, String> {
+        let client = self.client().await?;
+        function_detail(&client, schema, name, args).await
+    }
+
+    async fn extensions(&self) -> Result<Vec<ExtensionInfo>, String> {
+        let client = self.client().await?;
+        extensions(&client).await
+    }
 }
 
-#[tauri::command]
-pub async fn get_views(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<TableInfo>, String> {
-    let client = state.client(&session_id).await?;
-
-    let rows = client
-        .query(
-            "SELECT table_name as name, table_schema as schema, 'view' as type \
-             FROM information_schema.tables \
-             WHERE table_schema = $1 AND table_type = 'VIEW' \
-             ORDER BY table_name",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(rows
-        .iter()
-        .map(|r| TableInfo {
-            name: r.get("name"),
-            schema: r.get("schema"),
-            table_type: r.get("type"),
-        })
-        .collect())
-}
-
-#[tauri::command]
-pub async fn get_functions(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<FunctionInfo>, String> {
-    let client = state.client(&session_id).await?;
-
-    let rows = client
-        .query(
-            "SELECT p.proname as name, n.nspname as schema, \
-             pg_get_function_result(p.oid) as return_type, \
-             pg_get_function_arguments(p.oid) as argument_types \
-             FROM pg_proc p \
-             JOIN pg_namespace n ON p.pronamespace = n.oid \
-             WHERE n.nspname = $1 AND p.prokind IN ('f', 'p') \
-             ORDER BY p.proname",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(rows
-        .iter()
-        .map(|r| FunctionInfo {
-            name: r.get("name"),
-            schema: r.get("schema"),
-            return_type: r.get("return_type"),
-            argument_types: r.get("argument_types"),
-        })
-        .collect())
-}
-
-#[tauri::command]
-pub async fn get_function_detail(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    function_name: String,
-    argument_types: String,
+async fn function_detail(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    function_name: &str,
+    argument_types: &str,
 ) -> Result<FunctionDetail, String> {
-    let client = state.client(&session_id).await?;
-
     let row = client
         .query_one(
             "SELECT p.proname as name, \
@@ -235,17 +125,6 @@ pub async fn get_function_detail(
 
 /// What a relation is: "table", "partitioned", "foreign", "view" or "matview"; None when
 /// there's no relation by that name.
-#[tauri::command]
-pub async fn get_relation_kind(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-) -> Result<Option<String>, String> {
-    let client = state.client(&session_id).await?;
-    relation_kind(&client, &schema, &name).await.map_err(|e| e.to_string())
-}
-
 pub(crate) async fn relation_kind(
     client: &tokio_postgres::Client,
     schema: &str,
@@ -261,17 +140,6 @@ pub(crate) async fn relation_kind(
         )
         .await?;
     Ok(row.map(|r| r.get("kind")))
-}
-
-#[tauri::command]
-pub async fn get_columns(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    table: String,
-) -> Result<Vec<ColumnInfo>, String> {
-    let client = state.client(&session_id).await?;
-    table_columns(&client, &schema, &table).await.map_err(|e| e.to_string())
 }
 
 pub(crate) async fn table_columns(
@@ -370,89 +238,7 @@ async fn table_foreign_keys(
         .collect())
 }
 
-#[tauri::command]
-pub async fn get_materialized_views(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<TableInfo>, String> {
-    let client = state.client(&session_id).await?;
-    let rows = client
-        .query(
-            "SELECT matviewname::text AS name FROM pg_matviews WHERE schemaname = $1 ORDER BY matviewname",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(rows
-        .iter()
-        .map(|r| TableInfo { name: r.get("name"), schema: schema.clone(), table_type: "matview".into() })
-        .collect())
-}
-
-/// A sequence, type or other schema object listed in the explorer.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SchemaObject {
-    pub name: String,
-    /// For types: "enum", "domain", "composite" or "range".
-    pub kind: String,
-}
-
-#[tauri::command]
-pub async fn get_sequences(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<SchemaObject>, String> {
-    let client = state.client(&session_id).await?;
-    let rows = client
-        .query(
-            "SELECT c.relname::text AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
-             WHERE c.relkind = 'S' AND n.nspname = $1 ORDER BY c.relname",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(rows.iter().map(|r| SchemaObject { name: r.get("name"), kind: "sequence".into() }).collect())
-}
-
-#[tauri::command]
-pub async fn get_types(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-) -> Result<Vec<SchemaObject>, String> {
-    let client = state.client(&session_id).await?;
-    // Composite types made for tables and views (their row types) are left out
-    let rows = client
-        .query(
-            "SELECT t.typname::text AS name, \
-             CASE t.typtype WHEN 'e' THEN 'enum' WHEN 'd' THEN 'domain' WHEN 'c' THEN 'composite' WHEN 'r' THEN 'range' END AS kind \
-             FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
-             LEFT JOIN pg_class c ON c.oid = t.typrelid \
-             WHERE n.nspname = $1 AND t.typtype IN ('e', 'd', 'c', 'r') \
-               AND (t.typtype <> 'c' OR c.relkind = 'c') \
-             ORDER BY t.typname",
-            &[&schema],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(rows.iter().map(|r| SchemaObject { name: r.get("name"), kind: r.get("kind") }).collect())
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExtensionInfo {
-    pub name: String,
-    pub version: String,
-    pub schema: String,
-    pub comment: Option<String>,
-}
-
-#[tauri::command]
-pub async fn get_extensions(state: State<'_, AppState>, session_id: String) -> Result<Vec<ExtensionInfo>, String> {
-    let client = state.client(&session_id).await?;
+async fn extensions(client: &tokio_postgres::Client) -> Result<Vec<ExtensionInfo>, String> {
     let rows = client
         .query(
             "SELECT e.extname::text AS name, e.extversion AS version, n.nspname::text AS schema, \
@@ -468,35 +254,22 @@ pub async fn get_extensions(state: State<'_, AppState>, session_id: String) -> R
         .collect())
 }
 
-/// What the explorer shows for a sequence or a type: a few facts and its DDL.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ObjectDefinition {
-    pub kind: String,
-    pub facts: Vec<(String, String)>,
-    pub comment: Option<String>,
-    pub ddl: String,
-}
-
-#[tauri::command]
-pub async fn get_object_definition(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-    kind: String,
+async fn object_definition(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    name: &str,
+    kind: &str,
 ) -> Result<ObjectDefinition, String> {
-    let client = state.client(&session_id).await?;
-    let result = match kind.as_str() {
-        "sequence" => sequence_definition(&client, &schema, &name).await,
-        "type" => type_definition(&client, &schema, &name).await,
+    let result = match kind {
+        "sequence" => sequence_definition(client, schema, name).await,
+        "type" => type_definition(client, schema, name).await,
         other => return Err(format!("Unknown object kind \"{other}\"")),
     };
-    result.map_err(|e| super::query::db_message(&e))
+    result.map_err(|e| db_message(&e))
 }
 
 fn qualified(schema: &str, name: &str) -> String {
-    format!("{}.{}", super::tablefilter::quote_ident(schema), super::tablefilter::quote_ident(name))
+    format!("{}.{}", crate::db::sql::filter::quote_ident(schema), crate::db::sql::filter::quote_ident(name))
 }
 
 pub(crate) async fn sequence_definition(client: &tokio_postgres::Client, schema: &str, name: &str) -> Result<ObjectDefinition, tokio_postgres::Error> {
@@ -603,33 +376,6 @@ pub(crate) async fn type_definition(client: &tokio_postgres::Client, schema: &st
     Ok(ObjectDefinition { kind: kind.into(), facts, comment: None, ddl })
 }
 
-/// One object in the explorer.
-#[derive(Serialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ExplorerObject {
-    pub name: String,
-    /// table, view, matview, sequence, function, procedure or type.
-    pub kind: String,
-    /// Arguments of a function, a type's kind (enum, domain...), or "partitioned" and
-    /// "foreign" for those tables.
-    pub detail: String,
-    /// A partitioned table's partitions; empty for everything else.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub partitions: Vec<ExplorerPartition>,
-}
-
-/// One partition, which may itself be partitioned.
-#[derive(Serialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ExplorerPartition {
-    pub schema: String,
-    pub name: String,
-    /// The values it holds, e.g. `FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')`.
-    pub bound: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub partitions: Vec<ExplorerPartition>,
-}
-
 /// Partitions of `parent`, nested, from the flat (parent, partition) list.
 fn partitions_of(parent: (&str, &str), all: &[(String, String, String, String, String)]) -> Vec<ExplorerPartition> {
     all.iter()
@@ -643,30 +389,9 @@ fn partitions_of(parent: (&str, &str), all: &[(String, String, String, String, S
         .collect()
 }
 
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ExplorerSchema {
-    pub name: String,
-    pub objects: Vec<ExplorerObject>,
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ExplorerTree {
-    pub schemas: Vec<ExplorerSchema>,
-    /// The first schema of the search path, opened first in the explorer.
-    pub default_schema: Option<String>,
-}
-
 /// Every schema with its objects, in one round trip, so the explorer can filter and
 /// count without loading folder by folder. Functions and types that belong to an
 /// extension are left out: they're the extension's, not the database's own.
-#[tauri::command]
-pub async fn get_explorer(state: State<'_, AppState>, session_id: String) -> Result<ExplorerTree, String> {
-    let client = state.client(&session_id).await?;
-    explorer(&client).await.map_err(|e| super::query::db_message(&e))
-}
-
 pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<ExplorerTree, tokio_postgres::Error> {
     let schemas = user_schemas(client).await?;
     let objects = client
@@ -734,40 +459,9 @@ pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<Explorer
     Ok(ExplorerTree { schemas: tree, default_schema })
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompletionRelation {
-    pub schema: String,
-    pub name: String,
-    #[serde(rename = "type")]
-    pub relation_type: String,
-    pub columns: Vec<CompletionColumn>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompletionColumn {
-    pub name: String,
-    pub data_type: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompletionSchema {
-    pub current_schema: Option<String>,
-    pub relations: Vec<CompletionRelation>,
-    pub functions: Vec<FunctionInfo>,
-}
-
 /// Everything the SQL editor needs for autocomplete, fetched in a couple of
 /// catalog queries instead of one `get_columns` call per table.
-#[tauri::command]
-pub async fn get_completion_schema(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<CompletionSchema, String> {
-    let client = state.client(&session_id).await?;
-
+async fn completion_schema(client: &tokio_postgres::Client) -> Result<CompletionSchema, String> {
     let current_schema: Option<String> = client
         .query_one("SELECT current_schema()::text AS name", &[])
         .await
@@ -849,7 +543,7 @@ pub async fn get_completion_schema(
     })
 }
 
-/// Tests that need a real server, see `query::server_tests`.
+/// Tests that need a real server, see `console::server_tests`.
 #[cfg(test)]
 mod server_tests {
     use super::*;

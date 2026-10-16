@@ -2,8 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ConnectResponse,
   SshConfig,
-  TableInfo,
-  FunctionInfo,
   FunctionDetail,
   ColumnInfo,
   CompletionSchema,
@@ -18,7 +16,6 @@ import type {
   StructureChange,
   NewColumn,
   ExplainResult,
-  SchemaObject,
   ExtensionInfo,
   ObjectDefinition,
   ServerActivity,
@@ -37,6 +34,11 @@ export const api = {
   /** Connects, optionally through SSH. `trustHostKey` is an SSH host key fingerprint the user confirmed. */
   async connect(connectionUrl: string, ssh?: SshConfig | null, trustHostKey?: string) {
     return invoke<ConnectResponse>("connect", { connectionUrl, ssh: ssh ?? null, trustHostKey: trustHostKey ?? null });
+  },
+
+  /** Opens a SQLite file; `create` makes it when it doesn't exist. */
+  async connectSqlite(path: string, readOnly: boolean, create: boolean) {
+    return invoke<ConnectResponse>("connect_sqlite", { path, readOnly, create });
   },
 
   async disconnect(sessionId: string) {
@@ -62,29 +64,9 @@ export const api = {
  */
 export function createSessionApi(sessionId: string | null) {
   return {
-    async getTables(schema: string) {
-      return invoke<TableInfo[]>("get_tables", { sessionId, schema });
-    },
-
-    async getViews(schema: string) {
-      return invoke<TableInfo[]>("get_views", { sessionId, schema });
-    },
-
     /** Every schema with its objects, for the explorer. */
     async getExplorer() {
       return invoke<ExplorerTree>("get_explorer", { sessionId });
-    },
-
-    async getMaterializedViews(schema: string) {
-      return invoke<TableInfo[]>("get_materialized_views", { sessionId, schema });
-    },
-
-    async getSequences(schema: string) {
-      return invoke<SchemaObject[]>("get_sequences", { sessionId, schema });
-    },
-
-    async getTypes(schema: string) {
-      return invoke<SchemaObject[]>("get_types", { sessionId, schema });
     },
 
     async getExtensions() {
@@ -92,7 +74,7 @@ export function createSessionApi(sessionId: string | null) {
     },
 
     /** Facts and DDL of a sequence or a type. */
-    async getObjectDefinition(schema: string, name: string, kind: "sequence" | "type") {
+    async getObjectDefinition(schema: string, name: string, kind: "sequence" | "type" | "index" | "trigger") {
       return invoke<ObjectDefinition>("get_object_definition", { sessionId, schema, name, kind });
     },
 
@@ -139,10 +121,6 @@ export function createSessionApi(sessionId: string | null) {
       return invoke<boolean>("signal_backend", { sessionId, pid, terminate });
     },
 
-    async getFunctions(schema: string) {
-      return invoke<FunctionInfo[]>("get_functions", { sessionId, schema });
-    },
-
     async getFunctionDetail(schema: string, functionName: string, argumentTypes: string) {
       return invoke<FunctionDetail>("get_function_detail", { sessionId, schema, functionName, argumentTypes });
     },
@@ -181,7 +159,7 @@ export function createSessionApi(sessionId: string | null) {
     },
 
     async previewStructureChange(schema: string, table: string, change: StructureChange) {
-      return invoke<string>("preview_structure_change", { schema, table, change });
+      return invoke<string>("preview_structure_change", { sessionId, schema, table, change });
     },
 
     async applyStructureChange(schema: string, table: string, change: StructureChange) {
@@ -189,7 +167,7 @@ export function createSessionApi(sessionId: string | null) {
     },
 
     async previewCreateTable(schema: string, table: string, columns: NewColumn[]) {
-      return invoke<string>("preview_create_table", { schema, table, columns });
+      return invoke<string>("preview_create_table", { sessionId, schema, table, columns });
     },
 
     async createTable(schema: string, table: string, columns: NewColumn[]) {

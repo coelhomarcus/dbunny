@@ -1,3 +1,8 @@
+import type { Capabilities } from "./capabilities";
+
+/** The database a connection talks to. */
+export type Engine = "postgres" | "sqlite";
+
 export interface ConnectRequest {
   connectionUrl: string;
 }
@@ -10,6 +15,9 @@ export interface ConnectResponse {
   serverVersion: string;
   /** Asked for read-only, or the server is a read replica. */
   readOnly: boolean;
+  engine: Engine;
+  /** What the session supports. */
+  capabilities: Capabilities;
 }
 
 export interface ConnectionInfo {
@@ -18,6 +26,8 @@ export interface ConnectionInfo {
   port: number;
   serverVersion: string;
   readOnly: boolean;
+  engine: Engine;
+  capabilities: Capabilities;
 }
 
 export type SshAuthMethod = "password" | "key" | "agent";

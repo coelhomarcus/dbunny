@@ -1,6 +1,7 @@
 import { createContext } from "react";
 import type { SessionApi } from "../lib/api";
-import type { ConnectionInfo, SavedTag, SshConfig } from "@/types";
+import type { ConnectionInfo, SavedTag } from "@/types";
+import type { ConnectArgs } from "../lib/connectionDraft";
 
 export interface ConnectionContextValue {
   isConnected: boolean;
@@ -11,11 +12,8 @@ export interface ConnectionContextValue {
   /** API bound to this tab's session. */
   api: SessionApi;
   error: string | null;
-  connect: (
-    url: string,
-    saved?: SavedTag,
-    tunnel?: { ssh?: SshConfig | null; trustHostKey?: string },
-  ) => Promise<void>;
+  /** Opens this tab's session. `trustHostKey` is an SSH host key fingerprint the user confirmed. */
+  connect: (args: ConnectArgs, saved?: SavedTag, trustHostKey?: string) => Promise<void>;
   disconnect: () => Promise<void>;
 }
 

@@ -1,0 +1,147 @@
+//! One connection to a SQLite file. rusqlite is blocking, so the connection sits behind
+//! a mutex and every use runs on tokio's blocking threads.
+
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use rusqlite::{Connection, InterruptHandle, OpenFlags, MAIN_DB};
+
+use super::errors::{cannot_open, map_open_error, missing};
+use super::OpenOptions;
+
+pub(crate) struct SqliteConn {
+    /// The connection; None once the session was closed. A task that already took the
+    /// connection out keeps it working until the task ends.
+    slot: Mutex<Option<Arc<Mutex<Connection>>>>,
+    /// Stops the statement running on the connection, from any thread.
+    interrupt: InterruptHandle,
+    /// Set by a cancel, for a script to stop before its next statement: SQLite forgets an
+    /// interrupt that comes when no statement is running. Cleared when a script starts.
+    cancelled: Arc<AtomicBool>,
+    /// The connection can't write: opened read-only, or the file only allows reading.
+    read_only: bool,
+    /// Whether the connection had a transaction open when it was last let go.
+    state: TransactionState,
+}
+
+/// Whether a connection has a transaction open, readable from anywhere without waiting
+/// for the connection. It's updated each time a task is done with the connection (and
+/// by the query editor after each statement), while the connection is still held.
+#[derive(Clone, Default)]
+pub(crate) struct TransactionState(Arc<AtomicBool>);
+
+impl TransactionState {
+    pub fn get(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    /// Notes what `conn`, which the caller holds, says now.
+    pub fn note(&self, conn: &Connection) {
+        self.0.store(!conn.is_autocommit(), Ordering::SeqCst);
+    }
+}
+
+impl SqliteConn {
+    /// Opens `path` without changing the file: no journal mode change, no extensions.
+    /// Blocks; call it off the async threads.
+    pub fn open(path: &Path, opts: &OpenOptions) -> Result<SqliteConn, String> {
+        match std::fs::metadata(path) {
+            Ok(meta) if meta.is_dir() => return Err(cannot_open(path, "it's a folder.")),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if !opts.create {
+                    return Err(missing(path));
+                }
+            }
+            Err(e) => return Err(cannot_open(path, &e.to_string())),
+        }
+
+        let mode = if opts.read_only {
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+        } else if opts.create {
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE
+        } else {
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+        };
+        // The bundled SQLite reads "file:..." names as URIs whatever the flags say, so the driver
+        // hands over absolute paths only (see SqliteDriver::open)
+        let flags = mode | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let fail = |e: rusqlite::Error| map_open_error(&e, path);
+
+        let conn = Connection::open_with_flags(path, flags).map_err(fail)?;
+        conn.busy_timeout(opts.busy_timeout).map_err(fail)?;
+        // For this connection only: edits respect foreign keys like they do in PostgreSQL
+        conn.execute_batch("PRAGMA foreign_keys = ON").map_err(fail)?;
+        // Reading the schema is what tells a database from any other file
+        conn.query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get::<_, i64>(0))
+            .map_err(fail)?;
+
+        let read_only = opts.read_only || conn.is_readonly(MAIN_DB).map_err(fail)?;
+        let interrupt = conn.get_interrupt_handle();
+        let state = TransactionState::default();
+        let cancelled = Arc::default();
+        Ok(SqliteConn { slot: Mutex::new(Some(Arc::new(Mutex::new(conn)))), interrupt, cancelled, read_only, state })
+    }
+
+    /// Runs `f` with the connection, on a blocking thread, once the connection is free.
+    pub async fn run<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String> {
+        let conn = lock(&self.slot).clone().ok_or_else(|| "Session not found".to_string())?;
+        let state = self.state.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut conn = lock(&conn);
+            let result = f(&mut conn);
+            state.note(&conn);
+            result
+        })
+        .await
+        .map_err(|e| format!("The query stopped unexpectedly: {e}"))?
+    }
+
+    /// Stops what the connection is running; it fails with "canceling statement due to user request".
+    pub fn interrupt(&self) {
+        self.interrupt.interrupt();
+    }
+
+    /// Stops what the connection is running and the rest of the script it belongs to.
+    pub fn cancel(&self) {
+        // First, so that a script the interrupt misses sees it before its next statement
+        self.cancelled.store(true, Ordering::SeqCst);
+        self.interrupt();
+    }
+
+    /// For a script about to start: says whether it was cancelled since. A cancel that
+    /// came earlier, with nothing running, is forgotten.
+    pub fn start_script(&self) -> Arc<AtomicBool> {
+        self.cancelled.store(false, Ordering::SeqCst);
+        self.cancelled.clone()
+    }
+
+    /// Whether a transaction is open, as of the last task on the connection. Never waits.
+    pub fn in_transaction(&self) -> bool {
+        self.state.get()
+    }
+
+    /// The same answer as `in_transaction`, to read from inside a task on another connection.
+    pub fn transaction_state(&self) -> TransactionState {
+        self.state.clone()
+    }
+
+    pub fn read_only(&self) -> bool {
+        self.read_only
+    }
+
+    /// Lets go of the connection; it closes once no running task holds it.
+    pub fn close(&self) {
+        let closed = lock(&self.slot).take();
+        drop(closed);
+    }
+}
+
+/// A mutex a panicking task left poisoned still guards a usable value.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}

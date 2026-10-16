@@ -2,12 +2,11 @@
 //! drop and refresh; and creating, renaming and dropping schemas and databases.
 //! Names are always quoted; nothing typed becomes SQL text.
 
-use tauri::State;
 use tokio_postgres::Client;
 
-use super::query::db_message;
-use super::state::AppState;
-use super::tablefilter::quote_ident;
+use super::data::db_message;
+use super::PostgresDriver;
+use crate::db::sql::filter::quote_ident;
 
 /// The SQL keyword for a relation kind as the explorer names it.
 fn keyword(kind: &str) -> Result<&'static str, String> {
@@ -19,7 +18,7 @@ fn keyword(kind: &str) -> Result<&'static str, String> {
     }
 }
 
-fn relation(schema: &str, name: &str) -> String {
+pub(super) fn relation(schema: &str, name: &str) -> String {
     format!("{}.{}", quote_ident(schema), quote_ident(name))
 }
 
@@ -33,16 +32,16 @@ fn check_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn rename_sql(schema: &str, name: &str, kind: &str, new_name: &str) -> Result<String, String> {
+pub(super) fn rename_sql(schema: &str, name: &str, kind: &str, new_name: &str) -> Result<String, String> {
     check_name(new_name)?;
     Ok(format!("ALTER {} {} RENAME TO {}", keyword(kind)?, relation(schema, name), quote_ident(new_name)))
 }
 
-pub(crate) fn drop_sql(schema: &str, name: &str, kind: &str, cascade: bool) -> Result<String, String> {
+pub(super) fn drop_sql(schema: &str, name: &str, kind: &str, cascade: bool) -> Result<String, String> {
     Ok(format!("DROP {} {}{}", keyword(kind)?, relation(schema, name), if cascade { " CASCADE" } else { "" }))
 }
 
-pub(crate) fn truncate_sql(schema: &str, name: &str, restart_identity: bool, cascade: bool) -> String {
+pub(super) fn truncate_sql(schema: &str, name: &str, restart_identity: bool, cascade: bool) -> String {
     format!(
         "TRUNCATE TABLE {}{}{}",
         relation(schema, name),
@@ -51,74 +50,17 @@ pub(crate) fn truncate_sql(schema: &str, name: &str, restart_identity: bool, cas
     )
 }
 
-async fn run(state: &AppState, session_id: &str, sql: &str) -> Result<(), String> {
-    let client = state.client(session_id).await?;
+/// Runs SQL the driver built (one statement or several in one message) on the
+/// session's main connection.
+pub(super) async fn run(driver: &PostgresDriver, sql: &str) -> Result<(), String> {
+    let client = driver.client().await?;
     client.batch_execute(sql).await.map_err(|e| db_message(&e))
-}
-
-#[tauri::command]
-pub async fn rename_relation(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-    kind: String,
-    new_name: String,
-) -> Result<(), String> {
-    run(&state, &session_id, &rename_sql(&schema, &name, &kind, &new_name)?).await
-}
-
-#[tauri::command]
-pub async fn drop_relation(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-    kind: String,
-    cascade: bool,
-) -> Result<(), String> {
-    run(&state, &session_id, &drop_sql(&schema, &name, &kind, cascade)?).await
-}
-
-#[tauri::command]
-pub async fn truncate_table(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-    restart_identity: bool,
-    cascade: bool,
-) -> Result<(), String> {
-    run(&state, &session_id, &truncate_sql(&schema, &name, restart_identity, cascade)).await
-}
-
-#[tauri::command]
-pub async fn refresh_materialized_view(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-) -> Result<(), String> {
-    run(&state, &session_id, &format!("REFRESH MATERIALIZED VIEW {}", relation(&schema, &name))).await
-}
-
-#[tauri::command]
-pub async fn duplicate_table(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    name: String,
-    new_name: String,
-    with_data: bool,
-) -> Result<(), String> {
-    let client = state.client(&session_id).await?;
-    duplicate(&client, &schema, &name, &new_name, with_data).await
 }
 
 /// A copy with the same columns, defaults, constraints, indexes and comments
 /// (`LIKE ... INCLUDING ALL`), optionally with the rows. Runs as one transaction, on a
 /// single message so no other command of the session can slip into it.
-pub(crate) async fn duplicate(client: &Client, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
+pub(super) async fn duplicate(client: &Client, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
     check_name(new_name)?;
     let source = relation(schema, name);
     let target = relation(schema, new_name);
@@ -151,54 +93,28 @@ pub(crate) async fn duplicate(client: &Client, schema: &str, name: &str, new_nam
     Ok(())
 }
 
-pub(crate) fn create_schema_sql(name: &str) -> Result<String, String> {
+pub(super) fn create_schema_sql(name: &str) -> Result<String, String> {
     check_name(name)?;
     Ok(format!("CREATE SCHEMA {}", quote_ident(name)))
 }
 
-pub(crate) fn rename_schema_sql(name: &str, new_name: &str) -> Result<String, String> {
+pub(super) fn rename_schema_sql(name: &str, new_name: &str) -> Result<String, String> {
     check_name(new_name)?;
     Ok(format!("ALTER SCHEMA {} RENAME TO {}", quote_ident(name), quote_ident(new_name)))
 }
 
-pub(crate) fn drop_schema_sql(name: &str, cascade: bool) -> String {
+pub(super) fn drop_schema_sql(name: &str, cascade: bool) -> String {
     format!("DROP SCHEMA {}{}", quote_ident(name), if cascade { " CASCADE" } else { "" })
 }
 
-pub(crate) fn create_database_sql(name: &str) -> Result<String, String> {
+pub(super) fn create_database_sql(name: &str) -> Result<String, String> {
     check_name(name)?;
     Ok(format!("CREATE DATABASE {}", quote_ident(name)))
 }
 
 /// `force` (PostgreSQL 13+) ends the sessions still connected to it instead of failing.
-pub(crate) fn drop_database_sql(name: &str, force: bool) -> String {
+pub(super) fn drop_database_sql(name: &str, force: bool) -> String {
     format!("DROP DATABASE {}{}", quote_ident(name), if force { " WITH (FORCE)" } else { "" })
-}
-
-#[tauri::command]
-pub async fn create_schema(state: State<'_, AppState>, session_id: String, name: String) -> Result<(), String> {
-    run(&state, &session_id, &create_schema_sql(&name)?).await
-}
-
-#[tauri::command]
-pub async fn rename_schema(state: State<'_, AppState>, session_id: String, name: String, new_name: String) -> Result<(), String> {
-    run(&state, &session_id, &rename_schema_sql(&name, &new_name)?).await
-}
-
-#[tauri::command]
-pub async fn drop_schema(state: State<'_, AppState>, session_id: String, name: String, cascade: bool) -> Result<(), String> {
-    run(&state, &session_id, &drop_schema_sql(&name, cascade)).await
-}
-
-/// CREATE and DROP DATABASE refuse to run in a transaction, so they go alone in one message.
-#[tauri::command]
-pub async fn create_database(state: State<'_, AppState>, session_id: String, name: String) -> Result<(), String> {
-    run(&state, &session_id, &create_database_sql(&name)?).await
-}
-
-#[tauri::command]
-pub async fn drop_database(state: State<'_, AppState>, session_id: String, name: String, force: bool) -> Result<(), String> {
-    run(&state, &session_id, &drop_database_sql(&name, force)).await
 }
 
 #[cfg(test)]
@@ -235,7 +151,7 @@ mod tests {
     }
 }
 
-/// Tests that need a real server, see `query::server_tests`.
+/// Tests that need a real server, see `db::postgres::console::server_tests`.
 #[cfg(test)]
 mod server_tests {
     use super::*;

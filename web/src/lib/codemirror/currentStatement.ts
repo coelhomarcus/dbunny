@@ -1,20 +1,23 @@
-import { RangeSetBuilder, StateField, type EditorState } from "@codemirror/state";
+import { Facet, RangeSetBuilder, StateField, type EditorState } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
-import { splitStatements, statementAt, type StatementRange } from "../sqlStatements";
+import { splitStatements, statementAt, type SqlDialectName, type StatementRange } from "../sqlStatements";
 
 const lineMark = Decoration.line({ class: "cm-current-statement" });
+
+/** The SQL dialect of the editor, which decides where a statement ends. */
+export const statementDialect = Facet.define<SqlDialectName, SqlDialectName>({ combine: (values) => values[0] ?? "postgres" });
 
 /** The statement Cmd+Enter would run: the selection's text, or the statement at the cursor. */
 export function currentStatementRange(state: EditorState): StatementRange | null {
   const { from, to, empty } = state.selection.main;
   if (!empty) return { from, to };
-  return statementAt(splitStatements(state.doc.toString()), state.selection.main.head);
+  return statementAt(splitStatements(state.doc.toString(), state.facet(statementDialect)), state.selection.main.head);
 }
 
 function marks(state: EditorState): DecorationSet {
   // With one statement (or a selection) there's nothing to tell apart
   if (!state.selection.main.empty) return Decoration.none;
-  const ranges = splitStatements(state.doc.toString());
+  const ranges = splitStatements(state.doc.toString(), state.facet(statementDialect));
   if (ranges.length < 2) return Decoration.none;
   const range = statementAt(ranges, state.selection.main.head);
   if (!range) return Decoration.none;

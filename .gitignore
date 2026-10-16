@@ -23,8 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 .claude
+.superpowers
 
 # Rust / Tauri
 src-tauri/target/
-
-/plans

@@ -5,6 +5,8 @@
 //! end one inside a string, a quoted identifier, a comment or a dollar-quoted body
 //! (function definitions, `DO` blocks).
 
+use super::Dialect;
+
 #[derive(Debug, PartialEq)]
 pub struct Statement {
     /// The statement text, without surrounding whitespace or the closing semicolon.
@@ -94,6 +96,18 @@ fn skip_dollar_quote(chars: &[char], i: usize) -> Option<usize> {
 }
 
 pub fn split_statements(sql: &str) -> Vec<Statement> {
+    split_statements_in(Dialect::Postgres, sql)
+}
+
+/// `split_statements` with the lexical rules of the given dialect.
+pub fn split_statements_in(dialect: Dialect, sql: &str) -> Vec<Statement> {
+    match dialect {
+        Dialect::Postgres => split_postgres(sql),
+        Dialect::Sqlite => crate::db::sqlite::split::split_sqlite(sql),
+    }
+}
+
+fn split_postgres(sql: &str) -> Vec<Statement> {
     let chars: Vec<char> = sql.chars().collect();
     let mut statements = Vec::new();
     let mut start = 0;
@@ -255,6 +269,13 @@ mod tests {
         // Leading whitespace is not part of the statement
         assert_eq!(statements[1].offset, 12);
         assert_eq!(statements[1].text, "SELECT bad");
+    }
+
+    #[test]
+    fn the_sqlite_dialect_uses_sqlites_own_rules() {
+        let sql = "CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END; SELECT 2";
+        let texts: Vec<String> = split_statements_in(Dialect::Sqlite, sql).into_iter().map(|s| s.text).collect();
+        assert_eq!(texts, ["CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END", "SELECT 2"]);
     }
 
     #[test]

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Plus, Table2, X } from "lucide-react";
 import type { NewColumn } from "@/types";
 import { useApi } from "../../contexts/useConnection";
+import { useSqlDialect } from "../../hooks/useSqlDialect";
 import { cn } from "../../lib/cn";
 import Dialog from "../ui/Dialog";
 import Button from "../ui/Button";
@@ -9,6 +10,8 @@ import Input from "../ui/Input";
 import Checkbox from "../Checkbox";
 
 const COMMON_TYPES = ["bigserial", "bigint", "integer", "text", "varchar(255)", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
+// SQLite stores a few kinds of value; the type decides how a column converts what is written to it
+const SQLITE_TYPES = ["INTEGER", "TEXT", "REAL", "NUMERIC", "BLOB"];
 
 type Row = NewColumn & { key: number };
 
@@ -33,11 +36,21 @@ function Builder({
   onClose: () => void;
 }) {
   const api = useApi();
+  const dialect = useSqlDialect();
+  const suggestedTypes = dialect === "sqlite" ? SQLITE_TYPES : COMMON_TYPES;
   const [table, setTable] = useState("");
-  const [rows, setRows] = useState<Row[]>(() => [
-    row({ name: "id", dataType: "bigserial", nullable: false, primaryKey: true }),
-    row({ name: "created_at", dataType: "timestamptz", nullable: false, default: "now()" }),
-  ]);
+  const [rows, setRows] = useState<Row[]>(() =>
+    dialect === "sqlite"
+      ? [
+          // A lone INTEGER primary key is the row id: SQLite numbers new rows by itself
+          row({ name: "id", dataType: "INTEGER", nullable: false, primaryKey: true }),
+          row({ name: "created_at", dataType: "TEXT", nullable: false, default: "CURRENT_TIMESTAMP" }),
+        ]
+      : [
+          row({ name: "id", dataType: "bigserial", nullable: false, primaryKey: true }),
+          row({ name: "created_at", dataType: "timestamptz", nullable: false, default: "now()" }),
+        ],
+  );
   const [sql, setSql] = useState("");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -150,7 +163,7 @@ function Builder({
             </tbody>
           </table>
           <datalist id="dbunny-new-table-types">
-            {COMMON_TYPES.map((t) => (
+            {suggestedTypes.map((t) => (
               <option key={t} value={t} />
             ))}
           </datalist>

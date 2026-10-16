@@ -7,6 +7,7 @@ import { formatBytes } from "../../lib/format";
 import { cn } from "../../lib/cn";
 import Popover from "../ui/Popover";
 import ContainerDialog, { type ContainerOptions, type ContainerRequest } from "../schema/ContainerDialog";
+import { useCapabilities } from "../../hooks/useCapabilities";
 
 /**
  * The connection name at the top of the sidebar, with the database in use under it; opens
@@ -24,6 +25,7 @@ export default function DatabaseSwitcher() {
   const [error, setError] = useState<string | null>(null);
   const [container, setContainer] = useState<ContainerRequest | null>(null);
   const readOnly = connectionInfo?.readOnly ?? false;
+  const capabilities = useCapabilities();
 
   function loadDatabases() {
     setError(null);
@@ -74,6 +76,21 @@ export default function DatabaseSwitcher() {
   const connectionName = savedConnectionName?.endsWith(` / ${database}`)
     ? savedConnectionName.slice(0, -(database.length + 3))
     : savedConnectionName;
+
+  // An engine with a single database has nothing to switch to: just say which one this is
+  if (!capabilities.databases) {
+    return (
+      <div className="flex min-w-0 flex-1 items-center rounded-md border border-border px-2 py-1">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium leading-tight">{connectionName || "Connection"}</div>
+          <div className="flex min-w-0 items-center gap-1 text-[11px] leading-tight text-muted-foreground">
+            <Database size={10} className="shrink-0" />
+            <span className="truncate">{database}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>

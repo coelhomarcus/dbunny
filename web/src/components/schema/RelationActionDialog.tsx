@@ -5,6 +5,7 @@ import Dialog from "../ui/Dialog";
 import CheckOption from "../ui/CheckOption";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
+import { useCapabilities } from "../../hooks/useCapabilities";
 
 export type RelationAction = "rename" | "duplicate" | "truncate" | "drop";
 
@@ -35,6 +36,7 @@ function ActionForm({
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const capabilities = useCapabilities();
 
   const kind = KIND_LABEL[target.kind];
   const destructive = action === "drop" || action === "truncate";
@@ -92,10 +94,10 @@ function ActionForm({
         {action === "duplicate" && (
           <CheckOption checked={withData} onChange={setWithData} label="Copy the rows too" hint="Otherwise the copy starts empty" />
         )}
-        {action === "truncate" && (
+        {action === "truncate" && capabilities.truncateOptions && (
           <CheckOption checked={restartIdentity} onChange={setRestartIdentity} label="Restart identity" hint="Serial and identity columns start counting from 1 again" />
         )}
-        {destructive && (
+        {destructive && capabilities.cascade && (action === "drop" || capabilities.truncateOptions) && (
           <CheckOption
             checked={cascade}
             onChange={setCascade}

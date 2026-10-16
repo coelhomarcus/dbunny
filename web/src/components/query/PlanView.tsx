@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 import type { ExplainResult } from "@/types";
-import { flattenPlan, formatMs, type PlanRow } from "../../lib/plan";
+import { flattenPlan, formatMs, sqlitePlanRows, type PlanRow } from "../../lib/plan";
 import { cn } from "../../lib/cn";
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
@@ -65,8 +65,52 @@ function Row({ row, executionMs }: { row: PlanRow; executionMs: number | null })
   );
 }
 
-/** EXPLAIN output as a tree, with the slowest nodes highlighted when it was analyzed. */
+/** SQLite's EXPLAIN QUERY PLAN: one line per step, nested like the plan, without costs or times. */
+function SqlitePlanView({ plan }: { plan: Extract<ExplainResult, { format: "sqliteQueryPlan" }>["plan"] }) {
+  const [copied, setCopied] = useState(false);
+  const lines = sqlitePlanRows(plan);
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-2 text-[13px]">
+        <span className="text-muted-foreground">How SQLite will run it. It reports the steps, not costs or times.</span>
+        <Button
+          variant="ghost-muted"
+          size="xs"
+          className="ml-auto"
+          onClick={async () => {
+            await writeClipboardText(JSON.stringify(plan, null, 2));
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }}
+        >
+          {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy JSON"}
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto py-1">
+        {lines.length === 0 ? (
+          <p className="px-4 py-3 text-sm text-muted-foreground">This statement has no plan.</p>
+        ) : (
+          lines.map((line, i) => (
+            <div key={i} className="border-b border-border py-2 pr-4 text-sm hover:bg-accent/50" style={{ paddingLeft: 16 + line.depth * 20 }}>
+              <div className="flex items-baseline gap-1.5">
+                {line.depth > 0 && <span className="select-none text-muted-foreground/50">└</span>}
+                <span className="font-mono text-[13px]">{line.detail}</span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** EXPLAIN output, in the shape the database gave it. */
 export default function PlanView({ explain }: { explain: ExplainResult }) {
+  return explain.format === "sqliteQueryPlan" ? <SqlitePlanView plan={explain.plan} /> : <PostgresPlanView explain={explain} />;
+}
+
+/** PostgreSQL's EXPLAIN as a tree, with the slowest nodes highlighted when it was analyzed. */
+function PostgresPlanView({ explain }: { explain: Extract<ExplainResult, { format: "postgresJson" }> }) {
   const [copied, setCopied] = useState(false);
   const top = explain.plan[0];
   const rows = flattenPlan(top.Plan);

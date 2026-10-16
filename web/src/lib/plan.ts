@@ -1,4 +1,4 @@
-import type { PlanNode } from "@/types";
+import type { PlanNode, SqlitePlanRow } from "@/types";
 
 export interface PlanRow {
   node: PlanNode;
@@ -103,4 +103,33 @@ export function formatMs(ms: number): string {
   if (ms < 1) return `${ms.toFixed(2)} ms`;
   if (ms < 1000) return `${ms.toFixed(ms < 10 ? 1 : 0)} ms`;
   return `${(ms / 1000).toFixed(2)} s`;
+}
+
+/** One line of a SQLite query plan, how deep it sits. */
+export interface SqlitePlanLine {
+  depth: number;
+  detail: string;
+}
+
+/**
+ * SQLite's EXPLAIN QUERY PLAN as a flat list in reading order: each row sits under the row
+ * its `parent` names (the top ones have parent 0).
+ */
+export function sqlitePlanRows(rows: SqlitePlanRow[]): SqlitePlanLine[] {
+  const ids = new Set(rows.map((row) => row.id));
+  const children = new Map<number, SqlitePlanRow[]>();
+  for (const row of rows) {
+    // A row whose parent isn't in the plan is shown at the top
+    const parent = ids.has(row.parent) ? row.parent : 0;
+    children.set(parent, [...(children.get(parent) ?? []), row]);
+  }
+  const lines: SqlitePlanLine[] = [];
+  const visit = (parent: number, depth: number) => {
+    for (const row of children.get(parent) ?? []) {
+      lines.push({ depth, detail: row.detail });
+      visit(row.id, depth + 1);
+    }
+  };
+  visit(0, 0);
+  return lines;
 }

@@ -4,6 +4,7 @@ import Dialog from "../ui/Dialog";
 import CheckOption from "../ui/CheckOption";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
+import { useCapabilities } from "../../hooks/useCapabilities";
 
 export type ContainerKind = "schema" | "database";
 export type ContainerAction = "create" | "rename" | "drop";
@@ -38,6 +39,7 @@ function ContainerForm({
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const capabilities = useCapabilities();
 
   const destructive = action === "drop";
   // Dropping needs the name typed out, so a slip of the mouse can't cause it
@@ -103,7 +105,7 @@ function ContainerForm({
             <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus spellCheck={false} autoComplete="off" className="font-mono" />
           </label>
         )}
-        {destructive && kind === "schema" && (
+        {destructive && kind === "schema" && capabilities.cascade && (
           <CheckOption checked={cascade} onChange={setCascade} label="Cascade" hint="Also drops everything in it; without it, only an empty schema can go" />
         )}
         {destructive && kind === "database" && (

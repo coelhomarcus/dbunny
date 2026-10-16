@@ -1,6 +1,6 @@
 [package]
 name = "dbunny"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 
 [lib]
@@ -24,6 +24,7 @@ tauri-plugin-clipboard-manager = "=2.4.1"
 tauri-plugin-process = "=2.4.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+async-trait = "=0.1.89"
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1", "with-chrono-0_4", "with-uuid-1", "array-impls"] }
 bytes = "1"
 futures-util = "0.3"
@@ -42,6 +43,7 @@ base64 = "0.22"
 pbkdf2 = { version = "0.12", features = ["simple"] }
 sha2 = "0.10"
 hostname = "0.4"
+rusqlite = { version = "=0.40.2", features = ["bundled", "column_decltype"] }
 
 [profile.release]
 strip = true

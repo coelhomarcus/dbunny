@@ -8,14 +8,21 @@ import {
 } from "@codemirror/autocomplete";
 import {
   PostgreSQL,
+  SQLite,
   keywordCompletionSource,
   schemaCompletionSource,
   type SQLNamespace,
 } from "@codemirror/lang-sql";
 import type { Extension } from "@codemirror/state";
 import type { CompletionRelation, CompletionSchema } from "@/types";
+import type { SqlDialectName } from "../sqlStatements";
 
 export const sqlDialect = PostgreSQL;
+
+/** The editor's language for a database's SQL. */
+export function dialectFor(name: SqlDialectName) {
+  return name === "sqlite" ? SQLite : PostgreSQL;
+}
 
 // No completions inside strings, quoted identifiers or comments
 const SKIP_NODES = ["String", "QuotedIdentifier", "LineComment", "BlockComment"];
@@ -274,10 +281,11 @@ const phraseSource = ifNotIn(
  * All autocomplete sources for the SQL editor. `schema` is null until the
  * catalog has loaded, in which case only keywords and document words are offered.
  */
-export function sqlCompletion(schema: CompletionSchema | null): Extension {
+export function sqlCompletion(schema: CompletionSchema | null, name: SqlDialectName = "postgres"): Extension {
+  const dialect = dialectFor(name);
   const known = new Set<string>();
   const sources: CompletionSource[] = [
-    keywordCompletionSource(sqlDialect, true),
+    keywordCompletionSource(dialect, true),
     phraseSource,
   ];
 
@@ -292,7 +300,7 @@ export function sqlCompletion(schema: CompletionSchema | null): Extension {
     sources.push(
       withoutSelfAlias(
         schemaCompletionSource({
-          dialect: sqlDialect,
+          dialect,
           schema: buildNamespace(schema),
           defaultSchema: schema.currentSchema ?? "public",
         }),
@@ -304,5 +312,5 @@ export function sqlCompletion(schema: CompletionSchema | null): Extension {
 
   sources.push(ifNotIn(SKIP_NODES, documentWords(known)));
 
-  return sources.map((autocomplete) => sqlDialect.language.data.of({ autocomplete }));
+  return sources.map((autocomplete) => dialect.language.data.of({ autocomplete }));
 }

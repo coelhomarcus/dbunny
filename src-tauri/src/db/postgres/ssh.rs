@@ -474,10 +474,10 @@ mod server_tests {
         assert_eq!(query_through(&tunnel, &env.db_url).await, 42);
 
         // The app's own path: the URL keeps the database host, hostaddr points at the tunnel
-        let url = crate::commands::connect::through_tunnel(&env.db_url, tunnel.local_port).unwrap();
-        let (config, tls) = crate::commands::connect::connection_config(&url).unwrap();
-        let link = crate::commands::state::Link { config, tls };
-        let client = crate::commands::connect::open_connection(&link, &Default::default()).await.unwrap();
+        let url = crate::db::postgres::connect::through_tunnel(&env.db_url, tunnel.local_port).unwrap();
+        let (config, tls) = crate::db::postgres::connect::connection_config(&url).unwrap();
+        let link = crate::db::postgres::Link { config, tls };
+        let client = crate::db::postgres::connect::open_connection(&link, &Default::default()).await.unwrap();
         let value: i32 = client.query_one("SELECT 7", &[]).await.unwrap().get(0);
         assert_eq!(value, 7);
     }

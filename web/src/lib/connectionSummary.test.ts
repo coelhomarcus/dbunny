@@ -1,11 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SavedConnection } from "@/types";
-import { mask, summaryOf } from "./connectionSummary.ts";
+import { fileNameOf, mask, summaryOf } from "./connectionSummary.ts";
 
 const saved: SavedConnection = {
   id: "c1",
   name: "Prod",
+  engine: "postgres",
+  path: "",
   host: "db.example.com",
   port: 5433,
   database: "app",
@@ -42,4 +44,34 @@ test("the password never appears", () => {
 
 test("mask hides every character", () => {
   assert.equal(mask("db:5432"), "•••••••");
+});
+
+test("the summary of a sqlite connection is its file", () => {
+  const sqlite: SavedConnection = {
+    ...saved,
+    engine: "sqlite",
+    host: "",
+    port: 0,
+    database: "",
+    user: "",
+    password: "",
+    path: "/Users/me/notes.sqlite",
+    readOnly: true,
+  };
+  const summary = summaryOf(sqlite);
+  assert.equal(summary.engineLabel, "SQLite");
+  assert.equal(summary.address, "/Users/me/notes.sqlite");
+  assert.equal(summary.user, "");
+  assert.equal(summary.ssl, false);
+  assert.equal(summary.sshVia, null);
+  assert.equal(summary.readOnly, true);
+  const { address, ...rest } = summary;
+  assert.ok(address);
+  assert.ok(!JSON.stringify(rest).includes("notes.sqlite"));
+});
+
+test("a file name is the last segment of its path", () => {
+  assert.equal(fileNameOf("/Users/me/notes.sqlite"), "notes.sqlite");
+  assert.equal(fileNameOf("C:\\data\\shop.db"), "shop.db");
+  assert.equal(fileNameOf("plain.db"), "plain.db");
 });

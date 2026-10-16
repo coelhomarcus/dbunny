@@ -23,7 +23,7 @@ export default function EnginePicker({ onPick }: { onPick: (engine: EngineCardId
           <EngineLogo engine={card.id} />
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-semibold">{card.label}</div>
-            <div className="text-xs text-muted-foreground">{card.available ? "Server connection" : "Coming soon"}</div>
+            <div className="text-xs text-muted-foreground">{card.available ? card.kind : "Coming soon"}</div>
           </div>
           {card.available && (
             <ChevronRight size={15} className="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />

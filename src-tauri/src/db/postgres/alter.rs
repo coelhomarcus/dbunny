@@ -3,44 +3,14 @@
 //! types, defaults and index expressions are SQL the user writes, so they're checked
 //! to be a single fragment (no `;`) and the generated SQL is shown before it runs.
 
-use serde::Deserialize;
-use tauri::State;
+use async_trait::async_trait;
 
-use super::query::db_message;
-use super::state::AppState;
-use super::tablefilter::quote_ident;
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
-pub enum StructureChange {
-    AddColumn { name: String, data_type: String, nullable: bool, default: Option<String>, comment: Option<String> },
-    RenameColumn { name: String, new_name: String },
-    DropColumn { name: String, cascade: bool },
-    SetNullable { name: String, nullable: bool },
-    SetDefault { name: String, default: Option<String> },
-    SetComment { name: String, comment: Option<String> },
-    /// `columns` are column names or expressions such as `lower(email)`.
-    CreateIndex { name: Option<String>, columns: Vec<String>, unique: bool, method: String, concurrently: bool },
-    DropIndex { name: String, cascade: bool },
-    /// `using` converts the existing values when there's no automatic cast, e.g. `price::numeric`.
-    SetType { name: String, data_type: String, using: Option<String> },
-    AddForeignKey {
-        name: Option<String>,
-        columns: Vec<String>,
-        ref_schema: String,
-        ref_table: String,
-        ref_columns: Vec<String>,
-        on_update: String,
-        on_delete: String,
-    },
-    AddUnique { name: Option<String>, columns: Vec<String> },
-    AddCheck { name: Option<String>, expression: String },
-    DropConstraint { name: String, cascade: bool },
-    SetTriggerEnabled { name: String, enabled: bool },
-    /// `grantee` is a role name, or PUBLIC for everyone.
-    Grant { grantee: String, privileges: Vec<String>, grant_option: bool },
-    Revoke { grantee: String, privileges: Vec<String> },
-}
+use super::data::db_message;
+use super::objects::{drop_sql, duplicate, relation, rename_sql, run, truncate_sql};
+use super::PostgresDriver;
+use crate::db::sql::filter::quote_ident;
+use crate::db::model::{NewColumn, StructureChange};
+use crate::db::SchemaEditor;
 
 /// Table privileges that can be granted (MAINTAIN only exists from PostgreSQL 17 on).
 const TABLE_PRIVILEGES: &[&str] = &["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"];
@@ -132,7 +102,7 @@ fn index_column(column: &str) -> Result<String, String> {
 }
 
 /// The statements a change runs, and whether they must run outside a transaction.
-pub(crate) fn change_sql(schema: &str, table: &str, change: &StructureChange) -> Result<(Vec<String>, bool), String> {
+fn change_sql(schema: &str, table: &str, change: &StructureChange) -> Result<(Vec<String>, bool), String> {
     let target = format!("{}.{}", quote_ident(schema), quote_ident(table));
     let alter = format!("ALTER TABLE {target}");
     let stmts = match change {
@@ -250,26 +220,7 @@ pub(crate) fn change_sql(schema: &str, table: &str, change: &StructureChange) ->
     Ok((stmts, false))
 }
 
-/// The SQL a change would run, for showing before running it.
-#[tauri::command]
-pub fn preview_structure_change(schema: String, table: String, change: StructureChange) -> Result<String, String> {
-    let (stmts, _) = change_sql(&schema, &table, &change)?;
-    Ok(stmts.iter().map(|s| format!("{s};")).collect::<Vec<_>>().join("\n"))
-}
-
-#[tauri::command]
-pub async fn apply_structure_change(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    table: String,
-    change: StructureChange,
-) -> Result<(), String> {
-    let client = state.client(&session_id).await?;
-    apply(&client, &schema, &table, &change).await
-}
-
-pub(crate) async fn apply(client: &tokio_postgres::Client, schema: &str, table: &str, change: &StructureChange) -> Result<(), String> {
+async fn apply(client: &tokio_postgres::Client, schema: &str, table: &str, change: &StructureChange) -> Result<(), String> {
     let (stmts, outside_transaction) = change_sql(schema, table, change)?;
     if outside_transaction {
         // CREATE INDEX CONCURRENTLY refuses to run inside a transaction
@@ -284,18 +235,8 @@ pub(crate) async fn apply(client: &tokio_postgres::Client, schema: &str, table: 
     Ok(())
 }
 
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct NewColumn {
-    pub name: String,
-    pub data_type: String,
-    pub nullable: bool,
-    pub primary_key: bool,
-    pub default: Option<String>,
-}
-
 /// `CREATE TABLE` from the table builder. Several primary key columns make a composite key.
-pub(crate) fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
+fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
     let target = format!("{}.{}", quote_ident(schema), name("table name", table)?);
     if columns.is_empty() {
         return Err("Add at least one column".into());
@@ -325,22 +266,49 @@ pub(crate) fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn])
     Ok(format!("CREATE TABLE {target} (\n    {}\n)", lines.join(",\n    ")))
 }
 
-#[tauri::command]
-pub fn preview_create_table(schema: String, table: String, columns: Vec<NewColumn>) -> Result<String, String> {
-    Ok(create_table_sql(&schema, &table, &columns)? + ";")
-}
+#[async_trait]
+impl SchemaEditor for PostgresDriver {
+    /// The SQL a change would run, for showing before running it.
+    async fn preview_change(&self, schema: &str, table: &str, change: &StructureChange) -> Result<String, String> {
+        let (stmts, _) = change_sql(schema, table, change)?;
+        Ok(stmts.iter().map(|s| format!("{s};")).collect::<Vec<_>>().join("\n"))
+    }
 
-#[tauri::command]
-pub async fn create_table(
-    state: State<'_, AppState>,
-    session_id: String,
-    schema: String,
-    table: String,
-    columns: Vec<NewColumn>,
-) -> Result<(), String> {
-    let sql = create_table_sql(&schema, &table, &columns)?;
-    let client = state.client(&session_id).await?;
-    client.batch_execute(&sql).await.map_err(|e| db_message(&e))
+    async fn apply_change(&self, schema: &str, table: &str, change: StructureChange) -> Result<(), String> {
+        let client = self.client().await?;
+        apply(&client, schema, table, &change).await
+    }
+
+    async fn preview_create_table(&self, schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
+        Ok(create_table_sql(schema, table, columns)? + ";")
+    }
+
+    async fn create_table(&self, schema: &str, table: &str, columns: Vec<NewColumn>) -> Result<(), String> {
+        let sql = create_table_sql(schema, table, &columns)?;
+        let client = self.client().await?;
+        client.batch_execute(&sql).await.map_err(|e| db_message(&e))
+    }
+
+    async fn rename_relation(&self, schema: &str, name: &str, kind: &str, new_name: &str) -> Result<(), String> {
+        run(self, &rename_sql(schema, name, kind, new_name)?).await
+    }
+
+    async fn drop_relation(&self, schema: &str, name: &str, kind: &str, cascade: bool) -> Result<(), String> {
+        run(self, &drop_sql(schema, name, kind, cascade)?).await
+    }
+
+    async fn truncate_table(&self, schema: &str, name: &str, restart_identity: bool, cascade: bool) -> Result<(), String> {
+        run(self, &truncate_sql(schema, name, restart_identity, cascade)).await
+    }
+
+    async fn duplicate_table(&self, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
+        let client = self.client().await?;
+        duplicate(&client, schema, name, new_name, with_data).await
+    }
+
+    async fn refresh_materialized_view(&self, schema: &str, name: &str) -> Result<(), String> {
+        run(self, &format!("REFRESH MATERIALIZED VIEW {}", relation(schema, name))).await
+    }
 }
 
 #[cfg(test)]
@@ -473,7 +441,7 @@ mod tests {
     }
 }
 
-/// Tests that need a real server, see `query::server_tests`.
+/// Tests that need a real server, see `db::postgres::console::server_tests`.
 #[cfg(test)]
 mod server_tests {
     use super::*;

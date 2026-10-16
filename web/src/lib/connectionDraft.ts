@@ -1,4 +1,4 @@
-import type { SavedConnection, SavedConnectionInput, SavedTag, SshConfig } from "@/types";
+import type { Engine, SavedConnection, SavedConnectionInput, SavedTag, SshConfig } from "@/types";
 // With the extension, so Node's test runner can load it too
 import { type ConnectionFields, buildConnectionUrl, isSocketHost, parseConnectionUrl, tlsFieldsOf, tlsSettingsOf } from "./connectionUrl.ts";
 
@@ -11,9 +11,9 @@ export const DEFAULT_COLOR = "#3b82f6";
 // Colour tags to tell environments apart (prod, staging, local...)
 export const COLOR_PRESETS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899"];
 
-export type Engine = "postgres";
+export type { Engine };
 
-export type ConnectionTab = "connection" | "ssl" | "ssh" | "options";
+export type ConnectionTab = "connection" | "ssl" | "ssh" | "options" | "file";
 
 /** The SSH form keeps the port as typed; it becomes a number when used. */
 export type SshFields = Omit<SshConfig, "port"> & { port: string };
@@ -34,6 +34,10 @@ export interface ConnectionDraft {
   fields: ConnectionFields;
   sshEnabled: boolean;
   ssh: SshFields;
+  /** SQLite: the database file. */
+  sqlitePath: string;
+  /** SQLite: the file doesn't exist yet and is made when connecting (a new database). */
+  sqliteCreate: boolean;
 }
 
 /** A field left empty that the action needs, and the tab it's on. */
@@ -64,13 +68,16 @@ export function newDraft(engine: Engine): ConnectionDraft {
     fields: EMPTY_FIELDS,
     sshEnabled: false,
     ssh: EMPTY_SSH,
+    sqlitePath: "",
+    sqliteCreate: false,
   };
 }
 
 export function draftFromSaved(conn: SavedConnection): ConnectionDraft {
   return {
     id: conn.id,
-    engine: "postgres",
+    // Saved objects from before the engine was stored are PostgreSQL ones
+    engine: conn.engine ?? "postgres",
     identity: { name: conn.name, color: conn.color || DEFAULT_COLOR, icon: conn.icon ?? "" },
     fields: {
       host: conn.host,
@@ -85,11 +92,15 @@ export function draftFromSaved(conn: SavedConnection): ConnectionDraft {
     sshEnabled: Boolean(conn.ssh),
     // The default port shows as empty, like when it was typed
     ssh: conn.ssh ? { ...conn.ssh, port: conn.ssh.port && conn.ssh.port !== 22 ? String(conn.ssh.port) : "" } : EMPTY_SSH,
+    sqlitePath: conn.path ?? "",
+    sqliteCreate: false,
   };
 }
 
 /** Fills the server details from a postgres:// URL, keeping who the connection is. Null if it isn't one. */
 export function applyUrl(draft: ConnectionDraft, url: string): ConnectionDraft | null {
+  // A URL only fills the PostgreSQL form; it never changes what kind of connection this is
+  if (draft.engine !== "postgres") return null;
   const text = url.trim();
   if (!/^postgres(ql)?:\/\//i.test(text)) return null;
   const parsed = parseConnectionUrl(text);
@@ -101,12 +112,18 @@ export function tabsFor(engine: Engine): ConnectionTab[] {
   switch (engine) {
     case "postgres":
       return ["connection", "ssl", "ssh", "options"];
+    case "sqlite":
+      return ["file", "options"];
   }
 }
 
 /** The optional tabs that are turned on. SSL and SSH don't apply to a socket. */
 export function configuredTabs(draft: ConnectionDraft): Set<ConnectionTab> {
   const tabs = new Set<ConnectionTab>();
+  if (draft.engine === "sqlite") {
+    if (draft.fields.readOnly) tabs.add("options");
+    return tabs;
+  }
   const socket = isSocketHost(draft.fields.host);
   if (draft.fields.ssl && !socket) tabs.add("ssl");
   if (draft.sshEnabled && !socket) tabs.add("ssh");
@@ -119,6 +136,10 @@ export function missingFields(draft: ConnectionDraft, purpose: "connect" | "save
   const missing: MissingField[] = [];
   const { fields, ssh } = draft;
   if (purpose === "save" && !draft.identity.name.trim()) missing.push({ tab: "identity", fieldId: "conn-name" });
+  if (draft.engine === "sqlite") {
+    if (!draft.sqlitePath.trim()) missing.push({ tab: "file", fieldId: "sqlite-path" });
+    return missing;
+  }
   if (!fields.host.trim()) missing.push({ tab: "connection", fieldId: "conn-host" });
   if (!fields.database.trim()) missing.push({ tab: "connection", fieldId: "conn-db" });
   if (draft.sshEnabled && !isSocketHost(fields.host)) {
@@ -131,7 +152,7 @@ export function missingFields(draft: ConnectionDraft, purpose: "connect" | "save
 
 /** The SSH settings to connect with, or null for a direct connection. */
 export function sshConfigOf(draft: ConnectionDraft): SshConfig | null {
-  if (!draft.sshEnabled || isSocketHost(draft.fields.host)) return null;
+  if (draft.engine !== "postgres" || !draft.sshEnabled || isSocketHost(draft.fields.host)) return null;
   const { ssh } = draft;
   return { ...ssh, host: ssh.host.trim(), user: ssh.user.trim(), port: parseInt(ssh.port || "22", 10) };
 }
@@ -140,11 +161,45 @@ export function connectionUrlOf(draft: ConnectionDraft): string {
   return buildConnectionUrl(draft.fields);
 }
 
+/** What to open a session with: a URL (and SSH) for PostgreSQL, a file for SQLite. */
+export type ConnectArgs =
+  | { kind: "postgres"; url: string; ssh: SshConfig | null }
+  | { kind: "sqlite"; path: string; readOnly: boolean; create: boolean };
+
+export function connectArgsOf(draft: ConnectionDraft): ConnectArgs {
+  if (draft.engine === "sqlite") {
+    return { kind: "sqlite", path: draft.sqlitePath.trim(), readOnly: draft.fields.readOnly, create: draft.sqliteCreate };
+  }
+  return { kind: "postgres", url: connectionUrlOf(draft), ssh: sshConfigOf(draft) };
+}
+
 export function saveInputOf(draft: ConnectionDraft): SavedConnectionInput {
   const { fields, identity } = draft;
+  if (draft.engine === "sqlite") {
+    // The backend asks for the server fields whatever the database is; a file has none
+    return {
+      id: draft.id ?? undefined,
+      name: identity.name.trim(),
+      engine: "sqlite",
+      path: draft.sqlitePath.trim(),
+      host: "",
+      port: 0,
+      database: "",
+      user: "",
+      password: "",
+      ssl: false,
+      readOnly: fields.readOnly,
+      tls: null,
+      ssh: null,
+      color: identity.color,
+      icon: identity.icon,
+    };
+  }
   return {
+    path: "",
     id: draft.id ?? undefined,
     name: identity.name.trim(),
+    engine: draft.engine,
     host: fields.host.trim(),
     port: parseInt(fields.port || "5432", 10),
     database: fields.database.trim(),

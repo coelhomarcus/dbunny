@@ -3,6 +3,7 @@ import Tooltip from "../Tooltip";
 import { showUpdate, useUpdate } from "../../lib/updater";
 import type { ConnectionInfo } from "@/types";
 import { mask } from "../../lib/connectionSummary";
+import { engineLabel, locationOf } from "../../lib/engines";
 
 /** Brings back the update notice after "Later": an update is waiting or installed. */
 function UpdateIndicator() {
@@ -33,8 +34,7 @@ export default function StatusBar({
   onToggleReveal: () => void;
   onDisconnect: () => void;
 }) {
-  const host = connectionInfo ? `${connectionInfo.host}:${connectionInfo.port}` : "";
-  const database = connectionInfo?.database ?? "";
+  const { where: host, database } = connectionInfo ? locationOf(connectionInfo) : { where: "", database: "" };
 
   return (
     <footer className="flex h-7 shrink-0 items-center gap-3 px-1.5 text-[11px] text-muted-foreground select-none">
@@ -56,13 +56,17 @@ export default function StatusBar({
           className="group flex h-5 items-center gap-2 rounded-md px-1.5 font-mono transition-colors cursor-pointer hover:bg-accent hover:text-foreground"
         >
           <span>{revealed ? host : mask(host)}</span>
-          <span>{revealed ? database : mask(database)}</span>
+          {database !== null && <span>{revealed ? database : mask(database)}</span>}
           {revealed ? <EyeOff size={11} className="shrink-0" /> : <Eye size={11} className="shrink-0" />}
         </button>
       </Tooltip>
       <div className="ml-auto flex items-center gap-1">
         <UpdateIndicator />
-        {connectionInfo?.serverVersion && <span className="mr-1.5">PostgreSQL {connectionInfo.serverVersion.split(" ")[0]}</span>}
+        {connectionInfo?.serverVersion && (
+          <span className="mr-1.5">
+            {engineLabel(connectionInfo.engine)} {connectionInfo.serverVersion.split(" ")[0]}
+          </span>
+        )}
         <button
           onClick={onDisconnect}
           className="flex h-5 items-center gap-1 rounded-md px-1.5 hover:bg-destructive/10 hover:text-destructive-foreground transition-colors cursor-pointer"

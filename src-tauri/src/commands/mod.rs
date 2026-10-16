@@ -1,17 +1,17 @@
+pub mod admin;
+pub mod catalog;
 pub mod connect;
-pub mod query;
+pub mod console;
+pub mod data;
 pub mod saved;
-pub mod schema;
+pub mod schema_edit;
 pub mod state;
 pub mod storage;
-pub mod pgtext;
-pub mod sqlsplit;
-pub mod tablefilter;
-pub mod tableedit;
-pub mod structure;
-pub mod editor;
-pub mod ssh;
-pub mod objects;
-pub mod activity;
-pub mod alter;
-pub mod roles;
+pub mod transactions;
+
+use crate::db::{unsupported, Engine};
+
+/// The optional piece a command needs, or "<feature> isn't supported by <engine>".
+pub(crate) fn require<'a, T: ?Sized>(piece: Option<&'a T>, engine: Engine, feature: &str) -> Result<&'a T, String> {
+    piece.ok_or_else(|| unsupported(engine, feature))
+}
