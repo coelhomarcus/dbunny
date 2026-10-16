@@ -268,6 +268,39 @@ fn renamed_create_table(sql: &str, target: &str) -> Option<String> {
     Some(format!("{}{target}{}", &sql[..start], &sql[end..]))
 }
 
+/// A name as SQLite reads it, written plainly or between "", ``, [] or ''.
+fn unquoted(name: &str) -> String {
+    let inner = || &name[1..name.len() - 1];
+    match name.as_bytes() {
+        [b'[', .., b']'] => inner().to_string(),
+        [q @ (b'"' | b'`' | b'\''), .., last] if last == q => {
+            let q = *q as char;
+            inner().replace(&format!("{q}{q}"), &q.to_string())
+        }
+        _ => name.to_string(),
+    }
+}
+
+/// `sql`, a table's `CREATE TABLE`, with its foreign keys to itself (`REFERENCES <table>`,
+/// quoted in any way) pointing at `new_name` instead, so that a copy refers to its own
+/// rows. Foreign keys to other tables, strings and comments stay as they are.
+fn self_references_renamed(sql: &str, table: &str, new_name: &str) -> String {
+    let all = tokens(sql);
+    let mut out = sql.to_string();
+    // From the end, so the earlier byte ranges still hold
+    for at in (1..all.len()).rev() {
+        let (parent, start, end) = all[at];
+        let names_table = match parent {
+            Token::Word(_) | Token::Quoted => unquoted(&sql[start..end]).eq_ignore_ascii_case(table),
+            Token::Symbol(_) => false,
+        };
+        if names_table && is_word(all.get(at - 1), "REFERENCES") {
+            out.replace_range(start..end, &quote(new_name));
+        }
+    }
+    out
+}
+
 /// A copy of a table with the same columns, defaults and constraints (its `CREATE TABLE`
 /// under the new name), optionally with the rows. Indexes and triggers aren't copied.
 fn duplicate(c: &Connection, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), Failure> {
@@ -275,7 +308,7 @@ fn duplicate(c: &Connection, schema: &str, name: &str, new_name: &str, with_data
     let original: Option<Option<String>> = c.query_row(&lookup, [name], |r| r.get(0)).optional()?;
     let original = original.flatten().ok_or_else(|| Failure::message(format!("{schema}.{name} doesn't exist")))?;
     let target = relation(schema, new_name);
-    let create = renamed_create_table(&original, &target)
+    let create = renamed_create_table(&self_references_renamed(&original, name, new_name), &target)
         .ok_or_else(|| Failure::message(format!("{name} can't be duplicated: only plain tables can")))?;
     // Generated columns can't be written; they're computed again in the copy
     let copy = if with_data {
@@ -746,6 +779,81 @@ mod tests {
         }
         assert_eq!(renamed_create_table("CREATE VIRTUAL TABLE t USING fts5(a)", target), None);
         assert_eq!(renamed_create_table("CREATE TABLE", target), None);
+    }
+
+    #[test]
+    fn self_references_name_the_copy_in_every_quoting() {
+        let cases = [
+            ("CREATE TABLE emp (id, boss REFERENCES emp (id))", "CREATE TABLE emp (id, boss REFERENCES \"emp copy\" (id))"),
+            ("CREATE TABLE emp (id, boss REFERENCES EMP(id))", "CREATE TABLE emp (id, boss REFERENCES \"emp copy\"(id))"),
+            ("CREATE TABLE emp (id, boss references \"Emp\")", "CREATE TABLE emp (id, boss references \"emp copy\")"),
+            ("CREATE TABLE emp (id, boss REFERENCES `emp`)", "CREATE TABLE emp (id, boss REFERENCES \"emp copy\")"),
+            ("CREATE TABLE emp (id, boss REFERENCES [emp])", "CREATE TABLE emp (id, boss REFERENCES \"emp copy\")"),
+            ("CREATE TABLE emp (id, boss REFERENCES 'emp')", "CREATE TABLE emp (id, boss REFERENCES \"emp copy\")"),
+            (
+                "CREATE TABLE emp (id, boss, FOREIGN KEY (boss) REFERENCES /* c */ emp -- d\n (id) ON DELETE CASCADE)",
+                "CREATE TABLE emp (id, boss, FOREIGN KEY (boss) REFERENCES /* c */ \"emp copy\" -- d\n (id) ON DELETE CASCADE)",
+            ),
+            // Other tables stay, and so does the word anywhere but before a table's name
+            ("CREATE TABLE emp (id, dept REFERENCES depts (id), boss REFERENCES emp)", "CREATE TABLE emp (id, dept REFERENCES depts (id), boss REFERENCES \"emp copy\")"),
+            ("CREATE TABLE emp (id, boss REFERENCES emp2 (id))", "CREATE TABLE emp (id, boss REFERENCES emp2 (id))"),
+            (
+                "CREATE TABLE emp (n DEFAULT 'REFERENCES emp', \"REFERENCES emp\", references_emp, -- REFERENCES emp\n m /* REFERENCES emp */)",
+                "CREATE TABLE emp (n DEFAULT 'REFERENCES emp', \"REFERENCES emp\", references_emp, -- REFERENCES emp\n m /* REFERENCES emp */)",
+            ),
+        ];
+        for (original, copy) in cases {
+            assert_eq!(self_references_renamed(original, "emp", "emp copy"), copy, "{original}");
+        }
+        // Names with quotes inside
+        let original = "CREATE TABLE \"a \"\"b\"\"\" (id, up REFERENCES \"a \"\"b\"\"\" (id), other REFERENCES [a \"b\"])";
+        let copy = "CREATE TABLE \"a \"\"b\"\"\" (id, up REFERENCES \"it's \"\"new\"\"\" (id), other REFERENCES \"it's \"\"new\"\"\")";
+        assert_eq!(self_references_renamed(original, "A \"B\"", "it's \"new\""), copy);
+    }
+
+    #[tokio::test]
+    async fn a_copy_of_a_self_referencing_table_refers_to_itself() {
+        let f = TempDb::with(
+            "CREATE TABLE depts (id INTEGER PRIMARY KEY);
+             CREATE TABLE emp (id INTEGER PRIMARY KEY, boss INTEGER REFERENCES emp (id) ON DELETE CASCADE,
+                 dept INTEGER REFERENCES depts (id), mentor INTEGER, FOREIGN KEY (mentor) REFERENCES [EMP] (id));
+             INSERT INTO depts VALUES (1);
+             INSERT INTO emp VALUES (1, NULL, 1, NULL), (2, 1, 1, 1), (3, 2, 1, NULL);
+             CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT DEFAULT 'REFERENCES notes (id)', -- REFERENCES notes
+                 \"REFERENCES notes\" TEXT, references_notes INTEGER /* REFERENCES notes */);",
+        );
+        let d = open(&f).await;
+
+        editor(&d).duplicate_table("main", "emp", "emp copy", true).await.unwrap();
+        assert_eq!(
+            stored(&d, "main", "emp copy").await.unwrap(),
+            "CREATE TABLE \"emp copy\" (id INTEGER PRIMARY KEY, boss INTEGER REFERENCES \"emp copy\" (id) ON DELETE CASCADE,\n                 dept INTEGER REFERENCES depts (id), mentor INTEGER, FOREIGN KEY (mentor) REFERENCES \"emp copy\" (id))"
+        );
+        let parents = "SELECT \"from\", \"table\" FROM pragma_foreign_key_list('emp copy') ORDER BY \"from\"";
+        let expected = [("boss", "emp copy"), ("dept", "depts"), ("mentor", "emp copy")];
+        assert_eq!(query(&d, parents).await, expected.map(|(from, to)| vec![json!(from), json!(to)]).to_vec());
+
+        // Deleting from the original cascades there and leaves the copy alone
+        exec(&d, "DELETE FROM emp WHERE id = 1").await.unwrap();
+        assert_eq!(query(&d, "SELECT count(*) FROM emp").await, vec![vec![json!(0)]]);
+        assert_eq!(query(&d, "SELECT id, boss FROM \"emp copy\" ORDER BY id").await, vec![
+            vec![json!(1), JsonValue::Null],
+            vec![json!(2), json!(1)],
+            vec![json!(3), json!(2)],
+        ]);
+        // The copy checks its own rows
+        exec(&d, "INSERT INTO \"emp copy\" VALUES (4, 3, 1, 2)").await.unwrap();
+        let err = exec(&d, "INSERT INTO \"emp copy\" VALUES (5, 99, 1, NULL)").await.unwrap_err();
+        assert_eq!(err, "FOREIGN KEY constraint failed");
+        exec(&d, "DELETE FROM \"emp copy\" WHERE id = 3").await.unwrap();
+        assert_eq!(query(&d, "SELECT id FROM \"emp copy\" ORDER BY id").await, vec![vec![json!(1)], vec![json!(2)]]);
+
+        // The word in a default, a name or a comment isn't a reference
+        editor(&d).duplicate_table("main", "notes", "notes2", false).await.unwrap();
+        assert_eq!(
+            stored(&d, "main", "notes2").await.unwrap(),
+            "CREATE TABLE \"notes2\" (id INTEGER PRIMARY KEY, body TEXT DEFAULT 'REFERENCES notes (id)', -- REFERENCES notes\n                 \"REFERENCES notes\" TEXT, references_notes INTEGER /* REFERENCES notes */)"
+        );
     }
 
     #[tokio::test]
