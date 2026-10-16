@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::pgtext::{is_native, text_to_json};
 use super::sqlsplit::split_statements;
 use super::state::{AppState, Notice};
-use super::tableedit::build_insert;
+use super::tableedit::{build_delete, build_insert, build_update};
 use super::tablefilter::{build_where, quote_ident, TableFilter, TextParam};
 
 #[derive(Serialize)]
@@ -329,18 +329,6 @@ fn columns_from_statement(columns: &[tokio_postgres::Column]) -> Vec<QueryColumn
             data_type: c.type_().name().to_string(),
         })
         .collect()
-}
-
-fn json_value_to_pg_literal(v: &JsonValue) -> String {
-    match v {
-        JsonValue::Null => "NULL".to_string(),
-        JsonValue::Bool(b) => if *b { "TRUE".to_string() } else { "FALSE".to_string() },
-        JsonValue::Number(n) => n.to_string(),
-        JsonValue::String(s) => format!("'{}'", s.replace('\'', "''")),
-        JsonValue::Array(_) | JsonValue::Object(_) => {
-            format!("'{}'", v.to_string().replace('\'', "''"))
-        }
-    }
 }
 
 async fn get_valid_columns(
@@ -696,47 +684,23 @@ pub async fn update_row(
     primary_key: serde_json::Map<String, JsonValue>,
     updates: serde_json::Map<String, JsonValue>,
 ) -> Result<serde_json::Value, String> {
-    if primary_key.is_empty() {
-        return Err("primaryKey is required".into());
-    }
-    if updates.is_empty() {
-        return Err("updates is required".into());
-    }
-
     let client = state.client(&session_id).await?;
+    let affected = update_in(&client, &schema, &table, &primary_key, &updates).await?;
+    Ok(serde_json::json!({ "rowsAffected": affected }))
+}
 
-    let valid_columns = get_valid_columns(&client, &schema, &table).await?;
-
-    for col in updates.keys().chain(primary_key.keys()) {
-        if !valid_columns.contains(col) {
-            return Err(format!("Invalid column: {}", col));
-        }
-    }
-
-    let mut set_clauses = Vec::new();
-    for (col, val) in &updates {
-        set_clauses.push(format!("\"{}\" = {}", col, json_value_to_pg_literal(val)));
-    }
-
-    let mut where_clauses = Vec::new();
-    for (col, val) in &primary_key {
-        where_clauses.push(format!("\"{}\" = {}", col, json_value_to_pg_literal(val)));
-    }
-
-    let sql = format!(
-        "UPDATE \"{}\".\"{}\" SET {} WHERE {}",
-        schema,
-        table,
-        set_clauses.join(", "),
-        where_clauses.join(" AND ")
-    );
-
-    let result = client
-        .execute(&sql as &str, &[])
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(serde_json::json!({ "rowsAffected": result }))
+async fn update_in(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+    primary_key: &serde_json::Map<String, JsonValue>,
+    updates: &serde_json::Map<String, JsonValue>,
+) -> Result<u64, String> {
+    let valid_columns = get_valid_columns(client, schema, table).await?;
+    let relation = format!("{}.{}", quote_ident(schema), quote_ident(table));
+    let (sql, params) = build_update(&relation, primary_key, updates, &valid_columns)?;
+    let refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    client.execute(sql.as_str(), &refs).await.map_err(|e| db_message(&e))
 }
 
 #[tauri::command]
@@ -747,44 +711,22 @@ pub async fn delete_rows(
     table: String,
     primary_keys: Vec<serde_json::Map<String, JsonValue>>,
 ) -> Result<serde_json::Value, String> {
-    if primary_keys.is_empty() {
-        return Err("primaryKeys is required".into());
-    }
-
     let client = state.client(&session_id).await?;
+    let deleted = delete_from(&client, &schema, &table, &primary_keys).await?;
+    Ok(serde_json::json!({ "rowsDeleted": deleted }))
+}
 
-    let valid_columns = get_valid_columns(&client, &schema, &table).await?;
-    if let Some(first) = primary_keys.first() {
-        for col in first.keys() {
-            if !valid_columns.contains(col) {
-                return Err(format!("Invalid column: {}", col));
-            }
-        }
-    }
-
-    let mut total_deleted: u64 = 0;
-    for pk in &primary_keys {
-        let mut where_clauses = Vec::new();
-        for (col, val) in pk {
-            where_clauses.push(format!("\"{}\" = {}", col, json_value_to_pg_literal(val)));
-        }
-
-        let sql = format!(
-            "DELETE FROM \"{}\".\"{}\" WHERE {}",
-            schema,
-            table,
-            where_clauses.join(" AND ")
-        );
-
-        let result = client
-            .execute(&sql as &str, &[])
-            .await
-            .map_err(|e| e.to_string())?;
-
-        total_deleted += result;
-    }
-
-    Ok(serde_json::json!({ "rowsDeleted": total_deleted }))
+async fn delete_from(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+    primary_keys: &[serde_json::Map<String, JsonValue>],
+) -> Result<u64, String> {
+    let valid_columns = get_valid_columns(client, schema, table).await?;
+    let relation = format!("{}.{}", quote_ident(schema), quote_ident(table));
+    let (sql, params) = build_delete(&relation, primary_keys, &valid_columns)?;
+    let refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    client.execute(sql.as_str(), &refs).await.map_err(|e| db_message(&e))
 }
 
 /// Tests that need a real server. Run them with:
@@ -1150,5 +1092,81 @@ mod server_tests {
         let row = run(&client, "SELECT id, tag FROM only_defaults").await;
         assert_eq!(row.rows[0], vec![json!(1), json!("new")]);
     }
-}
 
+    async fn edit_fixture(client: &tokio_postgres::Client) {
+        client
+            .batch_execute(
+                "CREATE TYPE pg_temp.level AS ENUM ('low', 'high'); \
+                 CREATE TEMP TABLE parents (id int PRIMARY KEY); \
+                 CREATE TEMP TABLE items ( \
+                   id int, at timestamptz, name text, level pg_temp.level, data jsonb, \
+                   parent_id int REFERENCES parents (id), \
+                   PRIMARY KEY (id, at)); \
+                 INSERT INTO parents VALUES (1); \
+                 INSERT INTO items VALUES \
+                   (1, '2026-01-01T10:00:00Z', 'one', 'low', NULL, NULL), \
+                   (2, '2026-01-02T10:00:00Z', 'two', 'low', NULL, NULL), \
+                   (3, '2026-01-03T10:00:00Z', 'three', 'low', NULL, NULL);",
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn temp_schema(client: &tokio_postgres::Client) -> String {
+        client
+            .query_one("SELECT nspname::text FROM pg_namespace WHERE oid = pg_my_temp_schema()", &[])
+            .await
+            .unwrap()
+            .get(0)
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn updates_convert_values_server_side_and_find_rows_by_composite_keys() {
+        let client = connect().await;
+        edit_fixture(&client).await;
+        let schema = temp_schema(&client).await;
+
+        let key = values(json!({"id": 2, "at": "2026-01-02T10:00:00Z"}));
+        let updates = values(json!({"name": "it's \\ fine'); DROP TABLE items; --", "level": "high", "data": "{\"a\": [1, 2]}"}));
+        assert_eq!(update_in(&client, &schema, "items", &key, &updates).await.unwrap(), 1);
+
+        let row = client
+            .query_one("SELECT name, level::text, data->'a'->>1 FROM items WHERE id = 2", &[])
+            .await
+            .unwrap();
+        assert_eq!(row.get::<_, String>(0), "it's \\ fine'); DROP TABLE items; --");
+        assert_eq!(row.get::<_, String>(1), "high");
+        assert_eq!(row.get::<_, String>(2), "2");
+
+        // NULL is a real NULL; a key that matches nothing changes nothing
+        assert_eq!(update_in(&client, &schema, "items", &key, &values(json!({"name": null}))).await.unwrap(), 1);
+        let name: Option<String> = client.query_one("SELECT name FROM items WHERE id = 2", &[]).await.unwrap().get(0);
+        assert_eq!(name, None);
+        let missing = values(json!({"id": 2, "at": "2030-01-01T00:00:00Z"}));
+        assert_eq!(update_in(&client, &schema, "items", &missing, &values(json!({"name": "x"}))).await.unwrap(), 0);
+
+        let err = update_in(&client, &schema, "items", &key, &values(json!({"level": "medium"}))).await.unwrap_err();
+        assert!(err.contains("invalid input value for enum"), "{err}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn deletes_are_all_or_nothing() {
+        let client = connect().await;
+        edit_fixture(&client).await;
+        let schema = temp_schema(&client).await;
+        let key = |id: i32, day: i32| values(json!({"id": id, "at": format!("2026-01-0{day}T10:00:00Z")}));
+
+        // Row 3 is referenced, so deleting 1 and 3 together must fail and keep both
+        client.batch_execute("CREATE TEMP TABLE refs (item_id int, item_at timestamptz, FOREIGN KEY (item_id, item_at) REFERENCES items (id, at)); INSERT INTO refs VALUES (3, '2026-01-03T10:00:00Z')").await.unwrap();
+        let err = delete_from(&client, &schema, "items", &[key(1, 1), key(3, 3)]).await.unwrap_err();
+        assert!(err.contains("foreign key"), "{err}");
+        let left: i64 = client.query_one("SELECT count(*) FROM items", &[]).await.unwrap().get(0);
+        assert_eq!(left, 3);
+
+        assert_eq!(delete_from(&client, &schema, "items", &[key(1, 1), key(2, 2)]).await.unwrap(), 2);
+        let left: i64 = client.query_one("SELECT count(*) FROM items", &[]).await.unwrap().get(0);
+        assert_eq!(left, 1);
+    }
+}

@@ -45,6 +45,76 @@ pub fn build_insert(
     ))
 }
 
+fn check_columns<'a>(columns: impl Iterator<Item = &'a String>, valid_columns: &[String]) -> Result<(), String> {
+    for column in columns {
+        if !valid_columns.contains(column) {
+            return Err(format!("Invalid column: {column}"));
+        }
+    }
+    Ok(())
+}
+
+/// `col = $n AND ...` for a primary key, numbering parameters from `first`.
+fn key_condition(key: &serde_json::Map<String, JsonValue>, first: usize, params: &mut Vec<Option<TextParam>>) -> String {
+    key.iter()
+        .enumerate()
+        .map(|(i, (column, value))| {
+            params.push(param_for(value));
+            format!("{} = ${}", quote_ident(column), first + i)
+        })
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+/// `UPDATE` of one row, found by its primary key.
+pub fn build_update(
+    relation: &str,
+    primary_key: &serde_json::Map<String, JsonValue>,
+    updates: &serde_json::Map<String, JsonValue>,
+    valid_columns: &[String],
+) -> Result<(String, Vec<Option<TextParam>>), String> {
+    if primary_key.is_empty() {
+        return Err("primaryKey is required".into());
+    }
+    if updates.is_empty() {
+        return Err("updates is required".into());
+    }
+    check_columns(updates.keys().chain(primary_key.keys()), valid_columns)?;
+
+    let mut params = Vec::new();
+    let set: Vec<String> = updates
+        .iter()
+        .enumerate()
+        .map(|(i, (column, value))| {
+            params.push(param_for(value));
+            format!("{} = ${}", quote_ident(column), i + 1)
+        })
+        .collect();
+    let condition = key_condition(primary_key, params.len() + 1, &mut params);
+    Ok((format!("UPDATE {relation} SET {} WHERE {condition}", set.join(", ")), params))
+}
+
+/// One `DELETE` for every row, so either all of them go or none does.
+pub fn build_delete(
+    relation: &str,
+    primary_keys: &[serde_json::Map<String, JsonValue>],
+    valid_columns: &[String],
+) -> Result<(String, Vec<Option<TextParam>>), String> {
+    if primary_keys.is_empty() {
+        return Err("primaryKeys is required".into());
+    }
+    let mut params = Vec::new();
+    let mut conditions = Vec::new();
+    for key in primary_keys {
+        if key.is_empty() {
+            return Err("primaryKeys can't contain an empty key".into());
+        }
+        check_columns(key.keys(), valid_columns)?;
+        conditions.push(format!("({})", key_condition(key, params.len() + 1, &mut params)));
+    }
+    Ok((format!("DELETE FROM {relation} WHERE {}", conditions.join(" OR ")), params))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,5 +172,37 @@ mod tests {
         assert_eq!(sql, "INSERT INTO t (\"we\"\"ird\") VALUES ($1)");
         assert!(!sql.contains("DROP"));
         assert_eq!(params[0], Some(TextParam("x'); DROP TABLE t; --".into())));
+    }
+
+    #[test]
+    fn updates_set_values_and_find_the_row_by_key_with_parameters() {
+        let (sql, params) = build_update(
+            "\"public\".\"t\"",
+            &values(json!({"id": 7})),
+            &values(json!({"name": "it's", "note": null})),
+            &columns(),
+        )
+        .unwrap();
+        assert_eq!(sql, "UPDATE \"public\".\"t\" SET \"name\" = $1, \"note\" = $2 WHERE \"id\" = $3");
+        assert_eq!(params, vec![Some(TextParam("it's".into())), None, Some(TextParam("7".into()))]);
+    }
+
+    #[test]
+    fn updates_reject_unknown_columns_and_empty_input() {
+        assert!(build_update("t", &values(json!({"id": 1})), &values(json!({"x; DROP": 1})), &columns()).is_err());
+        assert!(build_update("t", &values(json!({"nope": 1})), &values(json!({"name": "a"})), &columns()).is_err());
+        assert!(build_update("t", &values(json!({})), &values(json!({"name": "a"})), &columns()).is_err());
+        assert!(build_update("t", &values(json!({"id": 1})), &values(json!({})), &columns()).is_err());
+    }
+
+    #[test]
+    fn deletes_combine_every_key_in_one_statement() {
+        let keys = vec![values(json!({"id": 1, "name": "a"})), values(json!({"id": 2, "name": "b"}))];
+        let (sql, params) = build_delete("t", &keys, &columns()).unwrap();
+        assert_eq!(sql, "DELETE FROM t WHERE (\"id\" = $1 AND \"name\" = $2) OR (\"id\" = $3 AND \"name\" = $4)");
+        assert_eq!(params.len(), 4);
+        assert_eq!(params[2], Some(TextParam("2".into())));
+        assert!(build_delete("t", &[values(json!({}))], &columns()).is_err());
+        assert!(build_delete("t", &[values(json!({"we\"ird": 1}))], &columns()).is_ok());
     }
 }
