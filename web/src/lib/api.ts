@@ -165,6 +165,26 @@ export function createSessionApi(sessionId: string | null) {
     },
 
     /** The SQL a structure change would run. */
+    async createSchema(name: string) {
+      return invoke<void>("create_schema", { sessionId, name });
+    },
+
+    async renameSchema(name: string, newName: string) {
+      return invoke<void>("rename_schema", { sessionId, name, newName });
+    },
+
+    async dropSchema(name: string, cascade: boolean) {
+      return invoke<void>("drop_schema", { sessionId, name, cascade });
+    },
+
+    async createDatabase(name: string) {
+      return invoke<void>("create_database", { sessionId, name });
+    },
+
+    async dropDatabase(name: string, force: boolean) {
+      return invoke<void>("drop_database", { sessionId, name, force });
+    },
+
     async previewStructureChange(schema: string, table: string, change: StructureChange) {
       return invoke<string>("preview_structure_change", { schema, table, change });
     },

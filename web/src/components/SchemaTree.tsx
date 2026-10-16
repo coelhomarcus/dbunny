@@ -5,6 +5,7 @@ import type { RelationKind } from "../lib/api";
 import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
 import RelationActionDialog, { type RelationAction, type RelationTarget } from "./schema/RelationActionDialog";
 import CreateTableDialog from "./schema/CreateTableDialog";
+import ContainerDialog, { type ContainerOptions, type ContainerRequest } from "./schema/ContainerDialog";
 import { quoteIdent } from "../lib/copyRows";
 import { shortType } from "../lib/columnMeta";
 import { cn } from "../lib/cn";
@@ -38,6 +39,7 @@ import {
   KeyRound,
   Link2,
   Database,
+  FolderPlus,
   type LucideProps,
 } from "lucide-react";
 
@@ -136,6 +138,7 @@ function GroupRow({
   label,
   count,
   action,
+  onContextMenu,
 }: {
   depth: number;
   open: boolean;
@@ -144,9 +147,10 @@ function GroupRow({
   label: string;
   count?: number;
   action?: ReactNode;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
-    <div className="group relative">
+    <div className="group relative" onContextMenu={onContextMenu}>
       <button
         onClick={onToggle}
         aria-expanded={open}
@@ -194,6 +198,9 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
   const [columns, setColumns] = useState<Record<string, ColumnInfo[] | "loading" | "error">>({});
   const [extensions, setExtensions] = useState<ExtensionInfo[] | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; target: RelationTarget } | null>(null);
+  // Right click on a schema, or the header's "+" (schema null)
+  const [schemaMenu, setSchemaMenu] = useState<{ x: number; y: number; schema: string | null } | null>(null);
+  const [container, setContainer] = useState<ContainerRequest | null>(null);
   const [action, setAction] = useState<{ action: RelationAction; target: RelationTarget } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // Schema the table builder is open for
@@ -321,6 +328,48 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
       if (isCurrent(target)) navigate("/db/query");
     }
     load(false);
+  }
+
+  /** Whether the open page belongs to the schema. */
+  function inSchema(schema: string) {
+    return decodeURIComponent(location.pathname).startsWith(`/db/${schema}/`);
+  }
+
+  async function runContainer(request: ContainerRequest, options: ContainerOptions) {
+    const { action: kind, name } = request;
+    if (kind === "create") {
+      await api.createSchema(options.name);
+      setExpanded((prev) => new Set([...prev, `s:${options.name}`]));
+    } else if (kind === "rename") {
+      await api.renameSchema(name, options.name);
+      setPins((prev) => prev.map((p) => (p.schema === name ? { ...p, schema: options.name } : p)));
+      if (inSchema(name)) navigate("/db/query");
+    } else {
+      await api.dropSchema(name, options.cascade);
+      setPins((prev) => prev.filter((p) => p.schema !== name));
+      if (inSchema(name)) navigate("/db/query");
+    }
+    load(false);
+  }
+
+  function schemaMenuItems(schema: string | null): ContextMenuItem[] {
+    // The header's "+": what can be created
+    if (schema === null) {
+      return [
+        { label: "New table…", icon: <Table2 />, onSelect: () => setNewTableIn(defaultSchema) },
+        { label: "New schema…", icon: <FolderPlus />, onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }) },
+      ];
+    }
+    const items: ContextMenuItem[] = [{ label: "Copy name", icon: <Copy />, onSelect: () => navigator.clipboard.writeText(quoteIdent(schema)) }];
+    if (readOnly) return items;
+    return [
+      { label: "New table here…", icon: <Table2 />, onSelect: () => setNewTableIn(schema) },
+      { label: "New schema…", icon: <FolderPlus />, onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }) },
+      ...items,
+      "separator",
+      { label: "Rename…", icon: <PenLine />, onSelect: () => setContainer({ kind: "schema", action: "rename", name: schema }) },
+      { label: "Drop…", icon: <Trash2 />, destructive: true, onSelect: () => setContainer({ kind: "schema", action: "drop", name: schema }) },
+    ];
   }
 
   function menuItems(target: RelationTarget): ContextMenuItem[] {
@@ -522,8 +571,17 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
         )}
         <div className="ml-auto flex items-center">
           {!readOnly && tree && (
-            <Tooltip label="New table" side="bottom">
-              <Button variant="ghost-muted" size="icon-xs" aria-label="New table" onClick={() => setNewTableIn(defaultSchema)}>
+            <Tooltip label="New table or schema" side="bottom">
+              <Button
+                variant="ghost-muted"
+                size="icon-xs"
+                aria-label="New table or schema"
+                aria-expanded={schemaMenu?.schema === null}
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setSchemaMenu({ x: r.left, y: r.bottom + 4, schema: null });
+                }}
+              >
                 <Plus />
               </Button>
             </Tooltip>
@@ -647,6 +705,10 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                         label={schema.name}
                         count={count}
                         action={newTableButton(schema.name)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setSchemaMenu({ x: e.clientX, y: e.clientY, schema: schema.name });
+                        }}
                       />
                       {isOpen(key) &&
                         (schema.objects.length === 0 ? (
@@ -701,6 +763,8 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
         onClose={() => setNewTableIn(null)}
       />
       <ContextMenu position={menu} items={menu ? menuItems(menu.target) : []} onClose={() => setMenu(null)} />
+      <ContextMenu position={schemaMenu} items={schemaMenu ? schemaMenuItems(schemaMenu.schema) : []} onClose={() => setSchemaMenu(null)} />
+      <ContainerDialog request={container} onRun={(options) => runContainer(container!, options)} onClose={() => setContainer(null)} />
       <RelationActionDialog
         action={action?.action ?? null}
         target={action?.target ?? null}
