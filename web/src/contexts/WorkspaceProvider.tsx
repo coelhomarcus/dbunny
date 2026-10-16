@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { api } from "../lib/api";
+import { GitCommitVertical } from "lucide-react";
+import { api, createSessionApi } from "../lib/api";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { disposeTabState } from "../lib/tabState";
 import { WorkspaceContext, type TabSessionInfo, type WorkspaceTab } from "./workspace";
 import type { InitialSession } from "@/types";
@@ -40,7 +42,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setActiveTabId(tab.id);
   }, []);
 
-  const closeTab = useCallback(
+  const closeNow = useCallback(
     (id: string) => {
       const index = tabs.findIndex((t) => t.id === id);
       if (index < 0) return;
@@ -56,6 +58,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
     },
     [tabs, activeTabId],
+  );
+
+  // A tab whose open transaction would be rolled back by closing it, waiting for a yes
+  const [confirmClose, setConfirmClose] = useState<string | null>(null);
+
+  /** Closes a tab, asking first when closing would roll back a transaction opened in it. */
+  const closeTab = useCallback(
+    async (id: string) => {
+      const sessionId = tabs.find((t) => t.id === id)?.sessionId;
+      const inTransaction = sessionId ? await createSessionApi(sessionId).transactionOpen().catch(() => false) : false;
+      if (inTransaction) setConfirmClose(id);
+      else closeNow(id);
+    },
+    [tabs, closeNow],
   );
 
   const cycleTab = useCallback(
@@ -86,5 +102,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [tabs, activeTabId, openTab, closeTab, cycleTab, updateTab, sidebarOpen, setSidebarOpen, toggleSidebar],
   );
 
-  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
+  return (
+    <WorkspaceContext.Provider value={value}>
+      {children}
+      <ConfirmDialog
+        open={confirmClose !== null}
+        onClose={() => setConfirmClose(null)}
+        onConfirm={() => {
+          if (confirmClose) closeNow(confirmClose);
+          setConfirmClose(null);
+        }}
+        icon={<GitCommitVertical />}
+        tone="destructive"
+        title="Close with a transaction open?"
+        description="Its changes haven't been committed, so closing the tab rolls them back."
+        confirmLabel="Roll back and close"
+      />
+    </WorkspaceContext.Provider>
+  );
 }

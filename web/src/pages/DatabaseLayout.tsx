@@ -6,15 +6,17 @@ import SchemaTree from "../components/SchemaTree";
 import StatusBar from "../components/layout/StatusBar";
 import DatabaseSwitcher from "../components/layout/DatabaseSwitcher";
 import { cn } from "../lib/cn";
-import { Terminal, Activity, Users } from "lucide-react";
+import { Terminal, Activity, Users, GitCommitVertical } from "lucide-react";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { RightPanelContext } from "../contexts/rightPanel";
 
 export default function DatabaseLayout() {
-  const { isConnected, connectionInfo, disconnect } = useConnection();
+  const { isConnected, connectionInfo, disconnect, api } = useConnection();
   const navigate = useNavigate();
   const [revealed, setRevealed] = useState(false);
   const { sidebarOpen } = useWorkspace();
   const [rightPanel, setRightPanel] = useState<HTMLElement | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   useEffect(() => {
     if (!isConnected) {
@@ -24,9 +26,15 @@ export default function DatabaseLayout() {
 
   if (!isConnected) return null;
 
-  async function handleDisconnect() {
+  async function disconnectNow() {
     await disconnect();
     navigate("/");
+  }
+
+  // Disconnecting drops an open transaction, so that asks first
+  async function handleDisconnect() {
+    if (await api.transactionOpen().catch(() => false)) setConfirmDisconnect(true);
+    else await disconnectNow();
   }
 
   const navItemClass = ({ isActive }: { isActive: boolean }) =>
@@ -94,6 +102,19 @@ export default function DatabaseLayout() {
         revealed={revealed}
         onToggleReveal={() => setRevealed((v) => !v)}
         onDisconnect={handleDisconnect}
+      />
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => {
+          setConfirmDisconnect(false);
+          disconnectNow();
+        }}
+        icon={<GitCommitVertical />}
+        tone="destructive"
+        title="Disconnect with a transaction open?"
+        description="Its changes haven't been committed, so disconnecting rolls them back."
+        confirmLabel="Roll back and disconnect"
       />
     </div>
   );
