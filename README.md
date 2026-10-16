@@ -12,7 +12,10 @@
 </p>
 
 <p align="center">
-  <img src="https://marcuscoelho.com/assets/projects/dbunny/01.webp" width="720" alt="DBunny screenshot" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/7e2436b2-2b8c-4cc9-a2ac-d9e1660150d6" />
+    <img src="https://github.com/user-attachments/assets/a237fc1c-56da-464e-921f-b4516e98f26d" width="720" alt="DBunny showing a table's rows, with the explorer on the left" />
+  </picture>
 </p>
 
 ## About
