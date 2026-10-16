@@ -6,11 +6,11 @@ import { useTab, useWorkspace } from "../../contexts/workspace";
 import { formatBytes } from "../../lib/format";
 import { cn } from "../../lib/cn";
 import Popover from "../ui/Popover";
-import { HeaderTitle } from "./PageHeader";
 
 /**
- * The connection name at the top of the sidebar; opens the server's databases. Picking
- * another one opens it in a new tab with the same login, SSL, SSH and read-only settings.
+ * The connection name at the top of the sidebar, with the database in use under it; opens
+ * the other databases on the same server. Picking one opens it in a new tab with the same
+ * login, SSL, SSH and read-only settings.
  */
 export default function DatabaseSwitcher() {
   const { api, connectionInfo, savedConnectionName } = useConnection();
@@ -45,6 +45,12 @@ export default function DatabaseSwitcher() {
     }
   }
 
+  const database = connectionInfo?.database ?? "";
+  // A tab opened from here is named "Connection / database": the database has its own line
+  const connectionName = savedConnectionName?.endsWith(` / ${database}`)
+    ? savedConnectionName.slice(0, -(database.length + 3))
+    : savedConnectionName;
+
   return (
     <>
       <button
@@ -53,15 +59,19 @@ export default function DatabaseSwitcher() {
         onClick={toggle}
         aria-expanded={open}
         aria-label="Switch database"
-        className="group -ml-1.5 flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-0.5 text-left cursor-pointer hover:bg-accent"
+        className="group flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-left cursor-pointer transition-colors hover:bg-accent aria-expanded:bg-accent"
       >
-        <HeaderTitle label="Connection" className="min-w-0 flex-1">
-          {savedConnectionName || connectionInfo?.database || "Connection"}
-        </HeaderTitle>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium leading-tight">{connectionName || "Connection"}</div>
+          <div className="flex min-w-0 items-center gap-1 text-[11px] leading-tight text-muted-foreground">
+            <Database size={10} className="shrink-0" />
+            <span className="truncate">{database}</span>
+          </div>
+        </div>
         <ChevronsUpDown size={12} className="shrink-0 text-muted-foreground/70 group-hover:text-muted-foreground" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} className="w-64 p-1">
-        <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Databases</div>
+        <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Databases on this server</div>
         {databases === null && !error ? (
           <div className="flex justify-center py-3">
             <Loader size={14} className="animate-spin text-muted-foreground" />
@@ -94,7 +104,7 @@ export default function DatabaseSwitcher() {
           </div>
         )}
         {error && <p className="px-2 py-1.5 text-xs text-destructive-foreground">{error}</p>}
-        <p className="border-t border-border px-2 pb-1 pt-1.5 text-[11px] text-muted-foreground">Opens in a new tab.</p>
+        <p className="border-t border-border px-2 pb-1 pt-1.5 text-[11px] text-muted-foreground">Opens in a new tab, with the same login.</p>
       </Popover>
     </>
   );

@@ -63,7 +63,7 @@ export default function DatabaseLayout() {
               sidebarExpanded ? "opacity-100 delay-75" : "opacity-0 pointer-events-none",
             )}
           >
-            <div className="h-10 shrink-0 flex items-center pl-3 pr-2">
+            <div className="shrink-0 flex items-center px-2 pt-2 pb-1">
               <DatabaseSwitcher />
             </div>
 
