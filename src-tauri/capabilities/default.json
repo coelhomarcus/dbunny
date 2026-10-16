@@ -18,6 +18,9 @@
     "fs:allow-read-text-file",
     "fs:allow-exists",
     "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text"
+    "clipboard-manager:allow-write-text",
+    "updater:default",
+    "process:allow-restart",
+    "opener:allow-open-url"
   ]
 }

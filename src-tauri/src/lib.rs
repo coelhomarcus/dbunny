@@ -18,9 +18,14 @@ const CLOSE_TAB_ID: &str = "close-tab";
 const CLOSE_WINDOW_ID: &str = "close-window";
 #[cfg(target_os = "macos")]
 const CLOSE_TAB_EVENT: &str = "menu:close-tab";
+#[cfg(target_os = "macos")]
+const SETTINGS_ID: &str = "settings";
+#[cfg(target_os = "macos")]
+const CHECK_UPDATES_ID: &str = "check-updates";
 
 /// Tauri's default macOS menu, except Cmd+W closes the active connection tab
-/// (handled by the frontend) and Close Window moves to Cmd+Shift+W.
+/// (handled by the frontend) and Close Window moves to Cmd+Shift+W. The app menu also
+/// opens Settings (Cmd+,) and checks for updates; the frontend gets `menu:<id>`.
 #[cfg(target_os = "macos")]
 fn build_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
     use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
@@ -32,8 +37,13 @@ fn build_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tau
         ..Default::default()
     };
 
+    let settings = MenuItemBuilder::with_id(SETTINGS_ID, "Settings…").accelerator("CmdOrCtrl+,").build(app)?;
+    let check_updates = MenuItemBuilder::with_id(CHECK_UPDATES_ID, "Check for Updates…").build(app)?;
     let app_menu = SubmenuBuilder::new(app, &pkg_info.name)
         .about(Some(about))
+        .item(&check_updates)
+        .separator()
+        .item(&settings)
         .separator()
         .services()
         .separator()
@@ -92,11 +102,14 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.close();
                 }
+            } else if event.id() == SETTINGS_ID || event.id() == CHECK_UPDATES_ID {
+                let _ = app.emit(&format!("menu:{}", event.id().as_ref()), ());
             }
         });
 
     builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -110,6 +123,10 @@ pub fn run() {
                 }),
                 Err(_) => legacy,
             };
+            // Updates come from the GitHub releases (see plugins.updater in tauri.conf.json)
+            #[cfg(desktop)]
+            app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+
             let state = AppState::new(key);
             if let Ok(path) = storage::get_storage_path(app.handle()) {
                 let mut connections = storage::load_connections_from_path(&path);

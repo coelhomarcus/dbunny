@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Database, Minus, PanelLeft, Plus, X } from "lucide-react";
+import { Database, Minus, PanelLeft, Plus, X, Settings } from "lucide-react";
 import { isMac } from "../lib/platform";
 import { cn } from "../lib/cn";
 import { useWorkspace, type WorkspaceTab } from "../contexts/workspace";
+import { useSettingsDialog } from "../contexts/settingsDialog";
 import ConnectionGlyph from "./ConnectionGlyph";
 import Button from "./ui/Button";
 import Tooltip from "./Tooltip";
@@ -152,6 +153,7 @@ function WindowTab({
 export default function TitleBar() {
   const { tabs, activeTabId, activateTab, closeTab, openTab, cycleTab, sidebarOpen, toggleSidebar } = useWorkspace();
   const { maximized, fullscreen } = useWindowState();
+  const { openSettings } = useSettingsDialog();
   const trafficLights = isMac && !fullscreen;
 
   // Cmd/Ctrl+T new tab, Ctrl+W close tab, Ctrl+Tab / Ctrl+Shift+Tab cycle, Cmd/Ctrl+1..9 jump
@@ -197,9 +199,16 @@ export default function TitleBar() {
         if (isDragArea(e.target)) appWindow.toggleMaximize();
       }}
     >
-      {/* Room for the traffic lights on macOS, then the sidebar toggle; the tabs follow,
-          and each tab's container below holds its own sidebar */}
-      <div className={cn("flex shrink-0 items-center", trafficLights ? "w-[7.5rem] justify-end pr-1" : "w-12 justify-center")}>
+      {/* Room for the traffic lights on macOS, then Settings and the sidebar toggle; the
+          tabs follow, and each tab's container below holds its own sidebar */}
+      {/* With the traffic lights: as far from them as the icons are apart, and 1px lower so
+          their centres line up (the lights sit a little below the bar's middle) */}
+      <div className={cn("flex shrink-0 items-center gap-0.5", trafficLights ? "w-[9rem] justify-end pt-0.5" : "pl-2")}>
+        <Tooltip label={`Settings (${isMac ? "⌘" : "Ctrl+"},)`} side="bottom">
+          <Button variant="ghost-muted" size="icon-sm" onClick={() => openSettings()} aria-label="Settings">
+            <Settings />
+          </Button>
+        </Tooltip>
         <Tooltip label={sidebarOpen ? "Hide sidebar" : "Show sidebar"} side="bottom">
           <Button variant="ghost-muted" size="icon-sm" onClick={toggleSidebar} aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}>
             <PanelLeft />
@@ -207,7 +216,9 @@ export default function TitleBar() {
         </Tooltip>
       </div>
 
-      <div role="tablist" className="tab-strip window-tabs flex min-w-0 flex-1 items-end gap-1 pl-5 pr-2">
+      {/* 9px: from the sidebar icon to the first tab, the same gap as between the two icons
+          (16px, counting each button's own padding) */}
+      <div role="tablist" className="tab-strip window-tabs flex min-w-0 flex-1 items-end gap-1 pl-[9px] pr-2">
         {tabs.map((tab) => (
           <WindowTab
             key={tab.id}

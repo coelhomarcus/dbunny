@@ -25,6 +25,7 @@ import { addToHistory, clearHistory, errorSummary, historyKey, loadHistory, remo
 import Button from "../components/ui/Button";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { isMac } from "../lib/platform";
+import { getSettings } from "../lib/settings";
 
 const MOD = isMac ? "⌘" : "Ctrl+";
 const SHIFT = isMac ? "⇧" : "Shift+";
@@ -77,7 +78,7 @@ function createQueryEditorState(): QueryEditorState {
     nextId: 2,
     tabMetas: [{ id: 1, label: "Query 1" }],
     activeId: 1,
-    safeMode: true,
+    safeMode: getSettings().safeModeByDefault,
     payloads: new Map([[1, { sql: "SELECT 1;", result: null, error: null }]]),
     completion: null,
   };

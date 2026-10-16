@@ -1,9 +1,25 @@
 import { Eye, EyeOff, Lock, LogOut } from "lucide-react";
 import Tooltip from "../Tooltip";
+import { showUpdate, useUpdate } from "../../lib/updater";
 import type { ConnectionInfo } from "@/types";
-import ThemeToggle from "../ui/ThemeToggle";
 
 const mask = (value: string) => value.replace(/./g, "•");
+
+/** Brings back the update notice after "Later": an update is waiting or installed. */
+function UpdateIndicator() {
+  const { state, dismissed } = useUpdate();
+  if (!dismissed || (state.status !== "available" && state.status !== "ready")) return null;
+  return (
+    <button
+      type="button"
+      onClick={showUpdate}
+      className="mr-1 flex h-5 items-center gap-1.5 rounded-md px-1.5 font-medium text-primary transition-colors cursor-pointer hover:bg-primary/10"
+    >
+      <span className="size-1.5 rounded-full bg-primary" />
+      {state.status === "ready" ? "Restart to update" : `Update to ${state.version}`}
+    </button>
+  );
+}
 
 /** Bottom bar of a connected tab: who we're talking to, plus global actions. */
 export default function StatusBar({
@@ -46,8 +62,8 @@ export default function StatusBar({
         </button>
       </Tooltip>
       <div className="ml-auto flex items-center gap-1">
+        <UpdateIndicator />
         {connectionInfo?.serverVersion && <span className="mr-1.5">PostgreSQL {connectionInfo.serverVersion.split(" ")[0]}</span>}
-        <ThemeToggle side="top" size="icon-xs" />
         <button
           onClick={onDisconnect}
           className="flex h-5 items-center gap-1 rounded-md px-1.5 hover:bg-destructive/10 hover:text-destructive-foreground transition-colors cursor-pointer"
@@ -69,8 +85,8 @@ export function IdleStatusBar({ version }: { version: string | null }) {
         Not connected
       </span>
       <div className="ml-auto flex items-center gap-1">
-        {version && <span className="mr-1.5">DBunny {version}</span>}
-        <ThemeToggle side="top" size="icon-xs" />
+        <UpdateIndicator />
+        {version && <span className="pr-1">DBunny {version}</span>}
       </div>
     </footer>
   );
