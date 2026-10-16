@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::{Connection, InterruptHandle, OpenFlags, MAIN_DB};
 
-use super::errors::{cannot_open, map_error, missing};
+use super::errors::{cannot_open, map_open_error, missing};
 use super::OpenOptions;
 
 pub(crate) struct SqliteConn {
@@ -44,7 +44,7 @@ impl SqliteConn {
         // The bundled SQLite reads "file:..." names as URIs whatever the flags say, so the driver
         // hands over absolute paths only (see SqliteDriver::open)
         let flags = mode | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        let fail = |e: rusqlite::Error| map_error(&e, path, false);
+        let fail = |e: rusqlite::Error| map_open_error(&e, path);
 
         let conn = Connection::open_with_flags(path, flags).map_err(fail)?;
         conn.busy_timeout(opts.busy_timeout).map_err(fail)?;
