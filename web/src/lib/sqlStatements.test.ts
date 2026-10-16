@@ -52,3 +52,26 @@ test("a sqlite script may end without a semicolon, and empty statements are drop
   assert.deepEqual(texts("select 1;; ; select 2", "sqlite"), ["select 1", "select 2"]);
   assert.deepEqual(texts("-- nothing;\n", "sqlite"), []);
 });
+
+test("a trigger ends at the END that follows a semicolon, like sqlite itself decides", () => {
+  // begin and end are valid column names: they don't open or close the trigger
+  const withBeginColumn =
+    "CREATE TRIGGER t AFTER UPDATE ON ev BEGIN UPDATE ev SET begin = new.x WHERE id = new.id; END; DROP TABLE old_stuff; SELECT 1;";
+  const parts = texts(withBeginColumn, "sqlite");
+  assert.equal(parts.length, 3);
+  assert.ok(parts[0].startsWith("CREATE TRIGGER t") && parts[0].endsWith("END"));
+  assert.equal(parts[1], "DROP TABLE old_stuff");
+
+  const withEndColumn = "CREATE TRIGGER t AFTER INSERT ON ev BEGIN UPDATE ev SET x = new.end; SELECT 1; END; SELECT 2";
+  const second = texts(withEndColumn, "sqlite");
+  assert.equal(second.length, 2);
+  assert.ok(second[0].endsWith("SELECT 1; END"));
+  assert.equal(second[1], "SELECT 2");
+});
+
+test("a trigger is recognised after EXPLAIN and with unicode names around END", () => {
+  assert.deepEqual(texts("EXPLAIN CREATE TRIGGER a AFTER DELETE ON t BEGIN SELECT 1; END; SELECT 2", "sqlite").length, 2);
+  // A name that only ends in "end" is not the END keyword
+  const sql = "CREATE TRIGGER a AFTER DELETE ON t BEGIN UPDATE t SET é_end = 1; SELECT 1; END; SELECT 2";
+  assert.equal(texts(sql, "sqlite").length, 2);
+});

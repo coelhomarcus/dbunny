@@ -25,19 +25,34 @@ function pushStatement(ranges: StatementRange[], sql: string, from: number, to: 
   if (to > from && sql.slice(from, to).replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, "").trim()) ranges.push({ from, to });
 }
 
-/** True for `CREATE [TEMP|TEMPORARY] TRIGGER`, given the first words of a statement. */
+/** True for `[EXPLAIN] CREATE [TEMP|TEMPORARY] TRIGGER`, given the first words of a statement. */
 function startsTrigger(words: string[]) {
-  return words[0] === "CREATE" && (words[1] === "TRIGGER" || ((words[1] === "TEMP" || words[1] === "TEMPORARY") && words[2] === "TRIGGER"));
+  const [a, b, c] = words[0] === "EXPLAIN" ? words.slice(1) : words;
+  return a === "CREATE" && (b === "TRIGGER" || ((b === "TEMP" || b === "TEMPORARY") && c === "TRIGGER"));
 }
 
+const SQLITE_WORD_START = /[A-Za-z_\u0080-\uffff]/;
+const SQLITE_WORD_PART = /[A-Za-z0-9_$\u0080-\uffff]/;
+
+/**
+ * SQLite's statements end at a semicolon, except inside a trigger, whose body holds statements of
+ * its own. There SQLite itself (sqlite3_complete) closes the trigger only at an END that comes right
+ * after a semicolon and is itself followed by one: begin, case and end can also be column names.
+ */
 function splitSqlite(sql: string): StatementRange[] {
   const ranges: StatementRange[] = [];
   let start = 0;
   let i = 0;
   // The first words of the current statement, to know when it's a trigger
   let words: string[] = [];
-  // Inside a trigger's body (BEGIN ... END), and inside a CASE ... END within it
-  let depth = 0;
+  // Inside a trigger: the last token was a semicolon / an END that came right after one
+  let afterSemi = false;
+  let afterEnd = false;
+  const other = () => {
+    afterSemi = false;
+    afterEnd = false;
+  };
+  const trigger = () => words.length >= 3 && startsTrigger(words);
 
   while (i < sql.length) {
     const ch = sql[i];
@@ -58,27 +73,42 @@ function splitSqlite(sql: string): StatementRange[] {
           break;
         } else i++;
       }
-      if (words.length < 3) words.push(ch);
+      if (words.length < 4) words.push(ch);
+      other();
     } else if (ch === "[") {
       const end = sql.indexOf("]", i + 1);
       i = end === -1 ? sql.length : end + 1;
-      if (words.length < 3) words.push("[");
-    } else if (/[A-Za-z_]/.test(ch)) {
+      if (words.length < 4) words.push("[");
+      other();
+    } else if (SQLITE_WORD_START.test(ch)) {
       let end = i + 1;
-      while (end < sql.length && /[A-Za-z0-9_$]/.test(sql[end])) end++;
+      while (end < sql.length && SQLITE_WORD_PART.test(sql[end])) end++;
       const word = sql.slice(i, end).toUpperCase();
-      if (words.length < 3) words.push(word);
-      if (startsTrigger(words)) {
-        if (word === "BEGIN" || word === "CASE") depth++;
-        else if (word === "END" && depth > 0) depth--;
+      if (words.length < 4) words.push(word);
+      if (trigger()) {
+        if (word === "END" && afterSemi) {
+          afterSemi = false;
+          afterEnd = true;
+        } else other();
       }
       i = end;
-    } else if (ch === ";" && depth === 0) {
-      pushStatement(ranges, sql, start, i);
-      start = i + 1;
-      words = [];
+    } else if (ch === ";") {
+      if (trigger() && !afterEnd) {
+        // A statement of the trigger's body ends; only an END after it can close the trigger
+        afterSemi = true;
+        afterEnd = false;
+        i++;
+      } else {
+        pushStatement(ranges, sql, start, i);
+        start = i + 1;
+        words = [];
+        other();
+        i++;
+      }
+    } else {
+      if (!/\s/.test(ch)) other();
       i++;
-    } else i++;
+    }
   }
   pushStatement(ranges, sql, start, sql.length);
   return ranges;
