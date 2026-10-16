@@ -2,6 +2,7 @@ use serde::Deserialize;
 use tauri::State;
 use uuid::Uuid;
 
+use super::ssh::SshConfig;
 use super::state::AppState;
 use super::storage::{save_connections_to_file, SavedConnection, SavedConnectionInfo};
 
@@ -15,6 +16,8 @@ pub struct SavedConnectionInput {
     pub database: String,
     pub user: String,
     pub password: String,
+    #[serde(default)]
+    pub ssh: Option<SshConfig>,
     pub ssl: bool,
     #[serde(default)]
     pub read_only: bool,
@@ -60,6 +63,7 @@ pub async fn save_connection(
             connection.database,
             connection.user,
             connection.password,
+            connection.ssh,
             connection.ssl,
             connection.color,
             created_at,
@@ -79,6 +83,7 @@ pub async fn save_connection(
             connection.database,
             connection.user,
             connection.password,
+            connection.ssh,
             connection.ssl,
             connection.color,
             now.clone(),

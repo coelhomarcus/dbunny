@@ -15,6 +15,10 @@ pub struct Session {
     /// Separate connection for a transaction opened from the query editor, so table views
     /// and the explorer keep working outside it. None when no transaction is open.
     pub transaction: Option<Arc<Client>>,
+    /// SSH tunnel the connections go through; held only to keep it open, and closed
+    /// when the session is dropped.
+    #[allow(dead_code)]
+    pub tunnel: Option<Arc<super::ssh::Tunnel>>,
 }
 
 #[derive(Clone)]

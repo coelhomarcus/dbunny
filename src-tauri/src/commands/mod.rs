@@ -10,3 +10,4 @@ pub mod tablefilter;
 pub mod tableedit;
 pub mod structure;
 pub mod editor;
+pub mod ssh;

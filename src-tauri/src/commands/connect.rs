@@ -4,6 +4,7 @@ use tauri::State;
 use tokio_postgres::config::SslMode;
 use uuid::Uuid;
 
+use super::ssh::{open_tunnel, KnownHosts, SshConfig};
 use super::state::{AppState, Link, Notice, Notices, Session};
 
 #[derive(Serialize, Deserialize)]
@@ -85,6 +86,22 @@ pub(crate) fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Confi
     Ok((config, MakeTlsConnector::new(connector)))
 }
 
+/// The URL rewritten to reach the database through a tunnel's local port. The host
+/// stays as it was so TLS still checks the database's real name; `hostaddr` is where
+/// the driver actually connects.
+pub(crate) fn through_tunnel(url: &url::Url, local_port: u16) -> Result<url::Url, String> {
+    let mut url = url.clone();
+    url.set_port(Some(local_port)).map_err(|_| "Can't tunnel this connection URL".to_string())?;
+    let mut pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(key, _)| key != "hostaddr")
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    pairs.push(("hostaddr".into(), "127.0.0.1".into()));
+    url.query_pairs_mut().clear().extend_pairs(pairs);
+    Ok(url)
+}
+
 /// Notices kept per session; the oldest are dropped past this many.
 const MAX_NOTICES: usize = 500;
 
@@ -125,8 +142,11 @@ pub(crate) async fn open_connection(link: &Link, notices: &Notices) -> Result<to
 
 #[tauri::command]
 pub async fn connect(
+    app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
     connection_url: String,
+    ssh: Option<SshConfig>,
+    trust_host_key: Option<String>,
 ) -> Result<ConnectResponse, String> {
     if connection_url.is_empty() {
         return Err("connectionUrl is required".into());
@@ -146,6 +166,22 @@ pub async fn connect(
     };
     let host = url.host_str().unwrap_or("localhost").to_string();
     let port = url.port().unwrap_or(5432);
+
+    // Through SSH, the driver connects to a local port forwarded to the database host
+    let (url, tunnel) = match ssh {
+        Some(ssh) => {
+            use tauri::Manager;
+            let known_hosts = app_handle
+                .path()
+                .app_data_dir()
+                .map(|dir| KnownHosts::new(dir.join("ssh_known_hosts.json")))
+                .map_err(|e| format!("Failed to get app data dir: {e}"))?;
+            let tunnel = open_tunnel(&ssh, (host.clone(), port), known_hosts, trust_host_key).await?;
+            let url = through_tunnel(&url, tunnel.local_port)?;
+            (url, Some(std::sync::Arc::new(tunnel)))
+        }
+        None => (url, None),
+    };
 
     let (config, tls) = connection_config(&url)?;
     let link = Link { config, tls };
@@ -186,6 +222,7 @@ pub async fn connect(
         link,
         notices,
         transaction: None,
+        tunnel,
     };
 
     let mut sessions = state.sessions.lock().await;
@@ -266,6 +303,18 @@ mod tests {
     fn read_only_option_reaches_the_server_config() {
         let url = url::Url::parse("postgresql://u@localhost/db?sslmode=require&options=-c%20default_transaction_read_only%3Don").unwrap();
         let (config, _) = connection_config(&url).unwrap();
+        assert_eq!(config.get_options(), Some("-c default_transaction_read_only=on"));
+        assert_eq!(config.get_ssl_mode(), SslMode::Require);
+    }
+
+    #[test]
+    fn tunnelled_urls_keep_the_host_for_tls_and_connect_locally() {
+        let url = url::Url::parse("postgresql://u:p@db.internal:5432/shop?sslmode=verify-full&options=-c%20default_transaction_read_only%3Don").unwrap();
+        let tunnelled = through_tunnel(&url, 51234).unwrap();
+        let (config, _) = connection_config(&tunnelled).unwrap();
+        assert_eq!(config.get_ports(), &[51234]);
+        assert_eq!(config.get_hostaddrs(), &["127.0.0.1".parse::<std::net::IpAddr>().unwrap()]);
+        assert!(matches!(&config.get_hosts()[0], tokio_postgres::config::Host::Tcp(h) if h == "db.internal"));
         assert_eq!(config.get_options(), Some("-c default_transaction_read_only=on"));
         assert_eq!(config.get_ssl_mode(), SslMode::Require);
     }
