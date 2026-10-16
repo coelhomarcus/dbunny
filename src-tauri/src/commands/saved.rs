@@ -24,6 +24,8 @@ pub struct SavedConnectionInput {
     #[serde(default)]
     pub read_only: bool,
     pub color: String,
+    #[serde(default)]
+    pub icon: String,
 }
 
 #[tauri::command]
@@ -55,7 +57,7 @@ pub async fn save_connection(
 
         let created_at = connections[pos].created_at.clone();
 
-        let read_only = connection.read_only;
+        let (read_only, icon) = (connection.read_only, connection.icon.clone());
         connections[pos] = SavedConnection::new(
             &state.encryption_key,
             id.clone(),
@@ -73,10 +75,11 @@ pub async fn save_connection(
             now,
         )?;
         connections[pos].read_only = read_only;
+        connections[pos].icon = icon;
 
         connections[pos].clone()
     } else {
-        let read_only = connection.read_only;
+        let (read_only, icon) = (connection.read_only, connection.icon.clone());
         let mut new_connection = SavedConnection::new(
             &state.encryption_key,
             Uuid::new_v4().to_string(),
@@ -94,6 +97,7 @@ pub async fn save_connection(
             now,
         )?;
         new_connection.read_only = read_only;
+        new_connection.icon = icon;
 
         connections.push(new_connection.clone());
         new_connection

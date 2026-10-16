@@ -56,6 +56,9 @@ pub struct SavedConnection {
     #[serde(default)]
     pub read_only: bool,
     pub color: String,
+    /// Name of the icon picked for it; empty (and missing in older files) for the default.
+    #[serde(default)]
+    pub icon: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -76,6 +79,7 @@ pub struct SavedConnectionInfo {
     pub ssl: bool,
     pub read_only: bool,
     pub color: String,
+    pub icon: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -243,6 +247,7 @@ impl SavedConnection {
             ssl,
             read_only: false,
             color,
+            icon: String::new(),
             created_at,
             updated_at,
         })
@@ -266,8 +271,38 @@ impl SavedConnection {
             ssl: self.ssl,
             read_only: self.read_only,
             color: self.color.clone(),
+            icon: self.icon.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn files_from_older_versions_still_load() {
+        // Written before read_only and icon existed
+        let old = r##"{"id":"1","name":"Prod","encryptedData":"x","ssl":true,"color":"#ef4444","createdAt":"a","updatedAt":"b"}"##;
+        let conn: SavedConnection = serde_json::from_str(old).unwrap();
+        assert!(!conn.read_only);
+        assert_eq!(conn.icon, "", "no icon means the default one");
+    }
+
+    #[test]
+    fn the_icon_is_kept_next_to_the_encrypted_details() {
+        let key = [7u8; 32];
+        let mut conn = SavedConnection::new(
+            &key, "1".into(), "Prod".into(), "db.example.com".into(), 5432, "shop".into(), "me".into(), "secret".into(),
+            None, None, true, "#ef4444".into(), "a".into(), "b".into(),
+        )
+        .unwrap();
+        conn.icon = "rocket".into();
+        let stored = serde_json::to_string(&conn).unwrap();
+        assert!(stored.contains(r#""icon":"rocket""#) && !stored.contains("secret"), "{stored}");
+        let info = serde_json::from_str::<SavedConnection>(&stored).unwrap().to_info(&key).unwrap();
+        assert_eq!((info.icon.as_str(), info.host.as_str()), ("rocket", "db.example.com"));
     }
 }
