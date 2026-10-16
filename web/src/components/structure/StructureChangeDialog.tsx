@@ -10,6 +10,8 @@ import Input from "../ui/Input";
 import Checkbox from "../Checkbox";
 import { selectClass } from "../ui/styles";
 import { useCapabilities } from "../../hooks/useCapabilities";
+import { useSqlDialect } from "../../hooks/useSqlDialect";
+import { SqlPreviewBox } from "../schema/SqlPreview";
 
 /** Which form to show; fields not chosen yet come from the column being changed. */
 export type ChangeDraft =
@@ -22,6 +24,7 @@ export type ChangeDraft =
   | { kind: "dropConstraint"; constraint: string };
 
 const COMMON_TYPES = ["text", "varchar(255)", "integer", "bigint", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
+const SQLITE_TYPES = ["INTEGER", "TEXT", "REAL", "NUMERIC", "BLOB"];
 const INDEX_METHODS = ["btree", "hash", "gin", "gist", "brin"];
 const REFERENTIAL_ACTIONS = ["NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"];
 
@@ -83,6 +86,7 @@ function ChangeForm({
 }) {
   const api = useApi();
   const capabilities = useCapabilities();
+  const suggestedTypes = useSqlDialect() === "sqlite" ? SQLITE_TYPES : COMMON_TYPES;
   const column = "column" in draft ? draft.column : null;
   const [name, setName] = useState(column?.name ?? "");
   const [dataType, setDataType] = useState(draft.kind === "setType" ? draft.column.typeName : "text");
@@ -263,11 +267,6 @@ function ChangeForm({
           <>
             <Field label="New type">
               <Input value={dataType} onChange={(e) => setDataType(e.target.value)} autoFocus spellCheck={false} className="font-mono" list="dbunny-common-types" />
-              <datalist id="dbunny-common-types">
-                {COMMON_TYPES.map((t) => (
-                  <option key={t} value={t} />
-                ))}
-              </datalist>
             </Field>
             <Field label="Conversion (USING)">
               <Input
@@ -284,11 +283,6 @@ function ChangeForm({
           <>
             <Field label="Type">
               <Input value={dataType} onChange={(e) => setDataType(e.target.value)} spellCheck={false} className="font-mono" list="dbunny-common-types" />
-              <datalist id="dbunny-common-types">
-                {COMMON_TYPES.map((t) => (
-                  <option key={t} value={t} />
-                ))}
-              </datalist>
             </Field>
             <CheckOption checked={!nullable} onChange={(v) => setNullable(!v)} label="NOT NULL" hint="Existing rows need a default to satisfy it" />
             <CheckOption checked={columnUnique} onChange={setColumnUnique} label="Unique" hint="No two rows may share this value" />
@@ -409,12 +403,12 @@ function ChangeForm({
           <CheckOption checked={cascade} onChange={setCascade} label="Cascade" hint="Also drops views and constraints that depend on it" />
         )}
 
-        <div>
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">SQL</span>
-          <pre className={cn("mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted px-3 py-2 font-mono text-xs", previewError && "text-muted-foreground")}>
-            {sql || previewError || "…"}
-          </pre>
-        </div>
+        <datalist id="dbunny-common-types">
+          {suggestedTypes.map((t) => (
+            <option key={t} value={t} />
+          ))}
+        </datalist>
+        <SqlPreviewBox source={sql} error={previewError} />
       </div>
     </Dialog>
   );

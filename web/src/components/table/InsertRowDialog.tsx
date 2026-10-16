@@ -18,7 +18,6 @@ const UNTOUCHED: Field = { touched: false, isNull: false, text: "" };
 
 // <select> option values for "leave to the default" and NULL; neither can collide with an enum label
 const DEFAULT_OPTION = "\u0000default";
-const NULL_OPTION = "\u0000null";
 
 /** Values to insert: null is SQL NULL, and columns left alone are omitted. */
 function collectValues(columns: ColumnInfo[], fields: Record<string, Field>) {
@@ -105,79 +104,73 @@ function InsertForm({
         </>
       }
     >
-      <form onSubmit={submit} className="-mr-2 max-h-[55vh] space-y-2.5 overflow-y-auto pr-2">
+      <form onSubmit={submit} className="-mr-2 max-h-[55vh] space-y-2 overflow-y-auto pr-2">
         {ordered.map((column, index) => {
           const field = fields[column.name] ?? UNTOUCHED;
           const required = !column.isNullable && column.defaultValue === null;
-          const choices =
-            column.dataType === "boolean" ? ["true", "false"] : column.enumValues?.length ? column.enumValues : null;
-          const placeholder = field.isNull
-            ? "NULL"
-            : column.defaultValue !== null
-              ? `default: ${column.defaultValue}`
-              : column.isNullable
-                ? "NULL"
-                : "required";
+          const choices = column.dataType === "boolean" ? ["true", "false"] : column.enumValues?.length ? column.enumValues : null;
+          const placeholder = column.defaultValue !== null ? `default: ${column.defaultValue}` : column.isNullable ? "NULL" : "required";
+          const clearNull = () => update(column.name, field.isNull ? { touched: false, isNull: false, text: "" } : { touched: true, isNull: true, text: "" });
           return (
-            <div key={column.name} className="grid grid-cols-[9.5rem_1fr] items-center gap-3">
-              <label htmlFor={`insert-${column.name}`} className="min-w-0 select-none">
-                <span className="block truncate font-mono text-[13px]">
+            <div key={column.name} className="rounded-lg border border-border px-3 py-2.5">
+              <label htmlFor={`insert-${column.name}`} className="mb-1.5 flex min-w-0 items-baseline gap-2">
+                <span className="truncate font-mono text-[13px]">
                   {column.name}
                   {required && <span className="ml-0.5 text-destructive-foreground">*</span>}
                 </span>
-                <span className="block truncate text-[11px] text-muted-foreground">
+                <span className="truncate text-[11px] text-muted-foreground">
                   {column.isPrimaryKey && <span className="mr-1 text-warning-foreground">PK</span>}
                   {shortType(column.typeName)}
                 </span>
               </label>
-
-              <div className="relative">
+              <div className="flex items-center gap-2">
                 {choices ? (
                   <select
                     id={`insert-${column.name}`}
-                    className={cn(selectClass, "w-full")}
-                    value={field.isNull ? NULL_OPTION : field.touched ? field.text : DEFAULT_OPTION}
+                    disabled={field.isNull}
+                    className={cn(selectClass, "min-w-0 flex-1", field.isNull && "text-muted-foreground")}
+                    value={field.isNull ? "" : field.touched ? field.text : DEFAULT_OPTION}
                     onChange={(e) => {
                       const v = e.target.value;
                       if (v === DEFAULT_OPTION) setFields((prev) => ({ ...prev, [column.name]: UNTOUCHED }));
-                      else if (v === NULL_OPTION) update(column.name, { touched: true, isNull: true, text: "" });
                       else update(column.name, { touched: true, isNull: false, text: v });
                     }}
                   >
-                    <option value={DEFAULT_OPTION}>{column.defaultValue !== null ? `default: ${column.defaultValue}` : "(not set)"}</option>
+                    {field.isNull ? (
+                      <option value="">NULL</option>
+                    ) : (
+                      <option value={DEFAULT_OPTION}>{column.defaultValue !== null ? `default: ${column.defaultValue}` : "(not set)"}</option>
+                    )}
                     {choices.map((choice) => (
                       <option key={choice} value={choice}>
                         {choice}
                       </option>
                     ))}
-                    {column.isNullable && <option value={NULL_OPTION}>NULL</option>}
                   </select>
                 ) : (
-                  <>
-                    <Input
-                      id={`insert-${column.name}`}
-                      value={field.text}
-                      placeholder={placeholder}
-                      autoFocus={index === 0}
-                      spellCheck={false}
-                      autoComplete="off"
-                      onChange={(e) => update(column.name, { touched: true, isNull: false, text: e.target.value })}
-                      className={cn("font-mono text-xs placeholder:italic", column.isNullable && "pr-14")}
-                    />
-                    {column.isNullable && (
-                      <button
-                        type="button"
-                        tabIndex={-1}
-                        onClick={() => update(column.name, { touched: true, isNull: true, text: "" })}
-                        className={cn(
-                          "absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[11px] font-medium cursor-pointer transition-colors",
-                          field.isNull ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground",
-                        )}
-                      >
-                        NULL
-                      </button>
+                  <Input
+                    id={`insert-${column.name}`}
+                    value={field.isNull ? "" : field.text}
+                    placeholder={field.isNull ? "NULL" : placeholder}
+                    disabled={field.isNull}
+                    autoFocus={index === 0}
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(e) => update(column.name, { touched: true, isNull: false, text: e.target.value })}
+                    className="min-w-0 flex-1 font-mono text-xs placeholder:italic"
+                  />
+                )}
+                {column.isNullable && (
+                  <button
+                    type="button"
+                    onClick={clearNull}
+                    className={cn(
+                      "h-8 shrink-0 rounded-lg px-2 text-[11px] font-medium cursor-pointer transition-colors",
+                      field.isNull ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
-                  </>
+                  >
+                    NULL
+                  </button>
                 )}
               </div>
             </div>

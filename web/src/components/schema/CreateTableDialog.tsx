@@ -4,13 +4,11 @@ import type { NewColumn } from "@/types";
 import { useApi } from "../../contexts/useConnection";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useSqlDialect } from "../../hooks/useSqlDialect";
-import { cn } from "../../lib/cn";
 import Dialog from "../ui/Dialog";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
-import Checkbox from "../Checkbox";
-import { selectClass } from "../ui/styles";
-import SqlPreview from "./SqlPreview";
+import CheckOption from "../ui/CheckOption";
+import { SqlPreviewBox } from "./SqlPreview";
 
 const COMMON_TYPES = ["bigserial", "bigint", "integer", "text", "varchar(255)", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
 // SQLite stores a few kinds of value; the type decides how a column converts what is written to it
@@ -114,7 +112,7 @@ function Builder({
           New table <span className="font-normal text-muted-foreground">in {schema}</span>
         </>
       }
-      className="max-w-5xl"
+      className="max-w-2xl"
       footer={
         <>
           {error && <p className="mr-auto min-w-0 flex-1 break-words text-xs text-destructive-foreground">{error}</p>}
@@ -133,89 +131,39 @@ function Builder({
           <Input value={table} onChange={(e) => setTable(e.target.value)} placeholder="e.g. invoices" autoFocus spellCheck={false} className="font-mono" />
         </label>
 
-        <div className="overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-[13px]">
-            <thead className="bg-card-header text-xs text-muted-foreground">
-              <tr className="[&>th]:px-2 [&>th]:py-1.5 [&>th]:text-left [&>th]:font-medium">
-                <th>Column</th>
-                <th>Type</th>
-                <th className="w-px whitespace-nowrap">NOT NULL</th>
-                <th className="w-px whitespace-nowrap">Primary key</th>
-                <th className="w-px whitespace-nowrap">Unique</th>
-                <th>Default</th>
-                <th>Check</th>
-                {capabilities.comments && <th>Comment</th>}
-                <th className="w-px" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.key} className="border-t border-border [&>td]:px-2 [&>td]:py-1">
-                  <td>
-                    <Input value={r.name} onChange={(e) => update(r.key, { name: e.target.value })} aria-label="Column name" spellCheck={false} className="h-7 font-mono text-xs" />
-                  </td>
-                  <td>
-                    <select
-                      value={r.dataType}
-                      onChange={(e) => update(r.key, { dataType: e.target.value })}
-                      aria-label="Type"
-                      className={cn(selectClass, "h-7 w-full min-w-28 font-mono text-xs")}
-                    >
-                      {(suggestedTypes.includes(r.dataType) ? suggestedTypes : [r.dataType, ...suggestedTypes]).map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="text-center">
-                    <Checkbox checked={!r.nullable || r.primaryKey} onChange={() => update(r.key, { nullable: !r.nullable })} className={cn(r.primaryKey && "opacity-50")} />
-                  </td>
-                  <td className="text-center">
-                    <Checkbox checked={r.primaryKey} onChange={() => update(r.key, { primaryKey: !r.primaryKey })} />
-                  </td>
-                  <td className="text-center">
-                    <Checkbox checked={r.unique} onChange={() => update(r.key, { unique: !r.unique })} />
-                  </td>
-                  <td>
-                    <Input value={r.default ?? ""} onChange={(e) => update(r.key, { default: e.target.value })} aria-label="Default" placeholder="none" spellCheck={false} className="h-7 font-mono text-xs" />
-                  </td>
-                  <td>
-                    <Input value={r.check ?? ""} onChange={(e) => update(r.key, { check: e.target.value })} aria-label="Check" placeholder="e.g. price >= 0" spellCheck={false} className="h-7 font-mono text-xs" />
-                  </td>
-                  {capabilities.comments && (
-                    <td>
-                      <Input value={r.comment ?? ""} onChange={(e) => update(r.key, { comment: e.target.value })} aria-label="Comment" placeholder="optional" className="h-7 text-xs" />
-                    </td>
-                  )}
-                  <td>
-                    <Button variant="ghost-muted" size="icon-xs" aria-label={`Remove ${r.name || "column"}`} onClick={() => setRows((prev) => prev.filter((p) => p.key !== r.key))} disabled={rows.length === 1}>
-                      <X />
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="border-t border-border p-1">
-            <Button variant="ghost-muted" size="xs" onClick={() => setRows((prev) => [...prev, row(dialect === "sqlite" ? { dataType: "TEXT" } : {})])}>
-              <Plus /> Add column
-            </Button>
-          </div>
+        <div className="flex flex-col gap-2">
+          {rows.map((r) => (
+            <div key={r.key} className="flex flex-col gap-2 rounded-lg border border-border p-2.5">
+              <div className="flex items-center gap-2">
+                <Input value={r.name} onChange={(e) => update(r.key, { name: e.target.value })} aria-label="Column name" placeholder="name" spellCheck={false} className="h-8 min-w-0 flex-1 font-mono text-xs" />
+                <Input value={r.dataType} onChange={(e) => update(r.key, { dataType: e.target.value })} aria-label="Type" spellCheck={false} list="dbunny-new-table-types" className="h-8 w-40 shrink-0 font-mono text-xs" />
+                <Button variant="ghost-muted" size="icon-xs" aria-label={`Remove ${r.name || "column"}`} onClick={() => setRows((prev) => prev.filter((p) => p.key !== r.key))} disabled={rows.length === 1}>
+                  <X />
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <CheckOption checked={!r.nullable || r.primaryKey} onChange={() => !r.primaryKey && update(r.key, { nullable: !r.nullable })} label="NOT NULL" />
+                <CheckOption checked={r.primaryKey} onChange={() => update(r.key, { primaryKey: !r.primaryKey })} label="Primary key" />
+                <CheckOption checked={r.unique} onChange={() => update(r.key, { unique: !r.unique })} label="Unique" />
+              </div>
+              <div className={capabilities.comments ? "grid grid-cols-3 gap-2" : "grid grid-cols-2 gap-2"}>
+                <Input value={r.default ?? ""} onChange={(e) => update(r.key, { default: e.target.value })} aria-label="Default" placeholder="default" spellCheck={false} className="h-8 font-mono text-xs" />
+                <Input value={r.check ?? ""} onChange={(e) => update(r.key, { check: e.target.value })} aria-label="Check" placeholder="check, e.g. price >= 0" spellCheck={false} className="h-8 font-mono text-xs" />
+                {capabilities.comments && <Input value={r.comment ?? ""} onChange={(e) => update(r.key, { comment: e.target.value })} aria-label="Comment" placeholder="comment" className="h-8 text-xs" />}
+              </div>
+            </div>
+          ))}
+          <datalist id="dbunny-new-table-types">
+            {suggestedTypes.map((t) => (
+              <option key={t} value={t} />
+            ))}
+          </datalist>
+          <Button variant="ghost-muted" size="xs" className="self-start" onClick={() => setRows((prev) => [...prev, row(dialect === "sqlite" ? { dataType: "TEXT" } : {})])}>
+            <Plus /> Add column
+          </Button>
         </div>
 
-        <div>
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">SQL</span>
-          {sql && !previewError ? (
-            <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-border bg-muted px-3 py-2 font-mono text-xs">
-              <SqlPreview source={sql} />
-            </div>
-          ) : (
-            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
-              {previewError || "…"}
-            </pre>
-          )}
-        </div>
+        <SqlPreviewBox source={sql} error={previewError} />
       </div>
     </Dialog>
   );
