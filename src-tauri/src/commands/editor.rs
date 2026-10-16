@@ -17,7 +17,10 @@ use super::state::{AppState, Link, Notices};
 /// Asks the server to stop whatever the query editor's connection is running.
 #[tauri::command]
 pub async fn cancel_query(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
-    let (client, _) = state.editor_client(&session_id).await?;
+    // Nothing open means nothing running
+    let Some(client) = state.running_editor(&session_id).await? else {
+        return Ok(());
+    };
     let link = state.link(&session_id).await?;
     client.cancel_token().cancel_query(link.tls).await.map_err(|e| e.to_string())
 }
@@ -26,8 +29,7 @@ pub async fn cancel_query(state: State<'_, AppState>, session_id: String) -> Res
 /// commit or rollback, while table views keep using the main connection.
 #[tauri::command]
 pub async fn begin_transaction(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
-    let (_, in_transaction) = state.editor_client(&session_id).await?;
-    if in_transaction {
+    if state.in_transaction(&session_id).await? {
         return Err("A transaction is already open".into());
     }
     let link = state.link(&session_id).await?;
@@ -36,7 +38,7 @@ pub async fn begin_transaction(state: State<'_, AppState>, session_id: String) -
 
     let mut sessions = state.sessions.lock().await;
     let session = sessions.get_mut(&session_id).ok_or("Session not found")?;
-    if session.transaction.is_some() {
+    if session.transaction.as_ref().is_some_and(|tx| !tx.is_closed()) {
         return Err("A transaction is already open".into());
     }
     session.transaction = Some(Arc::new(client));
@@ -89,7 +91,7 @@ pub async fn rollback_transaction(state: State<'_, AppState>, session_id: String
 
 #[tauri::command]
 pub async fn transaction_open(state: State<'_, AppState>, session_id: String) -> Result<bool, String> {
-    Ok(state.editor_client(&session_id).await?.1)
+    state.in_transaction(&session_id).await
 }
 
 #[derive(Serialize)]

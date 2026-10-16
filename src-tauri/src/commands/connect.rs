@@ -296,6 +296,7 @@ async fn open_session(state: &AppState, endpoint: Endpoint, trust_host_key: Opti
         link,
         notices,
         transaction: None,
+        editor: None,
         tunnel,
         endpoint,
         reconnect_lock: Default::default(),
