@@ -143,6 +143,19 @@ export default function QueryEditor() {
   // Name being typed when saving a query for the first time
   const [saveName, setSaveName] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  // Tabs of saved queries whose text differs from what's saved
+  const [dirtyIds, setDirtyIds] = useState<Set<number>>(() => new Set());
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  // Share of the height the editor takes over the results, remembered across sessions
+  const [split, setSplit] = useState(() => {
+    try {
+      const n = Number(localStorage.getItem("dbunny:editorSplit"));
+      return n >= 20 && n <= 80 ? n : 50;
+    } catch {
+      return 50;
+    }
+  });
+  const columnRef = useRef<HTMLDivElement>(null);
   const saved = tabState(tabId, "queryEditor", createQueryEditorState);
   repairQueryEditorState(saved);
   const [tabMetas, setTabMetas] = useState<TabMeta[]>(saved.tabMetas);
@@ -243,6 +256,65 @@ export default function QueryEditor() {
     setView("results");
   }
 
+  // Read from the editor's change handler, which is created once
+  const latest = useRef({ tabMetas, activeId, savedQueries });
+  useEffect(() => {
+    latest.current = { tabMetas, activeId, savedQueries };
+  });
+
+  /** Marks a tab dirty when its text no longer matches its saved query. */
+  function setDirty(id: number, dirty: boolean) {
+    setDirtyIds((prev) => {
+      if (prev.has(id) === dirty) return prev;
+      const next = new Set(prev);
+      if (dirty) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  const handleEditorChange = useCallback((sql: string) => {
+    const { tabMetas: metas, activeId: id, savedQueries: list } = latest.current;
+    const savedId = metas.find((t) => t.id === id)?.savedId;
+    if (!savedId) return;
+    const stored = list.find((q) => q.id === savedId);
+    setDirty(id, stored !== undefined && stored.sql !== sql);
+  }, []);
+
+  /** Renames a tab; a saved query's tab renames the query too. */
+  function renameTab(id: number, label: string) {
+    setRenamingId(null);
+    const name = label.trim();
+    const meta = tabMetas.find((t) => t.id === id);
+    if (!meta || !name || name === meta.label) return;
+    updateTabMeta(id, { label: name });
+    const stored = meta.savedId ? savedQueries.find((q) => q.id === meta.savedId) : undefined;
+    if (stored && savedStorageKey) setSavedQueries(saveQuery(savedStorageKey, { id: stored.id, name, sql: stored.sql }).list);
+  }
+
+  function startResize(e: React.PointerEvent) {
+    const column = columnRef.current;
+    if (!column) return;
+    e.preventDefault();
+    const rect = column.getBoundingClientRect();
+    let value = split;
+    const onMove = (ev: PointerEvent) => {
+      value = Math.min(80, Math.max(20, ((ev.clientY - rect.top) / rect.height) * 100));
+      setSplit(value);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      try {
+        localStorage.setItem("dbunny:editorSplit", String(Math.round(value)));
+      } catch {
+        // only for this session
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
   /** Opens SQL from the history in a new query tab, leaving the current one as it is. */
   function openFromHistory(sql: string, options: { label?: string; savedId?: string } = {}) {
     // A saved query that's already open is shown instead of opened twice
@@ -273,6 +345,7 @@ export default function QueryEditor() {
     const { list, saved: stored } = saveQuery(savedStorageKey, { id: existing?.id, name: name ?? existing!.name, sql });
     setSavedQueries(list);
     updateTabMeta(activeId, { label: stored.name, savedId: stored.id });
+    setDirty(activeId, false);
     setSaveName(null);
     setJustSaved(true);
     setTimeout(() => setJustSaved(false), 1500);
@@ -469,7 +542,7 @@ export default function QueryEditor() {
 
   return (
     <div className="h-full flex">
-      <div className="h-full flex flex-col flex-1 min-w-0">
+      <div ref={columnRef} className="h-full flex flex-col flex-1 min-w-0">
         <ConfirmDialog
           open={pendingDangers !== null}
           onClose={cancelDangerousQuery}
@@ -495,19 +568,35 @@ export default function QueryEditor() {
           </div>
         </ConfirmDialog>
 
-        {/* Editor panel */}
-        <div className="flex flex-col flex-1 min-h-0 border-b border-border">
+        {/* Editor panel: its height is dragged with the handle under it */}
+        <div className="flex min-h-0 shrink-0 grow-0 flex-col border-b border-border" style={{ flexBasis: `${split}%` }}>
           {/* Query tabs as compact pills: a lighter level than the connection tabs above */}
           <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2 select-none">
             <div role="tablist" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
               {tabMetas.map((tab) => {
                 const active = activeId === tab.id;
                 return (
+                  renamingId === tab.id ? (
+                    <input
+                      key={tab.id}
+                      autoFocus
+                      defaultValue={tab.label}
+                      aria-label="Tab name"
+                      onFocus={(e) => e.currentTarget.select()}
+                      onBlur={(e) => renameTab(tab.id, e.currentTarget.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") renameTab(tab.id, e.currentTarget.value);
+                        if (e.key === "Escape") setRenamingId(null);
+                      }}
+                      className="h-7 w-36 shrink-0 rounded-md border border-ring bg-card px-2 text-[13px] outline-none ring-3 ring-ring/20"
+                    />
+                  ) : (
                   <button
                     key={tab.id}
                     role="tab"
                     aria-selected={active}
                     onClick={() => switchTab(tab.id)}
+                    onDoubleClick={() => setRenamingId(tab.id)}
                     // Transition only while hovered, so switching tabs swaps styles instantly
                     className={`group flex h-7 shrink-0 items-center gap-1 rounded-md pl-2.5 text-[13px] whitespace-nowrap cursor-pointer ${
                       tabMetas.length > 1 ? "pr-1" : "pr-2.5"
@@ -518,6 +607,7 @@ export default function QueryEditor() {
                     }`}
                   >
                     {tab.label}
+                    {dirtyIds.has(tab.id) && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="Unsaved changes" />}
                     {tabMetas.length > 1 && (
                       <span
                         onClick={(e) => closeTab(e, tab.id)}
@@ -531,6 +621,7 @@ export default function QueryEditor() {
                       </span>
                     )}
                   </button>
+                  )
                 );
               })}
               <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={() => addTab()} aria-label="New query tab">
@@ -562,6 +653,7 @@ export default function QueryEditor() {
               initialValue={saved.payloads.get(activeId)?.sql ?? ""}
               schema={completionSchema}
               onRun={runQuery}
+              onChange={handleEditorChange}
             />
           </div>
 
@@ -623,6 +715,22 @@ export default function QueryEditor() {
             </div>
           </div>
         </div>
+
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize editor"
+          onPointerDown={startResize}
+          onDoubleClick={() => {
+            setSplit(50);
+            try {
+              localStorage.removeItem("dbunny:editorSplit");
+            } catch {
+              // nothing stored
+            }
+          }}
+          className="relative z-10 -my-1 h-2 shrink-0 cursor-row-resize after:absolute after:inset-x-0 after:top-1/2 after:h-0.5 after:-translate-y-1/2 after:bg-primary/60 after:opacity-0 after:transition-opacity hover:after:opacity-100"
+        />
 
         {/* Results panel: tabs appear once there are messages or a plan to show */}
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">

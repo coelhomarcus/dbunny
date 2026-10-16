@@ -40,9 +40,11 @@ type SqlEditorProps = {
   /** Called once the editor exists. The handle stays usable after unmount (reads the last state). */
   onMount: (handle: SqlEditorHandle) => void;
   onRun: (scope: RunScope) => void;
+  /** Called with the new text after every edit. */
+  onChange?: (sql: string) => void;
 };
 
-export default function SqlEditor({ initialValue, schema, onMount, onRun }: SqlEditorProps) {
+export default function SqlEditor({ initialValue, schema, onMount, onRun, onChange }: SqlEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const completionRef = useRef(new Compartment());
@@ -50,9 +52,12 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun }: SqlE
   // Keymaps are created once, so always call the latest onRun
   const onRunRef = useRef(onRun);
 
+  const onChangeRef = useRef(onChange);
+
   useEffect(() => {
     onRunRef.current = onRun;
-  }, [onRun]);
+    onChangeRef.current = onChange;
+  }, [onRun, onChange]);
 
   useEffect(() => {
     const createState = (doc: string) =>
@@ -102,6 +107,9 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun }: SqlE
       ]),
       EditorView.lineWrapping,
       currentStatementHighlight,
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) onChangeRef.current?.(update.state.doc.toString());
+      }),
       sqlDialect.language,
       completionRef.current.of(sqlCompletion(schemaRef.current)),
       appThemeExtension,
