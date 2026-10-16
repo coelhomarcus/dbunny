@@ -5,7 +5,7 @@ import { tabState } from "../lib/tabState";
 import type { CompletionSchema, ExplainResult, QueryResult } from "@/types";
 import QueryResults from "../components/QueryResults";
 import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
-import { Plus, X, Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, GitCommitVertical, History, Bookmark, Check, MoreHorizontal, AlignLeft } from "lucide-react";
+import { Plus, X, Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, GitCommitVertical, History, Bookmark, Check, MoreHorizontal, AlignLeft, Undo2 } from "lucide-react";
 import RunButton from "../components/query/RunButton";
 import ResultsBar from "../components/query/ResultsBar";
 import Tooltip from "../components/Tooltip";
@@ -14,7 +14,6 @@ import { useRightPanel } from "../contexts/rightPanel";
 import type { RunScope } from "../components/SqlEditor";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
 import Popover from "../components/ui/Popover";
-import Badge from "../components/ui/Badge";
 import PlanView from "../components/query/PlanView";
 import NoticeList from "../components/query/NoticeList";
 import HistoryPanel, { type LibraryView } from "../components/query/HistoryPanel";
@@ -698,22 +697,41 @@ export default function QueryEditor() {
           <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-2.5 select-none">
             <RunButton disabled={running || txBusy} onRun={runQuery} onExplain={explain} />
             {formatError && <span className="min-w-0 truncate text-xs text-destructive-foreground">Couldn't format: {formatError}</span>}
-            {inTransaction && (
-              <div className="ml-1 flex items-center gap-1.5">
-                <Badge variant="warning">
-                  <GitCommitVertical />
-                  In transaction
-                </Badge>
-                <Button variant="success" size="xs" onClick={() => runTransaction("commit")} disabled={txBusy || running}>
-                  Commit
-                </Button>
-                <Button variant="outline" size="xs" onClick={() => runTransaction("rollback")} disabled={txBusy || running}>
-                  Rollback
-                </Button>
-              </div>
-            )}
             <div className="ml-auto flex items-center gap-0.5">
-              {!inTransaction && (
+              {/* The same spot holds the transaction while it's open: its state, then how to end it */}
+              {inTransaction ? (
+                <div className="mr-1 flex h-7 items-center overflow-hidden rounded-lg border border-warning/40 bg-warning/8 text-[13px]">
+                  <span className="flex items-center gap-1.5 pl-2.5 pr-2 font-medium text-warning-foreground">
+                    <span className="relative flex size-1.5">
+                      <span className="absolute inline-flex size-full animate-ping rounded-full bg-warning opacity-60" />
+                      <span className="relative inline-flex size-1.5 rounded-full bg-warning" />
+                    </span>
+                    Transaction
+                  </span>
+                  <Tooltip label="Commit: keep every change made since it began" side="top">
+                    <button
+                      type="button"
+                      onClick={() => runTransaction("commit")}
+                      disabled={txBusy || running}
+                      className="flex h-7 items-center gap-1.5 border-l border-warning/30 px-2.5 font-medium text-success-foreground transition-colors cursor-pointer hover:bg-success/12 disabled:cursor-default disabled:opacity-50"
+                    >
+                      <Check size={14} />
+                      Commit
+                    </button>
+                  </Tooltip>
+                  <Tooltip label="Rollback: undo every change made since it began" side="top">
+                    <button
+                      type="button"
+                      onClick={() => runTransaction("rollback")}
+                      disabled={txBusy || running}
+                      className="flex h-7 items-center gap-1.5 border-l border-warning/30 px-2.5 text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-default disabled:opacity-50"
+                    >
+                      <Undo2 size={14} />
+                      Rollback
+                    </button>
+                  </Tooltip>
+                </div>
+              ) : (
                 <Tooltip label="Begin a transaction: runs join it until commit or rollback" side="top">
                   <Button variant="ghost-muted" size="sm" onClick={() => runTransaction("begin")} disabled={txBusy || running}>
                     <GitCommitVertical />
