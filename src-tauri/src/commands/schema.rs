@@ -73,6 +73,12 @@ pub struct FunctionDetail {
     pub description: Option<String>,
 }
 
+/// The user's schemas, for a query on `pg_namespace n`: leaves out the system catalogs and
+/// the `pg_toast*` / `pg_temp_*` schemas the server makes for its own use and for each
+/// session's temporary tables.
+const USER_SCHEMAS: &str = "n.nspname NOT IN ('pg_catalog', 'information_schema') \
+    AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp%'";
+
 #[tauri::command]
 pub async fn get_schemas(
     state: State<'_, AppState>,
@@ -80,17 +86,15 @@ pub async fn get_schemas(
 ) -> Result<Vec<SchemaInfo>, String> {
     let client = state.client(&session_id).await?;
 
-    let rows = client
-        .query(
-            "SELECT schema_name as name FROM information_schema.schemata \
-             WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast') \
-             ORDER BY schema_name",
-            &[],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+    Ok(user_schemas(&client).await.map_err(|e| e.to_string())?.into_iter().map(|name| SchemaInfo { name }).collect())
+}
 
-    Ok(rows.iter().map(|r| SchemaInfo { name: r.get("name") }).collect())
+/// The same schemas the explorer lists, so the collapsed sidebar and the explorer agree.
+pub(crate) async fn user_schemas(client: &tokio_postgres::Client) -> Result<Vec<String>, tokio_postgres::Error> {
+    let rows = client
+        .query(&format!("SELECT n.nspname::text FROM pg_namespace n WHERE {USER_SCHEMAS} ORDER BY n.nspname"), &[])
+        .await?;
+    Ok(rows.iter().map(|r| r.get(0)).collect())
 }
 
 #[tauri::command]
@@ -679,11 +683,7 @@ pub async fn get_explorer(state: State<'_, AppState>, session_id: String) -> Res
 }
 
 pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<ExplorerTree, tokio_postgres::Error> {
-    const USER_SCHEMAS: &str = "n.nspname NOT IN ('pg_catalog', 'information_schema') \
-        AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp%'";
-    let schemas = client
-        .query(&format!("SELECT n.nspname::text FROM pg_namespace n WHERE {USER_SCHEMAS} ORDER BY n.nspname"), &[])
-        .await?;
+    let schemas = user_schemas(client).await?;
     let objects = client
         .query(
             &format!(
@@ -734,8 +734,8 @@ pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<Explorer
         .and_then(|r| r.get(0));
 
     let mut tree: Vec<ExplorerSchema> = schemas
-        .iter()
-        .map(|r| ExplorerSchema { name: r.get(0), objects: Vec::new() })
+        .into_iter()
+        .map(|name| ExplorerSchema { name, objects: Vec::new() })
         .collect();
     for row in &objects {
         let schema: String = row.get("schema");
@@ -791,19 +791,18 @@ pub async fn get_completion_schema(
 
     let rows = client
         .query(
-            "SELECT n.nspname AS schema, c.relname AS name, \
-             CASE WHEN c.relkind IN ('v', 'm') THEN 'view' ELSE 'table' END AS type, \
-             a.attname AS column_name, \
-             format_type(a.atttypid, a.atttypmod) AS data_type \
-             FROM pg_class c \
-             JOIN pg_namespace n ON n.oid = c.relnamespace \
-             LEFT JOIN pg_attribute a \
-               ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
-             WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') \
-               AND n.nspname NOT IN ('pg_catalog', 'information_schema') \
-               AND n.nspname NOT LIKE 'pg\\_toast%' \
-               AND n.nspname NOT LIKE 'pg\\_temp%' \
-             ORDER BY n.nspname, c.relname, a.attnum",
+            &format!(
+                "SELECT n.nspname AS schema, c.relname AS name, \
+                 CASE WHEN c.relkind IN ('v', 'm') THEN 'view' ELSE 'table' END AS type, \
+                 a.attname AS column_name, \
+                 format_type(a.atttypid, a.atttypmod) AS data_type \
+                 FROM pg_class c \
+                 JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 LEFT JOIN pg_attribute a \
+                   ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+                 WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND {USER_SCHEMAS} \
+                 ORDER BY n.nspname, c.relname, a.attnum"
+            ),
             &[],
         )
         .await
@@ -834,16 +833,15 @@ pub async fn get_completion_schema(
 
     let function_rows = client
         .query(
-            "SELECT p.proname AS name, n.nspname AS schema, \
-             COALESCE(pg_get_function_result(p.oid), '') AS return_type, \
-             pg_get_function_arguments(p.oid) AS argument_types \
-             FROM pg_proc p \
-             JOIN pg_namespace n ON p.pronamespace = n.oid \
-             WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') \
-               AND n.nspname NOT LIKE 'pg\\_toast%' \
-               AND n.nspname NOT LIKE 'pg\\_temp%' \
-               AND p.prokind IN ('f', 'p') \
-             ORDER BY n.nspname, p.proname",
+            &format!(
+                "SELECT p.proname AS name, n.nspname AS schema, \
+                 COALESCE(pg_get_function_result(p.oid), '') AS return_type, \
+                 pg_get_function_arguments(p.oid) AS argument_types \
+                 FROM pg_proc p \
+                 JOIN pg_namespace n ON p.pronamespace = n.oid \
+                 WHERE {USER_SCHEMAS} AND p.prokind IN ('f', 'p') \
+                 ORDER BY n.nspname, p.proname"
+            ),
             &[],
         )
         .await
@@ -1100,5 +1098,21 @@ mod server_tests {
         assert_eq!(kind("counter").await, None, "a sequence isn't a relation with rows");
         assert_eq!(kind("missing").await, None);
         client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn temporary_schemas_stay_out_of_every_list() {
+        let client = connect().await;
+        // A temporary table makes the server create this session's pg_temp_N and pg_toast_temp_N
+        client.batch_execute("CREATE TEMP TABLE dbunny_scratch (id int)").await.unwrap();
+        let internal = |name: &String| name.starts_with("pg_temp") || name.starts_with("pg_toast") || name == "pg_catalog" || name == "information_schema";
+
+        let schemas = user_schemas(&client).await.unwrap();
+        assert!(schemas.iter().any(|s| s == "public"), "{schemas:?}");
+        assert!(!schemas.iter().any(internal), "{schemas:?}");
+        let tree = explorer(&client).await.unwrap();
+        let names: Vec<String> = tree.schemas.into_iter().map(|s| s.name).collect();
+        assert_eq!(names, schemas, "the sidebar and the explorer list the same schemas");
     }
 }
