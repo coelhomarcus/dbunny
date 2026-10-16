@@ -33,10 +33,12 @@ export default function SideCard({
   }, [open, mounted]);
 
   useEffect(() => {
-    if (visible || !mounted) return;
+    // Only after a close. While opening, `visible` stays false until the next frame,
+    // and a background tab can delay that frame past this timeout.
+    if (open || visible || !mounted) return;
     const timer = setTimeout(() => setMounted(false), 320);
     return () => clearTimeout(timer);
-  }, [visible, mounted]);
+  }, [open, visible, mounted]);
 
   if (!mounted) return null;
 

@@ -148,14 +148,14 @@ fn fts5_virtual_tables(c: &Connection, db: &str) -> rusqlite::Result<HashSet<Str
     rows.collect()
 }
 
-/// Shadow tables FTS5 creates alongside a virtual table.
+/// Shadow tables FTS5 creates next to a virtual table (`_data`, `_idx`, `_content`, `_docsize`, `_config`).
 fn is_fts5_internal(name: &str, fts: &HashSet<String>) -> bool {
     fts.iter().any(|base| {
-        name == format!("{base}_content")
+        name == format!("{base}_data")
+            || name == format!("{base}_idx")
+            || name == format!("{base}_content")
             || name == format!("{base}_docsize")
-            || name == format!("{base}_stat")
-            || name == format!("{base}_segments")
-            || name == format!("{base}_segdir")
+            || name == format!("{base}_config")
     })
 }
 
@@ -942,12 +942,18 @@ mod tests {
 
     #[tokio::test]
     async fn fts5_shadow_tables_stay_out_of_the_explorer() {
-        let f = TempDb::with("CREATE VIRTUAL TABLE docs USING fts5(title, body)");
+        let f = TempDb::with(
+            "CREATE VIRTUAL TABLE docs USING fts5(title, body); \
+             CREATE TABLE docs_stat (id INTEGER PRIMARY KEY)",
+        );
         let d = open(&f).await;
         let tree = d.explorer().await.unwrap();
         let names: Vec<&str> = schema(&tree, "main").objects.iter().map(|o| o.name.as_str()).collect();
         assert!(names.contains(&"docs"));
-        assert!(!names.iter().any(|n| n.contains("_content") || n.contains("_docsize")));
+        assert!(names.contains(&"docs_stat"), "a real table is not an FTS5 shadow");
+        for suffix in ["_data", "_idx", "_content", "_docsize", "_config"] {
+            assert!(!names.contains(&format!("docs{suffix}").as_str()), "{suffix}");
+        }
     }
 
     #[tokio::test]
