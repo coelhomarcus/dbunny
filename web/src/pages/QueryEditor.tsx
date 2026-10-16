@@ -348,11 +348,13 @@ export default function QueryEditor() {
       if (historyStorageKey) {
         setHistory(addToHistory(historyStorageKey, { sql, durationMs: null, rows: null, error: errorSummary(msg) }));
       }
+      // A lost transaction connection ends the transaction; reflect it in the toolbar
+      if (inTransaction) api.transactionOpen().then(setInTransaction).catch(() => setInTransaction(false));
       showView("results");
     } finally {
       setRunning(false);
     }
-  }, [loadCompletionSchema, api, saved, runTransaction, showView, historyStorageKey]);
+  }, [loadCompletionSchema, api, saved, runTransaction, showView, historyStorageKey, inTransaction]);
 
   const explain = useCallback(async (analyze: boolean) => {
     setExplainMenuOpen(false);

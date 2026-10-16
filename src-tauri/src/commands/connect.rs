@@ -4,8 +4,8 @@ use tauri::State;
 use tokio_postgres::config::SslMode;
 use uuid::Uuid;
 
-use super::ssh::{open_tunnel, KnownHosts, SshConfig};
-use super::state::{AppState, Link, Notice, Notices, Session};
+use super::ssh::{open_tunnel, KnownHosts, SshConfig, Tunnel};
+use super::state::{AppState, Endpoint, Link, Notice, Notices, Session};
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +84,37 @@ pub(crate) fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Confi
         .map_err(|e| format!("TLS setup failed: {}", e))?;
 
     Ok((config, MakeTlsConnector::new(connector)))
+}
+
+/// Opens the session's connection: the SSH tunnel first when there is one, then the
+/// database. Used on connect and again to reconnect after the connection was lost.
+pub(crate) async fn establish(
+    endpoint: &Endpoint,
+    notices: &Notices,
+    trust_host_key: Option<String>,
+) -> Result<(tokio_postgres::Client, Link, Option<std::sync::Arc<Tunnel>>), String> {
+    let host = endpoint.url.host_str().unwrap_or("localhost").to_string();
+    let port = endpoint.url.port().unwrap_or(5432);
+
+    // Through SSH, the driver connects to a local port forwarded to the database host
+    let (url, tunnel) = match (&endpoint.ssh, &endpoint.known_hosts) {
+        (Some(ssh), Some(known_hosts)) => {
+            let known_hosts = KnownHosts::new(known_hosts.clone());
+            let tunnel = open_tunnel(ssh, (host, port), known_hosts, trust_host_key).await?;
+            let url = through_tunnel(&endpoint.url, tunnel.local_port)?;
+            (url, Some(std::sync::Arc::new(tunnel)))
+        }
+        _ => (endpoint.url.clone(), None),
+    };
+
+    let (mut config, tls) = connection_config(&url)?;
+    // Notice a dead connection (sleep, network change) within minutes instead of hours
+    config.keepalives_idle(std::time::Duration::from_secs(60));
+    let link = Link { config, tls };
+    let client = open_connection(&link, notices)
+        .await
+        .map_err(|e| format!("Failed to connect: {}", e))?;
+    Ok((client, link, tunnel))
 }
 
 /// The URL rewritten to reach the database through a tunnel's local port. The host
@@ -167,28 +198,20 @@ pub async fn connect(
     let host = url.host_str().unwrap_or("localhost").to_string();
     let port = url.port().unwrap_or(5432);
 
-    // Through SSH, the driver connects to a local port forwarded to the database host
-    let (url, tunnel) = match ssh {
-        Some(ssh) => {
+    let known_hosts = match ssh {
+        Some(_) => {
             use tauri::Manager;
-            let known_hosts = app_handle
+            let dir = app_handle
                 .path()
                 .app_data_dir()
-                .map(|dir| KnownHosts::new(dir.join("ssh_known_hosts.json")))
                 .map_err(|e| format!("Failed to get app data dir: {e}"))?;
-            let tunnel = open_tunnel(&ssh, (host.clone(), port), known_hosts, trust_host_key).await?;
-            let url = through_tunnel(&url, tunnel.local_port)?;
-            (url, Some(std::sync::Arc::new(tunnel)))
+            Some(dir.join("ssh_known_hosts.json"))
         }
-        None => (url, None),
+        None => None,
     };
-
-    let (config, tls) = connection_config(&url)?;
-    let link = Link { config, tls };
+    let endpoint = Endpoint { url, ssh, known_hosts };
     let notices: Notices = Default::default();
-    let client = open_connection(&link, &notices)
-        .await
-        .map_err(|e| format!("Failed to connect: {}", e))?;
+    let (client, link, tunnel) = establish(&endpoint, &notices, trust_host_key).await?;
 
     // Test connection + pre-warm catalog cache
     client
@@ -223,6 +246,8 @@ pub async fn connect(
         notices,
         transaction: None,
         tunnel,
+        endpoint,
+        reconnect_lock: Default::default(),
     };
 
     let mut sessions = state.sessions.lock().await;
