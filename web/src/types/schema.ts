@@ -132,8 +132,8 @@ export interface RoleInfo {
 /** One object in the explorer. */
 export interface ExplorerObject {
   name: string;
-  kind: "table" | "view" | "matview" | "sequence" | "function" | "procedure" | "type";
-  /** Arguments of a function, a type's kind (enum, domain...), or "partitioned" / "foreign" for those tables. */
+  kind: "table" | "view" | "matview" | "sequence" | "function" | "procedure" | "type" | "index" | "trigger";
+  /** Arguments of a function, a type's kind (enum, domain...), "partitioned" / "foreign" for those tables, or the table an index or trigger belongs to. */
   detail: string;
   /** A partitioned table's partitions. */
   partitions?: ExplorerPartition[];

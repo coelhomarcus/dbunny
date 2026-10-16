@@ -74,7 +74,7 @@ export function createSessionApi(sessionId: string | null) {
     },
 
     /** Facts and DDL of a sequence or a type. */
-    async getObjectDefinition(schema: string, name: string, kind: "sequence" | "type") {
+    async getObjectDefinition(schema: string, name: string, kind: "sequence" | "type" | "index" | "trigger") {
       return invoke<ObjectDefinition>("get_object_definition", { sessionId, schema, name, kind });
     },
 

@@ -18,7 +18,7 @@ import { foreignKeyTarget, shortType } from "../lib/columnMeta";
 import { cn } from "../lib/cn";
 import { formatBytes } from "../lib/format";
 import { writeClipboardText } from "../lib/clipboard";
-import { notAvailableFor } from "../lib/engines";
+import { needsRebuild, notAvailableFor } from "../lib/engines";
 import { useCapabilities } from "../hooks/useCapabilities";
 
 type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "permissions" | "ddl";
@@ -399,6 +399,8 @@ export default function TableStructure() {
   const capabilities = useCapabilities();
   /** Tooltip of the actions the engine can't do. */
   const unavailable = connectionInfo ? notAvailableFor(connectionInfo.engine) : "";
+  // Constraints change by rebuilding the table in SQLite, which isn't done yet
+  const constraintsUnavailable = connectionInfo ? needsRebuild(connectionInfo.engine) : "";
   // Bumped after a change to load the structure again
   const [version, setVersion] = useState(0);
   const [draft, setDraft] = useState<ChangeDraft | null>(null);
@@ -568,17 +570,17 @@ export default function TableStructure() {
               <>
                 {canEdit && (
                   <SectionBar>
-                    <SectionAction unavailable={capabilities.constraints ? undefined : unavailable} onClick={() => setDraft({ kind: "addUnique" })}>
+                    <SectionAction unavailable={capabilities.constraints ? undefined : constraintsUnavailable} onClick={() => setDraft({ kind: "addUnique" })}>
                       <Plus /> Add unique
                     </SectionAction>
-                    <SectionAction unavailable={capabilities.constraints ? undefined : unavailable} onClick={() => setDraft({ kind: "addCheck" })}>
+                    <SectionAction unavailable={capabilities.constraints ? undefined : constraintsUnavailable} onClick={() => setDraft({ kind: "addCheck" })}>
                       <Plus /> Add check
                     </SectionAction>
                   </SectionBar>
                 )}
                 <ConstraintsSection
                   structure={structure}
-                  unavailable={capabilities.constraints ? undefined : unavailable}
+                  unavailable={capabilities.constraints ? undefined : constraintsUnavailable}
                   onDrop={canEdit ? (constraint) => setDraft({ kind: "dropConstraint", constraint }) : undefined}
                 />
               </>
@@ -587,14 +589,14 @@ export default function TableStructure() {
               <>
                 {canEdit && (
                   <SectionBar>
-                    <SectionAction unavailable={capabilities.constraints ? undefined : unavailable} onClick={() => setDraft({ kind: "addForeignKey" })}>
+                    <SectionAction unavailable={capabilities.constraints ? undefined : constraintsUnavailable} onClick={() => setDraft({ kind: "addForeignKey" })}>
                       <Plus /> Add foreign key
                     </SectionAction>
                   </SectionBar>
                 )}
                 <KeysSection
                   structure={structure}
-                  unavailable={capabilities.constraints ? undefined : unavailable}
+                  unavailable={capabilities.constraints ? undefined : constraintsUnavailable}
                   onDrop={canEdit ? (constraint) => setDraft({ kind: "dropConstraint", constraint }) : undefined}
                 />
               </>

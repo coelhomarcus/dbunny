@@ -1,5 +1,3 @@
-import type { ExplainFormat } from "./capabilities";
-
 export interface QueryRequest {
   sql: string;
 }
@@ -47,13 +45,22 @@ export interface PlanNode {
   [key: string]: unknown;
 }
 
-export interface ExplainResult {
-  plan: [{ Plan: PlanNode; "Planning Time"?: number; "Execution Time"?: number }];
-  /** The statement really ran (EXPLAIN ANALYZE) and was rolled back. */
-  analyzed: boolean;
-  /** How `plan` is shaped. */
-  format: ExplainFormat;
+/** One row of SQLite's EXPLAIN QUERY PLAN: `parent` is the `id` of the row it sits under (0 for the top). */
+export interface SqlitePlanRow {
+  id: number;
+  parent: number;
+  detail: string;
 }
+
+/** A query plan; `format` says how `plan` is shaped. */
+export type ExplainResult =
+  | {
+      format: "postgresJson";
+      plan: [{ Plan: PlanNode; "Planning Time"?: number; "Execution Time"?: number }];
+      /** The statement really ran (EXPLAIN ANALYZE) and was rolled back. */
+      analyzed: boolean;
+    }
+  | { format: "sqliteQueryPlan"; plan: SqlitePlanRow[]; analyzed: boolean };
 
 export interface QueryError {
   message: string;

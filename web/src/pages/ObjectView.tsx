@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
-import { Check, Copy, ListOrdered, Shapes } from "lucide-react";
+import { Check, Copy, ListOrdered, ListTree, Shapes, Zap } from "lucide-react";
 import type { ObjectDefinition } from "@/types";
 import { DetailSkeleton } from "../components/Skeleton";
 import { useApi } from "../contexts/useConnection";
@@ -8,8 +8,8 @@ import SqlViewer from "../components/SqlViewer";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { writeClipboardText } from "../lib/clipboard";
 
-/** A sequence or a type: a few facts and its DDL. */
-export default function ObjectView({ kind }: { kind: "sequence" | "type" }) {
+/** A sequence, type, index or trigger: a few facts and its DDL. */
+export default function ObjectView({ kind }: { kind: "sequence" | "type" | "index" | "trigger" }) {
   const { schema, name } = useParams<{ schema: string; name: string }>();
   const api = useApi();
   const key = `${kind}:${schema}.${name}`;
@@ -31,15 +31,23 @@ export default function ObjectView({ kind }: { kind: "sequence" | "type" }) {
 
   const loading = !result || result.key !== key;
   const definition = loading ? undefined : result.definition;
-  const label = kind === "sequence" ? "Sequence" : `Type${definition ? ` (${definition.kind})` : ""}`;
+  const label =
+    kind === "sequence" ? "Sequence" : kind === "index" ? "Index" : kind === "trigger" ? "Trigger" : `Type${definition ? ` (${definition.kind})` : ""}`;
+  const icon =
+    kind === "sequence" ? (
+      <ListOrdered className="text-teal-500" />
+    ) : kind === "index" ? (
+      <ListTree className="text-orange-500" />
+    ) : kind === "trigger" ? (
+      <Zap className="text-yellow-500" />
+    ) : (
+      <Shapes className="text-pink-500" />
+    );
 
   return (
     <div className="h-full flex flex-col">
       <PageHeader>
-        <HeaderTitle
-          label={`${label} · ${schema}`}
-          icon={kind === "sequence" ? <ListOrdered className="text-teal-500" /> : <Shapes className="text-pink-500" />}
-        >
+        <HeaderTitle label={`${label} · ${schema}`} icon={icon}>
           {name}
         </HeaderTitle>
       </PageHeader>

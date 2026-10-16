@@ -242,8 +242,8 @@ function QueryEditorPanel() {
 
   // The transaction lives on the server side of the connection; ask whether one is open
   useEffect(() => {
-    api.transactionOpen().then(setInTransaction).catch(() => {});
-  }, [api]);
+    if (capabilities.transactions) api.transactionOpen().then(setInTransaction).catch(() => {});
+  }, [api, capabilities.transactions]);
 
   // On unmount (e.g. opening a table), keep the SQL being edited. The tab list and
   // active tab are already written to `saved` by switchTab/addTab/closeTab; writing
@@ -489,6 +489,8 @@ function QueryEditorPanel() {
           error: null,
         }));
       }
+      // A script may have started or ended a transaction (BEGIN IMMEDIATE, COMMIT...): the toolbar follows
+      if (capabilities.transactions) api.transactionOpen().then(setInTransaction).catch(() => {});
       // A script that only printed messages opens on them
       showView(res.columns.length === 0 && (res.notices?.length ?? 0) > 0 ? "messages" : "results");
       if (DDL_PATTERN.test(sql)) loadCompletionSchema();
@@ -508,7 +510,7 @@ function QueryEditorPanel() {
       setRunning(false);
       setRunningSince(null);
     }
-  }, [loadCompletionSchema, api, saved, runTransaction, showView, historyStorageKey, inTransaction]);
+  }, [loadCompletionSchema, api, saved, runTransaction, showView, historyStorageKey, inTransaction, capabilities.transactions]);
 
   const explain = useCallback(async (analyze: boolean) => {
     // EXPLAIN takes one statement: the selection, or the one at the cursor

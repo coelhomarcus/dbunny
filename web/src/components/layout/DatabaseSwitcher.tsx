@@ -77,8 +77,20 @@ export default function DatabaseSwitcher() {
     ? savedConnectionName.slice(0, -(database.length + 3))
     : savedConnectionName;
 
-  // An engine with a single database has nothing to switch to
-  if (!capabilities.databases) return null;
+  // An engine with a single database has nothing to switch to: just say which one this is
+  if (!capabilities.databases) {
+    return (
+      <div className="flex min-w-0 flex-1 items-center rounded-md border border-border px-2 py-1">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium leading-tight">{connectionName || "Connection"}</div>
+          <div className="flex min-w-0 items-center gap-1 text-[11px] leading-tight text-muted-foreground">
+            <Database size={10} className="shrink-0" />
+            <span className="truncate">{database}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>

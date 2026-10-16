@@ -3,11 +3,13 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightSpecialChars, drawSelection } from "@codemirror/view";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { appThemeExtension } from "../lib/codemirror/theme";
-import { sqlDialect } from "../lib/codemirror/sqlCompletion";
+import { dialectFor } from "../lib/codemirror/sqlCompletion";
+import { useSqlDialect } from "../hooks/useSqlDialect";
 
 /** Read-only, syntax-highlighted SQL (function definitions, etc.). */
 export default function SqlViewer({ value }: { value: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const dialect = useSqlDialect();
 
   useEffect(() => {
     const view = new EditorView({
@@ -25,13 +27,13 @@ export default function SqlViewer({ value }: { value: string }) {
           highlightSelectionMatches(),
           search({ top: true }),
           keymap.of(searchKeymap),
-          sqlDialect.language,
+          dialectFor(dialect).language,
           appThemeExtension,
         ],
       }),
     });
     return () => view.destroy();
-  }, [value]);
+  }, [value, dialect]);
 
   return <div ref={containerRef} className="h-full" />;
 }

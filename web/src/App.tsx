@@ -100,6 +100,8 @@ function TabPane({
                 <Route path=":schema/function/:name" element={<FunctionView />} />
                 <Route path=":schema/sequence/:name" element={<ObjectView kind="sequence" />} />
                 <Route path=":schema/type/:name" element={<ObjectView kind="type" />} />
+                <Route path=":schema/index/:name" element={<ObjectView kind="index" />} />
+                <Route path=":schema/trigger/:name" element={<ObjectView kind="trigger" />} />
               </Route>
             </Routes>
           </MemoryRouter>

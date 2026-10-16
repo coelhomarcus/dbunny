@@ -21,6 +21,8 @@ import {
   Eye,
   Layers,
   Braces,
+  ListTree,
+  Zap,
   ListOrdered,
   Shapes,
   Puzzle,
@@ -67,6 +69,8 @@ const CATEGORIES: Category[] = [
   { id: "functions", label: "Functions", kinds: ["function", "procedure"], icon: Braces, color: "text-purple-500" },
   { id: "sequences", label: "Sequences", kinds: ["sequence"], icon: ListOrdered, color: "text-teal-500" },
   { id: "types", label: "Types", kinds: ["type"], icon: Shapes, color: "text-pink-500" },
+  { id: "indexes", label: "Indexes", kinds: ["index"], icon: ListTree, color: "text-orange-500" },
+  { id: "triggers", label: "Triggers", kinds: ["trigger"], icon: Zap, color: "text-yellow-500" },
 ];
 
 /** Categories shown only when the engine has that kind of object. */
@@ -92,6 +96,10 @@ function objectPath(schema: string, object: ExplorerObject): string {
       return `/db/${s}/sequence/${n}`;
     case "type":
       return `/db/${s}/type/${n}`;
+    case "index":
+      return `/db/${s}/index/${n}`;
+    case "trigger":
+      return `/db/${s}/trigger/${n}`;
     default:
       return relationPath(schema, object.name);
   }
@@ -459,13 +467,15 @@ export default function SchemaTree() {
     const hint =
       object.kind === "type"
         ? object.detail
-        : object.kind === "procedure"
-          ? "procedure"
-          : capabilities.partitions && object.partitions?.length
-            ? `${object.partitions.length} partition${object.partitions.length > 1 ? "s" : ""}`
-            : object.detail === "foreign"
-              ? "foreign"
-              : null;
+        : object.kind === "index" || object.kind === "trigger"
+          ? `on ${object.detail}`
+          : object.kind === "procedure"
+            ? "procedure"
+            : capabilities.partitions && object.partitions?.length
+              ? `${object.partitions.length} partition${object.partitions.length > 1 ? "s" : ""}`
+              : object.detail === "foreign"
+                ? "foreign"
+                : null;
     return (
       <div key={objectKey(schema, object)}>
         <div className="group relative">

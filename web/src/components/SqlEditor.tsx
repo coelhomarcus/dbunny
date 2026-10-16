@@ -16,8 +16,10 @@ import { indentOnInput, bracketMatching } from "@codemirror/language";
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { appThemeExtension } from "../lib/codemirror/theme";
-import { sqlCompletion, sqlDialect } from "../lib/codemirror/sqlCompletion";
-import { currentStatementHighlight, currentStatementRange } from "../lib/codemirror/currentStatement";
+import { dialectFor, sqlCompletion } from "../lib/codemirror/sqlCompletion";
+import { useSqlDialect } from "../hooks/useSqlDialect";
+import type { SqlDialectName } from "../lib/sqlStatements";
+import { currentStatementHighlight, currentStatementRange, statementDialect } from "../lib/codemirror/currentStatement";
 import { formatSql } from "../lib/formatSql";
 import type { CompletionSchema } from "@/types";
 
@@ -50,14 +52,14 @@ type SqlEditorProps = {
 };
 
 /** Formats the selection, or the whole document; one transaction, so a single undo restores it. */
-async function formatView(view: EditorView, onError?: (message: string) => void) {
+async function formatView(view: EditorView, dialect: SqlDialectName, onError?: (message: string) => void) {
   const { from, to, empty } = view.state.selection.main;
   const range = empty ? { from: 0, to: view.state.doc.length } : { from, to };
   const before = view.state.sliceDoc(range.from, range.to);
   if (!before.trim()) return;
   let after: string;
   try {
-    after = await formatSql(before);
+    after = await formatSql(before, dialect);
   } catch (err) {
     onError?.(err instanceof Error ? err.message.split("\n")[0] : "Couldn't format this SQL");
     return;
@@ -73,6 +75,7 @@ async function formatView(view: EditorView, onError?: (message: string) => void)
 
 export default function SqlEditor({ initialValue, schema, onMount, onRun, onChange, onFormatError }: SqlEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const dialect = useSqlDialect();
   const viewRef = useRef<EditorView | null>(null);
   const completionRef = useRef(new Compartment());
   const schemaRef = useRef(schema);
@@ -112,7 +115,7 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun, onChan
           {
             key: "Shift-Alt-f",
             run: (view) => {
-              formatView(view, onFormatErrorRef.current);
+              formatView(view, dialect, onFormatErrorRef.current);
               return true;
             },
           },
@@ -143,11 +146,12 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun, onChan
       ]),
       EditorView.lineWrapping,
       currentStatementHighlight,
+      statementDialect.of(dialect),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) onChangeRef.current?.(update.state.doc.toString());
       }),
-      sqlDialect.language,
-      completionRef.current.of(sqlCompletion(schemaRef.current)),
+      dialectFor(dialect).language,
+      completionRef.current.of(sqlCompletion(schemaRef.current, dialect)),
       appThemeExtension,
     ];
 
@@ -178,7 +182,7 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun, onChan
       },
       async format() {
         const view = viewRef.current;
-        if (view) await formatView(view, onFormatErrorRef.current);
+        if (view) await formatView(view, dialect, onFormatErrorRef.current);
         view?.focus();
       },
     });
@@ -196,9 +200,9 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun, onChan
   useEffect(() => {
     schemaRef.current = schema;
     viewRef.current?.dispatch({
-      effects: completionRef.current.reconfigure(sqlCompletion(schema)),
+      effects: completionRef.current.reconfigure(sqlCompletion(schema, dialect)),
     });
-  }, [schema]);
+  }, [schema, dialect]);
 
   return <div ref={containerRef} className="h-full" />;
 }

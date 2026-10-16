@@ -5,6 +5,7 @@ import type { ConnectArgs } from "../lib/connectionDraft";
 import { hostKeyProblem } from "../lib/sshHostKey";
 import type { TabSessionInfo } from "./workspace";
 import { ConnectionContext } from "./connection";
+import { addressOf } from "../lib/engines";
 
 const DISCONNECTED: TabSessionInfo = { title: null, subtitle: null, color: null, icon: null, sessionId: null };
 
@@ -24,7 +25,7 @@ function infoOf(response: ConnectResponse): ConnectionInfo {
 function tabInfo(response: ConnectResponse, saved?: SavedTag): TabSessionInfo {
   return {
     title: saved?.name || response.database,
-    subtitle: `${response.host}:${response.port}/${response.database}`,
+    subtitle: addressOf(response),
     color: saved?.color ?? null,
     icon: saved?.icon ?? null,
     sessionId: response.sessionId,

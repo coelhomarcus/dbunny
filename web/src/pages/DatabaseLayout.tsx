@@ -38,7 +38,7 @@ export default function DatabaseLayout() {
 
   // Disconnecting drops an open transaction, so that asks first
   async function handleDisconnect() {
-    if (await api.transactionOpen().catch(() => false)) setConfirmDisconnect(true);
+    if (capabilities.transactions && (await api.transactionOpen().catch(() => false))) setConfirmDisconnect(true);
     else await disconnectNow();
   }
 
