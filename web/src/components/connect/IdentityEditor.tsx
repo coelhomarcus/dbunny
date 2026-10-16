@@ -110,11 +110,14 @@ export default function IdentityEditor({
   identity,
   onChange,
   nameRef,
+  nameInvalid,
   layout,
 }: {
   identity: Identity;
   onChange: (next: Identity) => void;
   nameRef?: Ref<HTMLInputElement>;
+  /** Marks the name as needed (saving without one). */
+  nameInvalid?: boolean;
   layout: "stacked" | "header";
 }) {
   const [lookOpen, setLookOpen] = useState(false);
@@ -132,6 +135,7 @@ export default function IdentityEditor({
             onChange={(e) => set({ name: e.target.value })}
             placeholder="e.g. Production"
             spellCheck={false}
+            aria-invalid={nameInvalid || undefined}
           />
         </Field>
         <Field label="Color" hint="Tag environments, e.g. red for production.">
@@ -179,6 +183,7 @@ export default function IdentityEditor({
         placeholder="Untitled connection"
         spellCheck={false}
         autoComplete="off"
+        aria-invalid={nameInvalid || undefined}
         className="h-9 min-w-0 flex-1 rounded-lg bg-transparent px-2 text-[15px] font-semibold text-foreground outline-none placeholder:text-muted-foreground/70 hover:bg-muted focus-visible:bg-muted aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-destructive/40"
       />
     </div>
