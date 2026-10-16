@@ -7,10 +7,10 @@ use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::{Row, SimpleQueryMessage};
 use uuid::Uuid;
 
-use super::pgtext::{is_native, text_to_json};
+use super::pgtext::{int_to_json, is_native, text_to_json};
 use super::sqlsplit::split_statements;
 use super::state::{AppState, Notice};
-use super::tableedit::{build_delete, build_insert, build_update};
+use super::tableedit::{build_delete, build_import_batches, build_insert, build_update};
 use super::tablefilter::{build_where, quote_ident, TableFilter, TextParam};
 
 #[derive(Serialize)]
@@ -55,9 +55,32 @@ pub struct TableDataParams {
     pub page_size: Option<i64>,
     pub sort_column: Option<String>,
     pub sort_direction: Option<String>,
+    /// Several sort keys, first one first; takes over from sort_column when given.
+    pub sort: Option<Vec<SortKey>>,
     pub filters: Option<Vec<TableFilter>>,
     /// "any" joins the filters with OR; anything else (or none) with AND.
     pub filter_mode: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct SortKey {
+    pub column: String,
+    /// "desc" for descending; anything else ascends.
+    pub direction: Option<String>,
+}
+
+/// ` ORDER BY ...` for the sort keys that name real columns (others are ignored).
+pub(crate) fn order_clause(keys: &[SortKey], valid_columns: &[String]) -> String {
+    let parts: Vec<String> = keys
+        .iter()
+        .filter(|k| valid_columns.contains(&k.column))
+        .map(|k| format!("{} {}", quote_ident(&k.column), if k.direction.as_deref() == Some("desc") { "DESC" } else { "ASC" }))
+        .collect();
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ORDER BY {}", parts.join(", "))
+    }
 }
 
 fn try_get_string(row: &Row, i: usize) -> JsonValue {
@@ -93,7 +116,7 @@ fn row_to_json_values(row: &Row) -> Vec<JsonValue> {
                 Err(_) => try_get_string(row, i),
             },
             Type::INT8 => match row.try_get::<_, Option<i64>>(i) {
-                Ok(Some(v)) => JsonValue::Number(v.into()),
+                Ok(Some(v)) => int_to_json(v),
                 Ok(None) => JsonValue::Null,
                 Err(_) => try_get_string(row, i),
             },
@@ -193,11 +216,7 @@ fn row_to_json_values(row: &Row) -> Vec<JsonValue> {
                 Err(_) => try_get_string(row, i),
             },
             Type::INT8_ARRAY => match row.try_get::<_, Option<Vec<i64>>>(i) {
-                Ok(Some(v)) => JsonValue::Array(
-                    v.into_iter()
-                        .map(|n| JsonValue::Number(n.into()))
-                        .collect(),
-                ),
+                Ok(Some(v)) => JsonValue::Array(v.into_iter().map(int_to_json).collect()),
                 Ok(None) => JsonValue::Null,
                 Err(_) => try_get_string(row, i),
             },
@@ -338,8 +357,10 @@ async fn get_valid_columns(
 ) -> Result<Vec<String>, String> {
     let rows = client
         .query(
-            "SELECT column_name FROM information_schema.columns \
-             WHERE table_schema = $1 AND table_name = $2",
+            // pg_catalog, so materialized views have columns too
+            "SELECT a.attname::text FROM pg_attribute a \
+             JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped",
             &[&schema, &table],
         )
         .await
@@ -409,6 +430,89 @@ async fn run_statement(
     })
 }
 
+/// Rows of a change shown in the editor; the count of every changed row still comes back.
+const CHANGED_ROWS_SHOWN: usize = 500;
+const CHANGED_PREFIX: &str = "WITH dbunny_changed AS (\n";
+
+/// The first word of a statement, past comments.
+fn leading_keyword(sql: &str) -> String {
+    let mut rest = sql;
+    loop {
+        rest = rest.trim_start();
+        if let Some(after) = rest.strip_prefix("--") {
+            rest = after.split_once('\n').map_or("", |(_, tail)| tail);
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after.split_once("*/").map_or("", |(_, tail)| tail);
+        } else {
+            break;
+        }
+    }
+    rest.chars().take_while(|c| c.is_ascii_alphabetic()).collect::<String>().to_ascii_lowercase()
+}
+
+/// An INSERT, UPDATE or DELETE rewritten to also return the rows it changed: the statement
+/// still runs once, the server counts every changed row and sends back the first ones.
+/// None for anything else, or when the statement already says what to return (RETURNING)
+/// or brings its own WITH, which this can't nest safely.
+fn with_changed_rows(sql: &str) -> Option<String> {
+    if !matches!(leading_keyword(sql).as_str(), "insert" | "update" | "delete") {
+        return None;
+    }
+    let lower = sql.to_ascii_lowercase();
+    let has_word = |word: &str| {
+        lower.match_indices(word).any(|(i, _)| {
+            let before = lower[..i].chars().next_back();
+            let after = lower[i + word.len()..].chars().next();
+            !before.is_some_and(|c| c.is_alphanumeric() || c == '_') && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+        })
+    };
+    if has_word("returning") {
+        return None;
+    }
+    // On new lines, so a comment at the end of the statement can't swallow what follows
+    Some(format!(
+        "{CHANGED_PREFIX}{sql}\nRETURNING *\n) SELECT (SELECT count(*) FROM dbunny_changed) AS dbunny_total, * FROM dbunny_changed LIMIT {CHANGED_ROWS_SHOWN}"
+    ))
+}
+
+/// The rewritten statement's output as the changed rows: the count column goes, and the
+/// count becomes the number of rows affected.
+fn changed_rows_output(mut output: StatementOutput) -> StatementOutput {
+    let total = output
+        .rows
+        .first()
+        .and_then(|row| row.first())
+        .and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok()))
+        .unwrap_or(0);
+    output.columns.remove(0);
+    for row in &mut output.rows {
+        row.remove(0);
+    }
+    output.rows_affected = Some(total);
+    output
+}
+
+/// Runs one statement of the editor's script, with the changed rows of an INSERT, UPDATE
+/// or DELETE. A rewrite the server can't take (an insert into a view whose rules don't
+/// return rows, say) is refused before anything runs, and then the statement runs as typed.
+async fn run_editor_statement(
+    client: &tokio_postgres::Client,
+    sql: &str,
+    offset: i64,
+    in_transaction: bool,
+    position: Option<(usize, usize)>,
+) -> Result<StatementOutput, String> {
+    if let Some(rewritten) = with_changed_rows(sql) {
+        match run_statement(client, &rewritten).await {
+            Ok(output) => return Ok(changed_rows_output(output)),
+            // In a transaction the failure has aborted it, so there's no second try
+            Err(e) if !in_transaction && e.code() == Some(&tokio_postgres::error::SqlState::FEATURE_NOT_SUPPORTED) => {}
+            Err(e) => return Err(pg_error_in_script(e, offset - CHANGED_PREFIX.chars().count() as i64, position)),
+        }
+    }
+    run_statement(client, sql).await.map_err(|e| pg_error_in_script(e, offset, position))
+}
+
 #[tauri::command]
 pub async fn execute_query(
     state: State<'_, AppState>,
@@ -432,10 +536,14 @@ pub async fn execute_query(
     let mut shown: Option<StatementOutput> = None;
     let mut affected: u64 = 0;
     for (index, statement) in statements.iter().enumerate() {
-        let output = run_statement(&client, &statement.text).await.map_err(|e| {
-            pg_error_in_script(e, statement.offset as i64, (total > 1).then_some((index + 1, total)))
-        })?;
+        let position = (total > 1).then_some((index + 1, total));
+        let output = run_editor_statement(&client, &statement.text, statement.offset as i64, in_transaction, position).await?;
         match output.rows_affected {
+            // A change that brought its rows back is shown, and still counts as affected
+            Some(count) if !output.columns.is_empty() => {
+                affected += count;
+                shown = Some(output);
+            }
             Some(count) => affected += count,
             None => shown = Some(output),
         }
@@ -448,7 +556,8 @@ pub async fn execute_query(
             row_count: output.rows.len(),
             columns: output.columns,
             rows: output.rows,
-            rows_affected: None,
+            // The changed rows on show: the count of all of them
+            rows_affected: output.rows_affected,
             duration,
             statement_count: total,
             notices,
@@ -580,17 +689,14 @@ pub async fn get_table_data(
 
     let valid_columns = get_valid_columns(&client, &schema, &table).await?;
 
-    // Build ORDER BY clause
-    let mut order_clause = String::new();
-    if let Some(sort_col) = params.as_ref().and_then(|p| p.sort_column.as_ref()) {
-        if valid_columns.contains(sort_col) {
-            let dir = match params.as_ref().and_then(|p| p.sort_direction.as_deref()) {
-                Some("desc") => "DESC",
-                _ => "ASC",
-            };
-            order_clause = format!(" ORDER BY {} {}", quote_ident(sort_col), dir);
+    let sort_keys = match params.as_ref() {
+        Some(TableDataParams { sort: Some(keys), .. }) => keys.clone(),
+        Some(TableDataParams { sort_column: Some(column), sort_direction, .. }) => {
+            vec![SortKey { column: column.clone(), direction: sort_direction.clone() }]
         }
-    }
+        _ => vec![],
+    };
+    let order_clause = order_clause(&sort_keys, &valid_columns);
 
     // Build WHERE clause from the filters
     let filters = params.as_ref().and_then(|p| p.filters.as_deref()).unwrap_or(&[]);
@@ -675,18 +781,50 @@ pub async fn count_table_rows(
         .map_err(|e| db_message(&e))
 }
 
+/// One edited row: its primary key and the new values.
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RowChange {
+    pub primary_key: serde_json::Map<String, JsonValue>,
+    pub updates: serde_json::Map<String, JsonValue>,
+}
+
+/// Saves edited rows all at once: a separate connection runs them in one transaction, so
+/// either every row is saved or none is.
 #[tauri::command]
-pub async fn update_row(
+pub async fn update_rows(
     state: State<'_, AppState>,
     session_id: String,
     schema: String,
     table: String,
-    primary_key: serde_json::Map<String, JsonValue>,
-    updates: serde_json::Map<String, JsonValue>,
-) -> Result<serde_json::Value, String> {
-    let client = state.client(&session_id).await?;
-    let affected = update_in(&client, &schema, &table, &primary_key, &updates).await?;
-    Ok(serde_json::json!({ "rowsAffected": affected }))
+    changes: Vec<RowChange>,
+) -> Result<u64, String> {
+    let link = state.link(&session_id).await?;
+    let notices = state.notices(&session_id).await?;
+    let client = super::connect::open_connection(&link, &notices)
+        .await
+        .map_err(|e| format!("Couldn't open a connection to save: {e}"))?;
+    save_rows(&client, &schema, &table, &changes).await
+}
+
+/// Each change must find exactly its row: one that was changed or deleted elsewhere since
+/// it was read (or a key that matches several rows) stops the save instead of passing silently.
+pub(crate) async fn save_rows(client: &tokio_postgres::Client, schema: &str, table: &str, changes: &[RowChange]) -> Result<u64, String> {
+    client.batch_execute("BEGIN").await.map_err(|e| db_message(&e))?;
+    let total = changes.len();
+    for (i, change) in changes.iter().enumerate() {
+        let failure = match update_in(client, schema, table, &change.primary_key, &change.updates).await {
+            Ok(1) => continue,
+            Ok(0) => "it wasn't found, so it was changed or deleted since it was loaded".to_string(),
+            Ok(n) => format!("its key matched {n} rows"),
+            Err(e) => e,
+        };
+        let _ = client.batch_execute("ROLLBACK").await;
+        let which = if total > 1 { format!("Row {} of {total}", i + 1) } else { "The row".to_string() };
+        return Err(format!("Nothing was saved. {which}: {failure}"));
+    }
+    client.batch_execute("COMMIT").await.map_err(|e| format!("Nothing was saved: {}", db_message(&e)))?;
+    Ok(total as u64)
 }
 
 async fn update_in(
@@ -727,6 +865,92 @@ async fn delete_from(
     let (sql, params) = build_delete(&relation, primary_keys, &valid_columns)?;
     let refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
     client.execute(sql.as_str(), &refs).await.map_err(|e| db_message(&e))
+}
+
+/// Inserts imported rows (e.g. from a CSV file) all at once: a separate connection runs
+/// them in one transaction, so a bad row leaves the table untouched.
+#[tauri::command]
+pub async fn import_rows(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    table: String,
+    columns: Vec<String>,
+    rows: Vec<Vec<Option<String>>>,
+) -> Result<u64, String> {
+    let link = state.link(&session_id).await?;
+    let notices = state.notices(&session_id).await?;
+    let client = super::connect::open_connection(&link, &notices)
+        .await
+        .map_err(|e| format!("Couldn't open a connection for the import: {e}"))?;
+    import_into(&client, &schema, &table, &columns, &rows).await
+}
+
+pub(crate) async fn import_into(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+    columns: &[String],
+    rows: &[Vec<Option<String>>],
+) -> Result<u64, String> {
+    let valid_columns = get_valid_columns(client, schema, table).await?;
+    let relation = format!("{}.{}", quote_ident(schema), quote_ident(table));
+    let batches = build_import_batches(&relation, columns, rows, &valid_columns)?;
+
+    client.batch_execute("BEGIN").await.map_err(|e| db_message(&e))?;
+    let mut inserted = 0;
+    for (first_row, sql, params) in &batches {
+        let refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+        match client.execute(sql.as_str(), &refs).await {
+            Ok(count) => inserted += count,
+            Err(e) => {
+                let _ = client.batch_execute("ROLLBACK").await;
+                let size = params.len() / columns.len();
+                return Err(format!(
+                    "Nothing was imported. A row between {} and {} failed: {}",
+                    first_row + 1,
+                    first_row + size,
+                    db_message(&e)
+                ));
+            }
+        }
+    }
+    client.batch_execute("COMMIT").await.map_err(|e| db_message(&e))?;
+    Ok(inserted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(column: &str, direction: &str) -> SortKey {
+        SortKey { column: column.into(), direction: Some(direction.into()) }
+    }
+
+    #[test]
+    fn only_plain_changes_get_their_rows_back() {
+        assert!(with_changed_rows("UPDATE t SET a = 1 WHERE id = 7").is_some());
+        assert!(with_changed_rows("  -- fix it\n/* note */ delete from t").is_some());
+        assert!(with_changed_rows("insert into t values (1)").is_some());
+        assert!(with_changed_rows("SELECT 1").is_none());
+        assert!(with_changed_rows("WITH x AS (SELECT 1) UPDATE t SET a = 1").is_none(), "its own WITH");
+        assert!(with_changed_rows("UPDATE t SET a = 1 RETURNING id").is_none(), "already returns rows");
+        assert!(with_changed_rows("update t set returning_count = 1").is_some(), "a column named like the keyword");
+        let sql = with_changed_rows("UPDATE t SET a = 1 -- trailing comment").unwrap();
+        assert!(sql.contains("-- trailing comment\nRETURNING *\n)"), "{sql}");
+    }
+
+    #[test]
+    fn several_sort_keys_keep_their_order_and_skip_unknown_columns() {
+        let valid: Vec<String> = ["name", "age", "we\"ird"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            order_clause(&[key("age", "desc"), key("nope; DROP", "asc"), key("name", "asc")], &valid),
+            " ORDER BY \"age\" DESC, \"name\" ASC"
+        );
+        assert_eq!(order_clause(&[key("we\"ird", "sideways")], &valid), " ORDER BY \"we\"\"ird\" ASC");
+        assert_eq!(order_clause(&[key("nope", "asc")], &valid), "");
+        assert_eq!(order_clause(&[], &valid), "");
+    }
 }
 
 /// Tests that need a real server. Run them with:
@@ -1152,6 +1376,96 @@ mod server_tests {
 
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn big_bigint_keys_keep_every_digit_through_read_edit_and_delete() {
+        let client = connect().await;
+        client
+            .batch_execute(
+                "CREATE TEMP TABLE snow (id bigint PRIMARY KEY, name text); \
+                 INSERT INTO snow VALUES (1234567890123456789, 'a'), (1234567890123456800, 'b'), (7, 'small')",
+            )
+            .await
+            .unwrap();
+        let schema = temp_schema(&client).await;
+        let relation = format!("{}.{}", quote_ident(&schema), quote_ident("snow"));
+        let page = select_table_page(&client, &relation, "", &[], " ORDER BY id", 50, 0).await.unwrap();
+        let ids: Vec<JsonValue> = page.rows.iter().map(|r| r[0].clone()).collect();
+        // Small ids stay numbers; the big ones come as text, distinct even where a float would merge them
+        assert_eq!(ids, vec![json!(7), json!("1234567890123456789"), json!("1234567890123456800")]);
+
+        // The value as the app holds it finds exactly its row
+        let key = values(json!({"id": ids[1]}));
+        assert_eq!(update_in(&client, &schema, "snow", &key, &values(json!({"name": "edited"}))).await.unwrap(), 1);
+        let names: Vec<String> = client.query("SELECT name FROM snow ORDER BY id", &[]).await.unwrap().iter().map(|r| r.get(0)).collect();
+        assert_eq!(names, vec!["small", "edited", "b"]);
+        assert_eq!(delete_from(&client, &schema, "snow", &[key]).await.unwrap(), 1);
+        let left: i64 = client.query_one("SELECT count(*) FROM snow WHERE id = 1234567890123456800", &[]).await.unwrap().get(0);
+        assert_eq!(left, 1, "the neighbour a rounded key would have hit is still there");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn saving_edited_rows_is_all_or_nothing_and_needs_each_row() {
+        let client = connect().await;
+        client.batch_execute("CREATE TEMP TABLE edits (id int PRIMARY KEY, qty int CHECK (qty >= 0)); INSERT INTO edits VALUES (1, 1), (2, 2), (3, 3)").await.unwrap();
+        let schema = temp_schema(&client).await;
+        let change = |id: i32, qty: i32| RowChange { primary_key: values(json!({"id": id})), updates: values(json!({"qty": qty})) };
+        async fn qty(client: &tokio_postgres::Client) -> Vec<i32> {
+            client.query("SELECT qty FROM edits ORDER BY id", &[]).await.unwrap().iter().map(|r| r.get(0)).collect()
+        }
+
+        // The second row breaks a constraint: the first isn't saved either
+        let err = save_rows(&client, &schema, "edits", &[change(1, 10), change(2, -1), change(3, 30)]).await.unwrap_err();
+        assert!(err.starts_with("Nothing was saved. Row 2 of 3") && err.contains("check constraint"), "{err}");
+        assert_eq!(qty(&client).await, vec![1, 2, 3]);
+
+        // A row deleted elsewhere since it was loaded stops the save
+        client.batch_execute("DELETE FROM edits WHERE id = 3").await.unwrap();
+        let err = save_rows(&client, &schema, "edits", &[change(1, 10), change(3, 30)]).await.unwrap_err();
+        assert!(err.contains("Row 2 of 2") && err.contains("wasn't found"), "{err}");
+        assert_eq!(qty(&client).await, vec![1, 2]);
+
+        assert_eq!(save_rows(&client, &schema, "edits", &[change(1, 10), change(2, 20)]).await.unwrap(), 2);
+        assert_eq!(qty(&client).await, vec![10, 20]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn changes_in_the_editor_show_the_rows_they_changed() {
+        let client = connect().await;
+        client.batch_execute("CREATE TEMP TABLE stock (id int PRIMARY KEY, qty int); INSERT INTO stock SELECT g, 0 FROM generate_series(1, 600) g").await.unwrap();
+        let run = |sql: &'static str| {
+            let client = &client;
+            async move { run_editor_statement(client, sql, 0, false, None).await }
+        };
+
+        let out = run("UPDATE stock SET qty = 9 WHERE id = 7 -- one row").await.unwrap();
+        assert_eq!(out.rows_affected, Some(1));
+        assert_eq!(out.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), vec!["id", "qty"]);
+        assert_eq!(out.rows, vec![vec![json!(7), json!(9)]]);
+
+        // Every row is changed and counted; the first ones come back
+        let out = run("DELETE FROM stock WHERE id > 50").await.unwrap();
+        assert_eq!(out.rows_affected, Some(550));
+        assert_eq!(out.rows.len(), CHANGED_ROWS_SHOWN.min(550));
+        let left: i64 = client.query_one("SELECT count(*) FROM stock", &[]).await.unwrap().get(0);
+        assert_eq!(left, 50, "the statement ran once, in full");
+
+        // Nothing matched: no rows, zero affected
+        let out = run("UPDATE stock SET qty = 1 WHERE id = -1").await.unwrap();
+        assert_eq!((out.rows_affected, out.rows.len()), (Some(0), 0));
+
+        // RETURNING of its own is left as typed
+        let out = run("INSERT INTO stock VALUES (1000, 5) RETURNING id").await.unwrap();
+        assert_eq!((out.rows_affected, out.rows.clone()), (None, vec![vec![json!(1000)]]));
+
+        // Errors still point into the statement as typed
+        let err = run("UPDATE stock SET nope = 1").await.err().expect("an unknown column fails");
+        let error: serde_json::Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(error["position"], json!(18), "{err}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
     async fn deletes_are_all_or_nothing() {
         let client = connect().await;
         edit_fixture(&client).await;
@@ -1168,5 +1482,57 @@ mod server_tests {
         assert_eq!(delete_from(&client, &schema, "items", &[key(1, 1), key(2, 2)]).await.unwrap(), 2);
         let left: i64 = client.query_one("SELECT count(*) FROM items", &[]).await.unwrap().get(0);
         assert_eq!(left, 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn materialized_views_have_valid_columns_for_sorting_and_filters() {
+        let client = connect().await;
+        client
+            .batch_execute(
+                "DROP SCHEMA IF EXISTS dbunny_sort_test CASCADE; CREATE SCHEMA dbunny_sort_test; \
+                 CREATE MATERIALIZED VIEW dbunny_sort_test.mv AS SELECT g AS n, g % 2 AS parity FROM generate_series(1, 6) g;",
+            )
+            .await
+            .unwrap();
+        let mut columns = get_valid_columns(&client, "dbunny_sort_test", "mv").await.unwrap();
+        columns.sort();
+        assert_eq!(columns, vec!["n", "parity"]);
+
+        let order = order_clause(&[SortKey { column: "parity".into(), direction: None }, SortKey { column: "n".into(), direction: Some("desc".into()) }], &columns);
+        let page = select_table_page(&client, "\"dbunny_sort_test\".\"mv\"", "", &[], &order, 10, 0).await.unwrap();
+        let first: Vec<_> = page.rows.iter().map(|r| r[0].clone()).collect();
+        assert_eq!(first, vec![json!(6), json!(4), json!(2), json!(5), json!(3), json!(1)]);
+        client.batch_execute("DROP SCHEMA dbunny_sort_test CASCADE").await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn imports_are_converted_by_the_server_and_all_or_nothing() {
+        let client = connect().await;
+        client
+            .batch_execute("CREATE TEMP TABLE imported (id int PRIMARY KEY, name text NOT NULL, born date, score numeric)")
+            .await
+            .unwrap();
+        let schema: String = client.query_one("SELECT nspname::text FROM pg_namespace WHERE oid = pg_my_temp_schema()", &[]).await.unwrap().get(0);
+        let cols: Vec<String> = vec!["id".into(), "name".into(), "born".into(), "score".into()];
+        let row = |id: i32, name: &str, born: Option<&str>| vec![Some(id.to_string()), Some(name.to_string()), born.map(String::from), Some("1.5".into())];
+
+        let rows: Vec<_> = (1..=1500).map(|i| row(i, &format!("person {i}"), Some("1990-05-17"))).collect();
+        assert_eq!(import_into(&client, &schema, "imported", &cols, &rows).await.unwrap(), 1500);
+
+        // A duplicate key in the second batch rolls back the first one too
+        let mut bad: Vec<_> = (2001..=3200).map(|i| row(i, "x", None)).collect();
+        bad.push(row(1, "duplicate", None));
+        let err = import_into(&client, &schema, "imported", &cols, &bad).await.unwrap_err();
+        assert!(err.contains("Nothing was imported") && err.contains("duplicate key"), "{err}");
+        let total: i64 = client.query_one("SELECT count(*) FROM imported", &[]).await.unwrap().get(0);
+        assert_eq!(total, 1500);
+
+        let err = import_into(&client, &schema, "imported", &cols, &[row(9999, "y", Some("not a date"))]).await.unwrap_err();
+        assert!(err.contains("invalid input syntax for type date"), "{err}");
+        // The connection is usable after a failed import
+        let one: i32 = client.query_one("SELECT 1", &[]).await.unwrap().get(0);
+        assert_eq!(one, 1);
     }
 }

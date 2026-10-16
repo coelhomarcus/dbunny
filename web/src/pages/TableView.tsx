@@ -9,21 +9,27 @@ import type { ColumnInfo, QueryColumn, TableFilter } from "@/types";
 import { editorFor, toEditText, type CellEditor } from "../lib/cellEdit";
 import { isJsonType, shortType } from "../lib/columnMeta";
 import CellEditorDialog from "../components/table/CellEditorDialog";
-import { useTableData } from "../hooks/useTableData";
+import { useTableData, toSortKeys } from "../hooks/useTableData";
 import { useApi, useConnection } from "../contexts/useConnection";
 import { useTab } from "../contexts/workspace";
 import { useCellEditing } from "../hooks/useCellEditing";
 import { useRowSelection } from "../hooks/useRowSelection";
 import { useColumnResize } from "../hooks/useColumnResize";
+import { useColumnLayout } from "../hooks/useColumnLayout";
+import ColumnsMenu from "../components/table/ColumnsMenu";
+import TableTools from "../components/table/TableTools";
 import { usePendingChanges } from "../hooks/usePendingChanges";
 import { useDiscardGuard } from "../hooks/useDiscardGuard";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import FilterBar from "../components/table/FilterBar";
 import InsertRowDialog from "../components/table/InsertRowDialog";
+import ImportCsvDialog from "../components/table/ImportCsvDialog";
 import Button from "../components/ui/Button";
 import { ArrowUpRight, Ban, Braces, Copy, CopyPlus, Database, Filter, Sheet, TriangleAlert } from "lucide-react";
 import ContextMenu, { type ContextMenuItem } from "../components/ui/ContextMenu";
-import { rowsToInsertSql, rowsToJson, rowsToTsv, valueText } from "../lib/copyRows";
+import { pendingChangesToSql, rowsToInsertSql, rowsToJson, rowsToTsv, valueText } from "../lib/copyRows";
+import SqlViewer from "../components/SqlViewer";
+import Dialog from "../components/ui/Dialog";
 import Checkbox from "../components/Checkbox";
 import TableViewHeader from "../components/TableViewHeader";
 import SortableColumnHeader from "../components/SortableColumnHeader";
@@ -64,11 +70,22 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
 
   const tableData = useTableData(schema, table, initialFilters);
   const { data, columnInfos, loading, error, hasNoPk } = tableData;
-  const readOnly = useConnection().connectionInfo?.readOnly ?? false;
-  // Rows can't be changed without a primary key to find them, or on a read-only connection
+  const connectionReadOnly = useConnection().connectionInfo?.readOnly ?? false;
+  const { relationType } = tableData;
+  // A view's rows come from its query: nothing to insert into or edit here
+  const isView = relationType === "view" || relationType === "matview";
+  const readOnly = connectionReadOnly || isView;
+  // Rows can't be changed without a primary key to find them, or when nothing can be written
   const editLocked = hasNoPk || readOnly;
 
   const selection = useRowSelection(data?.rows.length ?? 0);
+  const { connectionInfo } = useConnection();
+  const layout = useColumnLayout(
+    connectionInfo && schema && table
+      ? `dbunny:columns:${connectionInfo.host}:${connectionInfo.port}/${connectionInfo.database}/${schema}.${table}`
+      : null,
+    data?.columns,
+  );
   const resize = useColumnResize();
 
   const pending = usePendingChanges({
@@ -93,6 +110,11 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   const [insert, setInsert] = useState<{ initialValues?: Record<string, string | null> } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; rowIndex: number; colName: string } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
+  const [reviewSql, setReviewSql] = useState<string | null>(null);
+  // Open with no text: choose a file; with text: rows pasted into the table
+  const [importOpen, setImportOpen] = useState<{ text?: string } | false>(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
+  const [sqlCopied, setSqlCopied] = useState(false);
 
   const editing = useCellEditing({
     data,
@@ -142,6 +164,21 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing, pending, isActive, editorDialogOpen]);
 
+  // Pasting rows (from a spreadsheet, say) onto the table offers to insert them
+  useEffect(() => {
+    if (!isActive || readOnly || importOpen !== false) return;
+    function onPaste(e: ClipboardEvent) {
+      if (editing.editingCell || (e.target as HTMLElement)?.closest("input, textarea, select, [contenteditable=true], [role=dialog]")) return;
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      // A single value isn't rows
+      if (!text.includes("\t") && !text.trim().includes("\n")) return;
+      e.preventDefault();
+      setImportOpen({ text });
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [isActive, readOnly, importOpen, editing.editingCell]);
+
   const fetchAllRows = useCallback(async () => {
     // An estimated total could miss rows, so count exactly before exporting everything
     const total = data?.totalRowsEstimated
@@ -149,11 +186,9 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       : (data?.totalRows ?? 0);
     const batchSize = 100;
     const pages = Math.ceil(total / batchSize);
-    const sortColumn = tableData.sorting[0]?.id;
-    const sortDirection = tableData.sorting[0]?.desc ? "desc" as const : "asc" as const;
     const params = {
-      pageSize: batchSize, sortColumn,
-      sortDirection: sortColumn ? sortDirection : undefined,
+      pageSize: batchSize,
+      sort: toSortKeys(tableData.sorting),
       filters: tableData.filters,
       filterMode: tableData.filterMode,
     };
@@ -182,12 +217,12 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
 
   const columns = useMemo<ColumnDef<unknown[], unknown>[]>(() => {
     if (!data?.columns) return [];
-    return data.columns.map((col: QueryColumn) => ({
-      id: col.name,
-      header: col.name,
+    return layout.visible.map(({ column }) => ({
+      id: column.name,
+      header: column.name,
       accessorFn: (row: unknown[]) => row,
     }));
-  }, [data?.columns]);
+  }, [data?.columns, layout.visible]);
 
   const reactTable = useReactTable({
     data: data?.rows ?? [],
@@ -197,6 +232,11 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
     getCoreRowModel: getCoreRowModel(),
     manualSorting: true,
     manualPagination: true,
+    // Shift+click adds a column to the sort instead of replacing it
+    enableMultiSort: true,
+    // Ascending first for every type (otherwise it's guessed from the first row)
+    sortDescFirst: false,
+    isMultiSortEvent: (e) => (e as MouseEvent).shiftKey,
   });
 
   /** The row as shown on screen, pending edits included. */
@@ -282,12 +322,9 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       <TableViewHeader
         schema={schema!}
         table={table!}
-        totalRows={data?.totalRows}
-        totalRowsEstimated={data?.totalRowsEstimated}
-        counting={tableData.counting}
-        onCountExactly={tableData.countExactly}
+        relationType={relationType}
         hasNoPk={hasNoPk}
-        readOnly={readOnly}
+        readOnly={connectionReadOnly}
         selectedCount={selection.selectedRows.size}
         deleting={pending.deleting}
         onDelete={pending.handleDelete}
@@ -300,19 +337,14 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
           pending.discardChanges();
           editing.cancelEdit();
         }}
-        refreshing={tableData.refreshing}
-        loading={loading}
-        spinKey={tableData.spinKey}
-        onRefresh={guard(tableData.refresh)}
-        hasCustomWidths={resize.hasCustomWidths}
-        onResetWidths={resize.resetWidths}
+        onReviewSql={() => {
+          setSqlCopied(false);
+          setReviewSql(pendingChangesToSql(schema!, table!, pending.changedRows()));
+        }}
         onInsertRow={guard(() => setInsert({}))}
         filterCount={tableData.filters.length}
         filtersOpen={filtersOpen}
         onToggleFilters={() => setFiltersOpen((open) => !open)}
-        columns={data?.columns}
-        rows={data?.rows}
-        onFetchAllRows={fetchAllRows}
       />
 
       {filtersOpen && columnInfos.length > 0 && (
@@ -325,6 +357,15 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       )}
 
       {error && <div className="px-4 py-3 text-destructive-foreground text-sm border-b border-border bg-destructive/5">{error}</div>}
+      {importNotice && (
+        <button
+          type="button"
+          onClick={() => setImportNotice(null)}
+          className="px-4 py-2 text-left text-[13px] text-success-foreground border-b border-border bg-success/5 cursor-pointer"
+        >
+          {importNotice}
+        </button>
+      )}
 
       {loading && !data && <TableSkeleton columns={6} rows={14} />}
 
@@ -339,18 +380,18 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                 borderSpacing: 0,
                 minWidth:
                   40 +
-                  data.columns.reduce(
-                    (sum, col) => sum + resize.getColWidth(col.name),
+                  layout.visible.reduce(
+                    (sum, { column }) => sum + resize.getColWidth(column.name),
                     0,
                   ),
               }}
             >
               <colgroup>
                 <col style={{ width: 40 }} />
-                {data.columns.map((col) => (
+                {layout.visible.map(({ column }) => (
                   <col
-                    key={col.name}
-                    style={{ width: resize.getColWidth(col.name) }}
+                    key={column.name}
+                    style={{ width: resize.getColWidth(column.name) }}
                   />
                 ))}
               </colgroup>
@@ -374,6 +415,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                         id={header.id}
                         columnInfo={columnInfos.find((c) => c.name === header.id)}
                         sorted={header.column.getIsSorted()}
+                        sortIndex={tableData.sorting.length > 1 ? header.column.getSortIndex() : -1}
                         onToggleSort={header.column.getToggleSortingHandler()!}
                         onResizeStart={(e) => resize.onResizeStart(e, header.id)}
                       />
@@ -405,7 +447,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                           onChange={() => selection.toggleSelectRow(rowIndex)}
                         />
                       </td>
-                      {data.columns.map((col, colIdx) => {
+                      {layout.visible.map(({ column: col, index: colIdx }) => {
                         const originalValue = row[colIdx];
                         const columnInfo = columnInfos.find((c) => c.name === col.name);
                         const link = foreignKeyLink(columnInfo, row, data.columns);
@@ -479,11 +521,73 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
             pageSize={tableData.pageSize}
             pageSizeOptions={tableData.pageSizeOptions}
             onPageSizeChange={guard(tableData.setPageSize)}
+            start={
+              <TableTools
+                schema={schema!}
+                table={table!}
+                totalRows={data.totalRows}
+                totalRowsEstimated={data.totalRowsEstimated}
+                counting={tableData.counting}
+                onCountExactly={tableData.countExactly}
+                refreshing={tableData.refreshing}
+                loading={loading}
+                spinKey={tableData.spinKey}
+                onRefresh={guard(tableData.refresh)}
+                columnsMenu={<ColumnsMenu layout={layout} />}
+                readOnly={readOnly}
+                onImportCsv={guard(() => setImportOpen({}))}
+                hasCustomWidths={resize.hasCustomWidths}
+                onResetWidths={resize.resetWidths}
+                columns={data.columns}
+                rows={data.rows}
+                onFetchAllRows={fetchAllRows}
+              />
+            }
           />
         </div>
       )}
 
       <ContextMenu position={menu} items={menuItems} onClose={closeMenu} />
+
+      <Dialog
+        open={reviewSql !== null}
+        onClose={() => setReviewSql(null)}
+        className="max-w-2xl"
+        title="Pending changes as SQL"
+        description="What saving will run. Values are sent as parameters; this text is for reviewing or reusing."
+        footer={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mr-auto"
+              onClick={async () => {
+                await navigator.clipboard.writeText(reviewSql ?? "");
+                setSqlCopied(true);
+              }}
+            >
+              {sqlCopied ? "Copied" : "Copy SQL"}
+            </Button>
+            <Button variant="neutral" size="sm" onClick={() => setReviewSql(null)}>
+              Close
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setReviewSql(null);
+                pending.handleSave();
+              }}
+            >
+              Save changes
+            </Button>
+          </>
+        }
+      >
+        <div className="h-64 overflow-hidden rounded-lg border border-border">
+          <SqlViewer value={reviewSql ?? ""} />
+        </div>
+      </Dialog>
 
       <CellEditorDialog
         open={editorDialogOpen}
@@ -495,6 +599,23 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         nullable={editingColumn?.isNullable ?? true}
         onApply={editing.commitEdit}
         onCancel={editing.cancelEdit}
+      />
+
+      <ImportCsvDialog
+        open={importOpen !== false}
+        // Remounted for each paste, so it starts from the new data
+        key={importOpen ? importOpen.text ?? "file" : "closed"}
+        initialText={importOpen ? importOpen.text : undefined}
+        schema={schema!}
+        table={table!}
+        columns={columnInfos}
+        onClose={() => setImportOpen(false)}
+        onImport={async (columns, rows) => {
+          const count = await api.importRows(schema!, table!, columns, rows);
+          setImportNotice(`Imported ${count.toLocaleString()} row${count === 1 ? "" : "s"}`);
+          await tableData.refresh();
+          return count;
+        }}
       />
 
       <InsertRowDialog

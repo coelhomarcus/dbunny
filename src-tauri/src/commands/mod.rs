@@ -11,3 +11,7 @@ pub mod tableedit;
 pub mod structure;
 pub mod editor;
 pub mod ssh;
+pub mod objects;
+pub mod activity;
+pub mod alter;
+pub mod roles;

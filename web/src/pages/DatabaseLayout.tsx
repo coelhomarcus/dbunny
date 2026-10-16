@@ -3,21 +3,20 @@ import { useConnection } from "../contexts/useConnection";
 import { useWorkspace } from "../contexts/workspace";
 import { useEffect, useState } from "react";
 import SchemaTree from "../components/SchemaTree";
-import Tooltip from "../components/Tooltip";
-import Button from "../components/ui/Button";
 import StatusBar from "../components/layout/StatusBar";
-import { HeaderTitle } from "../components/layout/PageHeader";
+import DatabaseSwitcher from "../components/layout/DatabaseSwitcher";
 import { cn } from "../lib/cn";
-import { Terminal, Folder } from "lucide-react";
-import type { SchemaInfo } from "@/types";
+import { Terminal, Activity, Users, GitCommitVertical } from "lucide-react";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
+import { RightPanelContext } from "../contexts/rightPanel";
 
 export default function DatabaseLayout() {
-  const { isConnected, connectionInfo, savedConnectionName, disconnect, api } = useConnection();
+  const { isConnected, connectionInfo, disconnect, api } = useConnection();
   const navigate = useNavigate();
   const [revealed, setRevealed] = useState(false);
-  const { sidebarOpen: sidebarExpanded, setSidebarOpen: setSidebarExpanded } = useWorkspace();
-  const [schemas, setSchemas] = useState<SchemaInfo[]>([]);
-  const [schemaToExpand, setSchemaToExpand] = useState<string | null>(null);
+  const { sidebarOpen } = useWorkspace();
+  const [rightPanel, setRightPanel] = useState<HTMLElement | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   useEffect(() => {
     if (!isConnected) {
@@ -25,17 +24,17 @@ export default function DatabaseLayout() {
     }
   }, [isConnected, navigate]);
 
-  useEffect(() => {
-    if (isConnected) {
-      api.getSchemas().then(setSchemas).catch(() => {});
-    }
-  }, [isConnected, api]);
-
   if (!isConnected) return null;
 
-  async function handleDisconnect() {
+  async function disconnectNow() {
     await disconnect();
     navigate("/");
+  }
+
+  // Disconnecting drops an open transaction, so that asks first
+  async function handleDisconnect() {
+    if (await api.transactionOpen().catch(() => false)) setConfirmDisconnect(true);
+    else await disconnectNow();
   }
 
   const navItemClass = ({ isActive }: { isActive: boolean }) =>
@@ -46,25 +45,24 @@ export default function DatabaseLayout() {
 
   return (
     <div className="h-full flex flex-col text-foreground">
-      <div className="flex flex-1 min-h-0">
+      {/* Each part is a card of its own, with a small gap between them */}
+      <div className="flex flex-1 min-h-0 gap-1.5">
+        {/* Open or hidden, nothing in between; hidden, it also gives back the gap */}
         <aside
+          inert={!sidebarOpen}
           className={cn(
-            // Same colour as the title bar above it: together they form the window frame
-            "relative shrink-0 select-none transition-[width] duration-300 ease-in-out overflow-hidden",
-            sidebarExpanded ? "w-64" : "w-12",
+            "relative shrink-0 select-none rounded-lg bg-sidebar transition-[width,margin] duration-300 ease-in-out overflow-hidden",
+            sidebarOpen ? "w-64 border border-border" : "-mr-1.5 w-0",
           )}
         >
-          {/* Expanded view */}
           <div
             className={cn(
               "absolute inset-y-0 left-0 w-64 flex flex-col transition-opacity duration-200",
-              sidebarExpanded ? "opacity-100 delay-75" : "opacity-0 pointer-events-none",
+              sidebarOpen ? "opacity-100 delay-75" : "opacity-0",
             )}
           >
-            <div className="h-10 shrink-0 flex items-center pl-3 pr-2">
-              <HeaderTitle label="Connection" className="flex-1">
-                {savedConnectionName || connectionInfo?.database || "Connection"}
-              </HeaderTitle>
+            <div className="shrink-0 flex items-center px-2 pt-2 pb-1">
+              <DatabaseSwitcher />
             </div>
 
             <nav className="px-2 pb-2">
@@ -72,64 +70,31 @@ export default function DatabaseLayout() {
                 <Terminal size={15} className="shrink-0" />
                 Query
               </NavLink>
+              <NavLink to="/db/activity" className={navItemClass}>
+                <Activity size={15} className="shrink-0" />
+                Activity
+              </NavLink>
+              <NavLink to="/db/roles" className={navItemClass}>
+                <Users size={15} className="shrink-0" />
+                Roles
+              </NavLink>
             </nav>
 
-            <div className="px-3 pt-1 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">
-              Explorer
-            </div>
-            <div className="flex-1 overflow-y-auto pb-2">
-              <SchemaTree schemaToExpand={schemaToExpand} onSchemaExpanded={() => setSchemaToExpand(null)} />
+            {/* The explorer has its own header, filter and scrolling list */}
+            <div className="min-h-0 flex-1">
+              <SchemaTree />
             </div>
           </div>
 
-          {/* Collapsed view: a narrow icon rail */}
-          <div
-            className={cn(
-              "absolute inset-0 flex flex-col items-center gap-1 transition-opacity duration-200",
-              sidebarExpanded ? "opacity-0 pointer-events-none" : "opacity-100 delay-75",
-            )}
-          >
-            <div className="pt-2" />
-            <Tooltip label="Query">
-              <NavLink
-                to="/db/query"
-                className={({ isActive }) =>
-                  cn(
-                    "size-7 flex items-center justify-center rounded-lg transition-colors",
-                    isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )
-                }
-              >
-                <Terminal size={15} />
-              </NavLink>
-            </Tooltip>
-            {schemas.length > 0 && (
-              <>
-                <div className="w-5 border-t border-border my-0.5" />
-                {schemas.map((s) => (
-                  <Tooltip key={s.name} label={s.name}>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-warning-foreground/80 hover:text-warning-foreground"
-                      aria-label={s.name}
-                      onClick={() => {
-                        setSchemaToExpand(s.name);
-                        setSidebarExpanded(true);
-                      }}
-                    >
-                      <Folder />
-                    </Button>
-                  </Tooltip>
-                ))}
-              </>
-            )}
-          </div>
         </aside>
 
-        <main className="flex-1 min-w-0 bg-card rounded-tl-[10px] border-l border-t border-frame-line overflow-hidden">
-          <Outlet />
+        <main className="flex-1 min-w-0 rounded-lg border border-border bg-card overflow-hidden">
+          <RightPanelContext.Provider value={rightPanel}>
+            <Outlet />
+          </RightPanelContext.Provider>
         </main>
+        {/* Filled by the page (e.g. the query library); hidden while empty */}
+        <div ref={setRightPanel} className="flex w-80 shrink-0 overflow-hidden rounded-lg border border-border bg-card empty:hidden" />
       </div>
 
       <StatusBar
@@ -137,6 +102,19 @@ export default function DatabaseLayout() {
         revealed={revealed}
         onToggleReveal={() => setRevealed((v) => !v)}
         onDisconnect={handleDisconnect}
+      />
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => {
+          setConfirmDisconnect(false);
+          disconnectNow();
+        }}
+        icon={<GitCommitVertical />}
+        tone="destructive"
+        title="Disconnect with a transaction open?"
+        description="Its changes haven't been committed, so disconnecting rolls them back."
+        confirmLabel="Roll back and disconnect"
       />
     </div>
   );

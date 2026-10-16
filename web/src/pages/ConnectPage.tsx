@@ -4,10 +4,12 @@ import { getVersion } from "@tauri-apps/api/app";
 import { ArrowRight, Check, Database, Eye, EyeOff, FolderOpen, KeyRound, Link, Loader, PlugZap, ShieldAlert, TriangleAlert, X } from "lucide-react";
 import { useConnection } from "../contexts/useConnection";
 import { useWorkspace } from "../contexts/workspace";
-import { type ConnectionFields, parseConnectionUrl, buildConnectionUrl } from "../lib/connectionUrl";
+import { type ConnectionFields, parseConnectionUrl, buildConnectionUrl, tlsFieldsOf, tlsSettingsOf, isSocketHost } from "../lib/connectionUrl";
+import { isWindows } from "../lib/platform";
+import { CONNECTION_ICONS } from "../lib/connectionIcons";
 import { api } from "../lib/api";
 import { cn } from "../lib/cn";
-import type { SavedConnection, SshAuthMethod, SshConfig, SshHostKeyProblem } from "@/types";
+import type { SavedConnection, SshAuthMethod, SshConfig, SshHostKeyProblem, SslMode } from "@/types";
 import { hostKeyProblem } from "../lib/sshHostKey";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -22,6 +24,7 @@ import Badge from "../components/ui/Badge";
 import Dialog from "../components/ui/Dialog";
 import Popover from "../components/ui/Popover";
 import ColorPicker from "../components/ui/ColorPicker";
+import Tooltip from "../components/Tooltip";
 
 const DEFAULT_COLOR = "#3b82f6";
 // Colour tags to tell environments apart (prod, staging, local...)
@@ -35,7 +38,19 @@ function toSshFields(ssh: SshConfig): SshFields {
   return { ...ssh, port: ssh.port && ssh.port !== 22 ? String(ssh.port) : "" };
 }
 
-const EMPTY_FIELDS: ConnectionFields = { host: "", port: "", database: "", user: "", password: "", ssl: false, readOnly: false };
+const EMPTY_FIELDS: ConnectionFields = {
+  host: "",
+  port: "",
+  database: "",
+  user: "",
+  password: "",
+  ssl: false,
+  sslMode: "require",
+  sslRootCert: "",
+  sslCert: "",
+  sslKey: "",
+  readOnly: false,
+};
 
 type TestState =
   | { status: "idle" }
@@ -88,6 +103,8 @@ export default function ConnectPage() {
   const [fields, setFields] = useState<ConnectionFields>(EMPTY_FIELDS);
   const [connectionName, setConnectionName] = useState("");
   const [connectionColor, setConnectionColor] = useState(DEFAULT_COLOR);
+  // "" is the default icon
+  const [connectionIcon, setConnectionIcon] = useState("");
   const [showImport, setShowImport] = useState(false);
   const [importUrl, setImportUrl] = useState("");
   const [importError, setImportError] = useState(false);
@@ -129,7 +146,7 @@ export default function ConnectPage() {
 
   /** The SSH settings to connect with, or null for a direct connection. */
   function sshConfig(): SshConfig | null {
-    if (!sshEnabled) return null;
+    if (!sshEnabled || isSocketHost(fields.host)) return null;
     return { ...ssh, host: ssh.host.trim(), user: ssh.user.trim(), port: parseInt(ssh.port || "22", 10) };
   }
 
@@ -151,6 +168,12 @@ export default function ConnectPage() {
         },
       });
     }
+  }
+
+  async function browseCertificate(key: "sslRootCert" | "sslCert" | "sslKey") {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const path = await open({ multiple: false, title: "Choose a certificate or key file" });
+    if (typeof path === "string") updateField(key, path);
   }
 
   async function browseKey() {
@@ -191,6 +214,7 @@ export default function ConnectPage() {
     setSelectedId(conn.id);
     setConnectionName(conn.name);
     setConnectionColor(conn.color || DEFAULT_COLOR);
+    setConnectionIcon(conn.icon ?? "");
     setFields({
       host: conn.host,
       port: conn.port.toString(),
@@ -199,6 +223,7 @@ export default function ConnectPage() {
       password: conn.password,
       ssl: conn.ssl,
       readOnly: conn.readOnly ?? false,
+      ...tlsFieldsOf(conn.tls),
     });
     setSshEnabled(Boolean(conn.ssh));
     setSsh(conn.ssh ? toSshFields(conn.ssh) : EMPTY_SSH);
@@ -216,9 +241,10 @@ export default function ConnectPage() {
         password: conn.password,
         ssl: conn.ssl,
         readOnly: conn.readOnly ?? false,
+        ...tlsFieldsOf(conn.tls),
       });
       await withHostKeyCheck(async (trustHostKey) => {
-        await connect(url, { name: conn.name, color: conn.color }, { ssh: conn.ssh, trustHostKey });
+        await connect(url, { name: conn.name, color: conn.color, icon: conn.icon }, { ssh: conn.ssh, trustHostKey });
         navigate("/db/query");
       });
     } catch {
@@ -230,6 +256,7 @@ export default function ConnectPage() {
     setSelectedId(null);
     setConnectionName("");
     setConnectionColor(DEFAULT_COLOR);
+    setConnectionIcon("");
     setFields(EMPTY_FIELDS);
     setSshEnabled(false);
     setSsh(EMPTY_SSH);
@@ -252,8 +279,10 @@ export default function ConnectPage() {
           password: fields.password,
           ssl: fields.ssl,
           readOnly: fields.readOnly,
+          tls: tlsSettingsOf(fields),
           ssh: sshConfig(),
           color: connectionColor,
+          icon: connectionIcon,
         }),
         new Promise((r) => setTimeout(r, 400)),
       ]);
@@ -303,7 +332,7 @@ export default function ConnectPage() {
       await withHostKeyCheck(async (trustHostKey) => {
         await connect(
           buildConnectionUrl(fields),
-          savedName ? { name: savedName, color: connectionColor } : undefined,
+          savedName ? { name: savedName, color: connectionColor, icon: connectionIcon } : undefined,
           { ssh: sshConfig(), trustHostKey },
         );
         navigate("/db/query");
@@ -315,6 +344,7 @@ export default function ConnectPage() {
 
   const sshReady =
     !sshEnabled ||
+    isSocketHost(fields.host) ||
     Boolean(ssh.host.trim() && ssh.user.trim() && (ssh.authMethod !== "key" || ssh.keyPath.trim()));
   const canConnect = Boolean(fields.host.trim() && fields.database.trim()) && sshReady;
   const canSave = canConnect && Boolean(connectionName.trim());
@@ -323,7 +353,7 @@ export default function ConnectPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 gap-1.5">
         <ConnectionSidebar
           connections={savedConnections}
           selectedId={selectedId}
@@ -334,7 +364,7 @@ export default function ConnectPage() {
           onNew={handleNewConnection}
         />
 
-        <main className="flex min-w-0 flex-1 flex-col bg-card rounded-tl-[10px] border-l border-t border-frame-line overflow-hidden">
+        <main className="flex min-w-0 flex-1 flex-col rounded-lg border border-border bg-card overflow-hidden">
           <PageHeader>
             <HeaderTitle label={editing ? "Saved connection" : "Connection"} icon={<Database />}>
               {editing ? connectionName || "Unnamed" : "New connection"}
@@ -374,7 +404,7 @@ export default function ConnectPage() {
                       onPaste={(e) => {
                         if (importFromUrl(e.clipboardData.getData("text"))) e.preventDefault();
                       }}
-                      placeholder="localhost"
+                      placeholder={isWindows ? "localhost" : "localhost, or a socket folder like /tmp"}
                       spellCheck={false}
                     />
                   </Field>
@@ -432,13 +462,68 @@ export default function ConnectPage() {
                     </div>
                   </Field>
                 </div>
-                <div className="flex items-center justify-between gap-4">
-                  <label htmlFor="conn-ssl" className="select-none">
-                    <span className="block text-[13px] font-medium">Require SSL</span>
-                    <span className="block text-xs text-muted-foreground">Encrypt the connection (sslmode=require)</span>
-                  </label>
-                  <Switch id="conn-ssl" checked={fields.ssl} onChange={(v) => updateField("ssl", v)} />
-                </div>
+                {isSocketHost(fields.host) && (
+                  <p className="-mt-1 text-xs text-muted-foreground">
+                    Connects through the Unix socket in this folder, on this computer. SSL and SSH tunnels don't apply.
+                  </p>
+                )}
+                {!isSocketHost(fields.host) && (
+                  <div className="flex items-center justify-between gap-4">
+                    <label htmlFor="conn-ssl" className="select-none">
+                      <span className="block text-[13px] font-medium">Require SSL</span>
+                      <span className="block text-xs text-muted-foreground">Encrypt the connection</span>
+                    </label>
+                    <Switch id="conn-ssl" checked={fields.ssl} onChange={(v) => updateField("ssl", v)} />
+                  </div>
+                )}
+                {fields.ssl && !isSocketHost(fields.host) && (
+                  <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[13px] font-medium">Check the server</span>
+                      <SegmentedTabs<SslMode>
+                        value={fields.sslMode}
+                        onChange={(v) => updateField("sslMode", v)}
+                        options={[
+                          { value: "require", label: "Encrypt only" },
+                          { value: "verify-ca", label: "Certificate" },
+                          { value: "verify-full", label: "Certificate + name" },
+                        ]}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {fields.sslMode === "require"
+                          ? fields.sslRootCert.trim()
+                            ? "With a CA certificate the server's certificate is checked against it."
+                            : "The server's certificate isn't checked (common for managed databases)."
+                          : fields.sslMode === "verify-ca"
+                            ? "The server's certificate must be signed by a trusted CA."
+                            : "The certificate must be trusted and issued for this host name."}
+                      </span>
+                    </div>
+                    {(
+                      [
+                        ["sslRootCert", "CA certificate", "Optional: the CA that signed the server's certificate"],
+                        ["sslCert", "Client certificate", "Optional: for servers that log in by certificate"],
+                        ["sslKey", "Client key", "Unencrypted PKCS#8 PEM"],
+                      ] as const
+                    ).map(([key, label, hint]) => (
+                      <Field key={key} label={label} htmlFor={`conn-${key}`}>
+                        <div className="flex gap-2">
+                          <Input
+                            id={`conn-${key}`}
+                            value={fields[key]}
+                            onChange={(e) => updateField(key, e.target.value)}
+                            placeholder={hint}
+                            spellCheck={false}
+                            className="font-mono text-xs"
+                          />
+                          <Button variant="outline" onClick={() => browseCertificate(key)} aria-label={`Choose the ${label.toLowerCase()} file`}>
+                            <FolderOpen />
+                          </Button>
+                        </div>
+                      </Field>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-4">
                   <label htmlFor="conn-readonly" className="select-none">
                     <span className="block text-[13px] font-medium">Read-only</span>
@@ -448,56 +533,57 @@ export default function ConnectPage() {
                 </div>
               </Section>
 
-              <Section
-                title="SSH tunnel"
-                description={
-                  sshEnabled
-                    ? "Host and port above are the database as seen from the SSH server."
-                    : "Reach the database through an SSH server."
-                }
-                action={<Switch id="conn-ssh" checked={sshEnabled} onChange={(v) => { setSshEnabled(v); setTest({ status: "idle" }); }} aria-label="Connect through SSH" />}
-              >
-                {sshEnabled && (
-                  <>
-                    <div className="grid grid-cols-[1fr_6.5rem] gap-3">
-                      <Field label="SSH host" htmlFor="ssh-host">
-                        <Input id="ssh-host" value={ssh.host} onChange={(e) => updateSsh("host", e.target.value)} placeholder="bastion.example.com" spellCheck={false} />
+              {!isSocketHost(fields.host) && (
+                <Section
+                  title="SSH tunnel"
+                  description={
+                    sshEnabled
+                      ? "Host and port above are the database as seen from the SSH server."
+                      : "Reach the database through an SSH server."
+                  }
+                  action={<Switch id="conn-ssh" checked={sshEnabled} onChange={(v) => { setSshEnabled(v); setTest({ status: "idle" }); }} aria-label="Connect through SSH" />}
+                >
+                  {sshEnabled && (
+                    <>
+                      <div className="grid grid-cols-[1fr_6.5rem] gap-3">
+                        <Field label="SSH host" htmlFor="ssh-host">
+                          <Input id="ssh-host" value={ssh.host} onChange={(e) => updateSsh("host", e.target.value)} placeholder="bastion.example.com" spellCheck={false} />
+                        </Field>
+                        <Field label="Port" htmlFor="ssh-port">
+                          <Input id="ssh-port" inputMode="numeric" value={ssh.port} onChange={(e) => updateSsh("port", e.target.value)} placeholder="22" className="font-mono" />
+                        </Field>
+                      </div>
+                      <Field label="SSH user" htmlFor="ssh-user">
+                        <Input id="ssh-user" value={ssh.user} onChange={(e) => updateSsh("user", e.target.value)} placeholder="ubuntu" spellCheck={false} autoComplete="off" />
                       </Field>
-                      <Field label="Port" htmlFor="ssh-port">
-                        <Input id="ssh-port" inputMode="numeric" value={ssh.port} onChange={(e) => updateSsh("port", e.target.value)} placeholder="22" className="font-mono" />
-                      </Field>
-                    </div>
-                    <Field label="SSH user" htmlFor="ssh-user">
-                      <Input id="ssh-user" value={ssh.user} onChange={(e) => updateSsh("user", e.target.value)} placeholder="ubuntu" spellCheck={false} autoComplete="off" />
-                    </Field>
-                    <div className="flex flex-col gap-1.5">
-                      <span className="text-[13px] font-medium">Log in with</span>
-                      <SegmentedTabs<SshAuthMethod>
-                        value={ssh.authMethod}
-                        onChange={(v) => updateSsh("authMethod", v)}
-                        options={[
-                          { value: "password", label: "Password" },
-                          { value: "key", label: "Private key" },
-                          { value: "agent", label: "SSH agent" },
-                        ]}
-                      />
-                    </div>
-                    {ssh.authMethod === "password" && (
-                      <Field label="SSH password" htmlFor="ssh-password">
-                        <div className="relative">
-                          <Input
-                            id="ssh-password"
-                            type={showSshSecret ? "text" : "password"}
-                            value={ssh.password}
-                            onChange={(e) => updateSsh("password", e.target.value)}
-                            className="pr-9"
-                            autoComplete="off"
-                          />
-                          <Button variant="ghost-muted" size="icon-xs" className="absolute right-1 top-1/2 -translate-y-1/2" aria-label={showSshSecret ? "Hide password" : "Show password"} onClick={() => setShowSshSecret((v) => !v)}>
-                            {showSshSecret ? <EyeOff /> : <Eye />}
-                          </Button>
-                        </div>
-                      </Field>
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-[13px] font-medium">Log in with</span>
+                        <SegmentedTabs<SshAuthMethod>
+                          value={ssh.authMethod}
+                          onChange={(v) => updateSsh("authMethod", v)}
+                          options={[
+                            { value: "password", label: "Password" },
+                            { value: "key", label: "Private key" },
+                            { value: "agent", label: "SSH agent" },
+                          ]}
+                        />
+                      </div>
+                      {ssh.authMethod === "password" && (
+                        <Field label="SSH password" htmlFor="ssh-password">
+                          <div className="relative">
+                            <Input
+                              id="ssh-password"
+                              type={showSshSecret ? "text" : "password"}
+                              value={ssh.password}
+                              onChange={(e) => updateSsh("password", e.target.value)}
+                              className="pr-9"
+                              autoComplete="off"
+                            />
+                            <Button variant="ghost-muted" size="icon-xs" className="absolute right-1 top-1/2 -translate-y-1/2" aria-label={showSshSecret ? "Hide password" : "Show password"} onClick={() => setShowSshSecret((v) => !v)}>
+                              {showSshSecret ? <EyeOff /> : <Eye />}
+                            </Button>
+                          </div>
+                        </Field>
                     )}
                     {ssh.authMethod === "key" && (
                       <>
@@ -524,6 +610,7 @@ export default function ConnectPage() {
                   </>
                 )}
               </Section>
+              )}
 
               <Section title="Save as" description="Optional. Keeps the connection in the sidebar for one-click access.">
                 <Field label="Name" htmlFor="conn-name">
@@ -572,6 +659,41 @@ export default function ConnectPage() {
                     <Popover open={colorPickerOpen} onClose={() => setColorPickerOpen(false)} anchorRef={customColorRef} className="p-3">
                       <ColorPicker value={connectionColor} onChange={setConnectionColor} />
                     </Popover>
+                  </div>
+                </Field>
+                <Field label="Icon" hint="Shown in the sidebar and on the tab, in the colour above.">
+                  <div role="radiogroup" aria-label="Icon" className="flex flex-wrap gap-1">
+                    {CONNECTION_ICONS.map(({ id, label, Icon }, i) => {
+                      // The first one is the default, stored as ""
+                      const value = i === 0 ? "" : id;
+                      const selected = connectionIcon === value;
+                      return (
+                        <Tooltip key={id} label={label} side="top">
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-label={label}
+                            aria-checked={selected}
+                            onClick={() => setConnectionIcon(value)}
+                            className={cn(
+                              "flex size-8 items-center justify-center rounded-lg text-muted-foreground cursor-pointer outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+                              selected && "hover:bg-transparent",
+                            )}
+                            style={
+                              selected
+                                ? {
+                                    color: connectionColor,
+                                    backgroundColor: `color-mix(in srgb, ${connectionColor} 16%, transparent)`,
+                                    boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${connectionColor} 40%, transparent)`,
+                                  }
+                                : undefined
+                            }
+                          >
+                            <Icon size={15} />
+                          </button>
+                        </Tooltip>
+                      );
+                    })}
                   </div>
                 </Field>
               </Section>

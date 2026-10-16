@@ -1,11 +1,29 @@
-export interface SchemaInfo {
-  name: string;
-}
-
 export interface TableInfo {
   name: string;
   schema: string;
-  type: "table" | "view";
+  type: "table" | "view" | "matview";
+}
+
+/** A sequence or type listed in the explorer. */
+export interface SchemaObject {
+  name: string;
+  /** For types: "enum", "domain", "composite" or "range". */
+  kind: string;
+}
+
+export interface ExtensionInfo {
+  name: string;
+  version: string;
+  schema: string;
+  comment: string | null;
+}
+
+/** Facts and DDL of a sequence or type. */
+export interface ObjectDefinition {
+  kind: string;
+  facts: [string, string][];
+  comment: string | null;
+  ddl: string;
 }
 
 /** A foreign key: `columns` of this table point at `refColumns` of `schema.table`. */
@@ -82,4 +100,74 @@ export interface CompletionSchema {
   currentSchema: string | null;
   relations: CompletionRelation[];
   functions: FunctionInfo[];
+}
+
+/** One server session from pg_stat_activity. */
+export interface ServerSession {
+  pid: number;
+  user: string | null;
+  database: string | null;
+  application: string | null;
+  client: string | null;
+  state: string | null;
+  waitingFor: string | null;
+  querySeconds: number | null;
+  transactionSeconds: number | null;
+  query: string | null;
+  blockedBy: number[];
+  /** The connection DBunny used to read this list. */
+  isSelf: boolean;
+}
+
+export interface ServerActivity {
+  sessions: ServerSession[];
+  /** Without pg_read_all_stats, other roles' queries are hidden by the server. */
+  limitedView: boolean;
+}
+
+export interface RoleInfo {
+  name: string;
+  canLogin: boolean;
+  superuser: boolean;
+  createDb: boolean;
+  createRole: boolean;
+  replication: boolean;
+  bypassRls: boolean;
+  /** -1 when unlimited. */
+  connectionLimit: number;
+  validUntil: string | null;
+  memberOf: string[];
+  isCurrent: boolean;
+  /** Built in (pg_*). */
+  isBuiltin: boolean;
+}
+
+/** One object in the explorer. */
+export interface ExplorerObject {
+  name: string;
+  kind: "table" | "view" | "matview" | "sequence" | "function" | "procedure" | "type";
+  /** Arguments of a function, a type's kind (enum, domain...), or "partitioned" / "foreign" for those tables. */
+  detail: string;
+  /** A partitioned table's partitions. */
+  partitions?: ExplorerPartition[];
+}
+
+/** One partition, which may itself be partitioned. */
+export interface ExplorerPartition {
+  schema: string;
+  name: string;
+  /** The values it holds, e.g. "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')". */
+  bound: string;
+  partitions?: ExplorerPartition[];
+}
+
+export interface ExplorerSchema {
+  name: string;
+  objects: ExplorerObject[];
+}
+
+export interface ExplorerTree {
+  schemas: ExplorerSchema[];
+  /** First schema of the search path. */
+  defaultSchema: string | null;
 }

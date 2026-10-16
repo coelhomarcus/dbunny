@@ -43,22 +43,38 @@ export function usePendingChanges({
   const dirtyRowCount = Object.keys(pendingChanges).length;
   const hasPendingChanges = dirtyRowCount > 0;
 
+  /** Each changed row with the primary key that finds it, as saving sends them. */
+  const changedRows = useCallback(() => {
+    if (!data) return [];
+    return Object.entries(pendingChanges).map(([rowIdxStr, updates]) => {
+      const row = data.rows[parseInt(rowIdxStr)];
+      const key: Record<string, unknown> = {};
+      for (const pkCol of pkColumns) {
+        key[pkCol.name] = row[data.columns.findIndex((c) => c.name === pkCol.name)];
+      }
+      return { key, updates };
+    });
+  }, [data, pendingChanges, pkColumns]);
+
   const handleSave = useCallback(async () => {
     if (!data || !schema || !table || !hasPendingChanges) return;
     setSaving(true);
     setSaveError(null);
 
     try {
-      for (const [rowIdxStr, updates] of Object.entries(pendingChanges)) {
-        const rowIndex = parseInt(rowIdxStr);
-        const row = data.rows[rowIndex];
-        const primaryKey: Record<string, unknown> = {};
-        for (const pkCol of pkColumns) {
-          const colIdx = data.columns.findIndex((c) => c.name === pkCol.name);
-          primaryKey[pkCol.name] = row[colIdx];
-        }
-        await api.updateRow(schema, table, { primaryKey, updates });
-      }
+      // Sent together, in row order, so the server saves all of them or none
+      const changes = Object.entries(pendingChanges)
+        .sort(([a], [b]) => Number(a) - Number(b))
+        .map(([rowIdxStr, updates]) => {
+          const row = data.rows[Number(rowIdxStr)];
+          const primaryKey: Record<string, unknown> = {};
+          for (const pkCol of pkColumns) {
+            const colIdx = data.columns.findIndex((c) => c.name === pkCol.name);
+            primaryKey[pkCol.name] = row[colIdx];
+          }
+          return { primaryKey, updates };
+        });
+      await api.updateRows(schema, table, changes);
       const fresh = await fetchData(schema, table, page, pageSize, sorting, filters, filterMode);
       setData(fresh);
       setPendingChanges({});
@@ -112,6 +128,7 @@ export function usePendingChanges({
     deleting,
     handleSave,
     handleDelete,
+    changedRows,
     discardChanges,
   };
 }

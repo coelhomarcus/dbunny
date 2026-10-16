@@ -3,6 +3,7 @@ import { ArrowUpRight, Maximize2 } from "lucide-react";
 import type { CellEditor } from "../lib/cellEdit";
 import { toEditText } from "../lib/cellEdit";
 import ChoiceList from "./table/ChoiceList";
+import DateTimeEditor from "./table/DateTimeEditor";
 
 interface EditableCellProps {
   value: unknown;
@@ -100,6 +101,16 @@ export default function EditableCell({
           current={displayValue === null || displayValue === undefined ? null : toEditText(displayValue)}
           nullable={nullable}
           onPick={(value) => onCommit(value === null, value ?? "")}
+          onCancel={onCancel}
+        />
+      )}
+      {isEditing && editor.kind === "datetime" && (
+        <DateTimeEditor
+          anchorRef={cellRef}
+          mode={editor.mode}
+          value={displayValue}
+          nullable={nullable}
+          onCommit={onCommit}
           onCancel={onCancel}
         />
       )}

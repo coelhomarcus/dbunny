@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ConnectResponse,
   SshConfig,
-  SchemaInfo,
   TableInfo,
   FunctionInfo,
   FunctionDetail,
@@ -10,13 +9,28 @@ import type {
   CompletionSchema,
   FilterMode,
   TableFilter,
+  SortKey,
   QueryResult,
   TableDataResponse,
   SavedConnection,
   SavedConnectionInput,
   TableStructure,
+  StructureChange,
+  NewColumn,
   ExplainResult,
+  SchemaObject,
+  ExtensionInfo,
+  ObjectDefinition,
+  ServerActivity,
+  ExplorerTree,
+  DatabaseInfo,
+  RoleInfo,
 } from "@/types";
+
+/** Relation kinds as the explorer names them. */
+export type RelationKind = "table" | "view" | "matview";
+/** Every kind of relation that has rows, as the server reports it. */
+export type RelationType = "table" | "partitioned" | "foreign" | "view" | "matview";
 
 /** Calls that don't belong to a connection. */
 export const api = {
@@ -48,16 +62,81 @@ export const api = {
  */
 export function createSessionApi(sessionId: string | null) {
   return {
-    async getSchemas() {
-      return invoke<SchemaInfo[]>("get_schemas", { sessionId });
-    },
-
     async getTables(schema: string) {
       return invoke<TableInfo[]>("get_tables", { sessionId, schema });
     },
 
     async getViews(schema: string) {
       return invoke<TableInfo[]>("get_views", { sessionId, schema });
+    },
+
+    /** Every schema with its objects, for the explorer. */
+    async getExplorer() {
+      return invoke<ExplorerTree>("get_explorer", { sessionId });
+    },
+
+    async getMaterializedViews(schema: string) {
+      return invoke<TableInfo[]>("get_materialized_views", { sessionId, schema });
+    },
+
+    async getSequences(schema: string) {
+      return invoke<SchemaObject[]>("get_sequences", { sessionId, schema });
+    },
+
+    async getTypes(schema: string) {
+      return invoke<SchemaObject[]>("get_types", { sessionId, schema });
+    },
+
+    async getExtensions() {
+      return invoke<ExtensionInfo[]>("get_extensions", { sessionId });
+    },
+
+    /** Facts and DDL of a sequence or a type. */
+    async getObjectDefinition(schema: string, name: string, kind: "sequence" | "type") {
+      return invoke<ObjectDefinition>("get_object_definition", { sessionId, schema, name, kind });
+    },
+
+    async renameRelation(schema: string, name: string, kind: RelationKind, newName: string) {
+      return invoke<void>("rename_relation", { sessionId, schema, name, kind, newName });
+    },
+
+    async dropRelation(schema: string, name: string, kind: RelationKind, cascade: boolean) {
+      return invoke<void>("drop_relation", { sessionId, schema, name, kind, cascade });
+    },
+
+    async truncateTable(schema: string, name: string, restartIdentity: boolean, cascade: boolean) {
+      return invoke<void>("truncate_table", { sessionId, schema, name, restartIdentity, cascade });
+    },
+
+    async refreshMaterializedView(schema: string, name: string) {
+      return invoke<void>("refresh_materialized_view", { sessionId, schema, name });
+    },
+
+    /** Copies a table's structure (and optionally its rows) under a new name. */
+    async duplicateTable(schema: string, name: string, newName: string, withData: boolean) {
+      return invoke<void>("duplicate_table", { sessionId, schema, name, newName, withData });
+    },
+
+    async getRoles() {
+      return invoke<RoleInfo[]>("get_roles", { sessionId });
+    },
+
+    async getDatabases() {
+      return invoke<DatabaseInfo[]>("get_databases", { sessionId });
+    },
+
+    /** Opens another database of the same server as a new session, with the same settings. */
+    async connectDatabase(database: string) {
+      return invoke<ConnectResponse>("connect_database", { sessionId, database });
+    },
+
+    async getServerActivity(allDatabases: boolean) {
+      return invoke<ServerActivity>("get_server_activity", { sessionId, allDatabases });
+    },
+
+    /** Cancels a session's query, or with `terminate` ends the session. */
+    async signalBackend(pid: number, terminate: boolean) {
+      return invoke<boolean>("signal_backend", { sessionId, pid, terminate });
     },
 
     async getFunctions(schema: string) {
@@ -71,10 +150,50 @@ export function createSessionApi(sessionId: string | null) {
     async getColumns(schema: string, table: string) {
       return invoke<ColumnInfo[]>("get_columns", { sessionId, schema, table });
     },
+    async getRelationKind(schema: string, name: string) {
+      return invoke<RelationType | null>("get_relation_kind", { sessionId, schema, name });
+    },
 
     /** Indexes, constraints, keys, triggers, sizes and DDL of a table or view. */
     async getTableStructure(schema: string, table: string) {
       return invoke<TableStructure>("get_table_structure", { sessionId, schema, table });
+    },
+
+    /** The SQL a structure change would run. */
+    async createSchema(name: string) {
+      return invoke<void>("create_schema", { sessionId, name });
+    },
+
+    async renameSchema(name: string, newName: string) {
+      return invoke<void>("rename_schema", { sessionId, name, newName });
+    },
+
+    async dropSchema(name: string, cascade: boolean) {
+      return invoke<void>("drop_schema", { sessionId, name, cascade });
+    },
+
+    async createDatabase(name: string) {
+      return invoke<void>("create_database", { sessionId, name });
+    },
+
+    async dropDatabase(name: string, force: boolean) {
+      return invoke<void>("drop_database", { sessionId, name, force });
+    },
+
+    async previewStructureChange(schema: string, table: string, change: StructureChange) {
+      return invoke<string>("preview_structure_change", { schema, table, change });
+    },
+
+    async applyStructureChange(schema: string, table: string, change: StructureChange) {
+      return invoke<void>("apply_structure_change", { sessionId, schema, table, change });
+    },
+
+    async previewCreateTable(schema: string, table: string, columns: NewColumn[]) {
+      return invoke<string>("preview_create_table", { schema, table, columns });
+    },
+
+    async createTable(schema: string, table: string, columns: NewColumn[]) {
+      return invoke<void>("create_table", { sessionId, schema, table, columns });
     },
 
     async getCompletionSchema() {
@@ -89,6 +208,7 @@ export function createSessionApi(sessionId: string | null) {
         pageSize?: number;
         sortColumn?: string;
         sortDirection?: "asc" | "desc";
+        sort?: SortKey[];
         filters?: TableFilter[];
         filterMode?: FilterMode;
       }
@@ -107,6 +227,11 @@ export function createSessionApi(sessionId: string | null) {
     },
 
     /** Exact row count, for tables whose total is only an estimate. */
+    /** Inserts rows (e.g. from a CSV file) in one transaction; nothing is kept if a row fails. */
+    async importRows(schema: string, table: string, columns: string[], rows: (string | null)[][]) {
+      return invoke<number>("import_rows", { sessionId, schema, table, columns, rows });
+    },
+
     async countTableRows(schema: string, table: string) {
       return invoke<number>("count_table_rows", { sessionId, schema, table });
     },
@@ -142,21 +267,13 @@ export function createSessionApi(sessionId: string | null) {
       return invoke<ExplainResult>("explain_query", { sessionId, sql, analyze });
     },
 
-    async updateRow(
+    /** Saves edited rows in one transaction: all of them, or none if any fails or is gone. */
+    async updateRows(
       schema: string,
       table: string,
-      payload: {
-        primaryKey: Record<string, unknown>;
-        updates: Record<string, unknown>;
-      }
+      changes: { primaryKey: Record<string, unknown>; updates: Record<string, unknown> }[],
     ) {
-      return invoke<{ rowsAffected: number }>("update_row", {
-        sessionId,
-        schema,
-        table,
-        primaryKey: payload.primaryKey,
-        updates: payload.updates,
-      });
+      return invoke<number>("update_rows", { sessionId, schema, table, changes });
     },
 
     async deleteRows(

@@ -4,11 +4,6 @@ use tauri::State;
 use super::state::AppState;
 
 #[derive(Serialize)]
-pub struct SchemaInfo {
-    pub name: String,
-}
-
-#[derive(Serialize)]
 pub struct TableInfo {
     pub name: String,
     pub schema: String,
@@ -73,24 +68,18 @@ pub struct FunctionDetail {
     pub description: Option<String>,
 }
 
-#[tauri::command]
-pub async fn get_schemas(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<Vec<SchemaInfo>, String> {
-    let client = state.client(&session_id).await?;
+/// The user's schemas, for a query on `pg_namespace n`: leaves out the system catalogs and
+/// the `pg_toast*` / `pg_temp_*` schemas the server makes for its own use and for each
+/// session's temporary tables.
+const USER_SCHEMAS: &str = "n.nspname NOT IN ('pg_catalog', 'information_schema') \
+    AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp%'";
 
+/// The schemas the explorer lists.
+pub(crate) async fn user_schemas(client: &tokio_postgres::Client) -> Result<Vec<String>, tokio_postgres::Error> {
     let rows = client
-        .query(
-            "SELECT schema_name as name FROM information_schema.schemata \
-             WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast') \
-             ORDER BY schema_name",
-            &[],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(rows.iter().map(|r| SchemaInfo { name: r.get("name") }).collect())
+        .query(&format!("SELECT n.nspname::text FROM pg_namespace n WHERE {USER_SCHEMAS} ORDER BY n.nspname"), &[])
+        .await?;
+    Ok(rows.iter().map(|r| r.get(0)).collect())
 }
 
 #[tauri::command]
@@ -244,6 +233,36 @@ pub async fn get_function_detail(
     })
 }
 
+/// What a relation is: "table", "partitioned", "foreign", "view" or "matview"; None when
+/// there's no relation by that name.
+#[tauri::command]
+pub async fn get_relation_kind(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    name: String,
+) -> Result<Option<String>, String> {
+    let client = state.client(&session_id).await?;
+    relation_kind(&client, &schema, &name).await.map_err(|e| e.to_string())
+}
+
+pub(crate) async fn relation_kind(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    name: &str,
+) -> Result<Option<String>, tokio_postgres::Error> {
+    let row = client
+        .query_opt(
+            "SELECT CASE c.relkind WHEN 'r' THEN 'table' WHEN 'p' THEN 'partitioned' WHEN 'f' THEN 'foreign' \
+                    WHEN 'v' THEN 'view' WHEN 'm' THEN 'matview' END AS kind \
+             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r', 'p', 'f', 'v', 'm')",
+            &[&schema, &name],
+        )
+        .await?;
+    Ok(row.map(|r| r.get("kind")))
+}
+
 #[tauri::command]
 pub async fn get_columns(
     state: State<'_, AppState>,
@@ -262,25 +281,33 @@ pub(crate) async fn table_columns(
 ) -> Result<Vec<ColumnInfo>, tokio_postgres::Error> {
     let foreign_keys = table_foreign_keys(client, schema, table).await?;
 
+    // pg_catalog rather than information_schema, which leaves out materialized views.
+    // data_type mimics the standard names the UI relies on ("USER-DEFINED", "ARRAY"...)
     let rows = client
         .query(
-            "SELECT c.column_name AS name, c.data_type AS data_type, \
+            "SELECT a.attname::text AS name, \
+             CASE WHEN t.typtype = 'e' OR (t.typtype = 'b' AND tn.nspname <> 'pg_catalog' AND t.typcategory <> 'A') THEN 'USER-DEFINED' \
+                  WHEN t.typcategory = 'A' THEN 'ARRAY' \
+                  WHEN t.typtype = 'd' THEN format_type(t.typbasetype, NULL) \
+                  ELSE format_type(a.atttypid, NULL) END AS data_type, \
              format_type(a.atttypid, a.atttypmod) AS type_name, \
-             (c.is_nullable = 'YES') AS is_nullable, \
-             c.column_default AS default_value, \
-             c.ordinal_position::int AS ordinal_position, \
+             NOT a.attnotnull AS is_nullable, \
+             CASE WHEN COALESCE(to_jsonb(a) ->> 'attgenerated', '') = '' THEN pg_get_expr(d.adbin, d.adrelid) END AS default_value, \
+             a.attnum::int AS ordinal_position, \
              COALESCE(a.attnum = ANY(pk.conkey), false) AS is_primary_key, \
-             COALESCE(c.is_generated = 'ALWAYS' OR c.identity_generation = 'ALWAYS', false) AS is_generated, \
+             (COALESCE(to_jsonb(a) ->> 'attgenerated', '') <> '' OR COALESCE(to_jsonb(a) ->> 'attidentity', '') = 'a') AS is_generated, \
              col_description(cls.oid, a.attnum) AS comment, \
              (SELECT array_agg(e.enumlabel::text ORDER BY e.enumsortorder) \
                 FROM pg_enum e WHERE e.enumtypid = a.atttypid) AS enum_values \
-             FROM information_schema.columns c \
-             JOIN pg_namespace ns ON ns.nspname = c.table_schema \
-             JOIN pg_class cls ON cls.relnamespace = ns.oid AND cls.relname = c.table_name \
-             JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name \
+             FROM pg_class cls \
+             JOIN pg_namespace ns ON ns.oid = cls.relnamespace \
+             JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attnum > 0 AND NOT a.attisdropped \
+             JOIN pg_type t ON t.oid = a.atttypid \
+             JOIN pg_namespace tn ON tn.oid = t.typnamespace \
+             LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
              LEFT JOIN pg_constraint pk ON pk.conrelid = cls.oid AND pk.contype = 'p' \
-             WHERE c.table_schema = $1 AND c.table_name = $2 \
-             ORDER BY c.ordinal_position",
+             WHERE ns.nspname = $1 AND cls.relname = $2 \
+             ORDER BY a.attnum",
             &[&schema, &table],
         )
         .await?;
@@ -343,6 +370,370 @@ async fn table_foreign_keys(
         .collect())
 }
 
+#[tauri::command]
+pub async fn get_materialized_views(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+) -> Result<Vec<TableInfo>, String> {
+    let client = state.client(&session_id).await?;
+    let rows = client
+        .query(
+            "SELECT matviewname::text AS name FROM pg_matviews WHERE schemaname = $1 ORDER BY matviewname",
+            &[&schema],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .map(|r| TableInfo { name: r.get("name"), schema: schema.clone(), table_type: "matview".into() })
+        .collect())
+}
+
+/// A sequence, type or other schema object listed in the explorer.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaObject {
+    pub name: String,
+    /// For types: "enum", "domain", "composite" or "range".
+    pub kind: String,
+}
+
+#[tauri::command]
+pub async fn get_sequences(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+) -> Result<Vec<SchemaObject>, String> {
+    let client = state.client(&session_id).await?;
+    let rows = client
+        .query(
+            "SELECT c.relname::text AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE c.relkind = 'S' AND n.nspname = $1 ORDER BY c.relname",
+            &[&schema],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows.iter().map(|r| SchemaObject { name: r.get("name"), kind: "sequence".into() }).collect())
+}
+
+#[tauri::command]
+pub async fn get_types(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+) -> Result<Vec<SchemaObject>, String> {
+    let client = state.client(&session_id).await?;
+    // Composite types made for tables and views (their row types) are left out
+    let rows = client
+        .query(
+            "SELECT t.typname::text AS name, \
+             CASE t.typtype WHEN 'e' THEN 'enum' WHEN 'd' THEN 'domain' WHEN 'c' THEN 'composite' WHEN 'r' THEN 'range' END AS kind \
+             FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
+             LEFT JOIN pg_class c ON c.oid = t.typrelid \
+             WHERE n.nspname = $1 AND t.typtype IN ('e', 'd', 'c', 'r') \
+               AND (t.typtype <> 'c' OR c.relkind = 'c') \
+             ORDER BY t.typname",
+            &[&schema],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows.iter().map(|r| SchemaObject { name: r.get("name"), kind: r.get("kind") }).collect())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionInfo {
+    pub name: String,
+    pub version: String,
+    pub schema: String,
+    pub comment: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_extensions(state: State<'_, AppState>, session_id: String) -> Result<Vec<ExtensionInfo>, String> {
+    let client = state.client(&session_id).await?;
+    let rows = client
+        .query(
+            "SELECT e.extname::text AS name, e.extversion AS version, n.nspname::text AS schema, \
+             obj_description(e.oid, 'pg_extension') AS comment \
+             FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace ORDER BY e.extname",
+            &[],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .map(|r| ExtensionInfo { name: r.get("name"), version: r.get("version"), schema: r.get("schema"), comment: r.get("comment") })
+        .collect())
+}
+
+/// What the explorer shows for a sequence or a type: a few facts and its DDL.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectDefinition {
+    pub kind: String,
+    pub facts: Vec<(String, String)>,
+    pub comment: Option<String>,
+    pub ddl: String,
+}
+
+#[tauri::command]
+pub async fn get_object_definition(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    name: String,
+    kind: String,
+) -> Result<ObjectDefinition, String> {
+    let client = state.client(&session_id).await?;
+    let result = match kind.as_str() {
+        "sequence" => sequence_definition(&client, &schema, &name).await,
+        "type" => type_definition(&client, &schema, &name).await,
+        other => return Err(format!("Unknown object kind \"{other}\"")),
+    };
+    result.map_err(|e| super::query::db_message(&e))
+}
+
+fn qualified(schema: &str, name: &str) -> String {
+    format!("{}.{}", super::tablefilter::quote_ident(schema), super::tablefilter::quote_ident(name))
+}
+
+pub(crate) async fn sequence_definition(client: &tokio_postgres::Client, schema: &str, name: &str) -> Result<ObjectDefinition, tokio_postgres::Error> {
+    let row = client
+        .query_one(
+            "SELECT format_type(s.seqtypid, NULL) AS data_type, s.seqstart::text AS start, s.seqincrement::text AS increment, \
+             s.seqmin::text AS min, s.seqmax::text AS max, s.seqcache::text AS cache, s.seqcycle AS cycle, \
+             (SELECT last_value::text FROM pg_sequences ps WHERE ps.schemaname = n.nspname AND ps.sequencename = c.relname) AS last_value, \
+             (SELECT quote_ident(tn.nspname) || '.' || quote_ident(tc.relname) || '.' || quote_ident(a.attname) \
+                FROM pg_depend dep JOIN pg_class tc ON tc.oid = dep.refobjid \
+                JOIN pg_namespace tn ON tn.oid = tc.relnamespace \
+                JOIN pg_attribute a ON a.attrelid = dep.refobjid AND a.attnum = dep.refobjsubid \
+                WHERE dep.objid = c.oid AND dep.classid = 'pg_class'::regclass AND dep.deptype IN ('a', 'i') LIMIT 1) AS owned_by, \
+             obj_description(c.oid, 'pg_class') AS comment \
+             FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relname = $2",
+            &[&schema, &name],
+        )
+        .await?;
+    let get = |col: &str| row.get::<_, String>(col);
+    let last_value: Option<String> = row.get("last_value");
+    let owned_by: Option<String> = row.get("owned_by");
+    let mut ddl = format!(
+        "CREATE SEQUENCE {}\n    AS {}\n    INCREMENT BY {}\n    MINVALUE {}\n    MAXVALUE {}\n    START WITH {}\n    CACHE {}\n    {}CYCLE;",
+        qualified(schema, name),
+        get("data_type"),
+        get("increment"),
+        get("min"),
+        get("max"),
+        get("start"),
+        get("cache"),
+        if row.get::<_, bool>("cycle") { "" } else { "NO " },
+    );
+    if let Some(owner) = &owned_by {
+        ddl += &format!("\n\nALTER SEQUENCE {} OWNED BY {owner};", qualified(schema, name));
+    }
+    let mut facts = vec![
+        ("Type".to_string(), get("data_type")),
+        ("Last value".to_string(), last_value.unwrap_or_else(|| "not used yet".into())),
+        ("Increment".to_string(), get("increment")),
+    ];
+    if let Some(owner) = owned_by {
+        facts.push(("Owned by".to_string(), owner));
+    }
+    Ok(ObjectDefinition { kind: "sequence".into(), facts, comment: row.get("comment"), ddl })
+}
+
+pub(crate) async fn type_definition(client: &tokio_postgres::Client, schema: &str, name: &str) -> Result<ObjectDefinition, tokio_postgres::Error> {
+    let row = client
+        .query_one(
+            "SELECT t.oid, t.typtype::text AS typtype, \
+             format_type(t.typbasetype, t.typtypmod) AS base_type, t.typnotnull AS not_null, t.typdefault AS default_value, \
+             obj_description(t.oid, 'pg_type') AS comment, \
+             (SELECT array_agg(e.enumlabel::text ORDER BY e.enumsortorder) FROM pg_enum e WHERE e.enumtypid = t.oid) AS labels, \
+             ARRAY(SELECT pg_get_constraintdef(con.oid, true) FROM pg_constraint con WHERE con.contypid = t.oid ORDER BY con.conname) AS checks, \
+             ARRAY(SELECT quote_ident(a.attname) || ' ' || format_type(a.atttypid, a.atttypmod) FROM pg_attribute a \
+                   WHERE a.attrelid = t.typrelid AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum) AS attributes, \
+             (SELECT format_type(r.rngsubtype, NULL) FROM pg_range r WHERE r.rngtypid = t.oid) AS subtype \
+             FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
+             WHERE n.nspname = $1 AND t.typname = $2",
+            &[&schema, &name],
+        )
+        .await?;
+    let target = qualified(schema, name);
+    let typtype: String = row.get("typtype");
+    let sql_string = |s: &str| format!("'{}'", s.replace('\'', "''"));
+    let (kind, ddl, facts) = match typtype.as_str() {
+        "e" => {
+            let labels: Vec<String> = row.get::<_, Option<Vec<String>>>("labels").unwrap_or_default();
+            let ddl = format!(
+                "CREATE TYPE {target} AS ENUM (\n    {}\n);",
+                labels.iter().map(|l| sql_string(l)).collect::<Vec<_>>().join(",\n    ")
+            );
+            ("enum", ddl, vec![("Values".to_string(), labels.len().to_string())])
+        }
+        "d" => {
+            let base: String = row.get("base_type");
+            let mut ddl = format!("CREATE DOMAIN {target} AS {base}");
+            if let Some(default) = row.get::<_, Option<String>>("default_value") {
+                ddl += &format!("\n    DEFAULT {default}");
+            }
+            if row.get::<_, bool>("not_null") {
+                ddl += "\n    NOT NULL";
+            }
+            for check in row.get::<_, Vec<String>>("checks") {
+                ddl += &format!("\n    {check}");
+            }
+            ("domain", ddl + ";", vec![("Base type".to_string(), base)])
+        }
+        "r" => {
+            let subtype: String = row.get::<_, Option<String>>("subtype").unwrap_or_default();
+            ("range", format!("CREATE TYPE {target} AS RANGE (\n    SUBTYPE = {subtype}\n);"), vec![("Subtype".to_string(), subtype)])
+        }
+        _ => {
+            let attributes: Vec<String> = row.get("attributes");
+            let ddl = format!("CREATE TYPE {target} AS (\n    {}\n);", attributes.join(",\n    "));
+            ("composite", ddl, vec![("Attributes".to_string(), attributes.len().to_string())])
+        }
+    };
+    if let Some(comment) = row.get::<_, Option<String>>("comment") {
+        let ddl = format!("{ddl}\n\nCOMMENT ON TYPE {target} IS {};", sql_string(&comment));
+        return Ok(ObjectDefinition { kind: kind.into(), facts, comment: Some(comment), ddl });
+    }
+    Ok(ObjectDefinition { kind: kind.into(), facts, comment: None, ddl })
+}
+
+/// One object in the explorer.
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerObject {
+    pub name: String,
+    /// table, view, matview, sequence, function, procedure or type.
+    pub kind: String,
+    /// Arguments of a function, a type's kind (enum, domain...), or "partitioned" and
+    /// "foreign" for those tables.
+    pub detail: String,
+    /// A partitioned table's partitions; empty for everything else.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub partitions: Vec<ExplorerPartition>,
+}
+
+/// One partition, which may itself be partitioned.
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerPartition {
+    pub schema: String,
+    pub name: String,
+    /// The values it holds, e.g. `FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')`.
+    pub bound: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub partitions: Vec<ExplorerPartition>,
+}
+
+/// Partitions of `parent`, nested, from the flat (parent, partition) list.
+fn partitions_of(parent: (&str, &str), all: &[(String, String, String, String, String)]) -> Vec<ExplorerPartition> {
+    all.iter()
+        .filter(|(ps, pn, ..)| ps == parent.0 && pn == parent.1)
+        .map(|(_, _, schema, name, bound)| ExplorerPartition {
+            schema: schema.clone(),
+            name: name.clone(),
+            bound: bound.clone(),
+            partitions: partitions_of((schema, name), all),
+        })
+        .collect()
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerSchema {
+    pub name: String,
+    pub objects: Vec<ExplorerObject>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerTree {
+    pub schemas: Vec<ExplorerSchema>,
+    /// The first schema of the search path, opened first in the explorer.
+    pub default_schema: Option<String>,
+}
+
+/// Every schema with its objects, in one round trip, so the explorer can filter and
+/// count without loading folder by folder. Functions and types that belong to an
+/// extension are left out: they're the extension's, not the database's own.
+#[tauri::command]
+pub async fn get_explorer(state: State<'_, AppState>, session_id: String) -> Result<ExplorerTree, String> {
+    let client = state.client(&session_id).await?;
+    explorer(&client).await.map_err(|e| super::query::db_message(&e))
+}
+
+pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<ExplorerTree, tokio_postgres::Error> {
+    let schemas = user_schemas(client).await?;
+    let objects = client
+        .query(
+            &format!(
+                "SELECT n.nspname::text AS schema, c.relname::text AS name, \
+                   CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'matview' WHEN 'S' THEN 'sequence' ELSE 'table' END AS kind, \
+                   CASE c.relkind WHEN 'p' THEN 'partitioned' WHEN 'f' THEN 'foreign' ELSE '' END AS detail \
+                 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE c.relkind IN ('r', 'p', 'f', 'v', 'm', 'S') AND {USER_SCHEMAS} \
+                   AND NOT COALESCE((to_jsonb(c) ->> 'relispartition')::boolean, false) \
+                 UNION ALL \
+                 SELECT n.nspname, p.proname, \
+                   CASE WHEN COALESCE(to_jsonb(p) ->> 'prokind', 'f') = 'p' THEN 'procedure' ELSE 'function' END, \
+                   pg_get_function_arguments(p.oid) \
+                 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
+                 WHERE {USER_SCHEMAS} AND COALESCE(to_jsonb(p) ->> 'prokind', 'f') IN ('f', 'p') \
+                   AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.classid = 'pg_proc'::regclass AND d.deptype = 'e') \
+                 UNION ALL \
+                 SELECT n.nspname, t.typname, 'type', \
+                   CASE t.typtype WHEN 'e' THEN 'enum' WHEN 'd' THEN 'domain' WHEN 'c' THEN 'composite' WHEN 'r' THEN 'range' END \
+                 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace LEFT JOIN pg_class tc ON tc.oid = t.typrelid \
+                 WHERE {USER_SCHEMAS} AND t.typtype IN ('e', 'd', 'c', 'r') AND (t.typtype <> 'c' OR tc.relkind = 'c') \
+                   AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = t.oid AND d.classid = 'pg_type'::regclass AND d.deptype = 'e') \
+                 ORDER BY 1, 3, 2"
+            ),
+            &[],
+        )
+        .await?;
+    // (parent schema, parent, schema, partition, bound), for nesting under the parents
+    let partitions: Vec<(String, String, String, String, String)> = client
+        .query(
+            "SELECT pn.nspname::text, pc.relname::text, n.nspname::text, c.relname::text, \
+               COALESCE(pg_get_expr(c.relpartbound, c.oid), '') \
+             FROM pg_inherits i \
+             JOIN pg_class c ON c.oid = i.inhrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+             JOIN pg_class pc ON pc.oid = i.inhparent JOIN pg_namespace pn ON pn.oid = pc.relnamespace \
+             WHERE pc.relkind = 'p' \
+             ORDER BY c.relname",
+            &[],
+        )
+        .await?
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)))
+        .collect();
+    let default_schema: Option<String> = client
+        .query_one("SELECT current_schema()::text", &[])
+        .await
+        .ok()
+        .and_then(|r| r.get(0));
+
+    let mut tree: Vec<ExplorerSchema> = schemas
+        .into_iter()
+        .map(|name| ExplorerSchema { name, objects: Vec::new() })
+        .collect();
+    for row in &objects {
+        let schema: String = row.get("schema");
+        if let Some(entry) = tree.iter_mut().find(|s| s.name == schema) {
+            let name: String = row.get("name");
+            let detail = row.get::<_, Option<String>>("detail").unwrap_or_default();
+            let partitions = if detail == "partitioned" { partitions_of((&schema, &name), &partitions) } else { Vec::new() };
+            entry.objects.push(ExplorerObject { name, kind: row.get("kind"), detail, partitions });
+        }
+    }
+    Ok(ExplorerTree { schemas: tree, default_schema })
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletionRelation {
@@ -385,19 +776,18 @@ pub async fn get_completion_schema(
 
     let rows = client
         .query(
-            "SELECT n.nspname AS schema, c.relname AS name, \
-             CASE WHEN c.relkind IN ('v', 'm') THEN 'view' ELSE 'table' END AS type, \
-             a.attname AS column_name, \
-             format_type(a.atttypid, a.atttypmod) AS data_type \
-             FROM pg_class c \
-             JOIN pg_namespace n ON n.oid = c.relnamespace \
-             LEFT JOIN pg_attribute a \
-               ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
-             WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') \
-               AND n.nspname NOT IN ('pg_catalog', 'information_schema') \
-               AND n.nspname NOT LIKE 'pg\\_toast%' \
-               AND n.nspname NOT LIKE 'pg\\_temp%' \
-             ORDER BY n.nspname, c.relname, a.attnum",
+            &format!(
+                "SELECT n.nspname AS schema, c.relname AS name, \
+                 CASE WHEN c.relkind IN ('v', 'm') THEN 'view' ELSE 'table' END AS type, \
+                 a.attname AS column_name, \
+                 format_type(a.atttypid, a.atttypmod) AS data_type \
+                 FROM pg_class c \
+                 JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 LEFT JOIN pg_attribute a \
+                   ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+                 WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND {USER_SCHEMAS} \
+                 ORDER BY n.nspname, c.relname, a.attnum"
+            ),
             &[],
         )
         .await
@@ -428,16 +818,15 @@ pub async fn get_completion_schema(
 
     let function_rows = client
         .query(
-            "SELECT p.proname AS name, n.nspname AS schema, \
-             COALESCE(pg_get_function_result(p.oid), '') AS return_type, \
-             pg_get_function_arguments(p.oid) AS argument_types \
-             FROM pg_proc p \
-             JOIN pg_namespace n ON p.pronamespace = n.oid \
-             WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') \
-               AND n.nspname NOT LIKE 'pg\\_toast%' \
-               AND n.nspname NOT LIKE 'pg\\_temp%' \
-               AND p.prokind IN ('f', 'p') \
-             ORDER BY n.nspname, p.proname",
+            &format!(
+                "SELECT p.proname AS name, n.nspname AS schema, \
+                 COALESCE(pg_get_function_result(p.oid), '') AS return_type, \
+                 pg_get_function_arguments(p.oid) AS argument_types \
+                 FROM pg_proc p \
+                 JOIN pg_namespace n ON p.pronamespace = n.oid \
+                 WHERE {USER_SCHEMAS} AND p.prokind IN ('f', 'p') \
+                 ORDER BY n.nspname, p.proname"
+            ),
             &[],
         )
         .await
@@ -551,5 +940,164 @@ mod server_tests {
 
         let regions = table_columns(&client, &schema, "regions").await.unwrap();
         assert!(regions.iter().all(|c| c.is_primary_key), "composite primary key");
+    }
+
+    /// A real schema (materialized views can't be temporary), dropped before and after.
+    async fn explorer_fixture(client: &tokio_postgres::Client, schema: &str) {
+        client
+            .batch_execute(&format!(
+                "DROP SCHEMA IF EXISTS {schema} CASCADE; \
+                 CREATE SCHEMA {schema}; \
+                 SET search_path = {schema}; \
+                 CREATE TYPE level AS ENUM ('low', 'it''s high'); \
+                 CREATE DOMAIN email AS text NOT NULL CHECK (VALUE LIKE '%@%'); \
+                 CREATE TYPE point2 AS (x int, y int); \
+                 CREATE TYPE floatrange AS RANGE (subtype = float8); \
+                 COMMENT ON TYPE level IS 'How urgent'; \
+                 CREATE TABLE tickets (id serial PRIMARY KEY, level level, contact email, at point2); \
+                 CREATE SEQUENCE counter INCREMENT 5 START 100 MAXVALUE 1000 CYCLE; \
+                 INSERT INTO tickets (level, contact) VALUES ('low', 'a@x.io'); \
+                 CREATE MATERIALIZED VIEW ticket_levels AS SELECT level, count(*) AS total FROM tickets GROUP BY level; \
+                 RESET search_path;"
+            ))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn materialized_views_have_columns_and_types_keep_standard_names() {
+        let client = connect().await;
+        let s = "dbunny_explorer_columns";
+        explorer_fixture(&client, s).await;
+
+        let view = table_columns(&client, s, "ticket_levels").await.unwrap();
+        let names: Vec<_> = view.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["level", "total"]);
+        assert!(view.iter().all(|c| !c.is_primary_key));
+
+        let table = table_columns(&client, s, "tickets").await.unwrap();
+        assert_eq!(column(&table, "id").data_type, "integer");
+        assert!(column(&table, "id").default_value.as_deref().unwrap().starts_with("nextval("));
+        assert_eq!(column(&table, "level").data_type, "USER-DEFINED");
+        assert_eq!(column(&table, "contact").data_type, "text", "domains report their base type");
+
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn object_definitions_recreate_the_same_objects() {
+        let client = connect().await;
+        let s = "dbunny_explorer_ddl";
+        explorer_fixture(&client, s).await;
+
+        let seq = sequence_definition(&client, s, "counter").await.unwrap();
+        assert!(seq.ddl.contains("INCREMENT BY 5") && seq.ddl.contains("START WITH 100") && seq.ddl.contains("\n    CYCLE;"), "{}", seq.ddl);
+        let owned = sequence_definition(&client, s, "tickets_id_seq").await.unwrap();
+        assert!(owned.ddl.contains(&format!("OWNED BY {s}.tickets.id")), "{}", owned.ddl);
+        assert!(owned.facts.iter().any(|(k, v)| k == "Last value" && v == "1"), "{:?}", owned.facts);
+
+        let mut ddls = vec![seq.ddl.clone()];
+        for name in ["level", "email", "point2", "floatrange"] {
+            let def = type_definition(&client, s, name).await.unwrap();
+            ddls.push(def.ddl);
+        }
+        assert!(ddls[1].contains("'it''s high'") && ddls[1].contains("COMMENT ON TYPE"), "{}", ddls[1]);
+        assert!(ddls[2].contains("NOT NULL") && ddls[2].contains("CHECK"), "{}", ddls[2]);
+
+        // Drop everything and run the definitions: they must rebuild identical objects
+        client
+            .batch_execute(&format!("DROP SCHEMA {s} CASCADE; CREATE SCHEMA {s}"))
+            .await
+            .unwrap();
+        for ddl in &ddls {
+            client.batch_execute(ddl).await.unwrap_or_else(|e| panic!("{e:?}\n{ddl}"));
+        }
+        assert_eq!(type_definition(&client, s, "level").await.unwrap().ddl, ddls[1]);
+        assert_eq!(type_definition(&client, s, "email").await.unwrap().ddl, ddls[2]);
+        assert_eq!(type_definition(&client, s, "point2").await.unwrap().ddl, ddls[3]);
+        assert_eq!(sequence_definition(&client, s, "counter").await.unwrap().ddl, seq.ddl);
+
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn the_explorer_lists_everything_but_extension_objects() {
+        let client = connect().await;
+        let s = "dbunny_explorer_tree";
+        explorer_fixture(&client, s).await;
+        client
+            .batch_execute(&format!(
+                "CREATE FUNCTION {s}.add(a int, b int) RETURNS int LANGUAGE sql AS 'SELECT a + b'; \
+                 CREATE TABLE {s}.events (id int, at date) PARTITION BY RANGE (at); \
+                 CREATE TABLE {s}.events_2026 PARTITION OF {s}.events FOR VALUES FROM ('2026-01-01') TO ('2027-01-01'); \
+                 CREATE SCHEMA IF NOT EXISTS dbunny_explorer_empty; \
+                 CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA {s};"
+            ))
+            .await
+            .unwrap();
+        let tree = explorer(&client).await.unwrap();
+        let schema = tree.schemas.iter().find(|x| x.name == s).unwrap();
+        let has = |name: &str, kind: &str| schema.objects.iter().any(|o| o.name == name && o.kind == kind);
+        assert!(has("tickets", "table") && has("ticket_levels", "matview") && has("counter", "sequence"));
+        assert!(has("level", "type") && has("email", "type") && has("add", "function"));
+        assert!(has("events", "table") && !has("events_2026", "table"), "partitions are under their parent");
+        let events = schema.objects.iter().find(|o| o.name == "events").unwrap();
+        assert_eq!(events.detail, "partitioned");
+        assert_eq!(events.partitions.len(), 1);
+        assert_eq!(events.partitions[0].name, "events_2026");
+        assert!(events.partitions[0].bound.starts_with("FOR VALUES FROM ('2026-01-01')"), "{}", events.partitions[0].bound);
+        assert_eq!(schema.objects.iter().find(|o| o.name == "add").unwrap().detail, "a integer, b integer");
+        assert!(!has("gen_random_uuid", "function") && !has("digest", "function"), "extension functions are hidden");
+        assert!(tree.schemas.iter().any(|x| x.name == "dbunny_explorer_empty" && x.objects.is_empty()), "empty schemas are listed");
+        assert!(!tree.schemas.iter().any(|x| x.name == "pg_catalog" || x.name == "information_schema"));
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE; DROP SCHEMA dbunny_explorer_empty")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn relations_report_their_kind() {
+        let client = connect().await;
+        let s = "dbunny_relation_kinds";
+        client
+            .batch_execute(&format!(
+                "DROP SCHEMA IF EXISTS {s} CASCADE; CREATE SCHEMA {s}; \
+                 CREATE TABLE {s}.plain (id int); \
+                 CREATE TABLE {s}.split (at date) PARTITION BY RANGE (at); \
+                 CREATE VIEW {s}.recent AS SELECT * FROM {s}.plain; \
+                 CREATE MATERIALIZED VIEW {s}.totals AS SELECT count(*) FROM {s}.plain; \
+                 CREATE SEQUENCE {s}.counter;"
+            ))
+            .await
+            .unwrap();
+        let kind = |name: &'static str| {
+            let client = &client;
+            async move { relation_kind(client, s, name).await.unwrap() }
+        };
+        assert_eq!(kind("plain").await.as_deref(), Some("table"));
+        assert_eq!(kind("split").await.as_deref(), Some("partitioned"));
+        assert_eq!(kind("recent").await.as_deref(), Some("view"));
+        assert_eq!(kind("totals").await.as_deref(), Some("matview"));
+        assert_eq!(kind("counter").await, None, "a sequence isn't a relation with rows");
+        assert_eq!(kind("missing").await, None);
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn temporary_schemas_stay_out_of_every_list() {
+        let client = connect().await;
+        // A temporary table makes the server create this session's pg_temp_N and pg_toast_temp_N
+        client.batch_execute("CREATE TEMP TABLE dbunny_scratch (id int)").await.unwrap();
+        let internal = |name: &String| name.starts_with("pg_temp") || name.starts_with("pg_toast") || name == "pg_catalog" || name == "information_schema";
+
+        let schemas = user_schemas(&client).await.unwrap();
+        assert!(schemas.iter().any(|s| s == "public"), "{schemas:?}");
+        assert!(!schemas.iter().any(internal), "{schemas:?}");
+        let tree = explorer(&client).await.unwrap();
+        let names: Vec<String> = tree.schemas.into_iter().map(|s| s.name).collect();
+        assert_eq!(names, schemas, "the sidebar and the explorer list the same schemas");
     }
 }

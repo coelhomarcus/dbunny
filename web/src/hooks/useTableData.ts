@@ -1,8 +1,9 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { type SortingState, type OnChangeFn } from "@tanstack/react-table";
 import { useApi } from "../contexts/useConnection";
-import type { TableDataResponse, ColumnInfo, TableFilter, FilterMode } from "@/types";
+import type { TableDataResponse, ColumnInfo, TableFilter, FilterMode, SortKey } from "@/types";
 import { isActiveFilter } from "../lib/tableFilters";
+import type { RelationType } from "../lib/api";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const DEFAULT_PAGE_SIZE = 50;
@@ -22,6 +23,11 @@ function readPageSize(schema?: string, table?: string): number {
  * Rows of one table. The view is remounted for every navigation, so state starts
  * fresh per table; `initialFilters` opens it already filtered (foreign key links).
  */
+/** The table's sorting state as the backend's sort keys. */
+export function toSortKeys(sorting: SortingState): SortKey[] {
+  return sorting.map((s) => ({ column: s.id, direction: s.desc ? "desc" : "asc" }));
+}
+
 export function useTableData(schema?: string, table?: string, initialFilters: TableFilter[] = []) {
   const api = useApi();
   const [data, setData] = useState<TableDataResponse | null>(null);
@@ -36,6 +42,21 @@ export function useTableData(schema?: string, table?: string, initialFilters: Ta
   const [refreshing, setRefreshing] = useState(false);
   const [counting, setCounting] = useState(false);
   const [spinKey, setSpinKey] = useState(0);
+  // Views and materialized views show rows but can't take writes; unknown until it loads
+  const [relationType, setRelationType] = useState<RelationType | null>(null);
+
+  useEffect(() => {
+    if (!schema || !table) return;
+    let cancel = false;
+    // If the lookup fails it's taken for a table: the server still refuses writes to a view
+    api
+      .getRelationKind(schema, table)
+      .then((kind) => !cancel && setRelationType(kind ?? "table"))
+      .catch(() => !cancel && setRelationType("table"));
+    return () => {
+      cancel = true;
+    };
+  }, [schema, table, api]);
 
   const pkColumns = useMemo(
     () => columnInfos.filter((c) => c.isPrimaryKey),
@@ -54,15 +75,10 @@ export function useTableData(schema?: string, table?: string, initialFilters: Ta
       filterList: TableFilter[] = [],
       mode: FilterMode = "all",
     ) => {
-      const sortColumn = sort[0]?.id;
-      const sortDirection = sort[0]?.desc
-        ? ("desc" as const)
-        : ("asc" as const);
       return api.getTableData(s, t, {
         page: pg,
         pageSize: ps,
-        sortColumn,
-        sortDirection: sortColumn ? sortDirection : undefined,
+        sort: toSortKeys(sort),
         filters: filterList,
         filterMode: mode,
       });
@@ -155,5 +171,6 @@ export function useTableData(schema?: string, table?: string, initialFilters: Ta
     fetchData,
     pkColumns,
     hasNoPk,
+    relationType,
   };
 }

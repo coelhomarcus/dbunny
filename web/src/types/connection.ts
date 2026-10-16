@@ -46,3 +46,25 @@ export interface SshHostKeyProblem {
   /** The mismatch is with ~/.ssh/known_hosts, which DBunny doesn't change. */
   inUserKnownHosts: boolean;
 }
+
+/** A database of the connected server, for switching. */
+export interface DatabaseInfo {
+  name: string;
+  sizeBytes: number | null;
+  isCurrent: boolean;
+  /** The user may connect to it. */
+  canConnect: boolean;
+}
+
+/** How a saved connection presents itself: its name, colour and icon. */
+export interface SavedTag {
+  name: string;
+  color?: string | null;
+  icon?: string | null;
+}
+
+/** A session opened elsewhere (e.g. another database) that a new tab starts with. */
+export interface InitialSession {
+  response: ConnectResponse;
+  saved?: SavedTag;
+}

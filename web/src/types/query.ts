@@ -58,6 +58,12 @@ export interface QueryError {
   hint?: string;
 }
 
+/** One key of a multi-column sort, first one first. */
+export interface SortKey {
+  column: string;
+  direction: "asc" | "desc";
+}
+
 /** One condition of the table view's filter bar. */
 export interface TableFilter {
   column: string;
@@ -74,6 +80,7 @@ export interface TableDataRequest {
   pageSize: number;
   sortColumn?: string;
   sortDirection?: "asc" | "desc";
+  sort?: SortKey[];
   filters?: Record<string, string>;
 }
 

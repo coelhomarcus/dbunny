@@ -99,16 +99,30 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .manage(AppState::new())
         .setup(|app| {
-            let state = app.state::<AppState>();
+            // The app's own key, kept with its data; the hostname key only opens older files
+            let legacy = storage::hostname_key();
+            let key = match app.path().app_data_dir() {
+                Ok(dir) => storage::load_or_create_key(&dir).unwrap_or_else(|e| {
+                    eprintln!("{e}; using the hostname key");
+                    legacy
+                }),
+                Err(_) => legacy,
+            };
+            let state = AppState::new(key);
             if let Ok(path) = storage::get_storage_path(app.handle()) {
-                let connections = storage::load_connections_from_path(&path);
-                let mut cache = state.saved_connections.blocking_lock();
-                *cache = connections;
+                let mut connections = storage::load_connections_from_path(&path);
+                if storage::migrate_to_key(&mut connections, &key, &legacy) {
+                    if let Err(e) = storage::write_connections(&path, &connections) {
+                        eprintln!("Couldn't save the connections under the new key: {e}");
+                    }
+                }
+                *state.saved_connections.blocking_lock() = connections;
             }
+            app.manage(state);
 
-            #[cfg(target_os = "windows")]
+            // Windows and Linux: the title bar (tabs and window controls) is drawn by the app
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_decorations(false);
@@ -120,13 +134,39 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::connect::connect,
             commands::connect::disconnect,
-            commands::schema::get_schemas,
             commands::schema::get_tables,
             commands::schema::get_views,
             commands::schema::get_functions,
             commands::schema::get_function_detail,
             commands::schema::get_columns,
+            commands::schema::get_relation_kind,
             commands::structure::get_table_structure,
+            commands::schema::get_materialized_views,
+            commands::schema::get_sequences,
+            commands::schema::get_types,
+            commands::schema::get_extensions,
+            commands::schema::get_object_definition,
+            commands::schema::get_explorer,
+            commands::objects::rename_relation,
+            commands::objects::drop_relation,
+            commands::objects::truncate_table,
+            commands::objects::refresh_materialized_view,
+            commands::objects::duplicate_table,
+            commands::objects::create_schema,
+            commands::objects::rename_schema,
+            commands::objects::drop_schema,
+            commands::objects::create_database,
+            commands::objects::drop_database,
+            commands::activity::get_server_activity,
+            commands::activity::signal_backend,
+            commands::connect::connect_database,
+            commands::connect::get_databases,
+            commands::query::import_rows,
+            commands::alter::preview_structure_change,
+            commands::alter::apply_structure_change,
+            commands::alter::preview_create_table,
+            commands::alter::create_table,
+            commands::roles::get_roles,
             commands::editor::cancel_query,
             commands::editor::begin_transaction,
             commands::editor::commit_transaction,
@@ -138,7 +178,7 @@ pub fn run() {
             commands::query::get_table_data,
             commands::query::count_table_rows,
             commands::query::insert_row,
-            commands::query::update_row,
+            commands::query::update_rows,
             commands::query::delete_rows,
             commands::saved::get_saved_connections,
             commands::saved::save_connection,

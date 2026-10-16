@@ -1,4 +1,5 @@
 import type { ColumnInfo } from "@/types";
+import { dateModeOf, type DateMode } from "./dateValue";
 
 
 /** Text shown in the editor for a cell value (NULL starts as an empty field). */
@@ -29,6 +30,8 @@ export type CellEditor =
   | { kind: "text" }
   /** A fixed set of values: booleans and enums. */
   | { kind: "choice"; options: string[] }
+  /** A calendar and/or time field. */
+  | { kind: "datetime"; mode: DateMode }
   /** Edited in a dialog: JSON, or text too long or multi-line for one line. */
   | { kind: "long"; json: boolean };
 
@@ -38,6 +41,8 @@ export function editorFor(column: ColumnInfo | undefined, value: unknown): CellE
   if (column?.isGenerated) return { kind: "readonly" };
   if (column?.dataType === "boolean") return { kind: "choice", options: ["true", "false"] };
   if (column?.enumValues?.length) return { kind: "choice", options: column.enumValues };
+  const dateMode = dateModeOf(column?.dataType);
+  if (dateMode) return { kind: "datetime", mode: dateMode };
   if (column?.dataType === "json" || column?.dataType === "jsonb") return { kind: "long", json: true };
   if (typeof value === "string" && (value.length > LONG_TEXT || value.includes("\n"))) return { kind: "long", json: false };
   return { kind: "text" };

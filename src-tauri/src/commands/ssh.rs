@@ -157,6 +157,13 @@ pub struct Tunnel {
     _session: Arc<client::Handle<Handler>>,
 }
 
+impl Tunnel {
+    /// The SSH session is still up and the local port still forwards.
+    pub fn is_alive(&self) -> bool {
+        !self.accept_loop.is_finished() && !self._session.is_closed()
+    }
+}
+
 impl Drop for Tunnel {
     fn drop(&mut self) {
         self.accept_loop.abort();
@@ -231,7 +238,7 @@ async fn authenticate_with_agent(session: &mut client::Handle<Handler>, user: &s
     Ok(false)
 }
 
-fn expand_home(path: &str) -> PathBuf {
+pub(crate) fn expand_home(path: &str) -> PathBuf {
     match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
         Some(rest) => user_known_hosts()
             .and_then(|p| p.parent().and_then(Path::parent).map(Path::to_path_buf))

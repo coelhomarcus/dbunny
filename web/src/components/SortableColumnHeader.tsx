@@ -7,6 +7,8 @@ interface SortableColumnHeaderProps {
   id: string;
   columnInfo?: ColumnInfo;
   sorted: false | "asc" | "desc";
+  /** Position in a multi-column sort (0 = first), or -1 when it's the only sort key. */
+  sortIndex: number;
   onToggleSort: ((event: unknown) => void);
   onResizeStart: (e: React.MouseEvent) => void;
 }
@@ -19,7 +21,7 @@ function ColumnIcon({ column }: { column: ColumnInfo }) {
 }
 
 export default function SortableColumnHeader({
-  id, columnInfo, sorted, onToggleSort, onResizeStart,
+  id, columnInfo, sorted, sortIndex, onToggleSort, onResizeStart,
 }: SortableColumnHeaderProps) {
   const isActive = sorted !== false;
   const facts = columnInfo ? columnFacts(columnInfo) : [];
@@ -51,7 +53,7 @@ export default function SortableColumnHeader({
         ) : (
           label
         )}
-        <span className={`shrink-0 transition-colors ${
+        <span className={`flex shrink-0 items-center gap-0.5 transition-colors ${
           isActive
             ? "text-info-foreground"
             : "text-muted-foreground/70 group-hover:text-muted-foreground"
@@ -63,6 +65,7 @@ export default function SortableColumnHeader({
           ) : (
             <ChevronsUpDown size={13} />
           )}
+          {sorted && sortIndex >= 0 && <span className="text-[10px] font-semibold tabular-nums">{sortIndex + 1}</span>}
         </span>
       </span>
       <div

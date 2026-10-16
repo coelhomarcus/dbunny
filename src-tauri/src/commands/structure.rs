@@ -85,6 +85,16 @@ pub struct TriggerInfo {
     pub definition: String,
 }
 
+/// What one role (or PUBLIC) may do on the table.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TablePrivilege {
+    pub grantee: String,
+    pub privileges: Vec<String>,
+    /// Privileges it may grant on to others.
+    pub grantable: Vec<String>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TableStructure {
@@ -95,6 +105,7 @@ pub struct TableStructure {
     pub foreign_keys: Vec<ForeignKeyInfo>,
     pub referenced_by: Vec<ReferencedBy>,
     pub triggers: Vec<TriggerInfo>,
+    pub privileges: Vec<TablePrivilege>,
     pub ddl: String,
     /// Sections that couldn't be read (usually permissions), shown instead of failing the whole tab.
     pub warnings: Vec<String>,
@@ -139,6 +150,7 @@ pub(crate) async fn table_structure(client: &Client, schema: &str, table: &str) 
     let foreign_keys = section(&mut warnings, "the foreign keys", table_foreign_keys(client, oid).await);
     let referenced_by = section(&mut warnings, "the referencing tables", referencing_tables(client, oid).await);
     let triggers = section(&mut warnings, "the triggers", table_triggers(client, oid).await);
+    let privileges = section(&mut warnings, "the permissions", table_privileges(client, oid).await);
 
     let ddl = if meta.kind == "view" || meta.kind == "materialized view" {
         section(&mut warnings, "the view definition", view_ddl(client, oid, schema, table, &meta.kind).await)
@@ -159,7 +171,7 @@ pub(crate) async fn table_structure(client: &Client, schema: &str, table: &str) 
         })
     };
 
-    Ok(TableStructure { meta, columns, indexes, constraints, foreign_keys, referenced_by, triggers, ddl, warnings })
+    Ok(TableStructure { meta, columns, indexes, constraints, foreign_keys, referenced_by, triggers, privileges, ddl, warnings })
 }
 
 async fn table_meta(client: &Client, oid: u32) -> Result<TableMeta, tokio_postgres::Error> {
@@ -333,6 +345,29 @@ async fn table_triggers(client: &Client, oid: u32) -> Result<Vec<TriggerInfo>, t
             function: r.get("function"),
             enabled: r.get("enabled"),
             definition: r.get("definition"),
+        })
+        .collect())
+}
+
+async fn table_privileges(client: &Client, oid: u32) -> Result<Vec<TablePrivilege>, tokio_postgres::Error> {
+    // relacl is NULL until the first GRANT; acldefault gives the owner's implicit rights then
+    let rows = client
+        .query(
+            "SELECT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS grantee, \
+             array_agg(a.privilege_type ORDER BY a.privilege_type) AS privileges, \
+             array_agg(a.privilege_type ORDER BY a.privilege_type) FILTER (WHERE a.is_grantable) AS grantable \
+             FROM pg_class c, aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a \
+             WHERE c.oid = $1 \
+             GROUP BY a.grantee ORDER BY a.grantee = 0, 1",
+            &[&oid],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| TablePrivilege {
+            grantee: r.get("grantee"),
+            privileges: r.get("privileges"),
+            grantable: r.get::<_, Option<Vec<String>>>("grantable").unwrap_or_default(),
         })
         .collect())
 }
@@ -606,6 +641,11 @@ mod server_tests {
         assert_eq!((trigger.timing.as_str(), trigger.level.as_str()), ("BEFORE", "ROW"));
         assert_eq!(trigger.events, vec!["INSERT", "UPDATE"]);
         assert!(trigger.enabled);
+
+        // The owner (the test's own role) has every right, implicitly
+        let owner: String = client.query_one("SELECT current_user::text", &[]).await.unwrap().get(0);
+        let own = s.privileges.iter().find(|p| p.grantee == owner).expect("owner privileges");
+        assert!(own.privileges.contains(&"SELECT".to_string()) && own.privileges.contains(&"DELETE".to_string()));
 
         let authors = table_structure(&client, &schema, "authors").await.unwrap();
         assert_eq!(authors.referenced_by.len(), 1);

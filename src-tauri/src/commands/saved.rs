@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::ssh::SshConfig;
 use super::state::AppState;
-use super::storage::{save_connections_to_file, SavedConnection, SavedConnectionInfo};
+use super::storage::{save_connections_to_file, SavedConnection, SavedConnectionInfo, TlsSettings};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,10 +18,14 @@ pub struct SavedConnectionInput {
     pub password: String,
     #[serde(default)]
     pub ssh: Option<SshConfig>,
+    #[serde(default)]
+    pub tls: Option<TlsSettings>,
     pub ssl: bool,
     #[serde(default)]
     pub read_only: bool,
     pub color: String,
+    #[serde(default)]
+    pub icon: String,
 }
 
 #[tauri::command]
@@ -43,6 +47,8 @@ pub async fn save_connection(
     connection: SavedConnectionInput,
 ) -> Result<SavedConnectionInfo, String> {
     let mut connections = state.saved_connections.lock().await;
+    // Restored if the file can't be written, so memory and disk don't disagree
+    let previous = connections.clone();
     let now = chrono::Utc::now().to_rfc3339();
 
     let saved = if let Some(ref id) = connection.id {
@@ -53,7 +59,7 @@ pub async fn save_connection(
 
         let created_at = connections[pos].created_at.clone();
 
-        let read_only = connection.read_only;
+        let (read_only, icon) = (connection.read_only, connection.icon.clone());
         connections[pos] = SavedConnection::new(
             &state.encryption_key,
             id.clone(),
@@ -64,16 +70,18 @@ pub async fn save_connection(
             connection.user,
             connection.password,
             connection.ssh,
+            connection.tls,
             connection.ssl,
             connection.color,
             created_at,
             now,
         )?;
         connections[pos].read_only = read_only;
+        connections[pos].icon = icon;
 
         connections[pos].clone()
     } else {
-        let read_only = connection.read_only;
+        let (read_only, icon) = (connection.read_only, connection.icon.clone());
         let mut new_connection = SavedConnection::new(
             &state.encryption_key,
             Uuid::new_v4().to_string(),
@@ -84,18 +92,23 @@ pub async fn save_connection(
             connection.user,
             connection.password,
             connection.ssh,
+            connection.tls,
             connection.ssl,
             connection.color,
             now.clone(),
             now,
         )?;
         new_connection.read_only = read_only;
+        new_connection.icon = icon;
 
         connections.push(new_connection.clone());
         new_connection
     };
 
-    let _ = save_connections_to_file(&app_handle, &connections);
+    if let Err(e) = save_connections_to_file(&app_handle, &connections) {
+        *connections = previous;
+        return Err(format!("The connection wasn't saved: {e}"));
+    }
 
     saved.to_info(&state.encryption_key)
 }
@@ -107,14 +120,17 @@ pub async fn delete_saved_connection(
     id: String,
 ) -> Result<bool, String> {
     let mut connections = state.saved_connections.lock().await;
-    let len_before = connections.len();
+    let previous = connections.clone();
     connections.retain(|c| c.id != id);
 
-    if connections.len() == len_before {
+    if connections.len() == previous.len() {
         return Err(format!("Connection with id {} not found", id));
     }
 
-    let _ = save_connections_to_file(&app_handle, &connections);
+    if let Err(e) = save_connections_to_file(&app_handle, &connections) {
+        *connections = previous;
+        return Err(format!("The connection wasn't deleted: {e}"));
+    }
 
     Ok(true)
 }

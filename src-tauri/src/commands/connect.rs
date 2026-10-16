@@ -4,8 +4,8 @@ use tauri::State;
 use tokio_postgres::config::SslMode;
 use uuid::Uuid;
 
-use super::ssh::{open_tunnel, KnownHosts, SshConfig};
-use super::state::{AppState, Link, Notice, Notices, Session};
+use super::ssh::{open_tunnel, KnownHosts, SshConfig, Tunnel};
+use super::state::{AppState, Endpoint, Link, Notice, Notices, Session};
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,19 +46,33 @@ fn tls_plan(sslmode: Option<&str>) -> Result<TlsPlan, String> {
     }
 }
 
+/// URL parameters DBunny applies itself instead of passing them to the driver
+/// (which only knows a few sslmodes and no certificate files).
+const TLS_PARAMS: [&str; 4] = ["sslmode", "sslrootcert", "sslcert", "sslkey"];
+
+fn read_file(label: &str, path: &str) -> Result<Vec<u8>, String> {
+    std::fs::read(super::ssh::expand_home(path)).map_err(|e| format!("Couldn't read the {label} {path}: {e}"))
+}
+
 /// Builds the driver config and TLS connector from a postgres:// URL.
 pub(crate) fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Config, MakeTlsConnector), String> {
-    let sslmode = url
-        .query_pairs()
-        .find(|(key, _)| key == "sslmode")
-        .map(|(_, value)| value.into_owned());
-    let plan = tls_plan(sslmode.as_deref())?;
+    let param = |name: &str| {
+        url.query_pairs()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.into_owned())
+            .filter(|value| !value.is_empty())
+    };
+    let mut plan = tls_plan(param("sslmode").as_deref())?;
+    let root_cert = param("sslrootcert");
+    // Like libpq: with a CA file, "require" checks the certificate against it
+    if root_cert.is_some() && plan.mode == SslMode::Require {
+        plan.verify_cert = true;
+    }
 
-    // The driver only understands disable/prefer/require, so sslmode is applied by hand
     let mut stripped = url.clone();
     let others: Vec<(String, String)> = url
         .query_pairs()
-        .filter(|(key, _)| key != "sslmode")
+        .filter(|(key, _)| !TLS_PARAMS.contains(&key.as_ref()))
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
         .collect();
     if others.is_empty() {
@@ -77,13 +91,78 @@ pub(crate) fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Confi
         .map_err(|e| format!("Invalid connection URL: {}", e))?;
     config.ssl_mode(plan.mode);
 
-    let connector = native_tls::TlsConnector::builder()
+    let mut builder = native_tls::TlsConnector::builder();
+    builder
         .danger_accept_invalid_certs(!plan.verify_cert)
-        .danger_accept_invalid_hostnames(!plan.verify_host)
-        .build()
-        .map_err(|e| format!("TLS setup failed: {}", e))?;
+        .danger_accept_invalid_hostnames(!plan.verify_host);
+    if let Some(path) = &root_cert {
+        let ca = native_tls::Certificate::from_pem(&read_file("CA certificate", path)?)
+            .map_err(|e| format!("The CA certificate {path} isn't a PEM certificate: {e}"))?;
+        builder.add_root_certificate(ca);
+    }
+    match (param("sslcert"), param("sslkey")) {
+        (Some(cert), Some(key)) => {
+            let identity = native_tls::Identity::from_pkcs8(&read_file("client certificate", &cert)?, &read_file("client key", &key)?)
+                .map_err(|e| {
+                    format!(
+                        "Couldn't use the client certificate and key: {e}. The key must be an unencrypted PKCS#8 PEM \
+                         (convert it with: openssl pkcs8 -topk8 -nocrypt -in key.pem -out key.pk8.pem)"
+                    )
+                })?;
+            builder.identity(identity);
+        }
+        (None, None) => {}
+        _ => return Err("A client certificate needs both the certificate and its key".into()),
+    }
+    let connector = builder.build().map_err(|e| format!("TLS setup failed: {}", e))?;
 
     Ok((config, MakeTlsConnector::new(connector)))
+}
+
+/// The socket folder when the URL's host is one (`postgresql://user@%2Ftmp/db`, as libpq
+/// writes it), None for a host name.
+pub(crate) fn socket_dir(url: &url::Url) -> Option<String> {
+    let host = percent_decode(url.host_str()?);
+    host.starts_with('/').then_some(host)
+}
+
+/// Opens the session's connection: the SSH tunnel first when there is one, then the
+/// database. Used on connect and again to reconnect after the connection was lost.
+pub(crate) async fn establish(
+    endpoint: &Endpoint,
+    notices: &Notices,
+    trust_host_key: Option<String>,
+) -> Result<(tokio_postgres::Client, Link, Option<std::sync::Arc<Tunnel>>), String> {
+    let host = endpoint.url.host_str().unwrap_or("localhost").to_string();
+    let port = endpoint.url.port().unwrap_or(5432);
+    if socket_dir(&endpoint.url).is_some() {
+        if cfg!(windows) {
+            return Err("Unix sockets aren't available on Windows: use the host name and port".into());
+        }
+        if endpoint.ssh.is_some() {
+            return Err("A socket is a local file, so it can't be reached through an SSH tunnel".into());
+        }
+    }
+
+    // Through SSH, the driver connects to a local port forwarded to the database host
+    let (url, tunnel) = match (&endpoint.ssh, &endpoint.known_hosts) {
+        (Some(ssh), Some(known_hosts)) => {
+            let known_hosts = KnownHosts::new(known_hosts.clone());
+            let tunnel = open_tunnel(ssh, (host, port), known_hosts, trust_host_key).await?;
+            let url = through_tunnel(&endpoint.url, tunnel.local_port)?;
+            (url, Some(std::sync::Arc::new(tunnel)))
+        }
+        _ => (endpoint.url.clone(), None),
+    };
+
+    let (mut config, tls) = connection_config(&url)?;
+    // Notice a dead connection (sleep, network change) within minutes instead of hours
+    config.keepalives_idle(std::time::Duration::from_secs(60));
+    let link = Link { config, tls };
+    let client = open_connection(&link, notices)
+        .await
+        .map_err(|e| format!("Failed to connect: {}", e))?;
+    Ok((client, link, tunnel))
 }
 
 /// The URL rewritten to reach the database through a tunnel's local port. The host
@@ -156,39 +235,34 @@ pub async fn connect(
         return Err("Invalid protocol. Must be postgres:// or postgresql://".into());
     }
 
-    // Parse URL for metadata
     let url = url::Url::parse(&connection_url).map_err(|e| format!("Invalid URL: {}", e))?;
-    let database = url.path().trim_start_matches('/').to_string();
-    let database = if database.is_empty() {
-        "postgres".to_string()
-    } else {
-        database
-    };
-    let host = url.host_str().unwrap_or("localhost").to_string();
-    let port = url.port().unwrap_or(5432);
 
-    // Through SSH, the driver connects to a local port forwarded to the database host
-    let (url, tunnel) = match ssh {
-        Some(ssh) => {
+    let known_hosts = match ssh {
+        Some(_) => {
             use tauri::Manager;
-            let known_hosts = app_handle
+            let dir = app_handle
                 .path()
                 .app_data_dir()
-                .map(|dir| KnownHosts::new(dir.join("ssh_known_hosts.json")))
                 .map_err(|e| format!("Failed to get app data dir: {e}"))?;
-            let tunnel = open_tunnel(&ssh, (host.clone(), port), known_hosts, trust_host_key).await?;
-            let url = through_tunnel(&url, tunnel.local_port)?;
-            (url, Some(std::sync::Arc::new(tunnel)))
+            Some(dir.join("ssh_known_hosts.json"))
         }
-        None => (url, None),
+        None => None,
     };
+    let endpoint = Endpoint { url, ssh, known_hosts };
+    open_session(&state, endpoint, trust_host_key).await
+}
 
-    let (config, tls) = connection_config(&url)?;
-    let link = Link { config, tls };
+/// Connects to `endpoint` and registers the new session.
+async fn open_session(state: &AppState, endpoint: Endpoint, trust_host_key: Option<String>) -> Result<ConnectResponse, String> {
+    let database = match endpoint.url.path().trim_start_matches('/') {
+        "" => "postgres".to_string(),
+        name => percent_decode(name),
+    };
+    // A socket shows as its folder
+    let host = socket_dir(&endpoint.url).unwrap_or_else(|| endpoint.url.host_str().unwrap_or("localhost").to_string());
+    let port = endpoint.url.port().unwrap_or(5432);
     let notices: Notices = Default::default();
-    let client = open_connection(&link, &notices)
-        .await
-        .map_err(|e| format!("Failed to connect: {}", e))?;
+    let (client, link, tunnel) = establish(&endpoint, &notices, trust_host_key).await?;
 
     // Test connection + pre-warm catalog cache
     client
@@ -222,7 +296,10 @@ pub async fn connect(
         link,
         notices,
         transaction: None,
+        editor: None,
         tunnel,
+        endpoint,
+        reconnect_lock: Default::default(),
     };
 
     let mut sessions = state.sessions.lock().await;
@@ -239,6 +316,80 @@ pub async fn connect(
         server_version,
         read_only,
     })
+}
+
+fn percent_decode(text: &str) -> String {
+    url::form_urlencoded::parse(format!("x={}", text.replace('+', "%2B")).as_bytes())
+        .next()
+        .map(|(_, v)| v.into_owned())
+        .unwrap_or_else(|| text.to_string())
+}
+
+/// The endpoint of an open session, pointed at another database of the same server.
+pub(crate) fn endpoint_for_database(endpoint: &Endpoint, database: &str) -> Result<Endpoint, String> {
+    if database.trim().is_empty() {
+        return Err("Choose a database".into());
+    }
+    let mut url = endpoint.url.clone();
+    url.path_segments_mut()
+        .map_err(|_| "Can't change the database of this connection".to_string())?
+        .clear()
+        .push(database);
+    Ok(Endpoint { url, ..endpoint.clone() })
+}
+
+/// Opens a new session on another database of the same server, with the same login,
+/// SSL, read-only and SSH settings as `session_id`.
+#[tauri::command]
+pub async fn connect_database(
+    state: State<'_, AppState>,
+    session_id: String,
+    database: String,
+) -> Result<ConnectResponse, String> {
+    let endpoint = {
+        let sessions = state.sessions.lock().await;
+        let session = sessions.get(&session_id).ok_or_else(|| "Session not found".to_string())?;
+        endpoint_for_database(&session.endpoint, &database)?
+    };
+    open_session(&state, endpoint, None).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseInfo {
+    pub name: String,
+    pub size_bytes: Option<i64>,
+    pub is_current: bool,
+    /// The user may connect to it.
+    pub can_connect: bool,
+}
+
+#[tauri::command]
+pub async fn get_databases(state: State<'_, AppState>, session_id: String) -> Result<Vec<DatabaseInfo>, String> {
+    let client = state.client(&session_id).await?;
+    list_databases(&client).await
+}
+
+pub(crate) async fn list_databases(client: &tokio_postgres::Client) -> Result<Vec<DatabaseInfo>, String> {
+    let rows = client
+        .query(
+            "SELECT datname::text AS name, \
+             CASE WHEN has_database_privilege(datname, 'CONNECT') THEN pg_database_size(datname) END AS size_bytes, \
+             datname = current_database() AS is_current, has_database_privilege(datname, 'CONNECT') AS can_connect \
+             FROM pg_database WHERE NOT datistemplate AND datallowconn ORDER BY datname",
+            &[],
+        )
+        .await
+        .map_err(|e| super::query::db_message(&e))?;
+    Ok(rows
+        .iter()
+        .map(|r| DatabaseInfo {
+            name: r.get("name"),
+            size_bytes: r.get("size_bytes"),
+            is_current: r.get("is_current"),
+            can_connect: r.get("can_connect"),
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -320,6 +471,59 @@ mod tests {
     }
 
     #[test]
+    fn another_database_keeps_everything_else() {
+        let endpoint = Endpoint {
+            url: url::Url::parse("postgresql://u:p%40ss@db.example.com:6543/shop?sslmode=require").unwrap(),
+            ssh: None,
+            known_hosts: None,
+        };
+        let other = endpoint_for_database(&endpoint, "my db/2").unwrap();
+        assert_eq!(other.url.as_str(), "postgresql://u:p%40ss@db.example.com:6543/my%20db%2F2?sslmode=require");
+        let (config, _) = connection_config(&other.url).unwrap();
+        assert_eq!(config.get_dbname(), Some("my db/2"));
+        assert_eq!(percent_decode("my%20db%2F2"), "my db/2");
+        assert!(endpoint_for_database(&endpoint, " ").is_err());
+    }
+
+    #[test]
+    fn certificate_params_are_kept_from_the_driver_and_checked() {
+        let url = url::Url::parse("postgresql://u@db.example.com/db?sslmode=require&sslrootcert=/nope/ca.pem&application_name=x").unwrap();
+        let err = connection_config(&url).err().unwrap();
+        assert!(err.contains("CA certificate /nope/ca.pem"), "{err}");
+
+        let url = url::Url::parse("postgresql://u@db.example.com/db?sslmode=require&sslcert=/a.pem").unwrap();
+        assert!(connection_config(&url).err().unwrap().contains("both the certificate and its key"));
+
+        // Empty values are ignored, the rest still reaches the driver
+        let url = url::Url::parse("postgresql://u@db.example.com/db?sslmode=require&sslrootcert=&application_name=dbunny").unwrap();
+        let (config, _) = connection_config(&url).unwrap();
+        assert_eq!(config.get_application_name(), Some("dbunny"));
+    }
+
+    #[test]
+    fn a_socket_folder_as_host_connects_through_the_socket() {
+        let url = url::Url::parse("postgresql://me:secret@%2Fvar%2Frun%2Fpostgresql:5433/shop").unwrap();
+        assert_eq!(socket_dir(&url).as_deref(), Some("/var/run/postgresql"));
+        let (config, _) = connection_config(&url).unwrap();
+        #[cfg(unix)]
+        assert!(matches!(&config.get_hosts()[0], tokio_postgres::config::Host::Unix(p) if p == std::path::Path::new("/var/run/postgresql")));
+        assert_eq!(config.get_ports(), &[5433]);
+        assert_eq!(config.get_user(), Some("me"));
+        assert_eq!(config.get_dbname(), Some("shop"));
+        assert_eq!(socket_dir(&url::Url::parse("postgresql://u@db.example.com/x").unwrap()), None);
+    }
+
+    #[test]
+    fn encoded_names_reach_the_driver_decoded() {
+        // As the form writes them: "#", "?" and "@" in names are percent-encoded
+        let url = url::Url::parse("postgresql://admin%40corp:p%23ss@db.example.com:5432/app%232").unwrap();
+        let (config, _) = connection_config(&url).unwrap();
+        assert_eq!(config.get_user(), Some("admin@corp"));
+        assert_eq!(config.get_password(), Some(&b"p#ss"[..]));
+        assert_eq!(config.get_dbname(), Some("app#2"));
+    }
+
+    #[test]
     fn config_without_query_still_parses() {
         let url = url::Url::parse("postgresql://u@localhost/db").unwrap();
         let (config, _) = connection_config(&url).unwrap();
@@ -376,5 +580,188 @@ mod server_tests {
     async fn verify_modes_refuse_a_certificate_nobody_trusts() {
         assert!(connect_with("verify-ca").await.is_err());
         assert!(connect_with("verify-full").await.is_err());
+    }
+}
+
+/// Switching databases against a real server, see `query::server_tests`.
+#[cfg(test)]
+mod database_server_tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL and a second database named dbunny_second"]
+    async fn another_database_opens_as_its_own_session() {
+        let url = url::Url::parse(&std::env::var("DBUNNY_TEST_DATABASE_URL").unwrap()).unwrap();
+        let state = AppState {
+            sessions: Default::default(),
+            saved_connections: Default::default(),
+            encryption_key: [0; 32],
+        };
+        let first = open_session(&state, Endpoint { url, ssh: None, known_hosts: None }, None).await.unwrap();
+
+        let client = state.client(&first.session_id).await.unwrap();
+        let databases = list_databases(&client).await.unwrap();
+        let names: Vec<_> = databases.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"dbunny_second"), "{names:?}");
+        assert!(!names.contains(&"template1"));
+        assert!(databases.iter().find(|d| d.is_current).unwrap().size_bytes.unwrap() > 0);
+
+        let endpoint = endpoint_for_database(&state.sessions.lock().await[&first.session_id].endpoint, "dbunny_second").unwrap();
+        let second = open_session(&state, endpoint, None).await.unwrap();
+        assert_eq!(second.database, "dbunny_second");
+        assert_ne!(second.session_id, first.session_id);
+        let current: String = state.client(&second.session_id).await.unwrap().query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
+        assert_eq!(current, "dbunny_second");
+        // The first session is untouched
+        let current: String = client.query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
+        assert_eq!(current, first.database);
+    }
+
+    /// The database switcher through an SSH tunnel: the second database opens through a
+    /// tunnel of its own, and the host key trusted for the first needs no new confirmation.
+    ///   DBUNNY_TEST_SSH=user:password@host:port
+    ///   DBUNNY_TEST_SSH_DATABASE_URL=<database URL as seen from the SSH server>
+    /// and a second database named dbunny_second.
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_SSH and DBUNNY_TEST_SSH_DATABASE_URL"]
+    async fn another_database_opens_through_the_same_tunnel_settings() {
+        let ssh = std::env::var("DBUNNY_TEST_SSH").unwrap();
+        let (auth, addr) = ssh.split_once('@').unwrap();
+        let (user, password) = auth.split_once(':').unwrap();
+        let (host, port) = addr.rsplit_once(':').unwrap();
+        let ssh = SshConfig {
+            host: host.into(),
+            port: port.parse().unwrap(),
+            user: user.into(),
+            auth_method: "password".into(),
+            password: password.into(),
+            key_path: String::new(),
+            passphrase: String::new(),
+        };
+        let known_hosts = std::env::temp_dir().join(format!("dbunny-switch-test-{}.json", Uuid::new_v4()));
+        let endpoint = Endpoint {
+            url: url::Url::parse(&std::env::var("DBUNNY_TEST_SSH_DATABASE_URL").unwrap()).unwrap(),
+            ssh: Some(ssh),
+            known_hosts: Some(known_hosts.clone()),
+        };
+        let state = AppState { sessions: Default::default(), saved_connections: Default::default(), encryption_key: [0; 32] };
+
+        // First time: the host key is unknown, so the UI asks and retries with its fingerprint
+        let err = open_session(&state, endpoint.clone(), None).await.err().expect("an unknown host key must be confirmed");
+        let problem: serde_json::Value = serde_json::from_str(&err).unwrap_or_else(|_| panic!("not a host key error: {err}"));
+        let fingerprint = problem["sshHostKey"]["fingerprint"].as_str().unwrap().to_string();
+        let first = open_session(&state, endpoint, Some(fingerprint)).await.unwrap();
+
+        // The switcher: list the server's databases through the tunnel, open another one
+        let client = state.client(&first.session_id).await.unwrap();
+        let names: Vec<String> = list_databases(&client).await.unwrap().into_iter().map(|d| d.name).collect();
+        assert!(names.iter().any(|n| n == "dbunny_second"), "{names:?}");
+        let other = endpoint_for_database(&state.sessions.lock().await[&first.session_id].endpoint, "dbunny_second").unwrap();
+        assert!(other.ssh.is_some(), "the SSH settings come along");
+        let second = open_session(&state, other, None).await.unwrap();
+        let current: String = state.client(&second.session_id).await.unwrap().query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
+        assert_eq!(current, "dbunny_second");
+
+        // Each session has its own tunnel; closing the first leaves the second working
+        let (one, two) = {
+            let sessions = state.sessions.lock().await;
+            (sessions[&first.session_id].tunnel.as_ref().unwrap().local_port, sessions[&second.session_id].tunnel.as_ref().unwrap().local_port)
+        };
+        assert_ne!(one, two);
+        state.sessions.lock().await.remove(&first.session_id);
+        let still: i32 = state.client(&second.session_id).await.unwrap().query_one("SELECT 1", &[]).await.unwrap().get(0);
+        assert_eq!(still, 1);
+        let _ = std::fs::remove_file(known_hosts);
+    }
+
+    /// DBUNNY_TEST_SOCKET_URL: a URL whose host is a socket folder, e.g.
+    /// postgresql://user:pass@%2Ftmp%2Fpg:5432/db
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_SOCKET_URL"]
+    async fn a_unix_socket_opens_a_session() {
+        let url = url::Url::parse(&std::env::var("DBUNNY_TEST_SOCKET_URL").unwrap()).unwrap();
+        let folder = socket_dir(&url).expect("the URL's host must be a socket folder");
+        let state = AppState { sessions: Default::default(), saved_connections: Default::default(), encryption_key: [0; 32] };
+        let session = open_session(&state, Endpoint { url: url.clone(), ssh: None, known_hosts: None }, None).await.unwrap();
+        assert_eq!(session.host, folder, "the socket folder stands for the host");
+        let one: i32 = state.client(&session.session_id).await.unwrap().query_one("SELECT 1", &[]).await.unwrap().get(0);
+        assert_eq!(one, 1);
+
+        let ssh = SshConfig {
+            host: "bastion".into(),
+            port: 22,
+            user: "u".into(),
+            auth_method: "password".into(),
+            password: "p".into(),
+            key_path: String::new(),
+            passphrase: String::new(),
+        };
+        let err = open_session(&state, Endpoint { url, ssh: Some(ssh), known_hosts: None }, None).await.err().unwrap();
+        assert!(err.contains("SSH"), "{err}");
+    }
+}
+
+/// Certificates against a real server with SSL and certificate login. Run with:
+///   DBUNNY_TEST_SSL_DIR=<dir with ca.pem, other-ca.pem, client.pem, client.pk8.pem, client.key>
+///   DBUNNY_TEST_SSL_PORT=<port of a server using a certificate for "localhost" signed by ca.pem,
+///   with a "demo"/"demo" password login and a "certuser" that logs in by certificate>
+///   cargo test --lib certificate_server_tests -- --ignored
+#[cfg(test)]
+mod certificate_server_tests {
+    use super::*;
+
+    fn dir() -> String {
+        std::env::var("DBUNNY_TEST_SSL_DIR").expect("set DBUNNY_TEST_SSL_DIR")
+    }
+
+    async fn try_connect(url: &str) -> Result<String, String> {
+        let url = url::Url::parse(url).unwrap();
+        let (config, tls) = connection_config(&url)?;
+        let (client, connection) = config.connect(tls).await.map_err(|e| e.to_string())?;
+        tokio::spawn(connection);
+        let row = client
+            .query_one("SELECT current_user::text || ' ' || ssl::text FROM pg_stat_ssl WHERE pid = pg_backend_pid()", &[])
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(row.get(0))
+    }
+
+    fn url(user: &str, host: &str, query: &str) -> String {
+        let port = std::env::var("DBUNNY_TEST_SSL_PORT").expect("set DBUNNY_TEST_SSL_PORT");
+        let auth = if user == "demo" { "demo:demo".to_string() } else { user.to_string() };
+        format!("postgresql://{auth}@{host}:{port}/demo?{query}")
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_SSL_DIR and DBUNNY_TEST_SSL_PORT"]
+    async fn the_server_certificate_is_checked_against_the_given_ca() {
+        let d = dir();
+        // The right CA: verify-ca and verify-full (the certificate is for localhost) both pass
+        assert_eq!(try_connect(&url("demo", "localhost", &format!("sslmode=verify-ca&sslrootcert={d}/ca.pem"))).await.unwrap(), "demo true");
+        assert_eq!(try_connect(&url("demo", "localhost", &format!("sslmode=verify-full&sslrootcert={d}/ca.pem"))).await.unwrap(), "demo true");
+        // require + CA behaves like verify-ca, as in libpq
+        assert!(try_connect(&url("demo", "localhost", &format!("sslmode=require&sslrootcert={d}/other-ca.pem"))).await.is_err());
+        // Another CA is refused
+        assert!(try_connect(&url("demo", "localhost", &format!("sslmode=verify-ca&sslrootcert={d}/other-ca.pem"))).await.is_err());
+        // verify-full accepts the other name the certificate lists (its IP address)
+        assert!(try_connect(&url("demo", "127.0.0.1", &format!("sslmode=verify-full&sslrootcert={d}/ca.pem"))).await.is_ok());
+        // Plain require without a CA still encrypts without checking
+        assert_eq!(try_connect(&url("demo", "localhost", "sslmode=require")).await.unwrap(), "demo true");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_SSL_DIR and DBUNNY_TEST_SSL_PORT"]
+    async fn client_certificates_log_in() {
+        let d = dir();
+        let with_cert = format!("sslmode=verify-ca&sslrootcert={d}/ca.pem&sslcert={d}/client.pem&sslkey={d}/client.pk8.pem");
+        assert_eq!(try_connect(&url("certuser", "localhost", &with_cert)).await.unwrap(), "certuser true");
+        // Without the certificate the server refuses the login
+        assert!(try_connect(&url("certuser", "localhost", &format!("sslmode=verify-ca&sslrootcert={d}/ca.pem"))).await.is_err());
+        // A PKCS#1 key explains how to convert it
+        let pkcs1 = format!("sslmode=require&sslcert={d}/client.pem&sslkey={d}/client.key");
+        match try_connect(&url("certuser", "localhost", &pkcs1)).await {
+            Ok(_) => {} // some platforms read PKCS#1 too
+            Err(e) => assert!(e.contains("PKCS#8") || e.contains("pkcs8"), "{e}"),
+        }
     }
 }
