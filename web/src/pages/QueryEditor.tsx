@@ -503,8 +503,9 @@ function QueryEditorPanel() {
       if (historyStorageKey) {
         setHistory(addToHistory(historyStorageKey, { sql, durationMs: null, rows: null, error: errorSummary(msg) }));
       }
-      // A lost transaction connection ends the transaction; reflect it in the toolbar
-      if (inTransaction) api.transactionOpen().then(setInTransaction).catch(() => setInTransaction(false));
+      // A lost transaction connection ends the transaction, and a script that failed after its BEGIN
+      // leaves one open (SQLite keeps the lock): the toolbar follows what the connection says
+      if (inTransaction || capabilities.transactions) api.transactionOpen().then(setInTransaction).catch(() => setInTransaction(false));
       showView("results");
     } finally {
       setRunning(false);
