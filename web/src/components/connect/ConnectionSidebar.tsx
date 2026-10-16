@@ -136,8 +136,7 @@ export default function ConnectionSidebar({
   return (
     <aside
       className={cn(
-        // Same colour as the title bar above it: together they form the window frame
-        "relative shrink-0 select-none overflow-hidden transition-[width] duration-300 ease-in-out",
+        "relative shrink-0 select-none overflow-hidden border-r border-border bg-sidebar transition-[width] duration-300 ease-in-out",
         expanded ? "w-64" : "w-12",
       )}
     >

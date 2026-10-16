@@ -355,7 +355,7 @@ export default function ConnectPage() {
           onNew={handleNewConnection}
         />
 
-        <main className="flex min-w-0 flex-1 flex-col bg-card rounded-tl-[10px] border-l border-t border-frame-line overflow-hidden">
+        <main className="flex min-w-0 flex-1 flex-col bg-card overflow-hidden">
           <PageHeader>
             <HeaderTitle label={editing ? "Saved connection" : "Connection"} icon={<Database />}>
               {editing ? connectionName || "Unnamed" : "New connection"}

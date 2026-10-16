@@ -70,7 +70,14 @@ function TabPane({
 
   return (
     <TabContext.Provider value={tab}>
-      <div className={cn("absolute inset-0", !active && "hidden")}>
+      {/* The tab's own container: sidebar, page and status bar all live inside it, and
+          the active tab above joins its top edge */}
+      <div
+        className={cn(
+          "absolute inset-x-1.5 top-0 bottom-1.5 flex flex-col overflow-hidden rounded-[10px] border border-frame-line bg-card",
+          !active && "hidden",
+        )}
+      >
         <ConnectionProvider onSessionChange={onSessionChange} initialSession={initialSession}>
           {/* A tab opened with a session starts on the query editor */}
           <MemoryRouter initialEntries={[initialSession ? "/db/query" : "/"]}>

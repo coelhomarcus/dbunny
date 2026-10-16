@@ -16,6 +16,9 @@
   /* Window frame: title bar, sidebars and status bar share it, the page sits on --card */
   --chrome: #eeeef0;
   --card: #ffffff;
+  /* Sidebar inside a tab's container: the container's own colour, so the active tab
+     above it joins seamlessly; a line separates it from the page */
+  --sidebar: var(--card);
   --card-foreground: #18181b;
   --popover: #ffffff;
   --popover-foreground: #18181b;
@@ -63,6 +66,7 @@
   --foreground: #f4f4f5;
   --chrome: #19191b;
   --card: #111112;
+  --sidebar: var(--card);
   --card-foreground: #f4f4f5;
   --popover: #161617;
   --popover-foreground: #f4f4f5;
@@ -105,6 +109,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-chrome: var(--chrome);
+  --color-sidebar: var(--sidebar);
   /* Opaque line of the window frame, so the sidebar edge and the title bar line meet cleanly */
   --color-frame-line: color-mix(in srgb, var(--foreground) 12%, var(--card));
   --color-foreground: var(--foreground);

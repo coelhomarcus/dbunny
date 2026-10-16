@@ -49,8 +49,7 @@ export default function DatabaseLayout() {
       <div className="flex flex-1 min-h-0">
         <aside
           className={cn(
-            // Same colour as the title bar above it: together they form the window frame
-            "relative shrink-0 select-none transition-[width] duration-300 ease-in-out overflow-hidden",
+            "relative shrink-0 select-none border-r border-border bg-sidebar transition-[width] duration-300 ease-in-out overflow-hidden",
             sidebarExpanded ? "w-64" : "w-12",
           )}
         >
@@ -161,7 +160,7 @@ export default function DatabaseLayout() {
           </div>
         </aside>
 
-        <main className="flex-1 min-w-0 bg-card rounded-tl-[10px] border-l border-t border-frame-line overflow-hidden">
+        <main className="flex-1 min-w-0 bg-card overflow-hidden">
           <Outlet />
         </main>
       </div>

@@ -182,14 +182,9 @@ export default function TitleBar() {
         if (isDragArea(e.target)) appWindow.toggleMaximize();
       }}
     >
-      {/* Sidebar block: same width as the sidebar below it, so both read as one
-          surface (traffic lights on macOS, collapse toggle at its right edge) */}
-      <div
-        className={cn(
-          "flex shrink-0 items-center justify-end transition-[width] duration-300 ease-in-out",
-          sidebarOpen ? "w-64 pr-2" : isMac ? "w-[7.5rem] pr-2" : "w-12 justify-center",
-        )}
-      >
+      {/* Room for the traffic lights on macOS, then the sidebar toggle; the tabs follow,
+          and each tab's container below holds its own sidebar */}
+      <div className={cn("flex shrink-0 items-center justify-end", isMac ? "w-[7.5rem] pr-1" : "w-12 justify-center")}>
         <Button
           variant="ghost-muted"
           size="icon-sm"
