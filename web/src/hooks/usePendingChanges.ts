@@ -43,6 +43,19 @@ export function usePendingChanges({
   const dirtyRowCount = Object.keys(pendingChanges).length;
   const hasPendingChanges = dirtyRowCount > 0;
 
+  /** Each changed row with the primary key that finds it, as saving sends them. */
+  const changedRows = useCallback(() => {
+    if (!data) return [];
+    return Object.entries(pendingChanges).map(([rowIdxStr, updates]) => {
+      const row = data.rows[parseInt(rowIdxStr)];
+      const key: Record<string, unknown> = {};
+      for (const pkCol of pkColumns) {
+        key[pkCol.name] = row[data.columns.findIndex((c) => c.name === pkCol.name)];
+      }
+      return { key, updates };
+    });
+  }, [data, pendingChanges, pkColumns]);
+
   const handleSave = useCallback(async () => {
     if (!data || !schema || !table || !hasPendingChanges) return;
     setSaving(true);
@@ -112,6 +125,7 @@ export function usePendingChanges({
     deleting,
     handleSave,
     handleDelete,
+    changedRows,
     discardChanges,
   };
 }

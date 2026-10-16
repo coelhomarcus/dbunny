@@ -7,6 +7,7 @@ import {
   Columns3,
   ListFilter,
   Lock,
+  FileCode,
   Loader,
   Plus,
 } from "lucide-react";
@@ -36,6 +37,8 @@ interface TableViewHeaderProps {
   saving: boolean;
   onSave: () => void;
   onDiscard: () => void;
+  /** Shows the SQL that saving would run. */
+  onReviewSql: () => void;
   refreshing: boolean;
   loading: boolean;
   spinKey: number;
@@ -54,7 +57,7 @@ interface TableViewHeaderProps {
 export default function TableViewHeader({
   schema, table, totalRows, totalRowsEstimated, counting, onCountExactly, hasNoPk, readOnly,
   selectedCount, deleting, onDelete,
-  hasPendingChanges, dirtyRowCount, saveError, saving, onSave, onDiscard,
+  hasPendingChanges, dirtyRowCount, saveError, saving, onSave, onDiscard, onReviewSql,
   refreshing, loading, spinKey, onRefresh,
   hasCustomWidths, onResetWidths,
   onInsertRow, filterCount, filtersOpen, onToggleFilters,
@@ -111,6 +114,9 @@ export default function TableViewHeader({
             <span className="text-sm text-muted-foreground">
               {dirtyRowCount} row{dirtyRowCount > 1 ? "s" : ""} changed
             </span>
+            <Button variant="ghost-muted" size="sm" onClick={onReviewSql}>
+              <FileCode /> SQL
+            </Button>
             <Button variant="ghost-muted" size="sm" onClick={onDiscard}>
               <X /> Discard
             </Button>

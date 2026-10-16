@@ -29,7 +29,7 @@ export function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
-function sqlLiteral(value: unknown): string {
+export function sqlLiteral(value: unknown): string {
   if (value === null || value === undefined) return "NULL";
   if (typeof value === "number" || typeof value === "bigint") return String(value);
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
@@ -43,4 +43,20 @@ export function rowsToInsertSql(schema: string, table: string, columns: QueryCol
   const names = columns.map((c) => quoteIdent(c.name)).join(", ");
   const values = rows.map((row) => `  (${row.map(sqlLiteral).join(", ")})`).join(",\n");
   return `INSERT INTO ${target} (${names}) VALUES\n${values};`;
+}
+
+/** The UPDATE statements that saving pending edits will run, one per changed row. */
+export function pendingChangesToSql(
+  schema: string,
+  table: string,
+  changes: { key: Record<string, unknown>; updates: Record<string, unknown> }[],
+): string {
+  const target = `${quoteIdent(schema)}.${quoteIdent(table)}`;
+  return changes
+    .map(({ key, updates }) => {
+      const set = Object.entries(updates).map(([column, value]) => `${quoteIdent(column)} = ${sqlLiteral(value)}`);
+      const where = Object.entries(key).map(([column, value]) => `${quoteIdent(column)} = ${sqlLiteral(value)}`);
+      return `UPDATE ${target}\nSET ${set.join(",\n    ")}\nWHERE ${where.join(" AND ")};`;
+    })
+    .join("\n\n");
 }

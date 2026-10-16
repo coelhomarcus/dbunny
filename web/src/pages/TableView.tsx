@@ -23,7 +23,9 @@ import InsertRowDialog from "../components/table/InsertRowDialog";
 import Button from "../components/ui/Button";
 import { ArrowUpRight, Ban, Braces, Copy, CopyPlus, Database, Filter, Sheet, TriangleAlert } from "lucide-react";
 import ContextMenu, { type ContextMenuItem } from "../components/ui/ContextMenu";
-import { rowsToInsertSql, rowsToJson, rowsToTsv, valueText } from "../lib/copyRows";
+import { pendingChangesToSql, rowsToInsertSql, rowsToJson, rowsToTsv, valueText } from "../lib/copyRows";
+import SqlViewer from "../components/SqlViewer";
+import Dialog from "../components/ui/Dialog";
 import Checkbox from "../components/Checkbox";
 import TableViewHeader from "../components/TableViewHeader";
 import SortableColumnHeader from "../components/SortableColumnHeader";
@@ -93,6 +95,8 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   const [insert, setInsert] = useState<{ initialValues?: Record<string, string | null> } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; rowIndex: number; colName: string } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
+  const [reviewSql, setReviewSql] = useState<string | null>(null);
+  const [sqlCopied, setSqlCopied] = useState(false);
 
   const editing = useCellEditing({
     data,
@@ -300,6 +304,10 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
           pending.discardChanges();
           editing.cancelEdit();
         }}
+        onReviewSql={() => {
+          setSqlCopied(false);
+          setReviewSql(pendingChangesToSql(schema!, table!, pending.changedRows()));
+        }}
         refreshing={tableData.refreshing}
         loading={loading}
         spinKey={tableData.spinKey}
@@ -484,6 +492,46 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       )}
 
       <ContextMenu position={menu} items={menuItems} onClose={closeMenu} />
+
+      <Dialog
+        open={reviewSql !== null}
+        onClose={() => setReviewSql(null)}
+        className="max-w-2xl"
+        title="Pending changes as SQL"
+        description="What saving will run. Values are sent as parameters; this text is for reviewing or reusing."
+        footer={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mr-auto"
+              onClick={async () => {
+                await navigator.clipboard.writeText(reviewSql ?? "");
+                setSqlCopied(true);
+              }}
+            >
+              {sqlCopied ? "Copied" : "Copy SQL"}
+            </Button>
+            <Button variant="neutral" size="sm" onClick={() => setReviewSql(null)}>
+              Close
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setReviewSql(null);
+                pending.handleSave();
+              }}
+            >
+              Save changes
+            </Button>
+          </>
+        }
+      >
+        <div className="h-64 overflow-hidden rounded-lg border border-border">
+          <SqlViewer value={reviewSql ?? ""} />
+        </div>
+      </Dialog>
 
       <CellEditorDialog
         open={editorDialogOpen}
