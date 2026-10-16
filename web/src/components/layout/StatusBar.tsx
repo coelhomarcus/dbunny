@@ -1,9 +1,41 @@
-import { Eye, EyeOff, Lock, LogOut } from "lucide-react";
+import { Eye, EyeOff, Lock, LogOut, Settings } from "lucide-react";
 import Tooltip from "../Tooltip";
+import Button from "../ui/Button";
+import { useSettingsDialog } from "../../contexts/settingsDialog";
+import { showUpdate, useUpdate } from "../../lib/updater";
+import { isMac } from "../../lib/platform";
 import type { ConnectionInfo } from "@/types";
 import ThemeToggle from "../ui/ThemeToggle";
 
 const mask = (value: string) => value.replace(/./g, "•");
+
+/** Brings back the update notice after "Later": an update is waiting or installed. */
+function UpdateIndicator() {
+  const { state, dismissed } = useUpdate();
+  if (!dismissed || (state.status !== "available" && state.status !== "ready")) return null;
+  return (
+    <button
+      type="button"
+      onClick={showUpdate}
+      className="mr-1 flex h-5 items-center gap-1.5 rounded-md px-1.5 font-medium text-primary transition-colors cursor-pointer hover:bg-primary/10"
+    >
+      <span className="size-1.5 rounded-full bg-primary" />
+      {state.status === "ready" ? "Restart to update" : `Update to ${state.version}`}
+    </button>
+  );
+}
+
+/** Opens Settings; Cmd/Ctrl+, does too. */
+function SettingsButton() {
+  const { openSettings } = useSettingsDialog();
+  return (
+    <Tooltip label={`Settings (${isMac ? "⌘" : "Ctrl+"},)`} side="top">
+      <Button variant="ghost-muted" size="icon-xs" aria-label="Settings" onClick={() => openSettings()}>
+        <Settings />
+      </Button>
+    </Tooltip>
+  );
+}
 
 /** Bottom bar of a connected tab: who we're talking to, plus global actions. */
 export default function StatusBar({
@@ -46,8 +78,10 @@ export default function StatusBar({
         </button>
       </Tooltip>
       <div className="ml-auto flex items-center gap-1">
+        <UpdateIndicator />
         {connectionInfo?.serverVersion && <span className="mr-1.5">PostgreSQL {connectionInfo.serverVersion.split(" ")[0]}</span>}
         <ThemeToggle side="top" size="icon-xs" />
+        <SettingsButton />
         <button
           onClick={onDisconnect}
           className="flex h-5 items-center gap-1 rounded-md px-1.5 hover:bg-destructive/10 hover:text-destructive-foreground transition-colors cursor-pointer"
@@ -69,8 +103,10 @@ export function IdleStatusBar({ version }: { version: string | null }) {
         Not connected
       </span>
       <div className="ml-auto flex items-center gap-1">
+        <UpdateIndicator />
         {version && <span className="mr-1.5">DBunny {version}</span>}
         <ThemeToggle side="top" size="icon-xs" />
+        <SettingsButton />
       </div>
     </footer>
   );

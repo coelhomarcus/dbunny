@@ -6,6 +6,8 @@ import { TabContext, useWorkspace, type TabSessionInfo } from "./contexts/worksp
 import type { InitialSession } from "@/types";
 import { cn } from "./lib/cn";
 import AppContextMenu from "./components/AppContextMenu";
+import SettingsProvider from "./components/settings/SettingsProvider";
+import UpdateNotice from "./components/UpdateNotice";
 import TitleBar from "./components/TitleBar";
 import ConnectPage from "./pages/ConnectPage";
 import DatabaseLayout from "./pages/DatabaseLayout";
@@ -32,15 +34,18 @@ export default function App() {
 
   return (
     <WorkspaceProvider>
-      <div className="h-screen flex flex-col bg-chrome text-foreground">
-        <TitleBar />
-        {/* -1px: the page card's top border sits under the title bar's last row, where
-            only the active tab (painted above it) hides it */}
-        <div className="relative -mt-px flex-1 min-h-0">
-          <TabPanes />
+      <SettingsProvider>
+        <div className="h-screen flex flex-col bg-chrome text-foreground">
+          <TitleBar />
+          {/* -1px: the page card's top border sits under the title bar's last row, where
+              only the active tab (painted above it) hides it */}
+          <div className="relative -mt-px flex-1 min-h-0">
+            <TabPanes />
+          </div>
         </div>
-      </div>
-      <AppContextMenu />
+        <UpdateNotice />
+        <AppContextMenu />
+      </SettingsProvider>
     </WorkspaceProvider>
   );
 }
