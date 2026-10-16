@@ -9,7 +9,7 @@ import type { ColumnInfo, QueryColumn, TableFilter } from "@/types";
 import { editorFor, toEditText, type CellEditor } from "../lib/cellEdit";
 import { isJsonType, shortType } from "../lib/columnMeta";
 import CellEditorDialog from "../components/table/CellEditorDialog";
-import { useTableData } from "../hooks/useTableData";
+import { useTableData, toSortKeys } from "../hooks/useTableData";
 import { useApi, useConnection } from "../contexts/useConnection";
 import { useTab } from "../contexts/workspace";
 import { useCellEditing } from "../hooks/useCellEditing";
@@ -153,11 +153,9 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       : (data?.totalRows ?? 0);
     const batchSize = 100;
     const pages = Math.ceil(total / batchSize);
-    const sortColumn = tableData.sorting[0]?.id;
-    const sortDirection = tableData.sorting[0]?.desc ? "desc" as const : "asc" as const;
     const params = {
-      pageSize: batchSize, sortColumn,
-      sortDirection: sortColumn ? sortDirection : undefined,
+      pageSize: batchSize,
+      sort: toSortKeys(tableData.sorting),
       filters: tableData.filters,
       filterMode: tableData.filterMode,
     };
@@ -201,6 +199,11 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
     getCoreRowModel: getCoreRowModel(),
     manualSorting: true,
     manualPagination: true,
+    // Shift+click adds a column to the sort instead of replacing it
+    enableMultiSort: true,
+    // Ascending first for every type (otherwise it's guessed from the first row)
+    sortDescFirst: false,
+    isMultiSortEvent: (e) => (e as MouseEvent).shiftKey,
   });
 
   /** The row as shown on screen, pending edits included. */
@@ -382,6 +385,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                         id={header.id}
                         columnInfo={columnInfos.find((c) => c.name === header.id)}
                         sorted={header.column.getIsSorted()}
+                        sortIndex={tableData.sorting.length > 1 ? header.column.getSortIndex() : -1}
                         onToggleSort={header.column.getToggleSortingHandler()!}
                         onResizeStart={(e) => resize.onResizeStart(e, header.id)}
                       />

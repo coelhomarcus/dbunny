@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { type SortingState, type OnChangeFn } from "@tanstack/react-table";
 import { useApi } from "../contexts/useConnection";
-import type { TableDataResponse, ColumnInfo, TableFilter, FilterMode } from "@/types";
+import type { TableDataResponse, ColumnInfo, TableFilter, FilterMode, SortKey } from "@/types";
 import { isActiveFilter } from "../lib/tableFilters";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
@@ -22,6 +22,11 @@ function readPageSize(schema?: string, table?: string): number {
  * Rows of one table. The view is remounted for every navigation, so state starts
  * fresh per table; `initialFilters` opens it already filtered (foreign key links).
  */
+/** The table's sorting state as the backend's sort keys. */
+export function toSortKeys(sorting: SortingState): SortKey[] {
+  return sorting.map((s) => ({ column: s.id, direction: s.desc ? "desc" : "asc" }));
+}
+
 export function useTableData(schema?: string, table?: string, initialFilters: TableFilter[] = []) {
   const api = useApi();
   const [data, setData] = useState<TableDataResponse | null>(null);
@@ -54,15 +59,10 @@ export function useTableData(schema?: string, table?: string, initialFilters: Ta
       filterList: TableFilter[] = [],
       mode: FilterMode = "all",
     ) => {
-      const sortColumn = sort[0]?.id;
-      const sortDirection = sort[0]?.desc
-        ? ("desc" as const)
-        : ("asc" as const);
       return api.getTableData(s, t, {
         page: pg,
         pageSize: ps,
-        sortColumn,
-        sortDirection: sortColumn ? sortDirection : undefined,
+        sort: toSortKeys(sort),
         filters: filterList,
         filterMode: mode,
       });

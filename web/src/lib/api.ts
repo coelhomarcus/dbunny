@@ -10,6 +10,7 @@ import type {
   CompletionSchema,
   FilterMode,
   TableFilter,
+  SortKey,
   QueryResult,
   TableDataResponse,
   SavedConnection,
@@ -157,6 +158,7 @@ export function createSessionApi(sessionId: string | null) {
         pageSize?: number;
         sortColumn?: string;
         sortDirection?: "asc" | "desc";
+        sort?: SortKey[];
         filters?: TableFilter[];
         filterMode?: FilterMode;
       }
