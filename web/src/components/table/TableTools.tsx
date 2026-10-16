@@ -51,7 +51,7 @@ export default function TableTools({
     <>
       {totalRows !== undefined &&
         (totalRowsEstimated ? (
-          <Tooltip label="Estimated from the table statistics. Click for an exact count." side="top">
+          <Tooltip label="An estimate. Click for the exact count" side="top">
             <button
               type="button"
               onClick={onCountExactly}

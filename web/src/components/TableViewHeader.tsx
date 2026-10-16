@@ -59,7 +59,7 @@ export default function TableViewHeader({
         <HeaderTitle label={relationType ? `${LABEL[relationType]} · ${schema}` : schema}>{table}</HeaderTitle>
         {isView ? (
           <Tooltip
-            label={relationType === "matview" ? "A materialized view keeps the result of its query: rows can't be edited" : "A view shows the result of its query: rows can't be edited"}
+            label={relationType === "matview" ? "A materialized view's rows can't be edited" : "A view's rows can't be edited"}
             side="bottom"
           >
             <Badge variant="neutral">
@@ -67,13 +67,13 @@ export default function TableViewHeader({
             </Badge>
           </Tooltip>
         ) : connectionReadOnly ? (
-          <Tooltip label="This connection is read-only: rows can't be inserted, edited or deleted" side="bottom">
+          <Tooltip label="Read-only connection: rows can't be changed" side="bottom">
             <Badge variant="warning">
               <Lock /> Read-only
             </Badge>
           </Tooltip>
         ) : hasNoPk ? (
-          <Tooltip label="Without a primary key rows can't be told apart, so editing is off" side="bottom">
+          <Tooltip label="No primary key, so rows can't be edited" side="bottom">
             <Badge variant="warning">
               <KeyRound /> No primary key
             </Badge>
