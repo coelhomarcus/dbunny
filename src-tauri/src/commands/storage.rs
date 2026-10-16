@@ -31,6 +31,13 @@ struct SensitiveData {
     tls: Option<TlsSettings>,
 }
 
+/// Sensitive data of a SQLite connection — encrypted at rest as a JSON blob, like the
+/// PostgreSQL one: the file's path says as much about the user as a host does.
+#[derive(Serialize, Deserialize)]
+struct SqliteData {
+    path: String,
+}
+
 /// SSL settings beyond on/off, saved with a connection.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +95,8 @@ pub struct SavedConnectionInfo {
     pub password: String,
     pub ssh: Option<SshConfig>,
     pub tls: Option<TlsSettings>,
+    /// The database file of a SQLite connection; empty for the other engines.
+    pub path: String,
     pub ssl: bool,
     pub read_only: bool,
     pub color: String,
@@ -291,13 +300,9 @@ pub fn write_connections(path: &Path, connections: &[SavedConnection]) -> Result
 
 // ── SavedConnection impl ──────────────────────────────────────────────────────
 
-impl SavedConnection {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        key: &[u8; 32],
-        engine: Engine,
-        id: String,
-        name: String,
+/// What a connection is saved with, by engine: the details that go into `encrypted_data`.
+pub enum ConnectionDetails {
+    Postgres {
         host: String,
         port: u16,
         database: String,
@@ -306,24 +311,45 @@ impl SavedConnection {
         ssh: Option<SshConfig>,
         tls: Option<TlsSettings>,
         ssl: bool,
+    },
+    Sqlite {
+        path: String,
+    },
+}
+
+impl ConnectionDetails {
+    pub fn engine(&self) -> Engine {
+        match self {
+            ConnectionDetails::Postgres { .. } => Engine::Postgres,
+            ConnectionDetails::Sqlite { .. } => Engine::Sqlite,
+        }
+    }
+}
+
+impl SavedConnection {
+    pub fn new(
+        key: &[u8; 32],
+        id: String,
+        name: String,
+        details: ConnectionDetails,
         color: String,
         created_at: String,
         updated_at: String,
     ) -> Result<Self, String> {
+        let engine = details.engine();
         // What gets encrypted depends on the engine
-        let json = match engine {
-            Engine::Postgres => serde_json::to_string(&SensitiveData {
-                host,
-                port,
-                database,
-                user,
-                password,
-                ssh,
-                tls,
-            })
-            .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?,
-            // Saved SQLite connections come with their own sensitive data in a later step
-            Engine::Sqlite => return Err("SQLite connections can't be saved yet".into()),
+        let (json, ssl) = match details {
+            ConnectionDetails::Postgres { host, port, database, user, password, ssh, tls, ssl } => {
+                let json = serde_json::to_string(&SensitiveData { host, port, database, user, password, ssh, tls })
+                    .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?;
+                (json, ssl)
+            }
+            // A SQLite file has no SSL
+            ConnectionDetails::Sqlite { path } => {
+                let json = serde_json::to_string(&SqliteData { path })
+                    .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?;
+                (json, false)
+            }
         };
         let encrypted_data = encrypt(key, &json)?;
 
@@ -351,11 +377,23 @@ impl SavedConnection {
             .engine()
             .ok_or_else(|| format!("This version doesn't support {} connections", self.engine))?;
         let json = decrypt(key, &self.encrypted_data)?;
-        let sensitive = match engine {
-            Engine::Postgres => serde_json::from_str::<SensitiveData>(&json)
-                .map_err(|e| format!("Failed to deserialize sensitive data: {e}"))?,
-            // Saved SQLite connections come with their own sensitive data in a later step
-            Engine::Sqlite => return Err("SQLite connections can't be read yet".into()),
+        let deserialize_error = |e: serde_json::Error| format!("Failed to deserialize sensitive data: {e}");
+        // A SQLite connection has only its path; the PostgreSQL fields are left empty
+        let (sensitive, path) = match engine {
+            Engine::Postgres => (serde_json::from_str::<SensitiveData>(&json).map_err(deserialize_error)?, String::new()),
+            Engine::Sqlite => {
+                let SqliteData { path } = serde_json::from_str(&json).map_err(deserialize_error)?;
+                let empty = SensitiveData {
+                    host: String::new(),
+                    port: 0,
+                    database: String::new(),
+                    user: String::new(),
+                    password: String::new(),
+                    ssh: None,
+                    tls: None,
+                };
+                (empty, path)
+            }
         };
 
         Ok(SavedConnectionInfo {
@@ -369,6 +407,7 @@ impl SavedConnection {
             password: sensitive.password,
             ssh: sensitive.ssh,
             tls: sensitive.tls,
+            path,
             ssl: self.ssl,
             read_only: self.read_only,
             color: self.color.clone(),
@@ -396,8 +435,7 @@ mod tests {
     fn the_icon_is_kept_next_to_the_encrypted_details() {
         let key = [7u8; 32];
         let mut conn = SavedConnection::new(
-            &key, Engine::Postgres, "1".into(), "Prod".into(), "db.example.com".into(), 5432, "shop".into(), "me".into(), "secret".into(),
-            None, None, true, "#ef4444".into(), "a".into(), "b".into(),
+            &key, "1".into(), "Prod".into(), postgres("db.example.com", 5432, "shop", "me", "secret", true), "#ef4444".into(), "a".into(), "b".into(),
         )
         .unwrap();
         conn.icon = "rocket".into();
@@ -429,8 +467,7 @@ mod tests {
     fn engine_is_written_back() {
         let key = [7u8; 32];
         let conn = SavedConnection::new(
-            &key, Engine::Postgres, "1".into(), "Prod".into(), "db.example.com".into(), 5432, "shop".into(), "me".into(), "secret".into(),
-            None, None, true, "#ef4444".into(), "a".into(), "b".into(),
+            &key, "1".into(), "Prod".into(), postgres("db.example.com", 5432, "shop", "me", "secret", true), "#ef4444".into(), "a".into(), "b".into(),
         )
         .unwrap();
         let json = serde_json::to_value(&conn).unwrap();
@@ -547,6 +584,20 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    /// PostgreSQL details without SSH or custom SSL settings.
+    fn postgres(host: &str, port: u16, database: &str, user: &str, password: &str, ssl: bool) -> ConnectionDetails {
+        ConnectionDetails::Postgres {
+            host: host.into(),
+            port,
+            database: database.into(),
+            user: user.into(),
+            password: password.into(),
+            ssh: None,
+            tls: None,
+            ssl,
+        }
+    }
+
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("dbunny-storage-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
@@ -555,8 +606,7 @@ mod tests {
 
     fn connection(key: &[u8; 32], name: &str) -> SavedConnection {
         SavedConnection::new(
-            key, Engine::Postgres, name.into(), name.into(), "db.example.com".into(), 5432, "shop".into(), "me".into(), "secret".into(),
-            None, None, false, "#3b82f6".into(), "a".into(), "b".into(),
+            key, name.into(), name.into(), postgres("db.example.com", 5432, "shop", "me", "secret", false), "#3b82f6".into(), "a".into(), "b".into(),
         )
         .unwrap()
     }
@@ -615,5 +665,169 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].to_info(&key).unwrap().name, "prod");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    const SQLITE_PATH: &str = "/Users/me/Projects/shop/inventory-private.sqlite";
+
+    fn sqlite(key: &[u8; 32], id: &str) -> SavedConnection {
+        SavedConnection::new(
+            key, id.into(), "Inventory".into(), ConnectionDetails::Sqlite { path: SQLITE_PATH.into() }, "#22c55e".into(), "a".into(), "b".into(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn sqlite_connections_keep_their_path_encrypted() {
+        let key = [4u8; 32];
+        let dir = temp_dir();
+        let path = dir.join("db_connections.json");
+        let mut conn = sqlite(&key, "lite");
+        conn.read_only = true;
+        conn.icon = "box".into();
+        write_connections(&path, &[conn]).unwrap();
+
+        let written = fs::read_to_string(&path).unwrap();
+        for part in [SQLITE_PATH, "inventory-private", "/Users/me"] {
+            assert!(!written.contains(part), "{part} is in the file: {written}");
+        }
+        let json: serde_json::Value = serde_json::from_str(&written).unwrap();
+        let entry = &json["connections"][0];
+        assert_eq!(entry["engine"], "sqlite");
+        assert_eq!((entry["ssl"].as_bool(), entry["readOnly"].as_bool()), (Some(false), Some(true)));
+        // The payload is just the path
+        let payload: serde_json::Value = serde_json::from_str(&decrypt(&key, entry["encryptedData"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(payload, serde_json::json!({ "path": SQLITE_PATH }));
+
+        let loaded = load_connections_from_path(&path);
+        assert_eq!(loaded[0].engine(), Some(Engine::Sqlite));
+        let info = loaded[0].to_info(&key).unwrap();
+        assert_eq!((info.engine, info.path.as_str()), (Engine::Sqlite, SQLITE_PATH));
+        assert_eq!(
+            (info.host.as_str(), info.port, info.database.as_str(), info.user.as_str(), info.password.as_str()),
+            ("", 0, "", "", "")
+        );
+        assert!(info.ssh.is_none() && info.tls.is_none() && !info.ssl && info.read_only);
+        assert_eq!((info.id.as_str(), info.name.as_str(), info.color.as_str(), info.icon.as_str()), ("lite", "Inventory", "#22c55e", "box"));
+        assert_eq!((info.created_at.as_str(), info.updated_at.as_str()), ("a", "b"));
+        let info = serde_json::to_value(&info).unwrap();
+        assert_eq!((info["engine"].as_str(), info["path"].as_str()), (Some("sqlite"), Some(SQLITE_PATH)));
+
+        // Written back by the next save with its engine
+        write_connections(&path, &loaded).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["connections"][0]["engine"], "sqlite");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn postgres_connections_still_round_trip() {
+        let key = [6u8; 32];
+        let dir = temp_dir();
+        let path = dir.join("db_connections.json");
+        let plain = connection(&key, "plain");
+        // The payload is written exactly as before SQLite existed
+        assert_eq!(
+            decrypt(&key, &plain.encrypted_data).unwrap(),
+            r#"{"host":"db.example.com","port":5432,"database":"shop","user":"me","password":"secret","ssh":null,"tls":null}"#
+        );
+        let ssh = SshConfig {
+            host: "bastion".into(),
+            port: 2222,
+            user: "ubuntu".into(),
+            auth_method: "key".into(),
+            password: String::new(),
+            key_path: "/home/me/.ssh/id_ed25519".into(),
+            passphrase: "pp".into(),
+        };
+        let tls = TlsSettings { mode: "verify-full".into(), root_cert: "/ca.pem".into(), cert: "/client.pem".into(), key: "/client.key".into() };
+        let full = SavedConnection::new(
+            &key,
+            "full".into(),
+            "Prod".into(),
+            ConnectionDetails::Postgres {
+                host: "db.example.com".into(),
+                port: 5433,
+                database: "shop".into(),
+                user: "me".into(),
+                password: "secret".into(),
+                ssh: Some(ssh),
+                tls: Some(tls),
+                ssl: true,
+            },
+            "#ef4444".into(),
+            "t1".into(),
+            "t2".into(),
+        )
+        .unwrap();
+        write_connections(&path, &[plain, full]).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("db.example.com") && !written.contains("secret") && !written.contains("bastion"), "{written}");
+
+        let loaded = load_connections_from_path(&path);
+        let info = loaded[1].to_info(&key).unwrap();
+        assert_eq!((info.engine, info.path.as_str(), info.ssl), (Engine::Postgres, "", true));
+        assert_eq!(
+            (info.host.as_str(), info.port, info.database.as_str(), info.user.as_str(), info.password.as_str()),
+            ("db.example.com", 5433, "shop", "me", "secret")
+        );
+        let ssh = info.ssh.expect("the ssh settings");
+        assert_eq!((ssh.host.as_str(), ssh.port, ssh.key_path.as_str(), ssh.passphrase.as_str()), ("bastion", 2222, "/home/me/.ssh/id_ed25519", "pp"));
+        let tls = info.tls.expect("the tls settings");
+        assert_eq!((tls.mode.as_str(), tls.root_cert.as_str(), tls.cert.as_str(), tls.key.as_str()), ("verify-full", "/ca.pem", "/client.pem", "/client.key"));
+        let plain = loaded[0].to_info(&key).unwrap();
+        assert_eq!((plain.host.as_str(), plain.path.as_str(), plain.ssl), ("db.example.com", "", false));
+        assert!(plain.ssh.is_none() && plain.tls.is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_file_mixing_engines_offers_the_known_ones_and_keeps_the_rest() {
+        let key = [8u8; 32];
+        let dir = temp_dir();
+        let path = dir.join("db_connections.json");
+        let (unknown_file, _) = file_with_an_unknown_engine(&key);
+        let mut file: serde_json::Value = serde_json::from_str(&unknown_file).unwrap();
+        let sqlite_payload = encrypt(&key, &format!(r#"{{"path":"{SQLITE_PATH}"}}"#)).unwrap();
+        file["connections"].as_array_mut().unwrap().insert(
+            1,
+            serde_json::json!({
+                "id": "lite", "name": "Inventory", "engine": "sqlite", "encryptedData": sqlite_payload, "ssl": false,
+                "readOnly": true, "color": "#22c55e", "icon": "box", "createdAt": "t5", "updatedAt": "t6"
+            }),
+        );
+        let original_unknown = file["connections"][2].clone();
+        assert_eq!(original_unknown["engine"], "mysql");
+        fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+
+        let loaded = load_connections_from_path(&path);
+        assert!(path.exists(), "the file isn't moved aside");
+        assert_eq!(loaded.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["pg", "lite", "my"]);
+        // What get_saved_connections offers
+        let offered: Vec<_> = loaded.iter().filter_map(|c| c.to_info(&key).ok()).collect();
+        assert_eq!(
+            offered.iter().map(|c| (c.id.as_str(), c.engine)).collect::<Vec<_>>(),
+            [("pg", Engine::Postgres), ("lite", Engine::Sqlite)]
+        );
+        assert_eq!((offered[0].host.as_str(), offered[0].path.as_str()), ("db.example.com", ""));
+        assert_eq!((offered[1].host.as_str(), offered[1].path.as_str(), offered[1].read_only), ("", SQLITE_PATH, true));
+
+        write_connections(&path, &loaded).unwrap();
+        let written: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(written["connections"][2], original_unknown, "the unknown connection is written back as it was");
+        assert_eq!(serde_json::to_string(&written["connections"][2]).unwrap(), serde_json::to_string(&original_unknown).unwrap());
+        assert_eq!(written["connections"][1]["engine"], "sqlite");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sqlite_connections_under_the_hostname_key_move_to_the_new_key() {
+        let (legacy, key) = ([1u8; 32], [2u8; 32]);
+        let mut connections = vec![sqlite(&legacy, "old"), connection(&key, "new")];
+        assert!(connections[0].to_info(&key).is_err());
+        assert!(migrate_to_key(&mut connections, &key, &legacy));
+        let info = connections[0].to_info(&key).unwrap();
+        assert_eq!((info.engine, info.path.as_str()), (Engine::Sqlite, SQLITE_PATH));
+        assert_eq!(connections[1].to_info(&key).unwrap().password, "secret");
+        assert!(!migrate_to_key(&mut connections, &key, &legacy), "nothing left to move");
     }
 }
