@@ -6,13 +6,13 @@ import SchemaTree from "../components/SchemaTree";
 import Tooltip from "../components/Tooltip";
 import Button from "../components/ui/Button";
 import StatusBar from "../components/layout/StatusBar";
-import { HeaderTitle } from "../components/layout/PageHeader";
+import DatabaseSwitcher from "../components/layout/DatabaseSwitcher";
 import { cn } from "../lib/cn";
 import { Terminal, Folder, Activity } from "lucide-react";
 import type { SchemaInfo } from "@/types";
 
 export default function DatabaseLayout() {
-  const { isConnected, connectionInfo, savedConnectionName, disconnect, api } = useConnection();
+  const { isConnected, connectionInfo, disconnect, api } = useConnection();
   const navigate = useNavigate();
   const [revealed, setRevealed] = useState(false);
   const { sidebarOpen: sidebarExpanded, setSidebarOpen: setSidebarExpanded } = useWorkspace();
@@ -62,9 +62,7 @@ export default function DatabaseLayout() {
             )}
           >
             <div className="h-10 shrink-0 flex items-center pl-3 pr-2">
-              <HeaderTitle label="Connection" className="flex-1">
-                {savedConnectionName || connectionInfo?.database || "Connection"}
-              </HeaderTitle>
+              <DatabaseSwitcher />
             </div>
 
             <nav className="px-2 pb-2">

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
 import { disposeTabState } from "../lib/tabState";
 import { WorkspaceContext, type TabSessionInfo, type WorkspaceTab } from "./workspace";
+import type { InitialSession } from "@/types";
 
 const SIDEBAR_KEY = "dbunny-sidebar-open";
 
@@ -13,8 +14,8 @@ function readSidebarOpen() {
   }
 }
 
-function newTab(): WorkspaceTab {
-  return { id: crypto.randomUUID(), title: null, subtitle: null, color: null, sessionId: null };
+function newTab(initialSession?: InitialSession): WorkspaceTab {
+  return { id: crypto.randomUUID(), title: null, subtitle: null, color: null, sessionId: null, initialSession };
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
@@ -33,8 +34,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const toggleSidebar = useCallback(() => setSidebarOpen(!sidebarOpen), [sidebarOpen, setSidebarOpen]);
 
-  const openTab = useCallback(() => {
-    const tab = newTab();
+  const openTab = useCallback((initialSession?: InitialSession) => {
+    const tab = newTab(initialSession);
     setTabs((prev) => [...prev, tab]);
     setActiveTabId(tab.id);
   }, []);

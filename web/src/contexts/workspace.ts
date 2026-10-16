@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react";
+import type { InitialSession } from "@/types";
 
 /** One window tab = one independent connection workspace. */
 export interface WorkspaceTab {
@@ -10,6 +11,8 @@ export interface WorkspaceTab {
   /** Colour of the saved connection, if any. */
   color: string | null;
   sessionId: string | null;
+  /** A session this tab opens with, instead of starting on the connect screen. */
+  initialSession?: InitialSession;
 }
 
 export type TabSessionInfo = Pick<WorkspaceTab, "title" | "subtitle" | "color" | "sessionId">;
@@ -17,7 +20,7 @@ export type TabSessionInfo = Pick<WorkspaceTab, "title" | "subtitle" | "color" |
 export interface WorkspaceValue {
   tabs: WorkspaceTab[];
   activeTabId: string;
-  openTab: () => void;
+  openTab: (initialSession?: InitialSession) => void;
   closeTab: (id: string) => void;
   activateTab: (id: string) => void;
   /** Activate the next/previous tab (wraps around). */

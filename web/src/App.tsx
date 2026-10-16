@@ -3,6 +3,7 @@ import { MemoryRouter, Routes, Route, Navigate } from "react-router";
 import { ConnectionProvider } from "./contexts/ConnectionContext";
 import { WorkspaceProvider } from "./contexts/WorkspaceProvider";
 import { TabContext, useWorkspace, type TabSessionInfo } from "./contexts/workspace";
+import type { InitialSession } from "@/types";
 import { cn } from "./lib/cn";
 import TitleBar from "./components/TitleBar";
 import ConnectPage from "./pages/ConnectPage";
@@ -44,7 +45,7 @@ export default function App() {
 function TabPanes() {
   const { tabs, activeTabId, updateTab } = useWorkspace();
   return tabs.map((tab) => (
-    <TabPane key={tab.id} tabId={tab.id} active={tab.id === activeTabId} updateTab={updateTab} />
+    <TabPane key={tab.id} tabId={tab.id} active={tab.id === activeTabId} updateTab={updateTab} initialSession={tab.initialSession} />
   ));
 }
 
@@ -56,10 +57,12 @@ function TabPane({
   tabId,
   active,
   updateTab,
+  initialSession,
 }: {
   tabId: string;
   active: boolean;
   updateTab: (id: string, info: TabSessionInfo) => void;
+  initialSession?: InitialSession;
 }) {
   const onSessionChange = useCallback((info: TabSessionInfo) => updateTab(tabId, info), [tabId, updateTab]);
   const tab = useMemo(() => ({ tabId, isActive: active }), [tabId, active]);
@@ -67,8 +70,9 @@ function TabPane({
   return (
     <TabContext.Provider value={tab}>
       <div className={cn("absolute inset-0", !active && "hidden")}>
-        <ConnectionProvider onSessionChange={onSessionChange}>
-          <MemoryRouter>
+        <ConnectionProvider onSessionChange={onSessionChange} initialSession={initialSession}>
+          {/* A tab opened with a session starts on the query editor */}
+          <MemoryRouter initialEntries={[initialSession ? "/db/query" : "/"]}>
             <Routes>
               <Route path="/" element={<ConnectPage />} />
               <Route path="/db" element={<DatabaseLayout />}>

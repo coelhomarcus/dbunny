@@ -12,20 +12,9 @@ import SqlViewer from "../components/SqlViewer";
 import { useApi } from "../contexts/useConnection";
 import { foreignKeyTarget, shortType } from "../lib/columnMeta";
 import { cn } from "../lib/cn";
+import { formatBytes } from "../lib/format";
 
 type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "ddl";
-
-/** "1.4 MB" */
-function formatBytes(bytes: number): string {
-  const units = ["B", "kB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
-}
 
 function tablePath(schema: string, table: string) {
   return `/db/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`;

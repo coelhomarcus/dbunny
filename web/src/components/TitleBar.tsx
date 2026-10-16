@@ -210,7 +210,7 @@ export default function TitleBar() {
             onClose={() => closeTab(tab.id)}
           />
         ))}
-        <Button variant="ghost-muted" size="icon-xs" className="mb-1.5 ml-0.5" onClick={openTab} aria-label="New tab">
+        <Button variant="ghost-muted" size="icon-xs" className="mb-1.5 ml-0.5" onClick={() => openTab()} aria-label="New tab">
           <Plus />
         </Button>
       </div>
