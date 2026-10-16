@@ -606,6 +606,63 @@ mod database_server_tests {
         assert_eq!(current, first.database);
     }
 
+    /// The database switcher through an SSH tunnel: the second database opens through a
+    /// tunnel of its own, and the host key trusted for the first needs no new confirmation.
+    ///   DBUNNY_TEST_SSH=user:password@host:port
+    ///   DBUNNY_TEST_SSH_DATABASE_URL=<database URL as seen from the SSH server>
+    /// and a second database named dbunny_second.
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_SSH and DBUNNY_TEST_SSH_DATABASE_URL"]
+    async fn another_database_opens_through_the_same_tunnel_settings() {
+        let ssh = std::env::var("DBUNNY_TEST_SSH").unwrap();
+        let (auth, addr) = ssh.split_once('@').unwrap();
+        let (user, password) = auth.split_once(':').unwrap();
+        let (host, port) = addr.rsplit_once(':').unwrap();
+        let ssh = SshConfig {
+            host: host.into(),
+            port: port.parse().unwrap(),
+            user: user.into(),
+            auth_method: "password".into(),
+            password: password.into(),
+            key_path: String::new(),
+            passphrase: String::new(),
+        };
+        let known_hosts = std::env::temp_dir().join(format!("dbunny-switch-test-{}.json", Uuid::new_v4()));
+        let endpoint = Endpoint {
+            url: url::Url::parse(&std::env::var("DBUNNY_TEST_SSH_DATABASE_URL").unwrap()).unwrap(),
+            ssh: Some(ssh),
+            known_hosts: Some(known_hosts.clone()),
+        };
+        let state = AppState { sessions: Default::default(), saved_connections: Default::default(), encryption_key: [0; 32] };
+
+        // First time: the host key is unknown, so the UI asks and retries with its fingerprint
+        let err = open_session(&state, endpoint.clone(), None).await.err().expect("an unknown host key must be confirmed");
+        let problem: serde_json::Value = serde_json::from_str(&err).unwrap_or_else(|_| panic!("not a host key error: {err}"));
+        let fingerprint = problem["sshHostKey"]["fingerprint"].as_str().unwrap().to_string();
+        let first = open_session(&state, endpoint, Some(fingerprint)).await.unwrap();
+
+        // The switcher: list the server's databases through the tunnel, open another one
+        let client = state.client(&first.session_id).await.unwrap();
+        let names: Vec<String> = list_databases(&client).await.unwrap().into_iter().map(|d| d.name).collect();
+        assert!(names.iter().any(|n| n == "dbunny_second"), "{names:?}");
+        let other = endpoint_for_database(&state.sessions.lock().await[&first.session_id].endpoint, "dbunny_second").unwrap();
+        assert!(other.ssh.is_some(), "the SSH settings come along");
+        let second = open_session(&state, other, None).await.unwrap();
+        let current: String = state.client(&second.session_id).await.unwrap().query_one("SELECT current_database()::text", &[]).await.unwrap().get(0);
+        assert_eq!(current, "dbunny_second");
+
+        // Each session has its own tunnel; closing the first leaves the second working
+        let (one, two) = {
+            let sessions = state.sessions.lock().await;
+            (sessions[&first.session_id].tunnel.as_ref().unwrap().local_port, sessions[&second.session_id].tunnel.as_ref().unwrap().local_port)
+        };
+        assert_ne!(one, two);
+        state.sessions.lock().await.remove(&first.session_id);
+        let still: i32 = state.client(&second.session_id).await.unwrap().query_one("SELECT 1", &[]).await.unwrap().get(0);
+        assert_eq!(still, 1);
+        let _ = std::fs::remove_file(known_hosts);
+    }
+
     /// DBUNNY_TEST_SOCKET_URL: a URL whose host is a socket folder, e.g.
     /// postgresql://user:pass@%2Ftmp%2Fpg:5432/db
     #[tokio::test]
