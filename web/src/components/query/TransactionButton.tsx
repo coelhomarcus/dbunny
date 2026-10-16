@@ -2,10 +2,7 @@ import { Check, GitCommitVertical, Undo2 } from "lucide-react";
 import Button from "../ui/Button";
 import Tooltip from "../Tooltip";
 
-/**
- * Begins a transaction; while one is open, becomes a split accent button (like Run) in the
- * warning colour, to end it: Commit on the left, Rollback on the right.
- */
+/** Begins a transaction; while one is open, offers to end it: Commit, then Rollback. */
 export default function TransactionButton({
   open,
   disabled,
@@ -30,17 +27,17 @@ export default function TransactionButton({
     );
   }
   return (
-    <div className="mr-1 flex">
-      <Tooltip label="A transaction is open. Commit keeps its changes" side="top">
-        <Button variant="warning" size="sm" className="rounded-r-none" onClick={onCommit} disabled={disabled}>
-          <Check />
-          Commit
-        </Button>
-      </Tooltip>
-      <Tooltip label="Rollback undoes every change since it began" side="top">
-        <Button variant="warning" size="sm" className="rounded-l-none border-l-zinc-950/20" onClick={onRollback} disabled={disabled}>
+    <div className="mr-1 flex items-center gap-1.5">
+      <Tooltip label="Rollback undoes every change since the transaction began" side="top">
+        <Button variant="outline" size="sm" onClick={onRollback} disabled={disabled}>
           <Undo2 />
           Rollback
+        </Button>
+      </Tooltip>
+      <Tooltip label="A transaction is open. Commit keeps its changes" side="top">
+        <Button variant="success" size="sm" onClick={onCommit} disabled={disabled}>
+          <Check />
+          Commit
         </Button>
       </Tooltip>
     </div>

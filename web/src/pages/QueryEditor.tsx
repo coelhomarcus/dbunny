@@ -515,7 +515,8 @@ export default function QueryEditor() {
 
   const runQuery = useCallback(async (scope: RunScope = "current") => {
     const editor = editorRef.current;
-    if (!editor) return;
+    // A run waits out a transaction opening or closing (a blink, so Run isn't greyed out for it)
+    if (!editor || txBusy) return;
     const sql = scope === "all" ? editor.getValue() : editor.getCurrentStatement();
     if (!sql.trim()) return;
 
@@ -529,7 +530,7 @@ export default function QueryEditor() {
     }
 
     await executeQuery(sql);
-  }, [safeMode, executeQuery]);
+  }, [safeMode, executeQuery, txBusy]);
 
   const cancelQuery = useCallback(() => {
     api.cancelQuery().catch(() => {});
@@ -696,7 +697,7 @@ export default function QueryEditor() {
 
           {/* Actions: run on the left, the rest quieter on the right */}
           <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-2.5 select-none">
-            <RunButton disabled={running || txBusy} onRun={runQuery} onExplain={explain} />
+            <RunButton disabled={running} onRun={runQuery} onExplain={explain} />
             {formatError && <span className="min-w-0 truncate text-xs text-destructive-foreground">Couldn't format: {formatError}</span>}
             <div className="ml-auto flex items-center gap-0.5">
               <TransactionButton
