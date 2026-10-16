@@ -132,6 +132,7 @@ pub fn run() {
             commands::schema::get_types,
             commands::schema::get_extensions,
             commands::schema::get_object_definition,
+            commands::schema::get_explorer,
             commands::objects::rename_relation,
             commands::objects::drop_relation,
             commands::objects::truncate_table,

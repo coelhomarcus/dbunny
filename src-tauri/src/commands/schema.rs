@@ -584,6 +584,97 @@ pub(crate) async fn type_definition(client: &tokio_postgres::Client, schema: &st
     Ok(ObjectDefinition { kind: kind.into(), facts, comment: None, ddl })
 }
 
+/// One object in the explorer.
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerObject {
+    pub name: String,
+    /// table, view, matview, sequence, function, procedure or type.
+    pub kind: String,
+    /// Arguments of a function, or a type's kind (enum, domain...).
+    pub detail: String,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerSchema {
+    pub name: String,
+    pub objects: Vec<ExplorerObject>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerTree {
+    pub schemas: Vec<ExplorerSchema>,
+    /// The first schema of the search path, opened first in the explorer.
+    pub default_schema: Option<String>,
+}
+
+/// Every schema with its objects, in one round trip, so the explorer can filter and
+/// count without loading folder by folder. Functions and types that belong to an
+/// extension are left out: they're the extension's, not the database's own.
+#[tauri::command]
+pub async fn get_explorer(state: State<'_, AppState>, session_id: String) -> Result<ExplorerTree, String> {
+    let client = state.client(&session_id).await?;
+    explorer(&client).await.map_err(|e| super::query::db_message(&e))
+}
+
+pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<ExplorerTree, tokio_postgres::Error> {
+    const USER_SCHEMAS: &str = "n.nspname NOT IN ('pg_catalog', 'information_schema') \
+        AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp%'";
+    let schemas = client
+        .query(&format!("SELECT n.nspname::text FROM pg_namespace n WHERE {USER_SCHEMAS} ORDER BY n.nspname"), &[])
+        .await?;
+    let objects = client
+        .query(
+            &format!(
+                "SELECT n.nspname::text AS schema, c.relname::text AS name, \
+                   CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'matview' WHEN 'S' THEN 'sequence' ELSE 'table' END AS kind, \
+                   '' AS detail \
+                 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE c.relkind IN ('r', 'p', 'f', 'v', 'm', 'S') AND {USER_SCHEMAS} \
+                   AND NOT COALESCE((to_jsonb(c) ->> 'relispartition')::boolean, false) \
+                 UNION ALL \
+                 SELECT n.nspname, p.proname, \
+                   CASE WHEN COALESCE(to_jsonb(p) ->> 'prokind', 'f') = 'p' THEN 'procedure' ELSE 'function' END, \
+                   pg_get_function_arguments(p.oid) \
+                 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
+                 WHERE {USER_SCHEMAS} AND COALESCE(to_jsonb(p) ->> 'prokind', 'f') IN ('f', 'p') \
+                   AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.classid = 'pg_proc'::regclass AND d.deptype = 'e') \
+                 UNION ALL \
+                 SELECT n.nspname, t.typname, 'type', \
+                   CASE t.typtype WHEN 'e' THEN 'enum' WHEN 'd' THEN 'domain' WHEN 'c' THEN 'composite' WHEN 'r' THEN 'range' END \
+                 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace LEFT JOIN pg_class tc ON tc.oid = t.typrelid \
+                 WHERE {USER_SCHEMAS} AND t.typtype IN ('e', 'd', 'c', 'r') AND (t.typtype <> 'c' OR tc.relkind = 'c') \
+                   AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = t.oid AND d.classid = 'pg_type'::regclass AND d.deptype = 'e') \
+                 ORDER BY 1, 3, 2"
+            ),
+            &[],
+        )
+        .await?;
+    let default_schema: Option<String> = client
+        .query_one("SELECT current_schema()::text", &[])
+        .await
+        .ok()
+        .and_then(|r| r.get(0));
+
+    let mut tree: Vec<ExplorerSchema> = schemas
+        .iter()
+        .map(|r| ExplorerSchema { name: r.get(0), objects: Vec::new() })
+        .collect();
+    for row in &objects {
+        let schema: String = row.get("schema");
+        if let Some(entry) = tree.iter_mut().find(|s| s.name == schema) {
+            entry.objects.push(ExplorerObject {
+                name: row.get("name"),
+                kind: row.get("kind"),
+                detail: row.get::<_, Option<String>>("detail").unwrap_or_default(),
+            });
+        }
+    }
+    Ok(ExplorerTree { schemas: tree, default_schema })
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletionRelation {
@@ -872,5 +963,34 @@ mod server_tests {
         assert_eq!(sequence_definition(&client, s, "counter").await.unwrap().ddl, seq.ddl);
 
         client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn the_explorer_lists_everything_but_extension_objects() {
+        let client = connect().await;
+        let s = "dbunny_explorer_tree";
+        explorer_fixture(&client, s).await;
+        client
+            .batch_execute(&format!(
+                "CREATE FUNCTION {s}.add(a int, b int) RETURNS int LANGUAGE sql AS 'SELECT a + b'; \
+                 CREATE TABLE {s}.events (id int, at date) PARTITION BY RANGE (at); \
+                 CREATE TABLE {s}.events_2026 PARTITION OF {s}.events FOR VALUES FROM ('2026-01-01') TO ('2027-01-01'); \
+                 CREATE SCHEMA IF NOT EXISTS dbunny_explorer_empty; \
+                 CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA {s};"
+            ))
+            .await
+            .unwrap();
+        let tree = explorer(&client).await.unwrap();
+        let schema = tree.schemas.iter().find(|x| x.name == s).unwrap();
+        let has = |name: &str, kind: &str| schema.objects.iter().any(|o| o.name == name && o.kind == kind);
+        assert!(has("tickets", "table") && has("ticket_levels", "matview") && has("counter", "sequence"));
+        assert!(has("level", "type") && has("email", "type") && has("add", "function"));
+        assert!(has("events", "table") && !has("events_2026", "table"), "partitions are under their parent");
+        assert_eq!(schema.objects.iter().find(|o| o.name == "add").unwrap().detail, "a integer, b integer");
+        assert!(!has("gen_random_uuid", "function") && !has("digest", "function"), "extension functions are hidden");
+        assert!(tree.schemas.iter().any(|x| x.name == "dbunny_explorer_empty" && x.objects.is_empty()), "empty schemas are listed");
+        assert!(!tree.schemas.iter().any(|x| x.name == "pg_catalog" || x.name == "information_schema"));
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE; DROP SCHEMA dbunny_explorer_empty")).await.unwrap();
     }
 }
