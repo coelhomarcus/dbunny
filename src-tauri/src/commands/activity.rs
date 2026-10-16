@@ -88,7 +88,7 @@ pub(crate) async fn signal(client: &Client, pid: i32, terminate: bool) -> Result
     client.query_one(sql, &[&pid]).await.map(|r| r.get(0)).map_err(|e| db_message(&e))
 }
 
-/// Tests that need a real server, see `query::server_tests`.
+/// Tests that need a real server, see `db::postgres::console::server_tests`.
 #[cfg(test)]
 mod server_tests {
     use super::*;

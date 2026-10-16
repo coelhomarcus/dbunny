@@ -3,12 +3,14 @@
 
 pub mod catalog;
 pub mod connect;
+mod console;
 pub mod data;
 mod params;
 pub mod session;
 pub mod ssh;
 pub mod structure;
 pub mod text;
+mod transactions;
 
 use std::any::Any;
 use std::sync::Arc;
@@ -18,7 +20,7 @@ use tokio::sync::Mutex;
 
 pub use session::{Endpoint, Link, Notices, PgState};
 
-use super::{Capabilities, Catalog, ConnectionInfo, Data, Driver, Engine};
+use super::{Capabilities, Catalog, ConnectionInfo, Console, Data, Driver, Engine, Transactions};
 
 /// One open session on a PostgreSQL server.
 pub struct PostgresDriver {
@@ -60,6 +62,14 @@ impl Driver for PostgresDriver {
 
     fn data(&self) -> &dyn Data {
         self
+    }
+
+    fn console(&self) -> Option<&dyn Console> {
+        Some(self)
+    }
+
+    fn transactions(&self) -> Option<&dyn Transactions> {
+        Some(self)
     }
 
     fn as_any(&self) -> &dyn Any {

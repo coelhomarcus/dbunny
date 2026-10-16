@@ -44,7 +44,7 @@ pub type Notices = Arc<std::sync::Mutex<Vec<Notice>>>;
 impl PostgresDriver {
     /// The session's connections, None once it was closed. Held only briefly, never
     /// across a wait on the server.
-    pub(crate) async fn lock(&self) -> MutexGuard<'_, Option<PgState>> {
+    pub(super) async fn lock(&self) -> MutexGuard<'_, Option<PgState>> {
         self.state.lock().await
     }
 
@@ -182,7 +182,7 @@ impl PostgresDriver {
     }
 }
 
-/// Tests that need a real server, see `query::server_tests`.
+/// Tests that need a real server, see `console::server_tests`.
 #[cfg(test)]
 mod server_tests {
     use super::*;

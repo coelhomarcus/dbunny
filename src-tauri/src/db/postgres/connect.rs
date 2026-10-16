@@ -491,7 +491,7 @@ mod server_tests {
     }
 }
 
-/// Switching databases against a real server, see `query::server_tests`.
+/// Switching databases against a real server, see `console::server_tests`.
 #[cfg(test)]
 mod database_server_tests {
     use super::super::ssh::SshConfig;

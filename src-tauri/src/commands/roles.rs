@@ -47,7 +47,7 @@ pub(crate) async fn roles(client: &Client) -> Result<Vec<RoleInfo>, tokio_postgr
         .collect())
 }
 
-/// Tests that need a real server, see `query::server_tests`.
+/// Tests that need a real server, see `db::postgres::console::server_tests`.
 #[cfg(test)]
 mod server_tests {
     use super::*;

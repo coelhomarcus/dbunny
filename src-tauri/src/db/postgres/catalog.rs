@@ -543,7 +543,7 @@ pub(crate) async fn completion_schema(client: &tokio_postgres::Client) -> Result
     })
 }
 
-/// Tests that need a real server, see `query::server_tests`.
+/// Tests that need a real server, see `console::server_tests`.
 #[cfg(test)]
 mod server_tests {
     use super::*;

@@ -1,13 +1,17 @@
+//! The SQL console: running the editor's scripts, cancelling them and EXPLAIN plans.
+
+use async_trait::async_trait;
 use serde_json::Value as JsonValue;
-use tauri::State;
 use tokio_postgres::types::Type;
 use tokio_postgres::SimpleQueryMessage;
 
-use super::state::AppState;
-use crate::db::model::QueryResult;
-use crate::db::postgres::data::{columns_from_statement, row_to_json_values, StatementOutput};
-use crate::db::postgres::text::{is_native, text_to_json};
+use super::data::{columns_from_statement, db_message, row_to_json_values, StatementOutput};
+use super::text::{is_native, text_to_json};
+use super::transactions::start_transaction;
+use super::PostgresDriver;
+use crate::db::model::{ExplainResult, QueryResult};
 use crate::db::sql::split::split_statements;
+use crate::db::Console;
 
 /// Error as JSON for the UI. `offset` shifts the position to be relative to the whole
 /// script, and `statement` is the (1-based index, total) of the failing statement
@@ -170,67 +174,129 @@ async fn run_editor_statement(
     run_statement(client, sql).await.map_err(|e| pg_error_in_script(e, offset, position))
 }
 
-#[tauri::command]
-pub async fn execute_query(
-    state: State<'_, AppState>,
-    session_id: String,
-    sql: String,
-) -> Result<QueryResult, String> {
-    let statements = split_statements(&sql);
-    if statements.is_empty() {
-        return Err("SQL query is required".into());
-    }
+const SAVEPOINT: &str = "dbunny_explain";
 
-    let (client, in_transaction) = state.postgres(&session_id).await?.editor_client().await?;
-    let notices = state.postgres(&session_id).await?.notices().await?;
-    // Only this run's notices are returned
-    notices.lock().unwrap().clear();
-    let total = statements.len();
-
-    let start = std::time::Instant::now();
-    // The result set of the last statement that returns rows is the one shown;
-    // statements without rows only add to the affected count.
-    let mut shown: Option<StatementOutput> = None;
-    let mut affected: u64 = 0;
-    for (index, statement) in statements.iter().enumerate() {
-        let position = (total > 1).then_some((index + 1, total));
-        let output = run_editor_statement(&client, &statement.text, statement.offset as i64, in_transaction, position).await?;
-        match output.rows_affected {
-            // A change that brought its rows back is shown, and still counts as affected
-            Some(count) if !output.columns.is_empty() => {
-                affected += count;
-                shown = Some(output);
-            }
-            Some(count) => affected += count,
-            None => shown = Some(output),
+#[async_trait]
+impl Console for PostgresDriver {
+    async fn execute(&self, sql: &str) -> Result<QueryResult, String> {
+        let statements = split_statements(sql);
+        if statements.is_empty() {
+            return Err("SQL query is required".into());
         }
-    }
-    let duration = start.elapsed().as_millis() as u64;
-    let notices = std::mem::take(&mut *notices.lock().unwrap());
 
-    Ok(match shown {
-        Some(output) => QueryResult {
-            row_count: output.rows.len(),
-            columns: output.columns,
-            rows: output.rows,
-            // The changed rows on show: the count of all of them
-            rows_affected: output.rows_affected,
-            duration,
-            statement_count: total,
-            notices,
-            in_transaction,
-        },
-        None => QueryResult {
-            columns: vec![],
-            rows: vec![],
-            row_count: affected as usize,
-            rows_affected: Some(affected),
-            duration,
-            statement_count: total,
-            notices,
-            in_transaction,
-        },
-    })
+        let (client, in_transaction) = self.editor_client().await?;
+        let notices = self.notices().await?;
+        // Only this run's notices are returned
+        notices.lock().unwrap().clear();
+        let total = statements.len();
+
+        let start = std::time::Instant::now();
+        // The result set of the last statement that returns rows is the one shown;
+        // statements without rows only add to the affected count.
+        let mut shown: Option<StatementOutput> = None;
+        let mut affected: u64 = 0;
+        for (index, statement) in statements.iter().enumerate() {
+            let position = (total > 1).then_some((index + 1, total));
+            let output = run_editor_statement(&client, &statement.text, statement.offset as i64, in_transaction, position).await?;
+            match output.rows_affected {
+                // A change that brought its rows back is shown, and still counts as affected
+                Some(count) if !output.columns.is_empty() => {
+                    affected += count;
+                    shown = Some(output);
+                }
+                Some(count) => affected += count,
+                None => shown = Some(output),
+            }
+        }
+        let duration = start.elapsed().as_millis() as u64;
+        let notices = std::mem::take(&mut *notices.lock().unwrap());
+
+        Ok(match shown {
+            Some(output) => QueryResult {
+                row_count: output.rows.len(),
+                columns: output.columns,
+                rows: output.rows,
+                // The changed rows on show: the count of all of them
+                rows_affected: output.rows_affected,
+                duration,
+                statement_count: total,
+                notices,
+                in_transaction,
+            },
+            None => QueryResult {
+                columns: vec![],
+                rows: vec![],
+                row_count: affected as usize,
+                rows_affected: Some(affected),
+                duration,
+                statement_count: total,
+                notices,
+                in_transaction,
+            },
+        })
+    }
+
+    /// Asks the server to stop whatever the query editor's connection is running.
+    async fn cancel(&self) -> Result<(), String> {
+        // Nothing open means nothing running
+        let Some(client) = self.running_editor().await? else {
+            return Ok(());
+        };
+        let link = self.link().await?;
+        client.cancel_token().cancel_query(link.tls).await.map_err(|e| e.to_string())
+    }
+
+    /// EXPLAIN for one statement. With `analyze` the statement really runs, so it's wrapped
+    /// in a transaction that is always rolled back: inside the editor's open transaction via
+    /// a savepoint, otherwise on a short-lived connection so nothing else can slip into it.
+    async fn explain(&self, sql: &str, analyze: bool) -> Result<ExplainResult, String> {
+        let statements = split_statements(sql);
+        let statement = match statements.as_slice() {
+            [] => return Err("SQL query is required".into()),
+            [one] => one,
+            _ => return Err("EXPLAIN works on one statement at a time. Select the one to explain.".into()),
+        };
+        if statement.text.split_whitespace().next().is_some_and(|w| w.eq_ignore_ascii_case("explain")) {
+            return Err("Leave out EXPLAIN: the plan is requested for you.".into());
+        }
+
+        let prefix = if analyze { "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " } else { "EXPLAIN (FORMAT JSON) " };
+        let explain_sql = format!("{prefix}{}", statement.text);
+        // Positions in errors point into explain_sql; move them back into the user's script
+        let shift = statement.offset as i64 - prefix.chars().count() as i64;
+        let error = |e: tokio_postgres::Error| pg_error_in_script(e, shift, None);
+
+        let (client, in_transaction) = self.editor_client().await?;
+        let messages = if !analyze {
+            client.simple_query(&explain_sql).await.map_err(error)?
+        } else if in_transaction {
+            client.batch_execute(&format!("SAVEPOINT {SAVEPOINT}")).await.map_err(|e| db_message(&e))?;
+            let result = client.simple_query(&explain_sql).await;
+            let _ = client.batch_execute(&format!("ROLLBACK TO SAVEPOINT {SAVEPOINT}")).await;
+            result.map_err(error)?
+        } else {
+            let link = self.link().await?;
+            let notices = self.notices().await?;
+            let scratch = start_transaction(&link, &notices).await?;
+            let result = scratch.simple_query(&explain_sql).await;
+            let _ = scratch.batch_execute("ROLLBACK").await;
+            result.map_err(error)?
+        };
+
+        Ok(ExplainResult { plan: plan_from_messages(&messages)?, analyzed: analyze })
+    }
+}
+
+fn plan_from_messages(messages: &[SimpleQueryMessage]) -> Result<JsonValue, String> {
+    let text: String = messages
+        .iter()
+        .filter_map(|m| match m {
+            SimpleQueryMessage::Row(row) => row.get(0).map(str::to_string),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    serde_json::from_str(&text).map_err(|e| format!("Unexpected EXPLAIN output: {e}"))
 }
 
 #[cfg(test)]
@@ -257,7 +323,11 @@ mod tests {
 #[cfg(test)]
 mod server_tests {
     use super::*;
+    use crate::db::postgres::connect::{connection_config, open_connection};
+    use crate::db::postgres::{Link, Notices};
     use serde_json::json;
+    use std::sync::Arc;
+    use tokio_postgres::error::SqlState;
 
     async fn connect() -> tokio_postgres::Client {
         let url = std::env::var("DBUNNY_TEST_DATABASE_URL")
@@ -271,6 +341,14 @@ mod server_tests {
 
     async fn run(client: &tokio_postgres::Client, sql: &str) -> StatementOutput {
         run_statement(client, sql).await.unwrap_or_else(|e| panic!("{sql}: {e}"))
+    }
+
+    fn link() -> Link {
+        let url = std::env::var("DBUNNY_TEST_DATABASE_URL")
+            .expect("set DBUNNY_TEST_DATABASE_URL to run the server tests");
+        let url = url::Url::parse(&url).unwrap();
+        let (config, tls) = connection_config(&url).unwrap();
+        Link { config, tls }
     }
 
     #[tokio::test]
@@ -439,5 +517,63 @@ mod server_tests {
         let err = run("UPDATE stock SET nope = 1").await.err().expect("an unknown column fails");
         let error: serde_json::Value = serde_json::from_str(&err).unwrap();
         assert_eq!(error["position"], json!(18), "{err}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn notices_are_collected_from_the_connection() {
+        let notices: Notices = Default::default();
+        let client = open_connection(&link(), &notices).await.unwrap();
+        client
+            .batch_execute("DO $$ BEGIN RAISE NOTICE 'hello %', 42; RAISE WARNING 'careful' USING HINT = 'look'; END $$")
+            .await
+            .unwrap();
+        let list = notices.lock().unwrap().clone();
+        assert_eq!(list.len(), 2, "{list:?}");
+        assert_eq!((list[0].severity.as_str(), list[0].message.as_str()), ("NOTICE", "hello 42"));
+        assert_eq!((list[1].severity.as_str(), list[1].hint.as_deref()), ("WARNING", Some("look")));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn cancelling_stops_a_running_query() {
+        let link = link();
+        let notices: Notices = Default::default();
+        let client = Arc::new(open_connection(&link, &notices).await.unwrap());
+        let running = {
+            let client = Arc::clone(&client);
+            tokio::spawn(async move { client.batch_execute("SELECT pg_sleep(10)").await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let started = std::time::Instant::now();
+        client.cancel_token().cancel_query(link.tls.clone()).await.unwrap();
+        let err = running.await.unwrap().unwrap_err();
+        assert_eq!(err.code(), Some(&SqlState::QUERY_CANCELED));
+        assert!(started.elapsed().as_secs() < 3);
+        // The connection is still usable afterwards
+        client.batch_execute("SELECT 1").await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn explain_analyze_runs_the_statement_and_rolls_it_back() {
+        let link = link();
+        let notices: Notices = Default::default();
+        let main = open_connection(&link, &notices).await.unwrap();
+        main.batch_execute("DROP TABLE IF EXISTS dbunny_explain_test; CREATE TABLE dbunny_explain_test (v int)").await.unwrap();
+
+        let scratch = start_transaction(&link, &notices).await.unwrap();
+        let messages = scratch
+            .simple_query("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) INSERT INTO dbunny_explain_test SELECT generate_series(1, 5)")
+            .await
+            .unwrap();
+        scratch.batch_execute("ROLLBACK").await.unwrap();
+        let plan = plan_from_messages(&messages).unwrap();
+        assert_eq!(plan[0]["Plan"]["Node Type"], "ModifyTable");
+        assert!(plan[0]["Execution Time"].is_number());
+
+        let count: i64 = main.query_one("SELECT count(*) FROM dbunny_explain_test", &[]).await.unwrap().get(0);
+        assert_eq!(count, 0, "EXPLAIN ANALYZE must not keep its changes");
+        main.batch_execute("DROP TABLE dbunny_explain_test").await.unwrap();
     }
 }
