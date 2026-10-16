@@ -150,8 +150,19 @@ export interface RoleInfo {
 export interface ExplorerObject {
   name: string;
   kind: "table" | "view" | "matview" | "sequence" | "function" | "procedure" | "type";
-  /** Arguments of a function, or a type's kind (enum, domain...). */
+  /** Arguments of a function, a type's kind (enum, domain...), or "partitioned" / "foreign" for those tables. */
   detail: string;
+  /** A partitioned table's partitions. */
+  partitions?: ExplorerPartition[];
+}
+
+/** One partition, which may itself be partitioned. */
+export interface ExplorerPartition {
+  schema: string;
+  name: string;
+  /** The values it holds, e.g. "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')". */
+  bound: string;
+  partitions?: ExplorerPartition[];
 }
 
 export interface ExplorerSchema {

@@ -9,7 +9,7 @@ import ContainerDialog, { type ContainerOptions, type ContainerRequest } from ".
 import { quoteIdent } from "../lib/copyRows";
 import { shortType } from "../lib/columnMeta";
 import { cn } from "../lib/cn";
-import type { ColumnInfo, ExplorerObject, ExplorerTree, ExtensionInfo } from "@/types";
+import type { ColumnInfo, ExplorerObject, ExplorerPartition, ExplorerTree, ExtensionInfo } from "@/types";
 import Button from "./ui/Button";
 import Tooltip from "./Tooltip";
 import {
@@ -40,6 +40,7 @@ import {
   Link2,
   Database,
   FolderPlus,
+  Split,
   type LucideProps,
 } from "lucide-react";
 
@@ -447,7 +448,16 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
     const columnsKey = `t:${schema}.${object.name}`;
     const columnsOpen = relation !== undefined && expanded.has(columnsKey);
     const pinned = pins.some((p) => p.schema === schema && p.name === object.name && p.kind === object.kind);
-    const hint = object.kind === "type" ? object.detail : object.kind === "procedure" ? "procedure" : null;
+    const hint =
+      object.kind === "type"
+        ? object.detail
+        : object.kind === "procedure"
+          ? "procedure"
+          : object.partitions?.length
+            ? `${object.partitions.length} partition${object.partitions.length > 1 ? "s" : ""}`
+            : object.detail === "foreign"
+              ? "foreign"
+              : null;
     return (
       <div key={objectKey(schema, object)}>
         <div className="group relative">
@@ -509,9 +519,49 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
             </button>
           )}
         </div>
+        {columnsOpen && object.partitions?.length ? partitionRows(object.partitions, depth + 2) : null}
         {columnsOpen && columnRows(schema, object.name, depth + 2)}
       </div>
     );
+  }
+
+  /** A partitioned table's partitions, above its columns; each one opens like a table. */
+  function partitionRows(partitions: ExplorerPartition[], depth: number): ReactNode {
+    const pad = INDENT[Math.min(depth, INDENT.length - 1)];
+    return partitions.map((p) => {
+      const path = relationPath(p.schema, p.name);
+      const current = decodeURIComponent(location.pathname);
+      const active = current === decodeURIComponent(path) || current === `${decodeURIComponent(path)}/structure`;
+      // "FOR VALUES FROM (…) TO (…)" reads fine without its first two words
+      const bound = p.bound.replace(/^FOR VALUES\s+/i, "");
+      return (
+        <div key={`${p.schema}.${p.name}`}>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => navigate(path)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") navigate(path);
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY, target: { schema: p.schema, name: p.name, kind: "table" } });
+            }}
+            className={cn(
+              "flex h-6 items-center gap-1.5 rounded-md pr-2 text-xs transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              pad,
+              active ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <Split size={11} className="shrink-0 text-success-foreground/70" />
+            {/* The name comes first; the bound gets what's left */}
+            <span className="max-w-[70%] shrink-0 truncate text-foreground/90">{p.name}</span>
+            <span className="ml-auto min-w-0 truncate pl-1 font-mono text-[10px] text-muted-foreground/70">{bound}</span>
+          </div>
+          {p.partitions?.length ? partitionRows(p.partitions, depth + 1) : null}
+        </div>
+      );
+    });
   }
 
   function newTableButton(schema: string) {
