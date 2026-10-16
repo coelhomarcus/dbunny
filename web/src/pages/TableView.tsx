@@ -6,7 +6,9 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table";
 import type { ColumnInfo, QueryColumn, TableFilter } from "@/types";
-import { toEditText } from "../lib/cellEdit";
+import { editorFor, toEditText, type CellEditor } from "../lib/cellEdit";
+import { isJsonType, shortType } from "../lib/columnMeta";
+import CellEditorDialog from "../components/table/CellEditorDialog";
 import { useTableData } from "../hooks/useTableData";
 import { useApi } from "../contexts/useConnection";
 import { useTab } from "../contexts/workspace";
@@ -91,6 +93,19 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
     setPendingChanges: pending.setPendingChanges,
   });
 
+  // The cell whose inline edit moved to the dialog editor (compared by identity, so a new edit starts inline)
+  const [expandedCell, setExpandedCell] = useState<typeof editing.editingCell>(null);
+  const editingCell = editing.editingCell;
+  const editingColumn = editingCell ? columnInfos.find((c) => c.name === editingCell.colName) : undefined;
+  const editingEditor: CellEditor | null = (() => {
+    if (!editingCell || !data) return null;
+    if (expandedCell === editingCell) return { kind: "long", json: isJsonType(editingColumn) };
+    const colIdx = data.columns.findIndex((c) => c.name === editingCell.colName);
+    const pendingValue = pending.pendingChanges[editingCell.rowIndex]?.[editingCell.colName];
+    return editorFor(editingColumn, pendingValue !== undefined ? pendingValue : data.rows[editingCell.rowIndex]?.[colIdx]);
+  })();
+  const editorDialogOpen = editingEditor?.kind === "long";
+
   // Loading other rows (page, sorting, refresh) invalidates edits and selection by position
   const { discardChanges } = pending;
   const { cancelEdit } = editing;
@@ -106,6 +121,8 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   useEffect(() => {
     if (!isActive) return;
     function onKeyDown(e: KeyboardEvent) {
+      // The dialog editor handles its own keys
+      if (editorDialogOpen) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         if (editing.editingCell) editing.confirmEdit();
@@ -115,7 +132,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editing, pending, isActive]);
+  }, [editing, pending, isActive, editorDialogOpen]);
 
   const fetchAllRows = useCallback(async () => {
     // An estimated total could miss rows, so count exactly before exporting everything
@@ -314,6 +331,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                         const isEditing =
                           editing.editingCell?.rowIndex === rowIndex &&
                           editing.editingCell?.colName === col.name;
+                        const editor = isEditing && editingEditor ? editingEditor : editorFor(columnInfo, displayValue);
 
                         return (
                           <EditableCell
@@ -323,6 +341,8 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                             isDirty={isDirty}
                             isEditing={isEditing}
                             hasNoPk={hasNoPk}
+                            editor={editor}
+                            nullable={columnInfo?.isNullable ?? true}
                             editValue={editing.editValue}
                             editIsNull={editing.editIsNull}
                             inputRef={editing.inputRef}
@@ -332,7 +352,9 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                             onEditValueChange={editing.setEditValue}
                             onSetNull={editing.setEditNull}
                             onConfirm={editing.confirmEdit}
+                            onCommit={editing.commitEdit}
                             onCancel={editing.cancelEdit}
+                            onExpand={() => setExpandedCell(editing.editingCell)}
                             linkLabel={link ? `Open the referenced row in ${columnInfo!.foreignKey!.table}` : undefined}
                             onFollowLink={
                               link ? guard(() => navigate(link.path, { state: { filters: link.filters } })) : undefined
@@ -371,6 +393,18 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
           />
         </div>
       )}
+
+      <CellEditorDialog
+        open={editorDialogOpen}
+        column={editingCell?.colName ?? ""}
+        typeLabel={editingColumn ? shortType(editingColumn.typeName) : undefined}
+        // Starts from the inline draft, which begins as the cell's (pending) value
+        value={editing.editIsNull ? null : editing.editValue}
+        json={editingEditor?.kind === "long" && editingEditor.json}
+        nullable={editingColumn?.isNullable ?? true}
+        onApply={editing.commitEdit}
+        onCancel={editing.cancelEdit}
+      />
 
       <InsertRowDialog
         open={insertOpen}

@@ -1,4 +1,8 @@
-import { ArrowUpRight } from "lucide-react";
+import { useRef } from "react";
+import { ArrowUpRight, Maximize2 } from "lucide-react";
+import type { CellEditor } from "../lib/cellEdit";
+import { toEditText } from "../lib/cellEdit";
+import ChoiceList from "./table/ChoiceList";
 
 interface EditableCellProps {
   value: unknown;
@@ -6,6 +10,9 @@ interface EditableCellProps {
   isDirty: boolean;
   isEditing: boolean;
   hasNoPk: boolean;
+  /** How this cell is edited (inline text, a picker, a dialog, or not at all). */
+  editor: CellEditor;
+  nullable: boolean;
   editValue: string;
   /** The field currently holds SQL NULL (as opposed to an empty string). */
   editIsNull: boolean;
@@ -14,7 +21,10 @@ interface EditableCellProps {
   onEditValueChange: (v: string) => void;
   onSetNull: () => void;
   onConfirm: () => void;
+  onCommit: (isNull: boolean, text: string) => void;
   onCancel: () => void;
+  /** Moves the inline edit to the larger dialog editor. */
+  onExpand: () => void;
   /** Foreign key cells: opens the row this value references. */
   onFollowLink?: () => void;
   linkLabel?: string;
@@ -26,25 +36,38 @@ function renderValue(value: unknown) {
   if (value === null)
     return <span className="text-muted-foreground/70 italic">NULL</span>;
   const str = typeof value === "object" ? JSON.stringify(value) : String(value);
-  if (str.length > MAX_PREVIEW) return str.slice(0, MAX_PREVIEW) + "…";
-  return str;
+  if (str === "") return <span className="text-muted-foreground/70 italic">empty</span>;
+  // Rows stay one line high: line breaks show as a return symbol
+  const oneLine = str.length > MAX_PREVIEW ? str.slice(0, MAX_PREVIEW) + "…" : str;
+  return oneLine.replace(/\r?\n/g, " ↵ ");
 }
 
+// Shared look of the small buttons inside an edited cell
+const inCellButton =
+  "absolute top-1/2 z-10 -translate-y-1/2 rounded px-1.5 py-0.5 text-[11px] font-medium cursor-pointer transition-colors";
+
 export default function EditableCell({
-  displayValue, isDirty, isEditing, hasNoPk,
+  displayValue, isDirty, isEditing, hasNoPk, editor, nullable,
   editValue, editIsNull, inputRef,
-  onStartEdit, onEditValueChange, onSetNull, onConfirm, onCancel,
+  onStartEdit, onEditValueChange, onSetNull, onConfirm, onCommit, onCancel, onExpand,
   onFollowLink, linkLabel,
 }: EditableCellProps) {
+  const cellRef = useRef<HTMLTableCellElement>(null);
+  const editable = !hasNoPk && editor.kind !== "readonly";
+  const inlineEditing = isEditing && editor.kind === "text";
+
   return (
     <td
-      className={`relative p-0 overflow-hidden border-b border-r border-border ${isDirty ? "bg-warning/8" : ""}`}
-      onClick={() => !isEditing && onStartEdit()}
+      ref={cellRef}
+      className={`relative p-0 overflow-hidden border-b border-r border-border ${isDirty ? "bg-warning/8" : ""} ${
+        isEditing && !inlineEditing ? "ring-1 ring-inset ring-primary/60" : ""
+      }`}
+      onClick={() => editable && !isEditing && onStartEdit()}
     >
       <div
-        className={`px-3 py-1.5 truncate overflow-hidden ${isEditing ? "invisible" : ""} ${
-          isDirty ? "text-warning-foreground" : "text-foreground"
-        } ${!hasNoPk && !isEditing ? "cursor-text" : ""}`}
+        className={`px-3 py-1.5 truncate overflow-hidden ${inlineEditing ? "invisible" : ""} ${
+          isDirty ? "text-warning-foreground" : editor.kind === "readonly" ? "text-muted-foreground" : "text-foreground"
+        } ${editable && !isEditing ? (editor.kind === "text" ? "cursor-text" : "cursor-pointer") : ""}`}
       >
         {renderValue(displayValue)}
       </div>
@@ -61,7 +84,17 @@ export default function EditableCell({
           <ArrowUpRight size={13} />
         </button>
       )}
-      {isEditing && (
+      {isEditing && editor.kind === "choice" && (
+        <ChoiceList
+          anchorRef={cellRef}
+          options={editor.options}
+          current={displayValue === null || displayValue === undefined ? null : toEditText(displayValue)}
+          nullable={nullable}
+          onPick={(value) => onCommit(value === null, value ?? "")}
+          onCancel={onCancel}
+        />
+      )}
+      {inlineEditing && (
         <>
           <input
             ref={inputRef}
@@ -84,21 +117,37 @@ export default function EditableCell({
                 onSetNull();
               }
             }}
-            className="absolute inset-0 px-3 pr-14 bg-card text-foreground text-sm outline-none ring-1 ring-inset ring-primary/60 placeholder:italic placeholder:text-muted-foreground/70"
+            className={`absolute inset-0 px-3 bg-card text-foreground text-sm outline-none ring-1 ring-inset ring-primary/60 placeholder:italic placeholder:text-muted-foreground/70 ${
+              nullable ? "pr-20" : "pr-9"
+            }`}
           />
           {/* mousedown is prevented so the input keeps focus (a blur would confirm the edit) */}
+          {nullable && (
+            <button
+              type="button"
+              tabIndex={-1}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onSetNull();
+              }}
+              className={`${inCellButton} right-8 ${
+                editIsNull ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+              }`}
+            >
+              NULL
+            </button>
+          )}
           <button
             type="button"
             tabIndex={-1}
+            aria-label="Open in a larger editor"
             onMouseDown={(e) => {
               e.preventDefault();
-              onSetNull();
+              onExpand();
             }}
-            className={`absolute right-1.5 top-1/2 z-10 -translate-y-1/2 rounded px-1.5 py-0.5 text-[11px] font-medium cursor-pointer transition-colors ${
-              editIsNull ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
-            }`}
+            className={`${inCellButton} right-1.5 flex items-center bg-muted py-1 text-muted-foreground hover:bg-accent hover:text-foreground`}
           >
-            NULL
+            <Maximize2 size={11} />
           </button>
         </>
       )}

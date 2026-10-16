@@ -34,30 +34,36 @@ export function useCellEditing({ data, hasNoPk, pendingChanges, setPendingChange
     [hasNoPk, pendingChanges],
   );
 
-  const confirmEdit = useCallback(() => {
-    if (!editingCell || !data) return;
-    const { rowIndex, colName } = editingCell;
-    const colIdx = data.columns.findIndex((c) => c.name === colName);
-    const originalValue = data.rows[rowIndex][colIdx];
-    const outcome = resolveEdit(originalValue, editIsNull, editValue);
+  /** Saves `text` (or NULL) as the edited cell's pending value and closes the editor. */
+  const commitEdit = useCallback(
+    (isNull: boolean, text: string) => {
+      if (!editingCell || !data) return;
+      const { rowIndex, colName } = editingCell;
+      const colIdx = data.columns.findIndex((c) => c.name === colName);
+      const originalValue = data.rows[rowIndex][colIdx];
+      const outcome = resolveEdit(originalValue, isNull, text);
 
-    setPendingChanges((prev) => {
-      const rowChanges = { ...(prev[rowIndex] ?? {}) };
-      if (!outcome.changed) {
-        delete rowChanges[colName];
-      } else {
-        rowChanges[colName] = outcome.value;
-      }
-      if (Object.keys(rowChanges).length === 0) {
-        const next = { ...prev };
-        delete next[rowIndex];
-        return next;
-      }
-      return { ...prev, [rowIndex]: rowChanges };
-    });
+      setPendingChanges((prev) => {
+        const rowChanges = { ...(prev[rowIndex] ?? {}) };
+        if (!outcome.changed) {
+          delete rowChanges[colName];
+        } else {
+          rowChanges[colName] = outcome.value;
+        }
+        if (Object.keys(rowChanges).length === 0) {
+          const next = { ...prev };
+          delete next[rowIndex];
+          return next;
+        }
+        return { ...prev, [rowIndex]: rowChanges };
+      });
 
-    setEditingCell(null);
-  }, [editingCell, editValue, editIsNull, data, setPendingChanges]);
+      setEditingCell(null);
+    },
+    [editingCell, data, setPendingChanges],
+  );
+
+  const confirmEdit = useCallback(() => commitEdit(editIsNull, editValue), [commitEdit, editIsNull, editValue]);
 
   const cancelEdit = useCallback(() => setEditingCell(null), []);
 
@@ -81,6 +87,7 @@ export function useCellEditing({ data, hasNoPk, pendingChanges, setPendingChange
     inputRef,
     startEdit,
     confirmEdit,
+    commitEdit,
     cancelEdit,
   };
 }

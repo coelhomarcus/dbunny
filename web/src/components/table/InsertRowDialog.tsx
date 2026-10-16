@@ -5,6 +5,7 @@ import Dialog from "../ui/Dialog";
 import Input from "../ui/Input";
 import { selectClass } from "../ui/styles";
 import { cn } from "../../lib/cn";
+import { shortType } from "../../lib/columnMeta";
 
 type Field = {
   /** The user typed in it (even to clear it): an untouched field is left to the default. */
@@ -14,6 +15,10 @@ type Field = {
 };
 
 const UNTOUCHED: Field = { touched: false, isNull: false, text: "" };
+
+// <select> option values for "leave to the default" and NULL; neither can collide with an enum label
+const DEFAULT_OPTION = "\u0000default";
+const NULL_OPTION = "\u0000null";
 
 /** Values to insert: null is SQL NULL, and columns left alone are omitted. */
 function collectValues(columns: ColumnInfo[], fields: Record<string, Field>) {
@@ -43,7 +48,8 @@ function InsertForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ordered = [...columns].sort((a, b) => a.ordinalPosition - b.ordinalPosition);
+  // Generated columns are computed by the server and can't be given a value
+  const ordered = columns.filter((c) => !c.isGenerated).sort((a, b) => a.ordinalPosition - b.ordinalPosition);
 
   function update(name: string, patch: Partial<Field>) {
     setFields((prev) => ({ ...prev, [name]: { ...(prev[name] ?? UNTOUCHED), ...patch } }));
@@ -89,7 +95,8 @@ function InsertForm({
         {ordered.map((column, index) => {
           const field = fields[column.name] ?? UNTOUCHED;
           const required = !column.isNullable && column.defaultValue === null;
-          const isBoolean = column.dataType === "boolean";
+          const choices =
+            column.dataType === "boolean" ? ["true", "false"] : column.enumValues?.length ? column.enumValues : null;
           const placeholder = field.isNull
             ? "NULL"
             : column.defaultValue !== null
@@ -106,27 +113,30 @@ function InsertForm({
                 </span>
                 <span className="block truncate text-[11px] text-muted-foreground">
                   {column.isPrimaryKey && <span className="mr-1 text-warning-foreground">PK</span>}
-                  {column.dataType}
+                  {shortType(column.typeName)}
                 </span>
               </label>
 
               <div className="relative">
-                {isBoolean ? (
+                {choices ? (
                   <select
                     id={`insert-${column.name}`}
                     className={cn(selectClass, "w-full")}
-                    value={field.isNull ? "null" : field.touched ? field.text : ""}
+                    value={field.isNull ? NULL_OPTION : field.touched ? field.text : DEFAULT_OPTION}
                     onChange={(e) => {
                       const v = e.target.value;
-                      if (v === "") setFields((prev) => ({ ...prev, [column.name]: UNTOUCHED }));
-                      else if (v === "null") update(column.name, { touched: true, isNull: true, text: "" });
+                      if (v === DEFAULT_OPTION) setFields((prev) => ({ ...prev, [column.name]: UNTOUCHED }));
+                      else if (v === NULL_OPTION) update(column.name, { touched: true, isNull: true, text: "" });
                       else update(column.name, { touched: true, isNull: false, text: v });
                     }}
                   >
-                    <option value="">{column.defaultValue !== null ? `default: ${column.defaultValue}` : "(not set)"}</option>
-                    <option value="true">true</option>
-                    <option value="false">false</option>
-                    {column.isNullable && <option value="null">NULL</option>}
+                    <option value={DEFAULT_OPTION}>{column.defaultValue !== null ? `default: ${column.defaultValue}` : "(not set)"}</option>
+                    {choices.map((choice) => (
+                      <option key={choice} value={choice}>
+                        {choice}
+                      </option>
+                    ))}
+                    {column.isNullable && <option value={NULL_OPTION}>NULL</option>}
                   </select>
                 ) : (
                   <>
