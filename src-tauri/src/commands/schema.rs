@@ -621,8 +621,37 @@ pub struct ExplorerObject {
     pub name: String,
     /// table, view, matview, sequence, function, procedure or type.
     pub kind: String,
-    /// Arguments of a function, or a type's kind (enum, domain...).
+    /// Arguments of a function, a type's kind (enum, domain...), or "partitioned" and
+    /// "foreign" for those tables.
     pub detail: String,
+    /// A partitioned table's partitions; empty for everything else.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub partitions: Vec<ExplorerPartition>,
+}
+
+/// One partition, which may itself be partitioned.
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerPartition {
+    pub schema: String,
+    pub name: String,
+    /// The values it holds, e.g. `FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')`.
+    pub bound: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub partitions: Vec<ExplorerPartition>,
+}
+
+/// Partitions of `parent`, nested, from the flat (parent, partition) list.
+fn partitions_of(parent: (&str, &str), all: &[(String, String, String, String, String)]) -> Vec<ExplorerPartition> {
+    all.iter()
+        .filter(|(ps, pn, ..)| ps == parent.0 && pn == parent.1)
+        .map(|(_, _, schema, name, bound)| ExplorerPartition {
+            schema: schema.clone(),
+            name: name.clone(),
+            bound: bound.clone(),
+            partitions: partitions_of((schema, name), all),
+        })
+        .collect()
 }
 
 #[derive(Serialize, Debug)]
@@ -660,7 +689,7 @@ pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<Explorer
             &format!(
                 "SELECT n.nspname::text AS schema, c.relname::text AS name, \
                    CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'matview' WHEN 'S' THEN 'sequence' ELSE 'table' END AS kind, \
-                   '' AS detail \
+                   CASE c.relkind WHEN 'p' THEN 'partitioned' WHEN 'f' THEN 'foreign' ELSE '' END AS detail \
                  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
                  WHERE c.relkind IN ('r', 'p', 'f', 'v', 'm', 'S') AND {USER_SCHEMAS} \
                    AND NOT COALESCE((to_jsonb(c) ->> 'relispartition')::boolean, false) \
@@ -682,6 +711,22 @@ pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<Explorer
             &[],
         )
         .await?;
+    // (parent schema, parent, schema, partition, bound), for nesting under the parents
+    let partitions: Vec<(String, String, String, String, String)> = client
+        .query(
+            "SELECT pn.nspname::text, pc.relname::text, n.nspname::text, c.relname::text, \
+               COALESCE(pg_get_expr(c.relpartbound, c.oid), '') \
+             FROM pg_inherits i \
+             JOIN pg_class c ON c.oid = i.inhrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+             JOIN pg_class pc ON pc.oid = i.inhparent JOIN pg_namespace pn ON pn.oid = pc.relnamespace \
+             WHERE pc.relkind = 'p' \
+             ORDER BY c.relname",
+            &[],
+        )
+        .await?
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)))
+        .collect();
     let default_schema: Option<String> = client
         .query_one("SELECT current_schema()::text", &[])
         .await
@@ -695,11 +740,10 @@ pub(crate) async fn explorer(client: &tokio_postgres::Client) -> Result<Explorer
     for row in &objects {
         let schema: String = row.get("schema");
         if let Some(entry) = tree.iter_mut().find(|s| s.name == schema) {
-            entry.objects.push(ExplorerObject {
-                name: row.get("name"),
-                kind: row.get("kind"),
-                detail: row.get::<_, Option<String>>("detail").unwrap_or_default(),
-            });
+            let name: String = row.get("name");
+            let detail = row.get::<_, Option<String>>("detail").unwrap_or_default();
+            let partitions = if detail == "partitioned" { partitions_of((&schema, &name), &partitions) } else { Vec::new() };
+            entry.objects.push(ExplorerObject { name, kind: row.get("kind"), detail, partitions });
         }
     }
     Ok(ExplorerTree { schemas: tree, default_schema })
@@ -1017,6 +1061,11 @@ mod server_tests {
         assert!(has("tickets", "table") && has("ticket_levels", "matview") && has("counter", "sequence"));
         assert!(has("level", "type") && has("email", "type") && has("add", "function"));
         assert!(has("events", "table") && !has("events_2026", "table"), "partitions are under their parent");
+        let events = schema.objects.iter().find(|o| o.name == "events").unwrap();
+        assert_eq!(events.detail, "partitioned");
+        assert_eq!(events.partitions.len(), 1);
+        assert_eq!(events.partitions[0].name, "events_2026");
+        assert!(events.partitions[0].bound.starts_with("FOR VALUES FROM ('2026-01-01')"), "{}", events.partitions[0].bound);
         assert_eq!(schema.objects.iter().find(|o| o.name == "add").unwrap().detail, "a integer, b integer");
         assert!(!has("gen_random_uuid", "function") && !has("digest", "function"), "extension functions are hidden");
         assert!(tree.schemas.iter().any(|x| x.name == "dbunny_explorer_empty" && x.objects.is_empty()), "empty schemas are listed");
