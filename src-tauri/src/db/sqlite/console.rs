@@ -344,7 +344,10 @@ mod tests {
             // Until it stops: a cancel that comes before the script starts is forgotten
             let (e, _) = cancel_until_stopped(&d, &mut running, SOON).await;
             assert_eq!(e["message"], "canceling statement due to user request");
-            assert_eq!((e["code"].as_str(), e["statement"].as_u64()), (Some("SQLITE_INTERRUPT"), Some(2)));
+            assert_eq!(e["code"].as_str(), Some("SQLITE_INTERRUPT"));
+            // Normally it is the endless second statement; on a slow machine the cancel can land
+            // before the script's first one has started, which stops it there
+            assert!(matches!(e["statement"].as_u64(), Some(1 | 2)), "{e}");
             assert!(started.elapsed() < Duration::from_secs(2));
 
             // Cancelling with nothing running changes nothing, and the next query runs
