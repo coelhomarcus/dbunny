@@ -11,3 +11,4 @@ pub mod tableedit;
 pub mod structure;
 pub mod editor;
 pub mod ssh;
+pub mod objects;
