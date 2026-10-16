@@ -137,6 +137,8 @@ pub fn run() {
             commands::objects::truncate_table,
             commands::objects::refresh_materialized_view,
             commands::objects::duplicate_table,
+            commands::activity::get_server_activity,
+            commands::activity::signal_backend,
             commands::editor::cancel_query,
             commands::editor::begin_transaction,
             commands::editor::commit_transaction,
