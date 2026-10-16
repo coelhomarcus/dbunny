@@ -3,16 +3,18 @@
 
 use async_trait::async_trait;
 use rusqlite::ffi::ErrorCode;
-use rusqlite::types::ToSql;
+use rusqlite::types::{ToSql, Value};
 use rusqlite::{params_from_iter, Connection};
+use serde_json::Value as JsonValue;
 
 use super::catalog::{synthetic_rowid, table_columns};
 use super::errors::map_statement_error;
-use super::values::{standard_type, value_to_json};
+use super::values::{standard_type, value_to_json, Affinity};
 use super::SqliteDriver;
 use crate::db::model::{JsonMap, QueryColumn, RowChange, TableDataParams, TableDataResponse};
+use crate::db::sql::bind::{OperandBinder, ValueBinder};
 use crate::db::sql::edit::{build_delete_in, build_import_batches_in, build_insert_in, build_update_in};
-use crate::db::sql::filter::{build_where_in, TextParam};
+use crate::db::sql::filter::build_where_in;
 use crate::db::sql::order::{order_clause_in, sort_keys};
 use crate::db::sql::Dialect;
 use crate::db::Data;
@@ -36,7 +38,7 @@ impl Data for SqliteDriver {
             let filters = params.filters.as_deref().unwrap_or(&[]);
             let match_any = params.filter_mode.as_deref() == Some("any");
             let (where_sql, where_params) =
-                build_where_in(SQLITE, filters, match_any, &shape.columns).map_err(Failure::message)?;
+                build_where_in(SQLITE, filters, match_any, &shape.columns, &shape).map_err(Failure::message)?;
             let relation = relation(&schema, &table);
 
             let total_rows = count(c, &relation, &where_sql, &where_params)?;
@@ -86,7 +88,7 @@ impl Data for SqliteDriver {
         self.on_tables(move |c| {
             let shape = TableShape::read(c, &schema, &table)?;
             let (sql, params) =
-                build_insert_in(SQLITE, &relation(&schema, &table), &values, &shape.columns).map_err(Failure::message)?;
+                build_insert_in(SQLITE, &relation(&schema, &table), &values, &shape.columns, &shape).map_err(Failure::message)?;
             in_transaction(c, "", |c| Ok(c.execute(&sql, params_from_iter(&params))? as u64))
         })
         .await
@@ -102,7 +104,7 @@ impl Data for SqliteDriver {
             let total = changes.len();
             in_transaction(c, "Nothing was saved: ", |c| {
                 for (i, change) in changes.iter().enumerate() {
-                    let updated = build_update_in(SQLITE, &relation, &change.primary_key, &change.updates, &shape.columns)
+                    let updated = build_update_in(SQLITE, &relation, &change.primary_key, &change.updates, &shape.columns, &shape)
                         .map_err(Failure::message)
                         .and_then(|(sql, params)| Ok(c.execute(&sql, params_from_iter(&params))?));
                     let failure = match updated {
@@ -129,13 +131,19 @@ impl Data for SqliteDriver {
             let batches: Vec<&[JsonMap]> = if keys.is_empty() { vec![&[]] } else { keys.chunks(DELETE_BATCH).collect() };
             let statements = batches
                 .into_iter()
-                .map(|batch| build_delete_in(SQLITE, &relation, batch, &shape.columns))
+                .map(|batch| build_delete_in(SQLITE, &relation, batch, &shape.columns, &shape))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(Failure::message)?;
             in_transaction(c, "", |c| {
                 let mut deleted = 0;
                 for (sql, params) in &statements {
                     deleted += c.execute(sql, params_from_iter(params))? as u64;
+                }
+                // A key in a column without a type can match a blob and the text that
+                // looks like it; deleting both would delete a row nobody chose
+                if deleted > keys.len() as u64 {
+                    let which = if keys.len() == 1 { "the key".to_string() } else { format!("the {} keys", keys.len()) };
+                    return Err(Failure::message(format!("Nothing was deleted: {which} matched {deleted} rows")));
                 }
                 Ok(deleted)
             })
@@ -155,7 +163,7 @@ impl Data for SqliteDriver {
         let (schema, table) = (schema.to_owned(), table.to_owned());
         self.on_tables(move |c| {
             let shape = TableShape::read(c, &schema, &table)?;
-            let batches = build_import_batches_in(SQLITE, &relation(&schema, &table), &columns, &rows, &shape.columns)
+            let batches = build_import_batches_in(SQLITE, &relation(&schema, &table), &columns, &rows, &shape.columns, &shape)
                 .map_err(Failure::message)?;
             in_transaction(c, "", |c| {
                 let mut inserted = 0;
@@ -233,10 +241,12 @@ impl From<rusqlite::Error> for Failure {
     }
 }
 
-/// What statements on a table may name.
+/// What statements on a table may name, and how its columns take values.
 struct TableShape {
     /// The columns, with the synthetic rowid when the table is edited by it.
     columns: Vec<String>,
+    /// The affinity of each of `columns`.
+    affinities: Vec<Affinity>,
     /// The synthetic rowid column's name.
     rowid: Option<String>,
 }
@@ -245,7 +255,47 @@ impl TableShape {
     fn read(c: &Connection, schema: &str, table: &str) -> rusqlite::Result<TableShape> {
         let columns = table_columns(c, schema, table)?;
         let rowid = synthetic_rowid(&columns).map(String::from);
-        Ok(TableShape { columns: columns.into_iter().map(|column| column.name).collect(), rowid })
+        let affinities = columns.iter().map(|column| Affinity::of(&column.type_name)).collect();
+        Ok(TableShape { columns: columns.into_iter().map(|column| column.name).collect(), affinities, rowid })
+    }
+
+    fn affinity(&self, column: &str) -> Affinity {
+        // The builders check every column before they bind its values
+        let at = self.columns.iter().position(|c| c == column);
+        at.map(|i| self.affinities[i]).unwrap_or(Affinity::Numeric)
+    }
+}
+
+/// Values are bound by the column's affinity, since SQLite converts text only for some.
+impl ValueBinder for TableShape {
+    type Param = Value;
+
+    fn value(&self, column: &str, value: &JsonValue) -> Value {
+        self.affinity(column).value(value)
+    }
+
+    fn imported(&self, column: &str, value: Option<&str>) -> Value {
+        value.map_or(Value::Null, |text| self.affinity(column).text(text))
+    }
+
+    fn key(&self, column: &str, value: &JsonValue) -> Vec<Value> {
+        self.affinity(column).key(value)
+    }
+}
+
+impl OperandBinder for TableShape {
+    type Param = Value;
+
+    fn text(&self, text: &str) -> Value {
+        Value::Text(text.to_string())
+    }
+
+    fn compared(&self, column: &str, operand: &str) -> Value {
+        self.affinity(column).text(operand)
+    }
+
+    fn matched(&self, column: &str, operand: &str) -> Vec<Value> {
+        self.affinity(column).matched(operand)
     }
 }
 
@@ -254,7 +304,7 @@ fn relation(schema: &str, table: &str) -> String {
     format!("{}.{}", SQLITE.quote_ident(schema), SQLITE.quote_ident(table))
 }
 
-fn count(c: &Connection, relation: &str, where_sql: &str, params: &[TextParam]) -> rusqlite::Result<i64> {
+fn count(c: &Connection, relation: &str, where_sql: &str, params: &[Value]) -> rusqlite::Result<i64> {
     c.query_row(&format!("SELECT count(*) FROM {relation}{where_sql}"), params_from_iter(params), |row| row.get(0))
 }
 
@@ -437,6 +487,187 @@ mod tests {
         let stored = query(&d, "SELECT id, big, typeof(big), r FROM v ORDER BY id DESC").await;
         assert_eq!(stored[0], vec![json!("9007199254740993"), json!("9007199254740993"), json!("integer"), json!(2.5)]);
         assert_eq!(stored[1], vec![json!("9007199254740992"), json!(1), json!("integer"), json!("-Infinity")], "the neighbour a rounded key would hit");
+
+        // The blob and the infinities the grid shows are written back as a blob and reals
+        let back = vec![
+            change(json!({ "id": read.rows[0][0] }), json!({ "data": read.rows[0][2], "r": read.rows[0][3] })),
+            change(json!({ "id": read.rows[1][0] }), json!({ "data": "\\x", "r": read.rows[1][3] })),
+        ];
+        assert_eq!(d.data().save_rows("main", "v", back).await.unwrap(), 2);
+        let stored = query(&d, "SELECT data, typeof(data), r, typeof(r) FROM v ORDER BY id DESC").await;
+        assert_eq!(stored[0], vec![json!("\\x00ff"), json!("blob"), json!("Infinity"), json!("real")]);
+        assert_eq!(stored[1], vec![json!("\\x"), json!("blob"), json!("-Infinity"), json!("real")]);
+        let reread = page(&d, "v", TableDataParams { sort: Some(vec![sort("id", "desc")]), ..Default::default() }).await;
+        assert_eq!(reread.rows[0], read.rows[0]);
+        let found = page(&d, "v", TableDataParams { filters: Some(vec![filter("r", "=", "Infinity")]), ..Default::default() }).await;
+        assert_eq!(found.total_rows, 1);
+        let found = page(&d, "v", TableDataParams { filters: Some(vec![filter("data", "=", "\\x00ff")]), ..Default::default() }).await;
+        assert_eq!(found.total_rows, 1);
+    }
+
+    #[tokio::test]
+    async fn typeless_keys_find_their_own_rows() {
+        let f = TempDb::with(
+            "CREATE TABLE u (id PRIMARY KEY, name);
+             INSERT INTO u VALUES (1, 'int one'), ('1', 'text one'), (2, 'two'), (9007199254740993, 'big'), (2.5, 'real');",
+        );
+        let d = open(&f).await;
+        let read = page(&d, "u", TableDataParams { sort: Some(vec![sort("name", "asc")]), ..Default::default() }).await;
+        // As the grid shows them: big, int one, real, text one, two
+        assert_eq!(first_column(&read), vec![json!("9007199254740993"), json!(1), json!(2.5), json!("1"), json!(2)]);
+
+        // Each key, as the grid holds it, finds exactly its own row
+        let renamed: Vec<RowChange> = read
+            .rows
+            .iter()
+            .map(|row| change(json!({ "id": row[0] }), json!({ "name": format!("{} edited", row[1].as_str().unwrap()) })))
+            .collect();
+        assert_eq!(d.data().save_rows("main", "u", renamed).await.unwrap(), 5);
+        let stored = query(&d, "SELECT id, typeof(id), name FROM u ORDER BY name").await;
+        assert_eq!(
+            stored,
+            vec![
+                vec![json!("9007199254740993"), json!("integer"), json!("big edited")],
+                vec![json!(1), json!("integer"), json!("int one edited")],
+                vec![json!(2.5), json!("real"), json!("real edited")],
+                vec![json!("1"), json!("text"), json!("text one edited")],
+                vec![json!(2), json!("integer"), json!("two edited")],
+            ]
+        );
+
+        // The text '1' goes, the integer 1 stays; then the integer and the big one go
+        assert_eq!(d.data().delete_rows("main", "u", vec![values(json!({ "id": "1" }))]).await.unwrap(), 1);
+        let keys = vec![values(json!({ "id": 1 })), values(json!({ "id": "9007199254740993" }))];
+        assert_eq!(d.data().delete_rows("main", "u", keys).await.unwrap(), 2);
+        assert_eq!(query(&d, "SELECT id, typeof(id) FROM u ORDER BY id").await, vec![vec![json!(2), json!("integer")], vec![json!(2.5), json!("real")]]);
+    }
+
+    #[tokio::test]
+    async fn real_and_blob_keys_find_their_rows() {
+        let f = TempDb::with(
+            "CREATE TABLE rk (k REAL PRIMARY KEY, v TEXT); INSERT INTO rk VALUES (1.5, 'a'), (1e999, 'b'), (-1e999, 'c');
+             CREATE TABLE ids (id BLOB PRIMARY KEY, v TEXT);
+             INSERT INTO ids VALUES (x'00112233445566778899aabbccddeeff', 'a'), (x'ffeeddccbbaa99887766554433221100', 'b');
+             CREATE TABLE amb (id PRIMARY KEY, v); INSERT INTO amb VALUES (x'00ff', 'blob'), ('\\x00ff', 'text');",
+        );
+        let d = open(&f).await;
+
+        let reals = page(&d, "rk", TableDataParams { sort: Some(vec![sort("v", "asc")]), ..Default::default() }).await;
+        assert_eq!(first_column(&reals), vec![json!(1.5), json!("Infinity"), json!("-Infinity")]);
+        let edits = reals.rows.iter().map(|r| change(json!({ "k": r[0] }), json!({ "v": "edited" }))).collect();
+        assert_eq!(d.data().save_rows("main", "rk", edits).await.unwrap(), 3);
+        assert_eq!(d.data().delete_rows("main", "rk", vec![values(json!({ "k": "Infinity" }))]).await.unwrap(), 1);
+        assert_eq!(query(&d, "SELECT k, v FROM rk ORDER BY k").await, vec![vec![json!("-Infinity"), json!("edited")], vec![json!(1.5), json!("edited")]]);
+
+        let uuids = page(&d, "ids", TableDataParams { sort: Some(vec![sort("v", "asc")]), ..Default::default() }).await;
+        assert_eq!(uuids.rows[0][0], json!("\\x00112233445566778899aabbccddeeff"));
+        let edit = change(json!({ "id": uuids.rows[0][0] }), json!({ "v": "A" }));
+        assert_eq!(d.data().save_rows("main", "ids", vec![edit]).await.unwrap(), 1);
+        assert_eq!(d.data().delete_rows("main", "ids", vec![values(json!({ "id": uuids.rows[1][0] }))]).await.unwrap(), 1);
+        let stored = query(&d, "SELECT hex(id), typeof(id), v FROM ids").await;
+        assert_eq!(stored, vec![vec![json!("00112233445566778899AABBCCDDEEFF"), json!("blob"), json!("A")]]);
+
+        // A blob and the text that looks like it: the key can't tell them apart, so nothing changes
+        let edit = change(json!({ "id": "\\x00ff" }), json!({ "v": "which?" }));
+        let err = d.data().save_rows("main", "amb", vec![edit]).await.unwrap_err();
+        assert_eq!(err, "Nothing was saved. The row: its key matched 2 rows");
+        let err = d.data().delete_rows("main", "amb", vec![values(json!({ "id": "\\x00ff" }))]).await.unwrap_err();
+        assert_eq!(err, "Nothing was deleted: the key matched 2 rows");
+        assert_eq!(d.data().count_rows("main", "amb").await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn typeless_columns_store_numbers_as_numbers() {
+        let f = TempDb::with("CREATE TABLE w (id INTEGER PRIMARY KEY, qty, note TEXT); INSERT INTO w VALUES (1, 5, 'x'), (2, 7, 'y');");
+        let d = open(&f).await;
+        let edits = vec![change(json!({ "id": 1 }), json!({ "qty": "6" })), change(json!({ "id": 2 }), json!({ "qty": "007", "note": "8" }))];
+        assert_eq!(d.data().save_rows("main", "w", edits).await.unwrap(), 2);
+        d.data().insert_row("main", "w", values(json!({ "id": 3, "qty": "2.5" }))).await.unwrap();
+        d.data().insert_row("main", "w", values(json!({ "id": 4, "qty": "-12" }))).await.unwrap();
+        d.data().insert_row("main", "w", values(json!({ "id": 5, "qty": true }))).await.unwrap();
+        let rows = vec![vec![Some("6".to_string()), Some("1e5".to_string())], vec![Some("7".to_string()), Some("abc".to_string())]];
+        d.data().import_rows("main", "w", vec!["id".into(), "qty".into()], rows).await.unwrap();
+        let stored = query(&d, "SELECT qty, typeof(qty), typeof(note) FROM w ORDER BY id").await;
+        assert_eq!(
+            stored,
+            vec![
+                vec![json!(6), json!("integer"), json!("text")],
+                vec![json!("007"), json!("text"), json!("text")],
+                vec![json!(2.5), json!("real"), json!("null")],
+                vec![json!(-12), json!("integer"), json!("null")],
+                vec![json!(1), json!("integer"), json!("null")],
+                vec![json!(100000.0), json!("real"), json!("null")],
+                vec![json!("abc"), json!("text"), json!("null")],
+            ]
+        );
+        let bigger = page(&d, "w", TableDataParams { filters: Some(vec![filter("qty", ">", "5")]), ..Default::default() }).await;
+        assert_eq!(first_column(&bigger), vec![json!(1), json!(2), json!(6), json!(7)], "6, 1e5, and the texts, which sort after every number");
+    }
+
+    #[tokio::test]
+    async fn blobs_written_back_keep_their_bytes() {
+        let f = TempDb::with("CREATE TABLE bl (id INTEGER PRIMARY KEY, data BLOB, raw); INSERT INTO bl VALUES (1, x'00ff', x'deadbeef');");
+        let d = open(&f).await;
+        let read = page(&d, "bl", TableDataParams::default()).await;
+        assert_eq!(read.rows[0], vec![json!(1), json!("\\x00ff"), json!("\\xdeadbeef")]);
+
+        // Saved unchanged, cloned as a new row, and imported
+        let edit = change(json!({ "id": 1 }), json!({ "data": read.rows[0][1], "raw": read.rows[0][2] }));
+        assert_eq!(d.data().save_rows("main", "bl", vec![edit]).await.unwrap(), 1);
+        let clone = values(json!({ "data": read.rows[0][1], "raw": read.rows[0][2] }));
+        assert_eq!(d.data().insert_row("main", "bl", clone).await.unwrap(), 1);
+        let rows = vec![vec![Some("\\x00FF".to_string()), Some("\\xdeadbeef".to_string())], vec![Some("\\x0".to_string()), Some("\\xzz".to_string())]];
+        assert_eq!(d.data().import_rows("main", "bl", vec!["data".into(), "raw".into()], rows).await.unwrap(), 2);
+
+        let stored = query(&d, "SELECT hex(data), typeof(data), hex(raw), typeof(raw) FROM bl ORDER BY id").await;
+        let blob = vec![json!("00FF"), json!("blob"), json!("DEADBEEF"), json!("blob")];
+        assert_eq!(stored[..3], [blob.clone(), blob.clone(), blob]);
+        assert_eq!(stored[3], vec![json!("5C7830"), json!("text"), json!("5C787A7A"), json!("text")], "not hex digits in pairs: text");
+    }
+
+    #[tokio::test]
+    async fn filters_on_columns_without_a_type_compare_numbers_as_numbers() {
+        let f = TempDb::with(
+            "CREATE TABLE nums (id INTEGER PRIMARY KEY, x, b BLOB, g AS (x + 0));
+             INSERT INTO nums (x, b) VALUES (1, 1), (2, 2), (9, 9), (10, 10);
+             CREATE TABLE items (grp TEXT);
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 22)
+             INSERT INTO items SELECT CASE WHEN i = 1 THEN 'a' WHEN i <= 3 THEN 'b' WHEN i <= 12 THEN 'c' ELSE 'd' END FROM n;
+             CREATE VIEW counts AS SELECT grp, count(*) AS n FROM items GROUP BY grp;",
+        );
+        let d = open(&f).await;
+        let total = |table: &'static str, column: &'static str, operator: &'static str, value: &'static str| {
+            let d = d.clone();
+            async move {
+                let params = TableDataParams { filters: Some(vec![filter(column, operator, value)]), ..Default::default() };
+                page(&d, table, params).await.total_rows
+            }
+        };
+        for (table, column) in [("nums", "x"), ("nums", "b"), ("nums", "g"), ("counts", "n")] {
+            let found = (
+                total(table, column, ">", "9").await,
+                total(table, column, "=", "1").await,
+                total(table, column, "!=", "1").await,
+                total(table, column, "in", "1, 2").await,
+                total(table, column, "not in", "1, 2").await,
+                total(table, column, "like", "1%").await,
+            );
+            assert_eq!(found, (1, 1, 3, 2, 2, 2), "{table}.{column}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_later_delete_batch_that_fails_keeps_the_earlier_ones() {
+        let f = TempDb::with(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY);
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 300) INSERT INTO parents SELECT i FROM n;
+             CREATE TABLE children (parent_id INTEGER REFERENCES parents (id)); INSERT INTO children VALUES (300);",
+        );
+        let d = open(&f).await;
+        let keys: Vec<JsonMap> = (1..=300).map(|id: i64| values(json!({ "id": id }))).collect();
+        let err = d.data().delete_rows("main", "parents", keys).await.unwrap_err();
+        assert_eq!(err, "FOREIGN KEY constraint failed");
+        assert_eq!(d.data().count_rows("main", "parents").await.unwrap(), 300, "the first 250 are back");
     }
 
     #[tokio::test]
