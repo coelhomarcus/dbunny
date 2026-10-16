@@ -4,7 +4,8 @@ import { getVersion } from "@tauri-apps/api/app";
 import { ArrowRight, Check, Database, Eye, EyeOff, FolderOpen, KeyRound, Link, Loader, PlugZap, ShieldAlert, TriangleAlert, X } from "lucide-react";
 import { useConnection } from "../contexts/useConnection";
 import { useWorkspace } from "../contexts/workspace";
-import { type ConnectionFields, parseConnectionUrl, buildConnectionUrl, tlsFieldsOf, tlsSettingsOf } from "../lib/connectionUrl";
+import { type ConnectionFields, parseConnectionUrl, buildConnectionUrl, tlsFieldsOf, tlsSettingsOf, isSocketHost } from "../lib/connectionUrl";
+import { isWindows } from "../lib/platform";
 import { api } from "../lib/api";
 import { cn } from "../lib/cn";
 import type { SavedConnection, SshAuthMethod, SshConfig, SshHostKeyProblem, SslMode } from "@/types";
@@ -141,7 +142,7 @@ export default function ConnectPage() {
 
   /** The SSH settings to connect with, or null for a direct connection. */
   function sshConfig(): SshConfig | null {
-    if (!sshEnabled) return null;
+    if (!sshEnabled || isSocketHost(fields.host)) return null;
     return { ...ssh, host: ssh.host.trim(), user: ssh.user.trim(), port: parseInt(ssh.port || "22", 10) };
   }
 
@@ -336,6 +337,7 @@ export default function ConnectPage() {
 
   const sshReady =
     !sshEnabled ||
+    isSocketHost(fields.host) ||
     Boolean(ssh.host.trim() && ssh.user.trim() && (ssh.authMethod !== "key" || ssh.keyPath.trim()));
   const canConnect = Boolean(fields.host.trim() && fields.database.trim()) && sshReady;
   const canSave = canConnect && Boolean(connectionName.trim());
@@ -395,7 +397,7 @@ export default function ConnectPage() {
                       onPaste={(e) => {
                         if (importFromUrl(e.clipboardData.getData("text"))) e.preventDefault();
                       }}
-                      placeholder="localhost"
+                      placeholder={isWindows ? "localhost" : "localhost, or a socket folder like /tmp"}
                       spellCheck={false}
                     />
                   </Field>
@@ -453,14 +455,21 @@ export default function ConnectPage() {
                     </div>
                   </Field>
                 </div>
-                <div className="flex items-center justify-between gap-4">
-                  <label htmlFor="conn-ssl" className="select-none">
-                    <span className="block text-[13px] font-medium">Require SSL</span>
-                    <span className="block text-xs text-muted-foreground">Encrypt the connection</span>
-                  </label>
-                  <Switch id="conn-ssl" checked={fields.ssl} onChange={(v) => updateField("ssl", v)} />
-                </div>
-                {fields.ssl && (
+                {isSocketHost(fields.host) && (
+                  <p className="-mt-1 text-xs text-muted-foreground">
+                    Connects through the Unix socket in this folder, on this computer. SSL and SSH tunnels don't apply.
+                  </p>
+                )}
+                {!isSocketHost(fields.host) && (
+                  <div className="flex items-center justify-between gap-4">
+                    <label htmlFor="conn-ssl" className="select-none">
+                      <span className="block text-[13px] font-medium">Require SSL</span>
+                      <span className="block text-xs text-muted-foreground">Encrypt the connection</span>
+                    </label>
+                    <Switch id="conn-ssl" checked={fields.ssl} onChange={(v) => updateField("ssl", v)} />
+                  </div>
+                )}
+                {fields.ssl && !isSocketHost(fields.host) && (
                   <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/50 p-3">
                     <div className="flex flex-col gap-1.5">
                       <span className="text-[13px] font-medium">Check the server</span>
@@ -517,56 +526,57 @@ export default function ConnectPage() {
                 </div>
               </Section>
 
-              <Section
-                title="SSH tunnel"
-                description={
-                  sshEnabled
-                    ? "Host and port above are the database as seen from the SSH server."
-                    : "Reach the database through an SSH server."
-                }
-                action={<Switch id="conn-ssh" checked={sshEnabled} onChange={(v) => { setSshEnabled(v); setTest({ status: "idle" }); }} aria-label="Connect through SSH" />}
-              >
-                {sshEnabled && (
-                  <>
-                    <div className="grid grid-cols-[1fr_6.5rem] gap-3">
-                      <Field label="SSH host" htmlFor="ssh-host">
-                        <Input id="ssh-host" value={ssh.host} onChange={(e) => updateSsh("host", e.target.value)} placeholder="bastion.example.com" spellCheck={false} />
+              {!isSocketHost(fields.host) && (
+                <Section
+                  title="SSH tunnel"
+                  description={
+                    sshEnabled
+                      ? "Host and port above are the database as seen from the SSH server."
+                      : "Reach the database through an SSH server."
+                  }
+                  action={<Switch id="conn-ssh" checked={sshEnabled} onChange={(v) => { setSshEnabled(v); setTest({ status: "idle" }); }} aria-label="Connect through SSH" />}
+                >
+                  {sshEnabled && (
+                    <>
+                      <div className="grid grid-cols-[1fr_6.5rem] gap-3">
+                        <Field label="SSH host" htmlFor="ssh-host">
+                          <Input id="ssh-host" value={ssh.host} onChange={(e) => updateSsh("host", e.target.value)} placeholder="bastion.example.com" spellCheck={false} />
+                        </Field>
+                        <Field label="Port" htmlFor="ssh-port">
+                          <Input id="ssh-port" inputMode="numeric" value={ssh.port} onChange={(e) => updateSsh("port", e.target.value)} placeholder="22" className="font-mono" />
+                        </Field>
+                      </div>
+                      <Field label="SSH user" htmlFor="ssh-user">
+                        <Input id="ssh-user" value={ssh.user} onChange={(e) => updateSsh("user", e.target.value)} placeholder="ubuntu" spellCheck={false} autoComplete="off" />
                       </Field>
-                      <Field label="Port" htmlFor="ssh-port">
-                        <Input id="ssh-port" inputMode="numeric" value={ssh.port} onChange={(e) => updateSsh("port", e.target.value)} placeholder="22" className="font-mono" />
-                      </Field>
-                    </div>
-                    <Field label="SSH user" htmlFor="ssh-user">
-                      <Input id="ssh-user" value={ssh.user} onChange={(e) => updateSsh("user", e.target.value)} placeholder="ubuntu" spellCheck={false} autoComplete="off" />
-                    </Field>
-                    <div className="flex flex-col gap-1.5">
-                      <span className="text-[13px] font-medium">Log in with</span>
-                      <SegmentedTabs<SshAuthMethod>
-                        value={ssh.authMethod}
-                        onChange={(v) => updateSsh("authMethod", v)}
-                        options={[
-                          { value: "password", label: "Password" },
-                          { value: "key", label: "Private key" },
-                          { value: "agent", label: "SSH agent" },
-                        ]}
-                      />
-                    </div>
-                    {ssh.authMethod === "password" && (
-                      <Field label="SSH password" htmlFor="ssh-password">
-                        <div className="relative">
-                          <Input
-                            id="ssh-password"
-                            type={showSshSecret ? "text" : "password"}
-                            value={ssh.password}
-                            onChange={(e) => updateSsh("password", e.target.value)}
-                            className="pr-9"
-                            autoComplete="off"
-                          />
-                          <Button variant="ghost-muted" size="icon-xs" className="absolute right-1 top-1/2 -translate-y-1/2" aria-label={showSshSecret ? "Hide password" : "Show password"} onClick={() => setShowSshSecret((v) => !v)}>
-                            {showSshSecret ? <EyeOff /> : <Eye />}
-                          </Button>
-                        </div>
-                      </Field>
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-[13px] font-medium">Log in with</span>
+                        <SegmentedTabs<SshAuthMethod>
+                          value={ssh.authMethod}
+                          onChange={(v) => updateSsh("authMethod", v)}
+                          options={[
+                            { value: "password", label: "Password" },
+                            { value: "key", label: "Private key" },
+                            { value: "agent", label: "SSH agent" },
+                          ]}
+                        />
+                      </div>
+                      {ssh.authMethod === "password" && (
+                        <Field label="SSH password" htmlFor="ssh-password">
+                          <div className="relative">
+                            <Input
+                              id="ssh-password"
+                              type={showSshSecret ? "text" : "password"}
+                              value={ssh.password}
+                              onChange={(e) => updateSsh("password", e.target.value)}
+                              className="pr-9"
+                              autoComplete="off"
+                            />
+                            <Button variant="ghost-muted" size="icon-xs" className="absolute right-1 top-1/2 -translate-y-1/2" aria-label={showSshSecret ? "Hide password" : "Show password"} onClick={() => setShowSshSecret((v) => !v)}>
+                              {showSshSecret ? <EyeOff /> : <Eye />}
+                            </Button>
+                          </div>
+                        </Field>
                     )}
                     {ssh.authMethod === "key" && (
                       <>
@@ -593,6 +603,7 @@ export default function ConnectPage() {
                   </>
                 )}
               </Section>
+              )}
 
               <Section title="Save as" description="Optional. Keeps the connection in the sidebar for one-click access.">
                 <Field label="Name" htmlFor="conn-name">
