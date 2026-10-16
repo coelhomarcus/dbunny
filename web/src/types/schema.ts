@@ -145,3 +145,22 @@ export interface RoleInfo {
   /** Built in (pg_*). */
   isBuiltin: boolean;
 }
+
+/** One object in the explorer. */
+export interface ExplorerObject {
+  name: string;
+  kind: "table" | "view" | "matview" | "sequence" | "function" | "procedure" | "type";
+  /** Arguments of a function, or a type's kind (enum, domain...). */
+  detail: string;
+}
+
+export interface ExplorerSchema {
+  name: string;
+  objects: ExplorerObject[];
+}
+
+export interface ExplorerTree {
+  schemas: ExplorerSchema[];
+  /** First schema of the search path. */
+  defaultSchema: string | null;
+}

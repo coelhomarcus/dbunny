@@ -82,10 +82,8 @@ export default function DatabaseLayout() {
               </NavLink>
             </nav>
 
-            <div className="px-3 pt-1 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">
-              Explorer
-            </div>
-            <div className="flex-1 overflow-y-auto pb-2">
+            {/* The explorer has its own header, filter and scrolling list */}
+            <div className="min-h-0 flex-1">
               <SchemaTree schemaToExpand={schemaToExpand} onSchemaExpanded={() => setSchemaToExpand(null)} />
             </div>
           </div>

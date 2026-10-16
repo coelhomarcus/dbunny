@@ -23,6 +23,7 @@ import type {
   ExtensionInfo,
   ObjectDefinition,
   ServerActivity,
+  ExplorerTree,
   DatabaseInfo,
   RoleInfo,
 } from "@/types";
@@ -70,6 +71,11 @@ export function createSessionApi(sessionId: string | null) {
 
     async getViews(schema: string) {
       return invoke<TableInfo[]>("get_views", { sessionId, schema });
+    },
+
+    /** Every schema with its objects, for the explorer. */
+    async getExplorer() {
+      return invoke<ExplorerTree>("get_explorer", { sessionId });
     },
 
     async getMaterializedViews(schema: string) {
