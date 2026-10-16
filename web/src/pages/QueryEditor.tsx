@@ -5,7 +5,11 @@ import { tabState } from "../lib/tabState";
 import type { CompletionSchema, ExplainResult, QueryResult } from "@/types";
 import QueryResults from "../components/QueryResults";
 import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
-import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle, Square, Workflow, ChevronDown, GitCommitVertical, History, Bookmark, Check } from "lucide-react";
+import { Plus, X, Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, GitCommitVertical, History, Bookmark, Check, MoreHorizontal } from "lucide-react";
+import RunButton from "../components/query/RunButton";
+import ResultsBar from "../components/query/ResultsBar";
+import Tooltip from "../components/Tooltip";
+import type { RunScope } from "../components/SqlEditor";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
 import Popover from "../components/ui/Popover";
 import Badge from "../components/ui/Badge";
@@ -16,7 +20,6 @@ import Dialog from "../components/ui/Dialog";
 import Input from "../components/ui/Input";
 import { loadSaved, removeSaved, saveQuery, savedKey, type SavedQuery } from "../lib/savedQueries";
 import { addToHistory, clearHistory, errorSummary, historyKey, loadHistory, removeFromHistory, type HistoryEntry } from "../lib/queryHistory";
-import ExportMenu from "../components/ExportMenu";
 import Button from "../components/ui/Button";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 
@@ -129,7 +132,7 @@ function repairQueryEditorState(saved: QueryEditorState) {
 }
 
 export default function QueryEditor() {
-  const { tabId } = useTab();
+  const { tabId, isActive } = useTab();
   const { api, sessionId, connectionInfo } = useConnection();
   const historyStorageKey = connectionInfo ? historyKey(connectionInfo) : null;
   const [history, setHistory] = useState<HistoryEntry[]>(() => (historyStorageKey ? loadHistory(historyStorageKey) : []));
@@ -152,8 +155,10 @@ export default function QueryEditor() {
   const [view, setView] = useState<ResultView>(initial.view ?? "results");
   const [inTransaction, setInTransaction] = useState(false);
   const [txBusy, setTxBusy] = useState(false);
-  const [explainMenuOpen, setExplainMenuOpen] = useState(false);
-  const explainButtonRef = useRef<HTMLButtonElement>(null);
+  // When the running query started, for the elapsed time under the results
+  const [runningSince, setRunningSince] = useState<number | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
   const [safeMode, setSafeMode] = useState(saved.safeMode);
   const [pendingDangers, setPendingDangers] = useState<DangerInfo[] | null>(null);
   const pendingSqlRef = useRef<string | null>(null);
@@ -358,6 +363,7 @@ export default function QueryEditor() {
       return;
     }
     setRunning(true);
+    setRunningSince(Date.now());
     setError(null);
     setResult(null);
     const delay = new Promise<void>((r) => setTimeout(r, 400));
@@ -391,14 +397,16 @@ export default function QueryEditor() {
       showView("results");
     } finally {
       setRunning(false);
+      setRunningSince(null);
     }
   }, [loadCompletionSchema, api, saved, runTransaction, showView, historyStorageKey, inTransaction]);
 
   const explain = useCallback(async (analyze: boolean) => {
-    setExplainMenuOpen(false);
-    const sql = editorRef.current?.getSelectionOrValue() ?? "";
+    // EXPLAIN takes one statement: the selection, or the one at the cursor
+    const sql = editorRef.current?.getCurrentStatement() ?? "";
     if (!sql.trim()) return;
     setRunning(true);
+    setRunningSince(Date.now());
     setError(null);
     try {
       const res = await api.explain(sql, analyze);
@@ -411,13 +419,14 @@ export default function QueryEditor() {
       showView("results");
     } finally {
       setRunning(false);
+      setRunningSince(null);
     }
   }, [api, saved, showView]);
 
-  const runQuery = useCallback(async () => {
+  const runQuery = useCallback(async (scope: RunScope = "current") => {
     const editor = editorRef.current;
     if (!editor) return;
-    const sql = editor.getSelectionOrValue();
+    const sql = scope === "all" ? editor.getValue() : editor.getCurrentStatement();
     if (!sql.trim()) return;
 
     if (safeMode) {
@@ -431,6 +440,20 @@ export default function QueryEditor() {
 
     await executeQuery(sql);
   }, [safeMode, executeQuery]);
+
+  const cancelQuery = useCallback(() => {
+    api.cancelQuery().catch(() => {});
+  }, [api]);
+
+  // Esc stops the running query (only in the visible tab)
+  useEffect(() => {
+    if (!running || !isActive) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && !document.querySelector("[role=dialog][aria-modal]")) cancelQuery();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [running, isActive, cancelQuery]);
 
   function confirmDangerousQuery() {
     const sql = pendingSqlRef.current;
@@ -542,55 +565,14 @@ export default function QueryEditor() {
             />
           </div>
 
-          {/* Toolbar */}
-          <div className="flex items-center gap-3 px-3 py-2 bg-muted border-t border-border select-none">
-            <Button variant="primary" size="sm" className="px-4" onClick={runQuery} disabled={running}>
-              <span className={`transition-opacity duration-200 ${running ? "opacity-0" : "opacity-100"}`}>
-                Run
-              </span>
-              <Loader className={`size-4 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
-            </Button>
-            {running && (
-              <Button variant="outline" size="sm" onClick={() => api.cancelQuery().catch(() => {})}>
-                <Square className="size-3 fill-current" />
-                Cancel
-              </Button>
-            )}
-            <Button
-              ref={explainButtonRef}
-              variant="ghost-muted"
-              size="sm"
-              onClick={() => setExplainMenuOpen((open) => !open)}
-              disabled={running}
-              aria-expanded={explainMenuOpen}
-            >
-              <Workflow />
-              Explain
-              <ChevronDown className="size-3" />
-            </Button>
-            <Popover open={explainMenuOpen} onClose={() => setExplainMenuOpen(false)} anchorRef={explainButtonRef} className="w-64 p-1">
-              <button
-                type="button"
-                onClick={() => explain(false)}
-                className="w-full rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-accent"
-              >
-                <div className="text-[13px] font-medium">Explain</div>
-                <div className="text-xs text-muted-foreground">The planner's estimate, nothing runs</div>
-              </button>
-              <button
-                type="button"
-                onClick={() => explain(true)}
-                className="w-full rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-accent"
-              >
-                <div className="text-[13px] font-medium">Explain analyze</div>
-                <div className="text-xs text-muted-foreground">Runs the query for real times, then rolls it back</div>
-              </button>
-            </Popover>
-            {inTransaction ? (
-              <div className="flex items-center gap-1.5">
+          {/* Actions: run on the left, the rest quieter on the right */}
+          <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-2.5 select-none">
+            <RunButton disabled={running || txBusy} onRun={runQuery} onExplain={explain} />
+            {inTransaction && (
+              <div className="ml-1 flex items-center gap-1.5">
                 <Badge variant="warning">
                   <GitCommitVertical />
-                  Transaction open
+                  In transaction
                 </Badge>
                 <Button variant="success" size="xs" onClick={() => runTransaction("commit")} disabled={txBusy || running}>
                   Commit
@@ -599,51 +581,45 @@ export default function QueryEditor() {
                   Rollback
                 </Button>
               </div>
-            ) : (
-              <Button variant="ghost-muted" size="sm" onClick={() => runTransaction("begin")} disabled={txBusy || running}>
-                <GitCommitVertical />
-                Begin
-              </Button>
             )}
-            {result && (
-              <span className="text-sm text-muted-foreground">
-                {(result.statementCount ?? 1) > 1 && `${result.statementCount} statements · `}
-                {result.rowsAffected != null
-                  ? `${result.rowsAffected} rows affected in ${result.duration}ms`
-                  : `${result.rowCount} rows in ${result.duration}ms`}
-              </span>
-            )}
-            <div className="flex items-center gap-1 ml-auto">
-              {result && result.columns.length > 0 && (
-                <ExportMenu
-                  columns={result.columns}
-                  rows={result.rows}
-                  defaultName={tabMetas.find((t) => t.id === activeId)?.label.replace(/\s+/g, "_").toLowerCase() ?? "query"}
-                  side="up"
-                />
+            <div className="ml-auto flex items-center gap-0.5">
+              {!inTransaction && (
+                <Tooltip label="Begin a transaction: runs join it until commit or rollback" side="top">
+                  <Button variant="ghost-muted" size="sm" onClick={() => runTransaction("begin")} disabled={txBusy || running}>
+                    <GitCommitVertical />
+                    Transaction
+                  </Button>
+                </Tooltip>
               )}
-              <Button
-                variant={safeMode ? "ghost" : "ghost-muted"}
-                size="sm"
-                className={safeMode ? "text-success-foreground" : undefined}
-                onClick={() => setSafeMode((v) => !v)}
-                aria-pressed={safeMode}
-              >
-                {safeMode ? <ShieldCheck /> : <ShieldOff />}
-                {safeMode ? "Safe" : "Unsafe"}
-              </Button>
+              <Tooltip label={safeMode ? "Safe mode: asks before destructive statements" : "Safe mode off: destructive statements run directly"} side="top">
+                <Button
+                  variant="ghost-muted"
+                  size="icon-sm"
+                  className={safeMode ? "text-success-foreground hover:text-success-foreground" : undefined}
+                  onClick={() => setSafeMode((v) => !v)}
+                  aria-pressed={safeMode}
+                  aria-label="Safe mode"
+                >
+                  {safeMode ? <ShieldCheck /> : <ShieldOff />}
+                </Button>
+              </Tooltip>
               <Button variant="ghost-muted" size="sm" onClick={() => saveActiveQuery()} disabled={!savedStorageKey}>
                 {justSaved ? <Check /> : <Bookmark />}
                 {justSaved ? "Saved" : "Save"}
               </Button>
-              <Button variant="ghost-muted" size="sm" onClick={importQuery}>
-                <Upload />
-                Import
+              <Button ref={moreButtonRef} variant="ghost-muted" size="icon-sm" onClick={() => setMoreOpen((v) => !v)} aria-label="More" aria-expanded={moreOpen}>
+                <MoreHorizontal />
               </Button>
-              <Button variant="ghost-muted" size="sm" onClick={exportQuery}>
-                <Download />
-                Export SQL
-              </Button>
+              <Popover open={moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreButtonRef} className="w-52 p-1">
+                <div role="menu" className="[&>button]:flex [&>button]:w-full [&>button]:items-center [&>button]:gap-2.5 [&>button]:rounded-md [&>button]:px-2 [&>button]:py-1.5 [&>button]:text-left [&>button]:text-[13px] [&>button]:cursor-pointer [&>button:hover]:bg-accent [&_svg]:size-3.5 [&_svg]:text-muted-foreground">
+                  <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); importQuery(); }}>
+                    <Upload /> Open .sql file…
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); exportQuery(); }}>
+                    <Download /> Save as .sql file…
+                  </button>
+                </div>
+              </Popover>
             </div>
           </div>
         </div>
@@ -681,6 +657,13 @@ export default function QueryEditor() {
               <QueryResults result={result} error={error} running={running} />
             )}
           </div>
+          <ResultsBar
+            result={result}
+            error={error}
+            runningSince={runningSince}
+            onCancel={cancelQuery}
+            exportName={tabMetas.find((t) => t.id === activeId)?.label.replace(/\s+/g, "_").toLowerCase() ?? "query"}
+          />
         </div>
       </div>
       {historyOpen && (
