@@ -2,7 +2,6 @@
 //! connection in its own `BEGIN IMMEDIATE` transaction, so all of it is written or none is.
 
 use async_trait::async_trait;
-use rusqlite::ffi::ErrorCode;
 use rusqlite::types::{ToSql, Value};
 use rusqlite::{params_from_iter, Connection};
 use serde_json::Value as JsonValue;
@@ -192,20 +191,17 @@ impl SqliteDriver {
     ) -> Result<T, String> {
         match self.tables().run(move |c| Ok(f(c))).await? {
             Ok(value) => Ok(value),
-            Err(failure) => Err(self.describe(failure).await),
+            Err(failure) => Err(self.describe(failure)),
         }
     }
 
     /// The message of a failure. A busy database is explained by who holds it, which is
-    /// the editor when its connection has a transaction open.
-    async fn describe(&self, failure: Failure) -> String {
+    /// the editor when its connection has a transaction open. That is read without
+    /// waiting for the editor, which may be running a long statement.
+    fn describe(&self, failure: Failure) -> String {
         let reason = match failure.cause {
             Cause::Message(message) => message,
-            Cause::Sqlite(e) => {
-                let busy = matches!(&e, rusqlite::Error::SqliteFailure(f, _) if f.code == ErrorCode::DatabaseBusy);
-                let editor_in_transaction = busy && self.editor().run(|c| Ok(!c.is_autocommit())).await.unwrap_or(false);
-                map_statement_error(&e, editor_in_transaction)
-            }
+            Cause::Sqlite(e) => map_statement_error(&e, self.editor().in_transaction()),
         };
         format!("{}{reason}", failure.context)
     }
@@ -843,5 +839,33 @@ mod tests {
         let err = d.data().insert_row("main", "ins", values(json!({ "nope": 1 }))).await.unwrap_err();
         assert_eq!(err, "Invalid column: nope");
         assert_eq!(d.data().count_rows("main", "ins").await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_save_does_not_wait_for_a_busy_editor() {
+        let f = TempDb::with("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO t VALUES (1, 'a');");
+        let opts = OpenOptions { busy_timeout: std::time::Duration::from_millis(200), ..Default::default() };
+        let d = SqliteDriver::open(f.path(), opts).await.unwrap();
+        d.editor().run(|c| c.execute_batch("BEGIN; INSERT INTO t VALUES (2, 'b');").map_err(|e| e.to_string())).await.unwrap();
+        // The editor goes on with a statement that never ends, inside its transaction
+        let running = {
+            let d = d.clone();
+            tokio::spawn(async move {
+                let endless = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n";
+                d.editor().run(move |c| c.query_row(endless, [], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string())).await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let started = std::time::Instant::now();
+        let save = d.data().save_rows("main", "t", vec![change(json!({ "id": 1 }), json!({ "name": "A" }))]);
+        let saved = tokio::time::timeout(std::time::Duration::from_secs(3), save).await;
+        let elapsed = started.elapsed();
+        d.editor().interrupt();
+        assert!(running.await.unwrap().is_err(), "the endless statement was stopped");
+
+        let err = saved.expect("the save must not wait for the editor's statement").unwrap_err();
+        assert_eq!(err, "A transaction in the query editor is holding the database: commit or roll it back, then try again.");
+        assert!(elapsed < std::time::Duration::from_secs(2), "{elapsed:?}");
     }
 }

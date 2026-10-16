@@ -3,10 +3,13 @@
 
 mod catalog;
 mod conn;
+mod console;
 mod data;
 pub mod errors;
+pub(crate) mod split;
 #[cfg(test)]
 mod tests_support;
+mod transactions;
 pub mod values;
 
 use std::path::PathBuf;
@@ -17,7 +20,7 @@ use async_trait::async_trait;
 
 pub(crate) use conn::SqliteConn;
 
-use super::{Capabilities, Catalog, ConnectionInfo, Data, Driver, Engine};
+use super::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, Transactions};
 
 /// How a file is opened.
 pub struct OpenOptions {
@@ -72,7 +75,6 @@ impl SqliteDriver {
     }
 
     /// The connection of the query editor and its transaction.
-    #[allow(dead_code)] // Used once the SQLite query editor lands
     pub(crate) fn editor(&self) -> &SqliteConn {
         &self.editor
     }
@@ -107,6 +109,14 @@ impl Driver for SqliteDriver {
     fn data(&self) -> &dyn Data {
         self
     }
+
+    fn console(&self) -> Option<&dyn Console> {
+        Some(self)
+    }
+
+    fn transactions(&self) -> Option<&dyn Transactions> {
+        Some(self)
+    }
 }
 
 #[cfg(test)]
@@ -121,7 +131,8 @@ mod tests {
         assert_eq!(d.engine(), Engine::Sqlite);
         assert_eq!(d.capabilities(), &Capabilities::sqlite());
         assert_eq!(d.data().count_rows("main", "t").await, Ok(0));
-        assert!(d.console().is_none() && d.admin().is_none());
+        assert!(d.console().is_some() && d.transactions().is_some());
+        assert!(d.schema_editor().is_none() && d.admin().is_none());
     }
 
     /// Removes a file when it goes out of scope (also if an assertion fails first).

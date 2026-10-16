@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::db::sql::filter::TableFilter;
+use crate::db::ExplainFormat;
 
 /// A row as column name -> value, for inserts and primary keys.
 pub type JsonMap = serde_json::Map<String, JsonValue>;
@@ -340,10 +341,13 @@ pub struct RowChange {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExplainResult {
-    /// Postgres' JSON plan: `[{ "Plan": {...}, "Planning Time": .., "Execution Time": .. }]`.
+    /// Postgres' JSON plan: `[{ "Plan": {...}, "Planning Time": .., "Execution Time": .. }]`,
+    /// or SQLite's query plan rows: `[{ "id": .., "parent": .., "detail": ".." }]`.
     pub plan: JsonValue,
     /// The statement was actually run (ANALYZE), then rolled back.
     pub analyzed: bool,
+    /// How `plan` is shaped.
+    pub format: ExplainFormat,
 }
 
 // Structure changes

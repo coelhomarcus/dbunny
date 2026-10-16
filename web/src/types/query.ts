@@ -1,3 +1,5 @@
+import type { ExplainFormat } from "./capabilities";
+
 export interface QueryRequest {
   sql: string;
 }
@@ -49,6 +51,8 @@ export interface ExplainResult {
   plan: [{ Plan: PlanNode; "Planning Time"?: number; "Execution Time"?: number }];
   /** The statement really ran (EXPLAIN ANALYZE) and was rolled back. */
   analyzed: boolean;
+  /** How `plan` is shaped. */
+  format: ExplainFormat;
 }
 
 export interface QueryError {

@@ -1,8 +1,9 @@
 //! SQLite errors in words the app shows.
 
+use std::ffi::c_int;
 use std::path::Path;
 
-use rusqlite::ffi::ErrorCode;
+use rusqlite::ffi::{self, ErrorCode};
 
 /// The same text PostgreSQL gives a cancelled query, so the frontend treats both alike.
 pub const CANCELLED: &str = "canceling statement due to user request";
@@ -41,6 +42,126 @@ pub fn map_statement_error(e: &rusqlite::Error, editor_in_transaction: bool) -> 
     }
 }
 
+/// The name of a SQLite result code, such as `SQLITE_CONSTRAINT_NOTNULL`. An extended
+/// code without a name here gets its primary code's name.
+pub fn code_name(code: c_int) -> &'static str {
+    macro_rules! names {
+        ($code:expr; $($name:ident,)*) => {
+            match $code {
+                $(ffi::$name => Some(stringify!($name)),)*
+                _ => None,
+            }
+        };
+    }
+    let named = |code: c_int| {
+        names!(code;
+        SQLITE_ERROR,
+        SQLITE_INTERNAL,
+        SQLITE_PERM,
+        SQLITE_ABORT,
+        SQLITE_BUSY,
+        SQLITE_LOCKED,
+        SQLITE_NOMEM,
+        SQLITE_READONLY,
+        SQLITE_INTERRUPT,
+        SQLITE_IOERR,
+        SQLITE_CORRUPT,
+        SQLITE_NOTFOUND,
+        SQLITE_FULL,
+        SQLITE_CANTOPEN,
+        SQLITE_PROTOCOL,
+        SQLITE_EMPTY,
+        SQLITE_SCHEMA,
+        SQLITE_TOOBIG,
+        SQLITE_CONSTRAINT,
+        SQLITE_MISMATCH,
+        SQLITE_MISUSE,
+        SQLITE_NOLFS,
+        SQLITE_AUTH,
+        SQLITE_FORMAT,
+        SQLITE_RANGE,
+        SQLITE_NOTADB,
+        SQLITE_NOTICE,
+        SQLITE_WARNING,
+        SQLITE_ERROR_MISSING_COLLSEQ,
+        SQLITE_ERROR_RETRY,
+        SQLITE_ERROR_SNAPSHOT,
+        SQLITE_IOERR_READ,
+        SQLITE_IOERR_SHORT_READ,
+        SQLITE_IOERR_WRITE,
+        SQLITE_IOERR_FSYNC,
+        SQLITE_IOERR_DIR_FSYNC,
+        SQLITE_IOERR_TRUNCATE,
+        SQLITE_IOERR_FSTAT,
+        SQLITE_IOERR_UNLOCK,
+        SQLITE_IOERR_RDLOCK,
+        SQLITE_IOERR_DELETE,
+        SQLITE_IOERR_BLOCKED,
+        SQLITE_IOERR_NOMEM,
+        SQLITE_IOERR_ACCESS,
+        SQLITE_IOERR_CHECKRESERVEDLOCK,
+        SQLITE_IOERR_LOCK,
+        SQLITE_IOERR_CLOSE,
+        SQLITE_IOERR_DIR_CLOSE,
+        SQLITE_IOERR_SHMOPEN,
+        SQLITE_IOERR_SHMSIZE,
+        SQLITE_IOERR_SHMLOCK,
+        SQLITE_IOERR_SHMMAP,
+        SQLITE_IOERR_SEEK,
+        SQLITE_IOERR_DELETE_NOENT,
+        SQLITE_IOERR_MMAP,
+        SQLITE_IOERR_GETTEMPPATH,
+        SQLITE_IOERR_CONVPATH,
+        SQLITE_IOERR_VNODE,
+        SQLITE_IOERR_AUTH,
+        SQLITE_IOERR_BEGIN_ATOMIC,
+        SQLITE_IOERR_COMMIT_ATOMIC,
+        SQLITE_IOERR_ROLLBACK_ATOMIC,
+        SQLITE_IOERR_DATA,
+        SQLITE_IOERR_CORRUPTFS,
+        SQLITE_IOERR_IN_PAGE,
+        SQLITE_LOCKED_SHAREDCACHE,
+        SQLITE_LOCKED_VTAB,
+        SQLITE_BUSY_RECOVERY,
+        SQLITE_BUSY_SNAPSHOT,
+        SQLITE_BUSY_TIMEOUT,
+        SQLITE_CANTOPEN_NOTEMPDIR,
+        SQLITE_CANTOPEN_ISDIR,
+        SQLITE_CANTOPEN_FULLPATH,
+        SQLITE_CANTOPEN_CONVPATH,
+        SQLITE_CANTOPEN_DIRTYWAL,
+        SQLITE_CANTOPEN_SYMLINK,
+        SQLITE_CORRUPT_VTAB,
+        SQLITE_CORRUPT_SEQUENCE,
+        SQLITE_CORRUPT_INDEX,
+        SQLITE_READONLY_RECOVERY,
+        SQLITE_READONLY_CANTLOCK,
+        SQLITE_READONLY_ROLLBACK,
+        SQLITE_READONLY_DBMOVED,
+        SQLITE_READONLY_CANTINIT,
+        SQLITE_READONLY_DIRECTORY,
+        SQLITE_ABORT_ROLLBACK,
+        SQLITE_CONSTRAINT_CHECK,
+        SQLITE_CONSTRAINT_COMMITHOOK,
+        SQLITE_CONSTRAINT_FOREIGNKEY,
+        SQLITE_CONSTRAINT_FUNCTION,
+        SQLITE_CONSTRAINT_NOTNULL,
+        SQLITE_CONSTRAINT_PRIMARYKEY,
+        SQLITE_CONSTRAINT_TRIGGER,
+        SQLITE_CONSTRAINT_UNIQUE,
+        SQLITE_CONSTRAINT_VTAB,
+        SQLITE_CONSTRAINT_ROWID,
+        SQLITE_CONSTRAINT_PINNED,
+        SQLITE_CONSTRAINT_DATATYPE,
+        SQLITE_NOTICE_RECOVER_WAL,
+        SQLITE_NOTICE_RECOVER_ROLLBACK,
+        SQLITE_WARNING_AUTOINDEX,
+        SQLITE_AUTH_USER,
+        )
+    };
+    named(code).or_else(|| named(code & 0xff)).unwrap_or("SQLITE_ERROR")
+}
+
 /// "The file {path} doesn't exist."
 pub fn missing(path: &Path) -> String {
     format!("The file {} doesn't exist.", path.display())
@@ -60,7 +181,6 @@ fn system_reason(path: &Path) -> Option<String> {
 mod tests {
     use super::super::tests_support::TempDb;
     use super::*;
-    use rusqlite::ffi;
 
     fn failure(code: i32) -> rusqlite::Error {
         rusqlite::Error::SqliteFailure(ffi::Error::new(code), None)
@@ -135,6 +255,17 @@ mod tests {
         let message = map_statement_error(&err, false);
         assert_ne!(message, "The database is locked by another program. Try again when it's done.");
         assert_eq!(message, err.to_string());
+    }
+
+    #[test]
+    fn result_codes_have_their_names() {
+        assert_eq!(code_name(ffi::SQLITE_CONSTRAINT_NOTNULL), "SQLITE_CONSTRAINT_NOTNULL");
+        assert_eq!(code_name(ffi::SQLITE_ERROR), "SQLITE_ERROR");
+        assert_eq!(code_name(ffi::SQLITE_INTERRUPT), "SQLITE_INTERRUPT");
+        assert_eq!(code_name(ffi::SQLITE_BUSY_TIMEOUT), "SQLITE_BUSY_TIMEOUT");
+        // An extended code this version doesn't know gets its primary code's name
+        assert_eq!(code_name(ffi::SQLITE_IOERR | (99 << 8)), "SQLITE_IOERR");
+        assert_eq!(code_name(255), "SQLITE_ERROR");
     }
 
     #[test]

@@ -2,6 +2,7 @@
 //! a mutex and every use runs on tokio's blocking threads.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::{Connection, InterruptHandle, OpenFlags, MAIN_DB};
@@ -17,6 +18,25 @@ pub(crate) struct SqliteConn {
     interrupt: InterruptHandle,
     /// The connection can't write: opened read-only, or the file only allows reading.
     read_only: bool,
+    /// Whether the connection had a transaction open when it was last let go.
+    state: TransactionState,
+}
+
+/// Whether a connection has a transaction open, readable from anywhere without waiting
+/// for the connection. It's updated each time a task is done with the connection (and
+/// by the query editor after each statement), while the connection is still held.
+#[derive(Clone, Default)]
+pub(crate) struct TransactionState(Arc<AtomicBool>);
+
+impl TransactionState {
+    pub fn get(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    /// Notes what `conn`, which the caller holds, says now.
+    pub fn note(&self, conn: &Connection) {
+        self.0.store(!conn.is_autocommit(), Ordering::SeqCst);
+    }
 }
 
 impl SqliteConn {
@@ -56,7 +76,8 @@ impl SqliteConn {
 
         let read_only = opts.read_only || conn.is_readonly(MAIN_DB).map_err(fail)?;
         let interrupt = conn.get_interrupt_handle();
-        Ok(SqliteConn { slot: Mutex::new(Some(Arc::new(Mutex::new(conn)))), interrupt, read_only })
+        let state = TransactionState::default();
+        Ok(SqliteConn { slot: Mutex::new(Some(Arc::new(Mutex::new(conn)))), interrupt, read_only, state })
     }
 
     /// Runs `f` with the connection, on a blocking thread, once the connection is free.
@@ -65,15 +86,30 @@ impl SqliteConn {
         f: impl FnOnce(&mut Connection) -> Result<T, String> + Send + 'static,
     ) -> Result<T, String> {
         let conn = lock(&self.slot).clone().ok_or_else(|| "Session not found".to_string())?;
-        tokio::task::spawn_blocking(move || f(&mut lock(&conn)))
-            .await
-            .map_err(|e| format!("The query stopped unexpectedly: {e}"))?
+        let state = self.state.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut conn = lock(&conn);
+            let result = f(&mut conn);
+            state.note(&conn);
+            result
+        })
+        .await
+        .map_err(|e| format!("The query stopped unexpectedly: {e}"))?
     }
 
     /// Stops what the connection is running; it fails with "canceling statement due to user request".
-    #[allow(dead_code)] // Used once the query editor can cancel on SQLite
     pub fn interrupt(&self) {
         self.interrupt.interrupt();
+    }
+
+    /// Whether a transaction is open, as of the last task on the connection. Never waits.
+    pub fn in_transaction(&self) -> bool {
+        self.state.get()
+    }
+
+    /// The same answer as `in_transaction`, to read from inside a task on another connection.
+    pub fn transaction_state(&self) -> TransactionState {
+        self.state.clone()
     }
 
     pub fn read_only(&self) -> bool {

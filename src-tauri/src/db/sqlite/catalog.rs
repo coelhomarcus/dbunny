@@ -4,6 +4,7 @@
 use async_trait::async_trait;
 use rusqlite::{Connection, OptionalExtension};
 
+use super::conn::TransactionState;
 use super::errors::map_statement_error;
 use super::values::standard_type;
 use super::SqliteDriver;
@@ -18,31 +19,37 @@ use crate::db::{unsupported, Catalog, Engine};
 #[async_trait]
 impl Catalog for SqliteDriver {
     async fn explorer(&self) -> Result<ExplorerTree, String> {
-        self.tables().run(|c| explorer(c).map_err(db_error)).await
+        let editor = self.editor().transaction_state();
+        self.tables().run(move |c| explorer(c).map_err(db_error(&editor))).await
     }
 
     async fn columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, String> {
         let (schema, table) = (schema.to_owned(), table.to_owned());
-        self.tables().run(move |c| table_columns(c, &schema, &table).map_err(db_error)).await
+        let editor = self.editor().transaction_state();
+        self.tables().run(move |c| table_columns(c, &schema, &table).map_err(db_error(&editor))).await
     }
 
     async fn relation_kind(&self, schema: &str, name: &str) -> Result<Option<String>, String> {
         let (schema, name) = (schema.to_owned(), name.to_owned());
-        self.tables().run(move |c| relation_kind(c, &schema, &name).map_err(db_error)).await
+        let editor = self.editor().transaction_state();
+        self.tables().run(move |c| relation_kind(c, &schema, &name).map_err(db_error(&editor))).await
     }
 
     async fn table_structure(&self, schema: &str, table: &str) -> Result<TableStructure, String> {
         let (schema, table) = (schema.to_owned(), table.to_owned());
-        self.tables().run(move |c| table_structure(c, &schema, &table)).await
+        let editor = self.editor().transaction_state();
+        self.tables().run(move |c| table_structure(c, &editor, &schema, &table)).await
     }
 
     async fn completion_schema(&self) -> Result<CompletionSchema, String> {
-        self.tables().run(|c| completion_schema(c).map_err(db_error)).await
+        let editor = self.editor().transaction_state();
+        self.tables().run(move |c| completion_schema(c).map_err(db_error(&editor))).await
     }
 
     async fn object_definition(&self, schema: &str, name: &str, kind: &str) -> Result<ObjectDefinition, String> {
         let (schema, name, kind) = (schema.to_owned(), name.to_owned(), kind.to_owned());
-        self.tables().run(move |c| object_definition(c, &schema, &name, &kind)).await
+        let editor = self.editor().transaction_state();
+        self.tables().run(move |c| object_definition(c, &editor, &schema, &name, &kind)).await
     }
 
     async fn function_detail(&self, _: &str, _: &str, _: &str) -> Result<FunctionDetail, String> {
@@ -55,9 +62,10 @@ impl Catalog for SqliteDriver {
 }
 
 /// A statement error in the app's words. The catalog only reads on the tables'
-/// connection; a lock that stops it is reported as another program's.
-fn db_error(e: rusqlite::Error) -> String {
-    map_statement_error(&e, false)
+/// connection; a lock that stops it is the editor's when the editor has a transaction
+/// open (`editor`), and another program's otherwise.
+fn db_error(editor: &TransactionState) -> impl Fn(rusqlite::Error) -> String + '_ {
+    move |e| map_statement_error(&e, editor.get())
 }
 
 fn quote(name: &str) -> String {
@@ -327,21 +335,21 @@ fn stored_sql(c: &Connection, db: &str, kinds: &str, name: &str) -> rusqlite::Re
     c.query_row(&sql, [name], |r| Ok((r.get(0)?, r.get(1)?))).optional()
 }
 
-fn object_definition(c: &Connection, db: &str, name: &str, kind: &str) -> Result<ObjectDefinition, String> {
+fn object_definition(c: &Connection, editor: &TransactionState, db: &str, name: &str, kind: &str) -> Result<ObjectDefinition, String> {
     if !matches!(kind, "table" | "view" | "index" | "trigger") {
         return Err(format!("Unknown object kind \"{kind}\""));
     }
     let (table, sql) = stored_sql(c, db, &format!("'{kind}'"), name)
-        .map_err(db_error)?
+        .map_err(db_error(editor))?
         .ok_or_else(|| format!("{db}.{name} doesn't exist"))?;
     let facts = if matches!(kind, "index" | "trigger") { vec![("Table".to_string(), table)] } else { Vec::new() };
     Ok(ObjectDefinition { kind: kind.into(), facts, comment: None, ddl: sql.map(|s| format!("{s};")).unwrap_or_default() })
 }
 
 /// A section that failed becomes a warning and an empty value.
-fn section<T: Default>(warnings: &mut Vec<String>, name: &str, result: rusqlite::Result<T>) -> T {
+fn section<T: Default>(warnings: &mut Vec<String>, editor: &TransactionState, name: &str, result: rusqlite::Result<T>) -> T {
     result.unwrap_or_else(|e| {
-        let warning = format!("Couldn't read {name}: {}", db_error(e));
+        let warning = format!("Couldn't read {name}: {}", db_error(editor)(e));
         if !warnings.contains(&warning) {
             warnings.push(warning);
         }
@@ -349,16 +357,16 @@ fn section<T: Default>(warnings: &mut Vec<String>, name: &str, result: rusqlite:
     })
 }
 
-fn table_structure(c: &Connection, db: &str, table: &str) -> Result<TableStructure, String> {
-    let entry = table_entry(c, db, table).map_err(db_error)?.ok_or_else(|| format!("{db}.{table} doesn't exist"))?;
+fn table_structure(c: &Connection, editor: &TransactionState, db: &str, table: &str) -> Result<TableStructure, String> {
+    let entry = table_entry(c, db, table).map_err(db_error(editor))?.ok_or_else(|| format!("{db}.{table} doesn't exist"))?;
     let mut warnings = Vec::new();
-    let raw = section(&mut warnings, "the columns", raw_columns(c, db, table));
-    let columns = section(&mut warnings, "the columns", table_columns(c, db, table));
-    let keys = section(&mut warnings, "the foreign keys", foreign_keys(c, db, table));
-    let indexes = section(&mut warnings, "the indexes", table_indexes(c, db, table));
-    let referenced_by = section(&mut warnings, "the referencing tables", referencing_tables(c, db, table));
-    let triggers = section(&mut warnings, "the triggers", table_triggers(c, db, table));
-    let own_sql = section(&mut warnings, "the definition", stored_sql(c, db, "'table', 'view'", table));
+    let raw = section(&mut warnings, editor, "the columns", raw_columns(c, db, table));
+    let columns = section(&mut warnings, editor, "the columns", table_columns(c, db, table));
+    let keys = section(&mut warnings, editor, "the foreign keys", foreign_keys(c, db, table));
+    let indexes = section(&mut warnings, editor, "the indexes", table_indexes(c, db, table));
+    let referenced_by = section(&mut warnings, editor, "the referencing tables", referencing_tables(c, db, table));
+    let triggers = section(&mut warnings, editor, "the triggers", table_triggers(c, db, table));
+    let own_sql = section(&mut warnings, editor, "the definition", stored_sql(c, db, "'table', 'view'", table));
 
     let meta = TableMeta {
         kind: match entry.kind.as_str() {
@@ -1093,5 +1101,19 @@ mod tests {
         let authors = &completion.relations[0];
         let columns: Vec<(&str, &str)> = authors.columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str())).collect();
         assert_eq!(columns, vec![("id", "INTEGER"), ("email", "TEXT"), ("name", "VARCHAR(80)")]);
+    }
+
+    #[tokio::test]
+    async fn a_read_blocked_by_the_editors_transaction_says_so() {
+        let f = TempDb::with(FIXTURE);
+        let opts = OpenOptions { busy_timeout: std::time::Duration::from_millis(200), ..Default::default() };
+        let d = SqliteDriver::open(f.path(), opts).await.unwrap();
+        // An exclusive transaction keeps every other connection from reading the file
+        d.editor().run(|c| c.execute_batch("BEGIN EXCLUSIVE").map_err(|e| e.to_string())).await.unwrap();
+        let held = "A transaction in the query editor is holding the database: commit or roll it back, then try again.";
+        assert_eq!(d.explorer().await.err().unwrap(), held);
+        assert_eq!(d.table_structure("main", "posts").await.err().unwrap(), held);
+        d.editor().run(|c| c.execute_batch("ROLLBACK").map_err(|e| e.to_string())).await.unwrap();
+        assert!(d.explorer().await.is_ok());
     }
 }

@@ -103,8 +103,7 @@ pub fn split_statements(sql: &str) -> Vec<Statement> {
 pub fn split_statements_in(dialect: Dialect, sql: &str) -> Vec<Statement> {
     match dialect {
         Dialect::Postgres => split_postgres(sql),
-        // Placeholder until the SQLite splitter lands (plan task 5 replaces this arm)
-        Dialect::Sqlite => split_postgres(sql),
+        Dialect::Sqlite => crate::db::sqlite::split::split_sqlite(sql),
     }
 }
 
@@ -270,6 +269,13 @@ mod tests {
         // Leading whitespace is not part of the statement
         assert_eq!(statements[1].offset, 12);
         assert_eq!(statements[1].text, "SELECT bad");
+    }
+
+    #[test]
+    fn the_sqlite_dialect_uses_sqlites_own_rules() {
+        let sql = "CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END; SELECT 2";
+        let texts: Vec<String> = split_statements_in(Dialect::Sqlite, sql).into_iter().map(|s| s.text).collect();
+        assert_eq!(texts, ["CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END", "SELECT 2"]);
     }
 
     #[test]

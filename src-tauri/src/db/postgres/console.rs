@@ -11,7 +11,7 @@ use super::transactions::start_transaction;
 use super::PostgresDriver;
 use crate::db::model::{ExplainResult, QueryResult};
 use crate::db::sql::split::split_statements;
-use crate::db::Console;
+use crate::db::{Console, ExplainFormat};
 
 /// Error as JSON for the UI. `offset` shifts the position to be relative to the whole
 /// script, and `statement` is the (1-based index, total) of the failing statement
@@ -283,7 +283,7 @@ impl Console for PostgresDriver {
             result.map_err(error)?
         };
 
-        Ok(ExplainResult { plan: plan_from_messages(&messages)?, analyzed: analyze })
+        Ok(ExplainResult { plan: plan_from_messages(&messages)?, analyzed: analyze, format: ExplainFormat::PostgresJson })
     }
 }
 
