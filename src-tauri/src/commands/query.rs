@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::pgtext::{is_native, text_to_json};
 use super::sqlsplit::split_statements;
 use super::state::{AppState, Notice};
-use super::tableedit::{build_delete, build_insert, build_update};
+use super::tableedit::{build_delete, build_import_batches, build_insert, build_update};
 use super::tablefilter::{build_where, quote_ident, TableFilter, TextParam};
 
 #[derive(Serialize)]
@@ -751,6 +751,58 @@ async fn delete_from(
     client.execute(sql.as_str(), &refs).await.map_err(|e| db_message(&e))
 }
 
+/// Inserts imported rows (e.g. from a CSV file) all at once: a separate connection runs
+/// them in one transaction, so a bad row leaves the table untouched.
+#[tauri::command]
+pub async fn import_rows(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    table: String,
+    columns: Vec<String>,
+    rows: Vec<Vec<Option<String>>>,
+) -> Result<u64, String> {
+    let link = state.link(&session_id).await?;
+    let notices = state.notices(&session_id).await?;
+    let client = super::connect::open_connection(&link, &notices)
+        .await
+        .map_err(|e| format!("Couldn't open a connection for the import: {e}"))?;
+    import_into(&client, &schema, &table, &columns, &rows).await
+}
+
+pub(crate) async fn import_into(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+    columns: &[String],
+    rows: &[Vec<Option<String>>],
+) -> Result<u64, String> {
+    let valid_columns = get_valid_columns(client, schema, table).await?;
+    let relation = format!("{}.{}", quote_ident(schema), quote_ident(table));
+    let batches = build_import_batches(&relation, columns, rows, &valid_columns)?;
+
+    client.batch_execute("BEGIN").await.map_err(|e| db_message(&e))?;
+    let mut inserted = 0;
+    for (first_row, sql, params) in &batches {
+        let refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+        match client.execute(sql.as_str(), &refs).await {
+            Ok(count) => inserted += count,
+            Err(e) => {
+                let _ = client.batch_execute("ROLLBACK").await;
+                let size = params.len() / columns.len();
+                return Err(format!(
+                    "Nothing was imported. A row between {} and {} failed: {}",
+                    first_row + 1,
+                    first_row + size,
+                    db_message(&e)
+                ));
+            }
+        }
+    }
+    client.batch_execute("COMMIT").await.map_err(|e| db_message(&e))?;
+    Ok(inserted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1233,5 +1285,35 @@ mod server_tests {
         let first: Vec<_> = page.rows.iter().map(|r| r[0].clone()).collect();
         assert_eq!(first, vec![json!(6), json!(4), json!(2), json!(5), json!(3), json!(1)]);
         client.batch_execute("DROP SCHEMA dbunny_sort_test CASCADE").await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn imports_are_converted_by_the_server_and_all_or_nothing() {
+        let client = connect().await;
+        client
+            .batch_execute("CREATE TEMP TABLE imported (id int PRIMARY KEY, name text NOT NULL, born date, score numeric)")
+            .await
+            .unwrap();
+        let schema: String = client.query_one("SELECT nspname::text FROM pg_namespace WHERE oid = pg_my_temp_schema()", &[]).await.unwrap().get(0);
+        let cols: Vec<String> = vec!["id".into(), "name".into(), "born".into(), "score".into()];
+        let row = |id: i32, name: &str, born: Option<&str>| vec![Some(id.to_string()), Some(name.to_string()), born.map(String::from), Some("1.5".into())];
+
+        let rows: Vec<_> = (1..=1500).map(|i| row(i, &format!("person {i}"), Some("1990-05-17"))).collect();
+        assert_eq!(import_into(&client, &schema, "imported", &cols, &rows).await.unwrap(), 1500);
+
+        // A duplicate key in the second batch rolls back the first one too
+        let mut bad: Vec<_> = (2001..=3200).map(|i| row(i, "x", None)).collect();
+        bad.push(row(1, "duplicate", None));
+        let err = import_into(&client, &schema, "imported", &cols, &bad).await.unwrap_err();
+        assert!(err.contains("Nothing was imported") && err.contains("duplicate key"), "{err}");
+        let total: i64 = client.query_one("SELECT count(*) FROM imported", &[]).await.unwrap().get(0);
+        assert_eq!(total, 1500);
+
+        let err = import_into(&client, &schema, "imported", &cols, &[row(9999, "y", Some("not a date"))]).await.unwrap_err();
+        assert!(err.contains("invalid input syntax for type date"), "{err}");
+        // The connection is usable after a failed import
+        let one: i32 = client.query_one("SELECT 1", &[]).await.unwrap().get(0);
+        assert_eq!(one, 1);
     }
 }

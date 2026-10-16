@@ -141,6 +141,7 @@ pub fn run() {
             commands::activity::signal_backend,
             commands::connect::connect_database,
             commands::connect::get_databases,
+            commands::query::import_rows,
             commands::editor::cancel_query,
             commands::editor::begin_transaction,
             commands::editor::commit_transaction,

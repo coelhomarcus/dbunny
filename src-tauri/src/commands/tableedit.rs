@@ -115,6 +115,49 @@ pub fn build_delete(
     Ok((format!("DELETE FROM {relation} WHERE {}", conditions.join(" OR ")), params))
 }
 
+/// Parameters Postgres accepts in one statement (the protocol counts them in 16 bits).
+const MAX_PARAMS: usize = 65_535;
+
+/// Multi-row `INSERT`s for imported rows, split so none goes over the parameter limit.
+/// Each batch also returns the index of its first row, to point errors at a row.
+pub fn build_import_batches(
+    relation: &str,
+    columns: &[String],
+    rows: &[Vec<Option<String>>],
+    valid_columns: &[String],
+) -> Result<Vec<(usize, String, Vec<Option<TextParam>>)>, String> {
+    if columns.is_empty() {
+        return Err("Choose at least one column to import".into());
+    }
+    check_columns(columns.iter(), valid_columns)?;
+    if let Some((i, row)) = rows.iter().enumerate().find(|(_, r)| r.len() != columns.len()) {
+        return Err(format!("Row {} has {} values instead of {}", i + 1, row.len(), columns.len()));
+    }
+    let names = columns.iter().map(|c| quote_ident(c)).collect::<Vec<_>>().join(", ");
+    let per_batch = (MAX_PARAMS / columns.len()).clamp(1, 1000);
+    Ok(rows
+        .chunks(per_batch)
+        .enumerate()
+        .map(|(batch, chunk)| {
+            let mut params = Vec::with_capacity(chunk.len() * columns.len());
+            let values: Vec<String> = chunk
+                .iter()
+                .map(|row| {
+                    let placeholders: Vec<String> = row
+                        .iter()
+                        .map(|value| {
+                            params.push(value.clone().map(TextParam));
+                            format!("${}", params.len())
+                        })
+                        .collect();
+                    format!("({})", placeholders.join(", "))
+                })
+                .collect();
+            (batch * per_batch, format!("INSERT INTO {relation} ({names}) VALUES {}", values.join(", ")), params)
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,5 +247,30 @@ mod tests {
         assert_eq!(params[2], Some(TextParam("2".into())));
         assert!(build_delete("t", &[values(json!({}))], &columns()).is_err());
         assert!(build_delete("t", &[values(json!({"we\"ird": 1}))], &columns()).is_ok());
+    }
+
+    #[test]
+    fn imports_are_split_into_batches_under_the_parameter_limit() {
+        let cols: Vec<String> = vec!["name".into(), "note".into()];
+        let rows: Vec<Vec<Option<String>>> = (0..2500).map(|i| vec![Some(format!("n{i}")), None]).collect();
+        let batches = build_import_batches("t", &cols, &rows, &columns()).unwrap();
+        assert_eq!(batches.len(), 3, "1000 rows per batch at most");
+        assert_eq!(batches[1].0, 1000);
+        assert!(batches[0].1.starts_with("INSERT INTO t (\"name\", \"note\") VALUES ($1, $2), ($3, $4)"));
+        assert_eq!(batches[2].2.len(), 1000);
+        assert_eq!(batches[0].2[1], None, "missing values are real NULLs");
+
+        let wide: Vec<String> = (0..100).map(|i| format!("c{i}")).collect();
+        let wide_rows = vec![vec![Some("x".to_string()); 100]; 1000];
+        let batches = build_import_batches("t", &wide, &wide_rows, &wide).unwrap();
+        assert!(batches.iter().all(|(_, _, p)| p.len() <= MAX_PARAMS));
+    }
+
+    #[test]
+    fn imports_check_columns_and_row_lengths() {
+        assert!(build_import_batches("t", &[], &[], &columns()).is_err());
+        assert!(build_import_batches("t", &["nope".into()], &[vec![None]], &columns()).is_err());
+        let err = build_import_batches("t", &["name".into()], &[vec![None], vec![None, None]], &columns()).unwrap_err();
+        assert!(err.contains("Row 2"), "{err}");
     }
 }
