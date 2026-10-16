@@ -10,7 +10,7 @@ import { editorFor, toEditText, type CellEditor } from "../lib/cellEdit";
 import { isJsonType, shortType } from "../lib/columnMeta";
 import CellEditorDialog from "../components/table/CellEditorDialog";
 import { useTableData } from "../hooks/useTableData";
-import { useApi } from "../contexts/useConnection";
+import { useApi, useConnection } from "../contexts/useConnection";
 import { useTab } from "../contexts/workspace";
 import { useCellEditing } from "../hooks/useCellEditing";
 import { useRowSelection } from "../hooks/useRowSelection";
@@ -64,6 +64,9 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
 
   const tableData = useTableData(schema, table, initialFilters);
   const { data, columnInfos, loading, error, hasNoPk } = tableData;
+  const readOnly = useConnection().connectionInfo?.readOnly ?? false;
+  // Rows can't be changed without a primary key to find them, or on a read-only connection
+  const editLocked = hasNoPk || readOnly;
 
   const selection = useRowSelection(data?.rows.length ?? 0);
   const resize = useColumnResize();
@@ -93,7 +96,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
 
   const editing = useCellEditing({
     data,
-    hasNoPk,
+    hasNoPk: editLocked,
     pendingChanges: pending.pendingChanges,
     setPendingChanges: pending.setPendingChanges,
   });
@@ -218,7 +221,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
     const rowsLabel = targetRows.length > 1 ? `${targetRows.length} rows` : "row";
     const copy = (text: string) => navigator.clipboard.writeText(text);
     const link = foreignKeyLink(column, row, data.columns);
-    const editable = !hasNoPk && editorFor(column, value).kind !== "readonly";
+    const editable = !editLocked && editorFor(column, value).kind !== "readonly";
 
     const items: ContextMenuItem[] = [
       { label: "Copy value", icon: <Copy />, onSelect: () => copy(valueText(value)) },
@@ -257,7 +260,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         onSelect: () => editing.setCellValue(rowIndex, colName, true, ""),
       });
     }
-    items.push({
+    if (!readOnly) items.push({
       label: "Clone row",
       icon: <CopyPlus />,
       onSelect: guard(() => {
@@ -284,6 +287,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         counting={tableData.counting}
         onCountExactly={tableData.countExactly}
         hasNoPk={hasNoPk}
+        readOnly={readOnly}
         selectedCount={selection.selectedRows.size}
         deleting={pending.deleting}
         onDelete={pending.handleDelete}
@@ -423,7 +427,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                             displayValue={displayValue}
                             isDirty={isDirty}
                             isEditing={isEditing}
-                            hasNoPk={hasNoPk}
+                            hasNoPk={editLocked}
                             editor={editor}
                             nullable={columnInfo?.isNullable ?? true}
                             editValue={editing.editValue}

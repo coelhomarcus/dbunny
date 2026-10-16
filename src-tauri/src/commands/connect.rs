@@ -14,6 +14,9 @@ pub struct ConnectResponse {
     pub host: String,
     pub port: u16,
     pub server_version: String,
+    /// The session can't write: the connection asked for read-only transactions
+    /// (`options=-c default_transaction_read_only=on`) or the server is a read replica.
+    pub read_only: bool,
 }
 
 /// How the TLS handshake should behave, derived from the URL's `sslmode`.
@@ -61,6 +64,10 @@ pub(crate) fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Confi
         stripped.set_query(None);
     } else {
         stripped.query_pairs_mut().clear().extend_pairs(others);
+        // That writes spaces as "+" (form encoding), which the driver reads literally;
+        // a real "+" is already "%2B", so every "+" left is a space
+        let query = stripped.query().unwrap_or("").replace('+', "%20");
+        stripped.set_query(Some(&query));
     }
 
     let mut config: tokio_postgres::Config = stripped
@@ -166,6 +173,12 @@ pub async fn connect(
         .map(|row| row.get(0))
         .unwrap_or_default();
 
+    let read_only = client
+        .query_one("SHOW transaction_read_only", &[])
+        .await
+        .map(|row| row.get::<_, String>(0) == "on")
+        .unwrap_or(false);
+
     let session_id = Uuid::new_v4().to_string();
 
     let session = Session {
@@ -187,6 +200,7 @@ pub async fn connect(
         host,
         port,
         server_version,
+        read_only,
     })
 }
 
@@ -246,6 +260,14 @@ mod tests {
         assert_eq!(config.get_user(), Some("u"));
         assert_eq!(config.get_password(), Some(&b"p@ss"[..]));
         assert_eq!(config.get_connect_timeout().map(|d| d.as_secs()), Some(5));
+    }
+
+    #[test]
+    fn read_only_option_reaches_the_server_config() {
+        let url = url::Url::parse("postgresql://u@localhost/db?sslmode=require&options=-c%20default_transaction_read_only%3Don").unwrap();
+        let (config, _) = connection_config(&url).unwrap();
+        assert_eq!(config.get_options(), Some("-c default_transaction_read_only=on"));
+        assert_eq!(config.get_ssl_mode(), SslMode::Require);
     }
 
     #[test]

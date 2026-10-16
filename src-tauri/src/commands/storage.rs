@@ -30,6 +30,9 @@ pub struct SavedConnection {
     pub name: String,
     pub encrypted_data: String,
     pub ssl: bool,
+    /// Every transaction starts read-only; missing in files from older versions.
+    #[serde(default)]
+    pub read_only: bool,
     pub color: String,
     pub created_at: String,
     pub updated_at: String,
@@ -47,6 +50,7 @@ pub struct SavedConnectionInfo {
     pub user: String,
     pub password: String,
     pub ssl: bool,
+    pub read_only: bool,
     pub color: String,
     pub created_at: String,
     pub updated_at: String,
@@ -209,6 +213,7 @@ impl SavedConnection {
             name,
             encrypted_data,
             ssl,
+            read_only: false,
             color,
             created_at,
             updated_at,
@@ -229,6 +234,7 @@ impl SavedConnection {
             user: sensitive.user,
             password: sensitive.password,
             ssl: self.ssl,
+            read_only: self.read_only,
             color: self.color.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),

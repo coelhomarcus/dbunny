@@ -8,6 +8,8 @@ export interface ConnectResponse {
   host: string;
   port: number;
   serverVersion: string;
+  /** Asked for read-only, or the server is a read replica. */
+  readOnly: boolean;
 }
 
 export interface ConnectionInfo {
@@ -15,4 +17,5 @@ export interface ConnectionInfo {
   host: string;
   port: number;
   serverVersion: string;
+  readOnly: boolean;
 }

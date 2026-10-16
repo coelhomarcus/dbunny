@@ -1,4 +1,4 @@
-import { Eye, EyeOff, LogOut } from "lucide-react";
+import { Eye, EyeOff, Lock, LogOut } from "lucide-react";
 import type { ConnectionInfo } from "@/types";
 import ThemeToggle from "../ui/ThemeToggle";
 
@@ -26,6 +26,12 @@ export default function StatusBar({
         <span className="size-1.5 rounded-full bg-success" />
         Connected
       </span>
+      {connectionInfo?.readOnly && (
+        <span className="flex items-center gap-1 rounded bg-warning/12 px-1.5 py-px font-medium text-warning-foreground">
+          <Lock size={10} />
+          Read-only
+        </span>
+      )}
       {/* The toggle sits on the details it reveals */}
       <button
         onClick={onToggleReveal}

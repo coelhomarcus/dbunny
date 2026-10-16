@@ -6,6 +6,7 @@ import {
   RefreshCw,
   Columns3,
   ListFilter,
+  Lock,
   Loader,
   Plus,
 } from "lucide-react";
@@ -24,6 +25,8 @@ interface TableViewHeaderProps {
   counting: boolean;
   onCountExactly: () => void;
   hasNoPk: boolean;
+  /** Read-only connection: no insert, edit or delete. */
+  readOnly: boolean;
   selectedCount: number;
   deleting: boolean;
   onDelete: () => void;
@@ -49,7 +52,7 @@ interface TableViewHeaderProps {
 }
 
 export default function TableViewHeader({
-  schema, table, totalRows, totalRowsEstimated, counting, onCountExactly, hasNoPk,
+  schema, table, totalRows, totalRowsEstimated, counting, onCountExactly, hasNoPk, readOnly,
   selectedCount, deleting, onDelete,
   hasPendingChanges, dirtyRowCount, saveError, saving, onSave, onDiscard,
   refreshing, loading, spinKey, onRefresh,
@@ -78,15 +81,20 @@ export default function TableViewHeader({
               {totalRows.toLocaleString()} rows
             </span>
           ))}
-        {hasNoPk && (
+        {readOnly ? (
+          <span className="flex items-center gap-1 text-sm text-warning-foreground/80">
+            <Lock size={12} />
+            read-only connection
+          </span>
+        ) : hasNoPk ? (
           <span className="text-sm text-warning-foreground/80">
             no primary key - editing disabled
           </span>
-        )}
+        ) : null}
       </div>
 
       <div className="flex items-center gap-2">
-        {selectedCount > 0 && !hasNoPk && (
+        {selectedCount > 0 && !hasNoPk && !readOnly && (
           <Button variant="destructive" size="sm" onClick={onDelete} disabled={deleting}>
             <Trash2 />
             {deleting
@@ -113,10 +121,12 @@ export default function TableViewHeader({
           </div>
         )}
 
-        <Button variant="ghost-muted" size="sm" onClick={onInsertRow}>
-          <Plus />
-          Insert
-        </Button>
+        {!readOnly && (
+          <Button variant="ghost-muted" size="sm" onClick={onInsertRow}>
+            <Plus />
+            Insert
+          </Button>
+        )}
 
         <Button
           variant="ghost-muted"

@@ -32,6 +32,7 @@ export function ConnectionProvider({
           host: response.host,
           port: response.port,
           serverVersion: response.serverVersion,
+          readOnly: response.readOnly,
         };
         setSessionId(response.sessionId);
         setConnectionInfo(info);

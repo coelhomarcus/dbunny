@@ -16,6 +16,8 @@ pub struct SavedConnectionInput {
     pub user: String,
     pub password: String,
     pub ssl: bool,
+    #[serde(default)]
+    pub read_only: bool,
     pub color: String,
 }
 
@@ -48,6 +50,7 @@ pub async fn save_connection(
 
         let created_at = connections[pos].created_at.clone();
 
+        let read_only = connection.read_only;
         connections[pos] = SavedConnection::new(
             &state.encryption_key,
             id.clone(),
@@ -62,10 +65,12 @@ pub async fn save_connection(
             created_at,
             now,
         )?;
+        connections[pos].read_only = read_only;
 
         connections[pos].clone()
     } else {
-        let new_connection = SavedConnection::new(
+        let read_only = connection.read_only;
+        let mut new_connection = SavedConnection::new(
             &state.encryption_key,
             Uuid::new_v4().to_string(),
             connection.name,
@@ -79,6 +84,7 @@ pub async fn save_connection(
             now.clone(),
             now,
         )?;
+        new_connection.read_only = read_only;
 
         connections.push(new_connection.clone());
         new_connection

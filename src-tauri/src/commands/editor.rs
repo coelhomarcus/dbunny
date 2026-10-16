@@ -177,6 +177,28 @@ mod server_tests {
 
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn read_only_connections_reject_writes_on_every_connection() {
+        let url = std::env::var("DBUNNY_TEST_DATABASE_URL").unwrap();
+        let separator = if url.contains('?') { '&' } else { '?' };
+        let url = url::Url::parse(&format!("{url}{separator}options=-c%20default_transaction_read_only%3Don")).unwrap();
+        let (config, tls) = connection_config(&url).unwrap();
+        let link = Link { config, tls };
+        let notices: Notices = Default::default();
+
+        let main = open_connection(&link, &notices).await.unwrap();
+        let shown: String = main.query_one("SHOW transaction_read_only", &[]).await.unwrap().get(0);
+        assert_eq!(shown, "on");
+        let err = main.batch_execute("CREATE TEMP TABLE nope (v int)").await.unwrap_err();
+        assert_eq!(err.code(), Some(&SqlState::READ_ONLY_SQL_TRANSACTION));
+
+        // The editor's transaction connection is opened from the same link, so it's read-only too
+        let tx = start_transaction(&link, &notices).await.unwrap();
+        let err = tx.batch_execute("CREATE TEMP TABLE nope (v int)").await.unwrap_err();
+        assert_eq!(err.code(), Some(&SqlState::READ_ONLY_SQL_TRANSACTION));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
     async fn notices_are_collected_from_the_connection() {
         let notices: Notices = Default::default();
         let client = open_connection(&link(), &notices).await.unwrap();

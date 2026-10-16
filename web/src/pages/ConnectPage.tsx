@@ -24,7 +24,7 @@ const DEFAULT_COLOR = "#3b82f6";
 // Colour tags to tell environments apart (prod, staging, local...)
 const COLOR_PRESETS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899"];
 
-const EMPTY_FIELDS: ConnectionFields = { host: "", port: "", database: "", user: "", password: "", ssl: false };
+const EMPTY_FIELDS: ConnectionFields = { host: "", port: "", database: "", user: "", password: "", ssl: false, readOnly: false };
 
 type TestState =
   | { status: "idle" }
@@ -133,6 +133,7 @@ export default function ConnectPage() {
       user: conn.user,
       password: conn.password,
       ssl: conn.ssl,
+      readOnly: conn.readOnly ?? false,
     });
     setTest({ status: "idle" });
   }
@@ -147,6 +148,7 @@ export default function ConnectPage() {
         user: conn.user,
         password: conn.password,
         ssl: conn.ssl,
+        readOnly: conn.readOnly ?? false,
       });
       await connect(url, { name: conn.name, color: conn.color });
       navigate("/db/query");
@@ -178,6 +180,7 @@ export default function ConnectPage() {
           user: fields.user.trim(),
           password: fields.password,
           ssl: fields.ssl,
+          readOnly: fields.readOnly,
           color: connectionColor,
         }),
         new Promise((r) => setTimeout(r, 400)),
@@ -347,6 +350,13 @@ export default function ConnectPage() {
                     <span className="block text-xs text-muted-foreground">Encrypt the connection (sslmode=require)</span>
                   </label>
                   <Switch id="conn-ssl" checked={fields.ssl} onChange={(v) => updateField("ssl", v)} />
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <label htmlFor="conn-readonly" className="select-none">
+                    <span className="block text-[13px] font-medium">Read-only</span>
+                    <span className="block text-xs text-muted-foreground">The server refuses inserts, updates, deletes and schema changes</span>
+                  </label>
+                  <Switch id="conn-readonly" checked={fields.readOnly} onChange={(v) => updateField("readOnly", v)} />
                 </div>
               </Section>
 
