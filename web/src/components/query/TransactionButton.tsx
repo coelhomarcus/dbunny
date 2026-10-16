@@ -30,7 +30,7 @@ export default function TransactionButton({
     // Joined like Run, each half in its own colour
     <div className="mr-1 flex">
       <Tooltip label="Rollback undoes every change since the transaction began" side="top">
-        <Button variant="outline" size="sm" className="rounded-r-none border-r-0" onClick={onRollback} disabled={disabled}>
+        <Button variant="destructive" size="sm" className="rounded-r-none" onClick={onRollback} disabled={disabled}>
           <Undo2 />
           Rollback
         </Button>
