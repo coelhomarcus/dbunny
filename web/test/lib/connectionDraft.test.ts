@@ -13,7 +13,7 @@ import {
   savedTagOf,
   sshConfigOf,
   tabsFor,
-} from "./connectionDraft.ts";
+} from "../../src/lib/connectionDraft.ts";
 
 const saved: SavedConnection = {
   id: "c1",

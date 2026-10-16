@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { splitStatements } from "./sqlStatements.ts";
+import { splitStatements } from "../../src/lib/sqlStatements.ts";
 
 const texts = (sql: string, dialect?: "postgres" | "sqlite") => splitStatements(sql, dialect).map((r) => sql.slice(r.from, r.to));
 

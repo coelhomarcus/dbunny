@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ColumnInfo } from "@/types";
-import { editorFor } from "./cellEdit.ts";
+import { editorFor } from "../../src/lib/cellEdit.ts";
 
 const column = (dataType: string): ColumnInfo => ({ name: "c", dataType, typeName: dataType, isNullable: true, defaultValue: null, ordinalPosition: 1, isPrimaryKey: false, isGenerated: false, comment: null, enumValues: null, foreignKey: null });
 

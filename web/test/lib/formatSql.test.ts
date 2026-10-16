@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { clearFormatSqlCache, formatSqlCached } from "./formatSql.ts";
+import { clearFormatSqlCache, formatSqlCached } from "../../src/lib/formatSql.ts";
 
 afterEach(() => clearFormatSqlCache());
 

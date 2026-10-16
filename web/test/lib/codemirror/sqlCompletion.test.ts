@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { quoteIdentForDialect } from "./sqlCompletion.ts";
+import { quoteIdentForDialect } from "../../../src/lib/codemirror/sqlCompletion.ts";
 
 test("sqlite completion quotes reserved column names", () => {
   assert.equal(quoteIdentForDialect("index", "sqlite"), '"index"');
