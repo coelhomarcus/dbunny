@@ -1,0 +1,19 @@
+import type { ConnectionDraft } from "../../lib/connectionDraft";
+import Switch from "../ui/Switch";
+
+/** Settings every database has: for now, read-only. */
+export default function OptionsTab({ draft, onChange }: { draft: ConnectionDraft; onChange: (draft: ConnectionDraft) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <label htmlFor="conn-readonly" className="select-none">
+        <span className="block text-[13px] font-medium">Read-only</span>
+        <span className="block text-xs text-muted-foreground">The server refuses inserts, updates, deletes and schema changes</span>
+      </label>
+      <Switch
+        id="conn-readonly"
+        checked={draft.fields.readOnly}
+        onChange={(v) => onChange({ ...draft, fields: { ...draft.fields, readOnly: v } })}
+      />
+    </div>
+  );
+}
