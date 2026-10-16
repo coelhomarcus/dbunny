@@ -17,7 +17,11 @@ import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } 
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { appThemeExtension } from "../lib/codemirror/theme";
 import { sqlCompletion, sqlDialect } from "../lib/codemirror/sqlCompletion";
+import { currentStatementHighlight, currentStatementRange } from "../lib/codemirror/currentStatement";
 import type { CompletionSchema } from "@/types";
+
+/** "current": the selection, or the statement at the cursor; "all": the whole script. */
+export type RunScope = "current" | "all";
 
 export type SqlEditorHandle = {
   getValue(): string;
@@ -25,6 +29,8 @@ export type SqlEditorHandle = {
   setValue(sql: string): void;
   /** Selected text if there is a selection, otherwise the whole document. */
   getSelectionOrValue(): string;
+  /** The selection, or the statement the cursor is in (empty when there's none). */
+  getCurrentStatement(): string;
 };
 
 type SqlEditorProps = {
@@ -33,7 +39,7 @@ type SqlEditorProps = {
   schema: CompletionSchema | null;
   /** Called once the editor exists. The handle stays usable after unmount (reads the last state). */
   onMount: (handle: SqlEditorHandle) => void;
-  onRun: () => void;
+  onRun: (scope: RunScope) => void;
 };
 
 export default function SqlEditor({ initialValue, schema, onMount, onRun }: SqlEditorProps) {
@@ -58,7 +64,14 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun }: SqlE
           {
             key: "Mod-Enter",
             run: () => {
-              onRunRef.current();
+              onRunRef.current("current");
+              return true;
+            },
+          },
+          {
+            key: "Shift-Mod-Enter",
+            run: () => {
+              onRunRef.current("all");
               return true;
             },
           },
@@ -88,6 +101,7 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun }: SqlE
         indentWithTab,
       ]),
       EditorView.lineWrapping,
+      currentStatementHighlight,
       sqlDialect.language,
       completionRef.current.of(sqlCompletion(schemaRef.current)),
       appThemeExtension,
@@ -111,6 +125,12 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun }: SqlE
         if (!state) return "";
         const { from, to, empty } = state.selection.main;
         return empty ? state.doc.toString() : state.sliceDoc(from, to);
+      },
+      getCurrentStatement() {
+        const state = viewRef.current?.state;
+        if (!state) return "";
+        const range = currentStatementRange(state);
+        return range ? state.sliceDoc(range.from, range.to) : "";
       },
     });
 
