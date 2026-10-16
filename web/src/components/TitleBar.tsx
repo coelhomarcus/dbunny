@@ -201,7 +201,9 @@ export default function TitleBar() {
     >
       {/* Room for the traffic lights on macOS, then Settings and the sidebar toggle; the
           tabs follow, and each tab's container below holds its own sidebar */}
-      <div className={cn("flex shrink-0 items-center gap-0.5", trafficLights ? "w-[8.5rem] justify-end" : "pl-2")}>
+      {/* With the traffic lights: as far from them as the icons are apart, and 1px lower so
+          their centres line up (the lights sit a little below the bar's middle) */}
+      <div className={cn("flex shrink-0 items-center gap-0.5", trafficLights ? "w-[9rem] justify-end pt-0.5" : "pl-2")}>
         <Tooltip label={`Settings (${isMac ? "⌘" : "Ctrl+"},)`} side="bottom">
           <Button variant="ghost-muted" size="icon-sm" onClick={() => openSettings()} aria-label="Settings">
             <Settings />
