@@ -33,7 +33,14 @@ DBunny is a native PostgreSQL client for **macOS**, **Windows** and **Linux**, b
 
 ## Getting started
 
-Download the app for your system from the [releases page](https://github.com/coelhomarcus/dbunny/releases/latest).
+Download the app for your system from the [releases page](https://github.com/coelhomarcus/dbunny/releases/latest):
+
+| Your system | Download |
+|---|---|
+| macOS on Apple Silicon (M1 and later) | `DBunny-<version>-macOS-Apple-Silicon.dmg` |
+| macOS on Intel | `DBunny-<version>-macOS-Intel.dmg` |
+| Windows | `DBunny-<version>-Windows-x64-setup.exe` |
+| Linux | `DBunny-<version>-Linux-x64.AppImage`, or the `.deb` / `.rpm` |
 
 To build it yourself you need [Node.js](https://nodejs.org) and [Rust](https://www.rust-lang.org/tools/install):
 
