@@ -5,12 +5,14 @@ import { tabState } from "../lib/tabState";
 import type { CompletionSchema, ExplainResult, QueryResult } from "@/types";
 import QueryResults from "../components/QueryResults";
 import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
-import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle, Square, Workflow, ChevronDown, GitCommitVertical } from "lucide-react";
+import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle, Square, Workflow, ChevronDown, GitCommitVertical, History } from "lucide-react";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
 import Popover from "../components/ui/Popover";
 import Badge from "../components/ui/Badge";
 import PlanView from "../components/query/PlanView";
 import NoticeList from "../components/query/NoticeList";
+import HistoryPanel from "../components/query/HistoryPanel";
+import { addToHistory, clearHistory, errorSummary, historyKey, loadHistory, removeFromHistory, type HistoryEntry } from "../lib/queryHistory";
 import ExportMenu from "../components/ExportMenu";
 import Button from "../components/ui/Button";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -123,7 +125,10 @@ function repairQueryEditorState(saved: QueryEditorState) {
 
 export default function QueryEditor() {
   const { tabId } = useTab();
-  const { api, sessionId } = useConnection();
+  const { api, sessionId, connectionInfo } = useConnection();
+  const historyStorageKey = connectionInfo ? historyKey(connectionInfo) : null;
+  const [history, setHistory] = useState<HistoryEntry[]>(() => (historyStorageKey ? loadHistory(historyStorageKey) : []));
+  const [historyOpen, setHistoryOpen] = useState(false);
   const saved = tabState(tabId, "queryEditor", createQueryEditorState);
   repairQueryEditorState(saved);
   const [tabMetas, setTabMetas] = useState<TabMeta[]>(saved.tabMetas);
@@ -222,6 +227,14 @@ export default function QueryEditor() {
     setView("results");
   }
 
+  /** Opens SQL from the history in a new query tab, leaving the current one as it is. */
+  function openFromHistory(sql: string) {
+    addTab();
+    const payload = saved.payloads.get(saved.activeId);
+    if (payload) payload.sql = sql;
+    editorRef.current?.setValue(sql);
+  }
+
   function closeTab(e: React.MouseEvent, id: number) {
     e.stopPropagation();
     if (tabMetas.length === 1) return;
@@ -315,6 +328,14 @@ export default function QueryEditor() {
       setResult(res);
       const payload = saved.payloads.get(activeIdRef.current);
       if (payload) { payload.result = res; payload.error = null; }
+      if (historyStorageKey) {
+        setHistory(addToHistory(historyStorageKey, {
+          sql,
+          durationMs: res.duration,
+          rows: res.rowsAffected ?? res.rowCount,
+          error: null,
+        }));
+      }
       // A script that only printed messages opens on them
       showView(res.columns.length === 0 && (res.notices?.length ?? 0) > 0 ? "messages" : "results");
       if (DDL_PATTERN.test(sql)) loadCompletionSchema();
@@ -324,11 +345,14 @@ export default function QueryEditor() {
       setError(msg);
       const payload = saved.payloads.get(activeIdRef.current);
       if (payload) { payload.result = null; payload.error = msg; }
+      if (historyStorageKey) {
+        setHistory(addToHistory(historyStorageKey, { sql, durationMs: null, rows: null, error: errorSummary(msg) }));
+      }
       showView("results");
     } finally {
       setRunning(false);
     }
-  }, [loadCompletionSchema, api, saved, runTransaction, showView]);
+  }, [loadCompletionSchema, api, saved, runTransaction, showView, historyStorageKey]);
 
   const explain = useCallback(async (analyze: boolean) => {
     setExplainMenuOpen(false);
@@ -381,222 +405,251 @@ export default function QueryEditor() {
   }
 
   return (
-    <div className="h-full flex flex-col">
-      <ConfirmDialog
-        open={pendingDangers !== null}
-        onClose={cancelDangerousQuery}
-        onConfirm={confirmDangerousQuery}
-        icon={<AlertTriangle />}
-        tone="destructive"
-        title="Query blocked by Safe Mode"
-        description={
-          pendingDangers?.length === 1
-            ? "A potentially destructive operation was detected."
-            : `${pendingDangers?.length ?? 0} potentially destructive operations were detected.`
-        }
-        cancelLabel="Cancel"
-        confirmLabel="Run anyway"
-      >
-        <div className="rounded-xl border border-border bg-muted divide-y divide-border">
-          {(pendingDangers ?? []).map((d, i) => (
-            <div key={i} className="px-3 py-2.5">
-              <span className="font-mono text-xs font-medium text-destructive-foreground block">{d.rule}</span>
-              <span className="text-xs text-muted-foreground block mt-0.5">{d.detail}</span>
-            </div>
-          ))}
-        </div>
-      </ConfirmDialog>
-
-      {/* Editor panel */}
-      <div className="flex flex-col flex-1 min-h-0 border-b border-border">
-        {/* Query tabs as compact pills: a lighter level than the connection tabs above */}
-        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2 select-none">
-          <div role="tablist" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-            {tabMetas.map((tab) => {
-              const active = activeId === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => switchTab(tab.id)}
-                  // Transition only while hovered, so switching tabs swaps styles instantly
-                  className={`group flex h-7 shrink-0 items-center gap-1 rounded-md pl-2.5 text-[13px] whitespace-nowrap cursor-pointer ${
-                    tabMetas.length > 1 ? "pr-1" : "pr-2.5"
-                  } ${
-                    active
-                      ? "bg-accent font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground hover:transition-colors"
-                  }`}
-                >
-                  {tab.label}
-                  {tabMetas.length > 1 && (
-                    <span
-                      onClick={(e) => closeTab(e, tab.id)}
-                      className={`flex size-4 items-center justify-center rounded transition-colors cursor-pointer hover:bg-foreground/10 ${
-                        active
-                          ? "text-muted-foreground hover:text-foreground"
-                          : "text-transparent group-hover:text-muted-foreground hover:text-foreground!"
-                      }`}
-                    >
-                      <X size={10} />
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-            <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={addTab} aria-label="New query tab">
-              <Plus />
-            </Button>
+    <div className="h-full flex">
+      <div className="h-full flex flex-col flex-1 min-w-0">
+        <ConfirmDialog
+          open={pendingDangers !== null}
+          onClose={cancelDangerousQuery}
+          onConfirm={confirmDangerousQuery}
+          icon={<AlertTriangle />}
+          tone="destructive"
+          title="Query blocked by Safe Mode"
+          description={
+            pendingDangers?.length === 1
+              ? "A potentially destructive operation was detected."
+              : `${pendingDangers?.length ?? 0} potentially destructive operations were detected.`
+          }
+          cancelLabel="Cancel"
+          confirmLabel="Run anyway"
+        >
+          <div className="rounded-xl border border-border bg-muted divide-y divide-border">
+            {(pendingDangers ?? []).map((d, i) => (
+              <div key={i} className="px-3 py-2.5">
+                <span className="font-mono text-xs font-medium text-destructive-foreground block">{d.rule}</span>
+                <span className="text-xs text-muted-foreground block mt-0.5">{d.detail}</span>
+              </div>
+            ))}
           </div>
-        </div>
+        </ConfirmDialog>
 
-        {/* SQL editor */}
-        <div className="flex-1 min-h-0">
-          <SqlEditor
-            onMount={(handle) => { editorRef.current = handle; }}
-            initialValue={saved.payloads.get(activeId)?.sql ?? ""}
-            schema={completionSchema}
-            onRun={runQuery}
-          />
-        </div>
-
-        {/* Toolbar */}
-        <div className="flex items-center gap-3 px-3 py-2 bg-muted border-t border-border select-none">
-          <Button variant="primary" size="sm" className="px-4" onClick={runQuery} disabled={running}>
-            <span className={`transition-opacity duration-200 ${running ? "opacity-0" : "opacity-100"}`}>
-              Run
-            </span>
-            <Loader className={`size-4 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
-          </Button>
-          {running && (
-            <Button variant="outline" size="sm" onClick={() => api.cancelQuery().catch(() => {})}>
-              <Square className="size-3 fill-current" />
-              Cancel
-            </Button>
-          )}
-          <Button
-            ref={explainButtonRef}
-            variant="ghost-muted"
-            size="sm"
-            onClick={() => setExplainMenuOpen((open) => !open)}
-            disabled={running}
-            aria-expanded={explainMenuOpen}
-          >
-            <Workflow />
-            Explain
-            <ChevronDown className="size-3" />
-          </Button>
-          <Popover open={explainMenuOpen} onClose={() => setExplainMenuOpen(false)} anchorRef={explainButtonRef} className="w-64 p-1">
-            <button
-              type="button"
-              onClick={() => explain(false)}
-              className="w-full rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-accent"
-            >
-              <div className="text-[13px] font-medium">Explain</div>
-              <div className="text-xs text-muted-foreground">The planner's estimate, nothing runs</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => explain(true)}
-              className="w-full rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-accent"
-            >
-              <div className="text-[13px] font-medium">Explain analyze</div>
-              <div className="text-xs text-muted-foreground">Runs the query for real times, then rolls it back</div>
-            </button>
-          </Popover>
-          {inTransaction ? (
-            <div className="flex items-center gap-1.5">
-              <Badge variant="warning">
-                <GitCommitVertical />
-                Transaction open
-              </Badge>
-              <Button variant="success" size="xs" onClick={() => runTransaction("commit")} disabled={txBusy || running}>
-                Commit
-              </Button>
-              <Button variant="outline" size="xs" onClick={() => runTransaction("rollback")} disabled={txBusy || running}>
-                Rollback
+        {/* Editor panel */}
+        <div className="flex flex-col flex-1 min-h-0 border-b border-border">
+          {/* Query tabs as compact pills: a lighter level than the connection tabs above */}
+          <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2 select-none">
+            <div role="tablist" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+              {tabMetas.map((tab) => {
+                const active = activeId === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => switchTab(tab.id)}
+                    // Transition only while hovered, so switching tabs swaps styles instantly
+                    className={`group flex h-7 shrink-0 items-center gap-1 rounded-md pl-2.5 text-[13px] whitespace-nowrap cursor-pointer ${
+                      tabMetas.length > 1 ? "pr-1" : "pr-2.5"
+                    } ${
+                      active
+                        ? "bg-accent font-medium text-foreground"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground hover:transition-colors"
+                    }`}
+                  >
+                    {tab.label}
+                    {tabMetas.length > 1 && (
+                      <span
+                        onClick={(e) => closeTab(e, tab.id)}
+                        className={`flex size-4 items-center justify-center rounded transition-colors cursor-pointer hover:bg-foreground/10 ${
+                          active
+                            ? "text-muted-foreground hover:text-foreground"
+                            : "text-transparent group-hover:text-muted-foreground hover:text-foreground!"
+                        }`}
+                      >
+                        <X size={10} />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+              <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={addTab} aria-label="New query tab">
+                <Plus />
               </Button>
             </div>
-          ) : (
-            <Button variant="ghost-muted" size="sm" onClick={() => runTransaction("begin")} disabled={txBusy || running}>
-              <GitCommitVertical />
-              Begin
-            </Button>
-          )}
-          {result && (
-            <span className="text-sm text-muted-foreground">
-              {(result.statementCount ?? 1) > 1 && `${result.statementCount} statements · `}
-              {result.rowsAffected != null
-                ? `${result.rowsAffected} rows affected in ${result.duration}ms`
-                : `${result.rowCount} rows in ${result.duration}ms`}
-            </span>
-          )}
-          <div className="flex items-center gap-1 ml-auto">
-            {result && result.columns.length > 0 && (
-              <ExportMenu
-                columns={result.columns}
-                rows={result.rows}
-                defaultName={tabMetas.find((t) => t.id === activeId)?.label.replace(/\s+/g, "_").toLowerCase() ?? "query"}
-                side="up"
-              />
-            )}
             <Button
-              variant={safeMode ? "ghost" : "ghost-muted"}
+              variant="ghost-muted"
               size="sm"
-              className={safeMode ? "text-success-foreground" : undefined}
-              onClick={() => setSafeMode((v) => !v)}
-              aria-pressed={safeMode}
+              className="shrink-0"
+              data-active={historyOpen}
+              aria-pressed={historyOpen}
+              onClick={() => {
+              // Other tabs on the same database may have added runs since this one loaded
+              if (!historyOpen && historyStorageKey) setHistory(loadHistory(historyStorageKey));
+              setHistoryOpen((open) => !open);
+            }}
             >
-              {safeMode ? <ShieldCheck /> : <ShieldOff />}
-              {safeMode ? "Safe" : "Unsafe"}
-            </Button>
-            <Button variant="ghost-muted" size="sm" onClick={importQuery}>
-              <Upload />
-              Import
-            </Button>
-            <Button variant="ghost-muted" size="sm" onClick={exportQuery}>
-              <Download />
-              Export SQL
+              <History />
+              History
             </Button>
           </div>
-        </div>
-      </div>
 
-      {/* Results panel: tabs appear once there are messages or a plan to show */}
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        {(plan || (result?.notices?.length ?? 0) > 0) && (
-          <div className="flex shrink-0 items-center border-b border-border px-2 py-1.5">
-            <SegmentedTabs
-              value={view}
-              onChange={showView}
-              options={[
-                { value: "results", label: "Results" },
-                {
-                  value: "messages",
-                  label: (
-                    <>
-                      Messages <span className="text-xs tabular-nums text-muted-foreground">{result?.notices?.length ?? 0}</span>
-                    </>
-                  ),
-                },
-                ...(plan ? [{ value: "plan" as const, label: "Plan" }] : []),
-              ]}
+          {/* SQL editor */}
+          <div className="flex-1 min-h-0">
+            <SqlEditor
+              onMount={(handle) => { editorRef.current = handle; }}
+              initialValue={saved.payloads.get(activeId)?.sql ?? ""}
+              schema={completionSchema}
+              onRun={runQuery}
             />
           </div>
-        )}
-        <div className="flex-1 min-h-0 overflow-hidden">
-          {view === "plan" && plan && !error ? (
-            <PlanView explain={plan} />
-          ) : view === "messages" && !error ? (
-            <div className="h-full overflow-auto">
-              <NoticeList notices={result?.notices ?? []} />
+
+          {/* Toolbar */}
+          <div className="flex items-center gap-3 px-3 py-2 bg-muted border-t border-border select-none">
+            <Button variant="primary" size="sm" className="px-4" onClick={runQuery} disabled={running}>
+              <span className={`transition-opacity duration-200 ${running ? "opacity-0" : "opacity-100"}`}>
+                Run
+              </span>
+              <Loader className={`size-4 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
+            </Button>
+            {running && (
+              <Button variant="outline" size="sm" onClick={() => api.cancelQuery().catch(() => {})}>
+                <Square className="size-3 fill-current" />
+                Cancel
+              </Button>
+            )}
+            <Button
+              ref={explainButtonRef}
+              variant="ghost-muted"
+              size="sm"
+              onClick={() => setExplainMenuOpen((open) => !open)}
+              disabled={running}
+              aria-expanded={explainMenuOpen}
+            >
+              <Workflow />
+              Explain
+              <ChevronDown className="size-3" />
+            </Button>
+            <Popover open={explainMenuOpen} onClose={() => setExplainMenuOpen(false)} anchorRef={explainButtonRef} className="w-64 p-1">
+              <button
+                type="button"
+                onClick={() => explain(false)}
+                className="w-full rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-accent"
+              >
+                <div className="text-[13px] font-medium">Explain</div>
+                <div className="text-xs text-muted-foreground">The planner's estimate, nothing runs</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => explain(true)}
+                className="w-full rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-accent"
+              >
+                <div className="text-[13px] font-medium">Explain analyze</div>
+                <div className="text-xs text-muted-foreground">Runs the query for real times, then rolls it back</div>
+              </button>
+            </Popover>
+            {inTransaction ? (
+              <div className="flex items-center gap-1.5">
+                <Badge variant="warning">
+                  <GitCommitVertical />
+                  Transaction open
+                </Badge>
+                <Button variant="success" size="xs" onClick={() => runTransaction("commit")} disabled={txBusy || running}>
+                  Commit
+                </Button>
+                <Button variant="outline" size="xs" onClick={() => runTransaction("rollback")} disabled={txBusy || running}>
+                  Rollback
+                </Button>
+              </div>
+            ) : (
+              <Button variant="ghost-muted" size="sm" onClick={() => runTransaction("begin")} disabled={txBusy || running}>
+                <GitCommitVertical />
+                Begin
+              </Button>
+            )}
+            {result && (
+              <span className="text-sm text-muted-foreground">
+                {(result.statementCount ?? 1) > 1 && `${result.statementCount} statements · `}
+                {result.rowsAffected != null
+                  ? `${result.rowsAffected} rows affected in ${result.duration}ms`
+                  : `${result.rowCount} rows in ${result.duration}ms`}
+              </span>
+            )}
+            <div className="flex items-center gap-1 ml-auto">
+              {result && result.columns.length > 0 && (
+                <ExportMenu
+                  columns={result.columns}
+                  rows={result.rows}
+                  defaultName={tabMetas.find((t) => t.id === activeId)?.label.replace(/\s+/g, "_").toLowerCase() ?? "query"}
+                  side="up"
+                />
+              )}
+              <Button
+                variant={safeMode ? "ghost" : "ghost-muted"}
+                size="sm"
+                className={safeMode ? "text-success-foreground" : undefined}
+                onClick={() => setSafeMode((v) => !v)}
+                aria-pressed={safeMode}
+              >
+                {safeMode ? <ShieldCheck /> : <ShieldOff />}
+                {safeMode ? "Safe" : "Unsafe"}
+              </Button>
+              <Button variant="ghost-muted" size="sm" onClick={importQuery}>
+                <Upload />
+                Import
+              </Button>
+              <Button variant="ghost-muted" size="sm" onClick={exportQuery}>
+                <Download />
+                Export SQL
+              </Button>
             </div>
-          ) : (
-            <QueryResults result={result} error={error} running={running} />
+          </div>
+        </div>
+
+        {/* Results panel: tabs appear once there are messages or a plan to show */}
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          {(plan || (result?.notices?.length ?? 0) > 0) && (
+            <div className="flex shrink-0 items-center border-b border-border px-2 py-1.5">
+              <SegmentedTabs
+                value={view}
+                onChange={showView}
+                options={[
+                  { value: "results", label: "Results" },
+                  {
+                    value: "messages",
+                    label: (
+                      <>
+                        Messages <span className="text-xs tabular-nums text-muted-foreground">{result?.notices?.length ?? 0}</span>
+                      </>
+                    ),
+                  },
+                  ...(plan ? [{ value: "plan" as const, label: "Plan" }] : []),
+                ]}
+              />
+            </div>
           )}
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {view === "plan" && plan && !error ? (
+              <PlanView explain={plan} />
+            ) : view === "messages" && !error ? (
+              <div className="h-full overflow-auto">
+                <NoticeList notices={result?.notices ?? []} />
+              </div>
+            ) : (
+              <QueryResults result={result} error={error} running={running} />
+            )}
+          </div>
         </div>
       </div>
+      {historyOpen && (
+        <HistoryPanel
+          entries={history}
+          onOpen={openFromHistory}
+          onRemove={(id) => historyStorageKey && setHistory(removeFromHistory(historyStorageKey, id))}
+          onClear={() => {
+            if (historyStorageKey) clearHistory(historyStorageKey);
+            setHistory([]);
+          }}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
     </div>
   );
 }
