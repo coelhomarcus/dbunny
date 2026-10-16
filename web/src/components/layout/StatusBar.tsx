@@ -2,8 +2,7 @@ import { Eye, EyeOff, Lock, LogOut } from "lucide-react";
 import Tooltip from "../Tooltip";
 import { showUpdate, useUpdate } from "../../lib/updater";
 import type { ConnectionInfo } from "@/types";
-
-const mask = (value: string) => value.replace(/./g, "•");
+import { mask } from "../../lib/connectionSummary";
 
 /** Brings back the update notice after "Later": an update is waiting or installed. */
 function UpdateIndicator() {
