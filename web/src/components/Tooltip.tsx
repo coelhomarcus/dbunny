@@ -15,7 +15,8 @@ export default function Tooltip({ label, children, side = "right", className }: 
 
   function show() {
     const el = ref.current;
-    if (!el) return;
+    // A menu opened by the wrapped button covers the same spot, so it wins
+    if (!el || el.querySelector("[aria-expanded='true']")) return;
     const r = el.getBoundingClientRect();
     const gap = 8;
 
@@ -30,7 +31,14 @@ export default function Tooltip({ label, children, side = "right", className }: 
   }
 
   return (
-    <div ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)} className={cn("inline-flex", className)}>
+    <div
+      ref={ref}
+      onMouseEnter={show}
+      onMouseLeave={() => setPos(null)}
+      // Clicking acts on the button (often opening a menu): the hint has done its job
+      onMouseDown={() => setPos(null)}
+      className={cn("inline-flex", className)}
+    >
       {children}
       {pos &&
         createPortal(

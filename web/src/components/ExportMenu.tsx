@@ -67,7 +67,7 @@ export default function ExportMenu({
   return (
     <div ref={ref} className="relative">
       <Tooltip label="Export" side={side === "up" ? "top" : "bottom"}>
-        <Button variant="ghost-muted" size={compact ? "icon-xs" : "icon-sm"} data-active={open} onClick={() => setOpen((v) => !v)} aria-label="Export data">
+        <Button variant="ghost-muted" size={compact ? "icon-xs" : "icon-sm"} data-active={open} aria-expanded={open} onClick={() => setOpen((v) => !v)} aria-label="Export data">
           {loading ? <Loader className="animate-spin" /> : <Download />}
         </Button>
       </Tooltip>
