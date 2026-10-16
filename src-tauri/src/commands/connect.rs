@@ -4,8 +4,7 @@ use tauri::State;
 use tokio_postgres::config::SslMode;
 use uuid::Uuid;
 
-use super::state::AppState;
-use super::state::Session;
+use super::state::{AppState, Link, Notice, Notices, Session};
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,7 +43,7 @@ fn tls_plan(sslmode: Option<&str>) -> Result<TlsPlan, String> {
 }
 
 /// Builds the driver config and TLS connector from a postgres:// URL.
-fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Config, MakeTlsConnector), String> {
+pub(crate) fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Config, MakeTlsConnector), String> {
     let sslmode = url
         .query_pairs()
         .find(|(key, _)| key == "sslmode")
@@ -79,6 +78,44 @@ fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Config, MakeTlsC
     Ok((config, MakeTlsConnector::new(connector)))
 }
 
+/// Notices kept per session; the oldest are dropped past this many.
+const MAX_NOTICES: usize = 500;
+
+/// Opens a connection and drives it in the background, keeping the server's notices
+/// (`RAISE NOTICE`, warnings) instead of dropping them.
+pub(crate) async fn open_connection(link: &Link, notices: &Notices) -> Result<tokio_postgres::Client, tokio_postgres::Error> {
+    use futures_util::StreamExt;
+    use tokio_postgres::AsyncMessage;
+
+    let (client, mut connection) = link.config.connect(link.tls.clone()).await?;
+    let notices = std::sync::Arc::clone(notices);
+    tokio::spawn(async move {
+        let mut messages = futures_util::stream::poll_fn(move |cx| connection.poll_message(cx));
+        while let Some(message) = messages.next().await {
+            match message {
+                Ok(AsyncMessage::Notice(notice)) => {
+                    let mut list = notices.lock().unwrap();
+                    if list.len() >= MAX_NOTICES {
+                        list.remove(0);
+                    }
+                    list.push(Notice {
+                        severity: notice.severity().to_string(),
+                        message: notice.message().to_string(),
+                        detail: notice.detail().map(str::to_string),
+                        hint: notice.hint().map(str::to_string),
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("Connection error: {}", e);
+                    break;
+                }
+            }
+        }
+    });
+    Ok(client)
+}
+
 #[tauri::command]
 pub async fn connect(
     state: State<'_, AppState>,
@@ -104,17 +141,11 @@ pub async fn connect(
     let port = url.port().unwrap_or(5432);
 
     let (config, tls) = connection_config(&url)?;
-    let (client, connection) = config
-        .connect(tls)
+    let link = Link { config, tls };
+    let notices: Notices = Default::default();
+    let client = open_connection(&link, &notices)
         .await
         .map_err(|e| format!("Failed to connect: {}", e))?;
-
-    // Spawn the connection handler
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("Connection error: {}", e);
-        }
-    });
 
     // Test connection + pre-warm catalog cache
     client
@@ -137,7 +168,12 @@ pub async fn connect(
 
     let session_id = Uuid::new_v4().to_string();
 
-    let session = Session { client: std::sync::Arc::new(client) };
+    let session = Session {
+        client: std::sync::Arc::new(client),
+        link,
+        notices,
+        transaction: None,
+    };
 
     let mut sessions = state.sessions.lock().await;
     if sessions.len() >= 50 {

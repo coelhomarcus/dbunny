@@ -817,6 +817,7 @@ dependencies = [
  "bytes",
  "chrono",
  "deadpool-postgres",
+ "futures-util",
  "hostname",
  "native-tls",
  "pbkdf2",

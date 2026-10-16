@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::pgtext::{is_native, text_to_json};
 use super::sqlsplit::split_statements;
-use super::state::AppState;
+use super::state::{AppState, Notice};
 use super::tableedit::build_insert;
 use super::tablefilter::{build_where, quote_ident, TableFilter, TextParam};
 
@@ -30,6 +30,10 @@ pub struct QueryResult {
     pub duration: u64,
     /// How many statements the script had (1 for a plain query).
     pub statement_count: usize,
+    /// Notices the server sent while the script ran (`RAISE NOTICE`, warnings).
+    pub notices: Vec<Notice>,
+    /// The script ran inside the editor's open transaction.
+    pub in_transaction: bool,
 }
 
 #[derive(Serialize)]
@@ -295,10 +299,10 @@ fn row_to_json_values(row: &Row) -> Vec<JsonValue> {
 /// Error as JSON for the UI. `offset` shifts the position to be relative to the whole
 /// script, and `statement` is the (1-based index, total) of the failing statement
 /// when the script had more than one.
-fn pg_error_in_script(e: tokio_postgres::Error, offset: usize, statement: Option<(usize, usize)>) -> String {
+pub(crate) fn pg_error_in_script(e: tokio_postgres::Error, offset: i64, statement: Option<(usize, usize)>) -> String {
     if let Some(db) = e.as_db_error() {
         let position = match db.position() {
-            Some(tokio_postgres::error::ErrorPosition::Original(p)) => Some(*p as usize + offset),
+            Some(tokio_postgres::error::ErrorPosition::Original(p)) => Some((*p as i64 + offset).max(1)),
             _ => None,
         };
         serde_json::json!({
@@ -428,7 +432,10 @@ pub async fn execute_query(
         return Err("SQL query is required".into());
     }
 
-    let client = state.client(&session_id).await?;
+    let (client, in_transaction) = state.editor_client(&session_id).await?;
+    let notices = state.notices(&session_id).await?;
+    // Only this run's notices are returned
+    notices.lock().unwrap().clear();
     let total = statements.len();
 
     let start = std::time::Instant::now();
@@ -438,7 +445,7 @@ pub async fn execute_query(
     let mut affected: u64 = 0;
     for (index, statement) in statements.iter().enumerate() {
         let output = run_statement(&client, &statement.text).await.map_err(|e| {
-            pg_error_in_script(e, statement.offset, (total > 1).then_some((index + 1, total)))
+            pg_error_in_script(e, statement.offset as i64, (total > 1).then_some((index + 1, total)))
         })?;
         match output.rows_affected {
             Some(count) => affected += count,
@@ -446,6 +453,7 @@ pub async fn execute_query(
         }
     }
     let duration = start.elapsed().as_millis() as u64;
+    let notices = std::mem::take(&mut *notices.lock().unwrap());
 
     Ok(match shown {
         Some(output) => QueryResult {
@@ -455,6 +463,8 @@ pub async fn execute_query(
             rows_affected: None,
             duration,
             statement_count: total,
+            notices,
+            in_transaction,
         },
         None => QueryResult {
             columns: vec![],
@@ -463,6 +473,8 @@ pub async fn execute_query(
             rows_affected: Some(affected),
             duration,
             statement_count: total,
+            notices,
+            in_transaction,
         },
     })
 }
@@ -920,7 +932,7 @@ mod server_tests {
             .await
             .err()
             .expect("the second statement should fail");
-        let json: serde_json::Value = serde_json::from_str(&pg_error_in_script(err, statements[1].offset, Some((2, 2)))).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&pg_error_in_script(err, statements[1].offset as i64, Some((2, 2)))).unwrap();
         let position = json["position"].as_u64().unwrap() as usize;
         // The position points at "nope", counted in characters from the start of the script
         let at_position: String = script.chars().skip(position - 1).take(4).collect();
