@@ -1,8 +1,45 @@
-//! Throwaway SQLite files for the tests, deleted when the test ends.
+//! Throwaway SQLite files for the tests, deleted when the test ends, and a way to test
+//! statements that only stop when told to.
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
+use tokio::task::JoinHandle;
 use uuid::Uuid;
+
+/// Runs the async test `body` like `#[tokio::test]` does, except that a failing test
+/// doesn't wait for a statement still running on a blocking thread: the runtime is shut
+/// down without waiting, so the test fails instead of hanging.
+pub fn without_hanging(body: impl Future<Output = ()>) {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runtime.block_on(body)));
+    runtime.shutdown_background();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// Calls `stop` each `every` until `task` ends, and gives what it returned with how many
+/// times `stop` was called: a stop that lands before the statement starts isn't the last
+/// one. Fails the test once `limit` has passed.
+pub async fn stop_until_done<T, F: Future<Output = ()>>(
+    task: &mut JoinHandle<T>,
+    every: Duration,
+    limit: Duration,
+    mut stop: impl FnMut() -> F,
+) -> (T, usize) {
+    let deadline = Instant::now() + limit;
+    let mut stops = 0;
+    loop {
+        stop().await;
+        stops += 1;
+        match tokio::time::timeout(every, &mut *task).await {
+            Ok(joined) => return (joined.expect("the task panicked"), stops),
+            Err(_) => assert!(Instant::now() < deadline, "still running {limit:?} after being told to stop"),
+        }
+    }
+}
 
 /// A file named `dbunny-test-{uuid}.sqlite` in the temporary directory. Dropping it
 /// deletes the file and the journal files SQLite may have left beside it.

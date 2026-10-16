@@ -16,6 +16,9 @@ pub(crate) struct SqliteConn {
     slot: Mutex<Option<Arc<Mutex<Connection>>>>,
     /// Stops the statement running on the connection, from any thread.
     interrupt: InterruptHandle,
+    /// Set by a cancel, for a script to stop before its next statement: SQLite forgets an
+    /// interrupt that comes when no statement is running. Cleared when a script starts.
+    cancelled: Arc<AtomicBool>,
     /// The connection can't write: opened read-only, or the file only allows reading.
     read_only: bool,
     /// Whether the connection had a transaction open when it was last let go.
@@ -77,7 +80,8 @@ impl SqliteConn {
         let read_only = opts.read_only || conn.is_readonly(MAIN_DB).map_err(fail)?;
         let interrupt = conn.get_interrupt_handle();
         let state = TransactionState::default();
-        Ok(SqliteConn { slot: Mutex::new(Some(Arc::new(Mutex::new(conn)))), interrupt, read_only, state })
+        let cancelled = Arc::default();
+        Ok(SqliteConn { slot: Mutex::new(Some(Arc::new(Mutex::new(conn)))), interrupt, cancelled, read_only, state })
     }
 
     /// Runs `f` with the connection, on a blocking thread, once the connection is free.
@@ -100,6 +104,20 @@ impl SqliteConn {
     /// Stops what the connection is running; it fails with "canceling statement due to user request".
     pub fn interrupt(&self) {
         self.interrupt.interrupt();
+    }
+
+    /// Stops what the connection is running and the rest of the script it belongs to.
+    pub fn cancel(&self) {
+        // First, so that a script the interrupt misses sees it before its next statement
+        self.cancelled.store(true, Ordering::SeqCst);
+        self.interrupt();
+    }
+
+    /// For a script about to start: says whether it was cancelled since. A cancel that
+    /// came earlier, with nothing running, is forgotten.
+    pub fn start_script(&self) -> Arc<AtomicBool> {
+        self.cancelled.store(false, Ordering::SeqCst);
+        self.cancelled.clone()
     }
 
     /// Whether a transaction is open, as of the last task on the connection. Never waits.

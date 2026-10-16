@@ -1,6 +1,7 @@
 //! The SQL console on SQLite: running the editor's scripts, cancelling them and query plans.
 //! Everything runs on the editor's connection, which also keeps its transaction.
 
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -84,8 +85,8 @@ fn stored_type(value: ValueRef<'_>) -> Option<&'static str> {
 /// An error of the editor's script as JSON for the UI, in the shape PostgreSQL's take.
 /// `statement` is the (1-based index, total) of the failing statement when the script had
 /// more than one. SQLite gives no position. A lock that stops the editor is never its own
-/// transaction's, so it's another program's.
-fn script_error(e: &rusqlite::Error, statement: Option<(usize, usize)>) -> String {
+/// transaction's, so it's another program's. `detail` adds to SQLite's message.
+fn script_error(e: &rusqlite::Error, statement: Option<(usize, usize)>, detail: Option<&str>) -> String {
     let (failure, message) = match e {
         rusqlite::Error::SqliteFailure(failure, _) => (failure, map_statement_error(e, false)),
         // A syntax error: SQLite's message, without the statement and offset rusqlite adds
@@ -95,7 +96,7 @@ fn script_error(e: &rusqlite::Error, statement: Option<(usize, usize)>) -> Strin
     serde_json::json!({
         "message": message,
         "severity": "ERROR",
-        "detail": null,
+        "detail": detail,
         "hint": null,
         "position": null,
         "code": code_name(failure.extended_code),
@@ -103,6 +104,15 @@ fn script_error(e: &rusqlite::Error, statement: Option<(usize, usize)>) -> Strin
         "statementCount": statement.map(|(_, total)| total),
     })
     .to_string()
+}
+
+/// The error SQLite gives a statement it stopped.
+fn interrupted() -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_INTERRUPT), None)
+}
+
+fn is_interrupt(e: &rusqlite::Error) -> bool {
+    matches!(e, rusqlite::Error::SqliteFailure(failure, _) if failure.code == rusqlite::ErrorCode::OperationInterrupted)
 }
 
 #[async_trait]
@@ -116,6 +126,7 @@ impl Console for SqliteDriver {
             return Err("SQL query is required".into());
         }
         let state = self.editor().transaction_state();
+        let cancelled = self.editor().start_script();
         self.editor()
             .run(move |c| {
                 let total = statements.len();
@@ -123,10 +134,20 @@ impl Console for SqliteDriver {
                 let mut shown: Option<StatementOutput> = None;
                 let mut affected: u64 = 0;
                 for (index, statement) in statements.iter().enumerate() {
+                    let position = (total > 1).then_some((index + 1, total));
+                    // A cancel that came between two statements, which SQLite doesn't keep
+                    if cancelled.load(Ordering::SeqCst) {
+                        return Err(script_error(&interrupted(), position, None));
+                    }
+                    let in_transaction = !c.is_autocommit();
                     let output = run_statement(c, &statement.text);
                     // A table save that finds the file busy meanwhile names the right holder
                     state.note(c);
-                    let output = output.map_err(|e| script_error(&e, (total > 1).then_some((index + 1, total))))?;
+                    let output = output.map_err(|e| {
+                        // SQLite rolls the whole transaction back when it stops a change
+                        let rolled_back = in_transaction && c.is_autocommit() && is_interrupt(&e);
+                        script_error(&e, position, rolled_back.then_some("The transaction was rolled back."))
+                    })?;
                     match output.rows_affected {
                         Some(count) => affected += count,
                         None => shown = Some(output),
@@ -161,10 +182,11 @@ impl Console for SqliteDriver {
             .await
     }
 
-    /// Stops whatever the editor's connection is running; it fails with
-    /// "canceling statement due to user request". With nothing running it does nothing.
+    /// Stops whatever the editor's connection is running, and the rest of its script; it
+    /// fails with "canceling statement due to user request". With nothing running it does
+    /// nothing: the next script starts afresh.
     async fn cancel(&self) -> Result<(), String> {
-        self.editor().interrupt();
+        self.editor().cancel();
         Ok(())
     }
 
@@ -198,7 +220,7 @@ impl Console for SqliteDriver {
                     })?;
                     rows.collect()
                 };
-                read().map_err(|e| script_error(&e, None))
+                read().map_err(|e| script_error(&e, None, None))
             })
             .await?;
         Ok(ExplainResult { plan: JsonValue::Array(plan), analyzed: false, format: ExplainFormat::SqliteQueryPlan })
@@ -212,7 +234,7 @@ mod tests {
 
     use serde_json::{json, Value as JsonValue};
 
-    use super::super::tests_support::TempDb;
+    use super::super::tests_support::{stop_until_done, without_hanging, TempDb};
     use super::super::OpenOptions;
     use super::*;
     use crate::db::{Driver, ExplainFormat};
@@ -328,6 +350,101 @@ mod tests {
         // Cancelling with nothing running changes nothing, and the next query runs
         d.console().unwrap().cancel().await.unwrap();
         assert_eq!(d.console().unwrap().execute("SELECT 2").await.unwrap().rows, vec![vec![json!(2)]]);
+    }
+
+    /// Runs `sql` on the editor in a task of its own.
+    fn start(d: &Arc<SqliteDriver>, sql: String) -> tokio::task::JoinHandle<Result<QueryResult, String>> {
+        let d = d.clone();
+        tokio::spawn(async move { d.console().unwrap().execute(&sql).await })
+    }
+
+    /// Cancels like the editor's button does, each `every` until `running` ends; gives its
+    /// error and how many cancels it took.
+    async fn cancel_until_stopped(
+        d: &Arc<SqliteDriver>,
+        running: &mut tokio::task::JoinHandle<Result<QueryResult, String>>,
+        every: Duration,
+    ) -> (JsonValue, usize) {
+        let cancel = || {
+            let d = d.clone();
+            async move { d.console().unwrap().cancel().await.unwrap() }
+        };
+        let (outcome, cancels) = stop_until_done(running, every, Duration::from_secs(5), cancel).await;
+        (error(&outcome.err().expect("the script was stopped")), cancels)
+    }
+
+    const SOON: Duration = Duration::from_millis(20);
+
+    #[test]
+    fn cancelling_stops_a_script_between_statements() {
+        without_hanging(async {
+            let f = TempDb::with("CREATE TABLE t (x)");
+            let d = open(&f).await;
+            // Each statement is short, so a cancel mostly lands after its last check for
+            // one, or between two statements, where SQLite forgets it
+            let total = 200_000;
+            let mut running = start(&d, "INSERT INTO t VALUES (1);\n".repeat(total));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let started = Instant::now();
+            let (e, cancels) = cancel_until_stopped(&d, &mut running, Duration::from_millis(250)).await;
+            assert_eq!(cancels, 1, "the first cancel stops the script");
+            assert!(started.elapsed() < Duration::from_secs(1), "{:?}", started.elapsed());
+
+            assert_eq!(e["message"], "canceling statement due to user request");
+            assert_eq!((e["code"].as_str(), e["statementCount"].as_u64()), (Some("SQLITE_INTERRUPT"), Some(total as u64)));
+            assert_eq!(e["detail"], JsonValue::Null);
+            let inserted = d.data().count_rows("main", "t").await.unwrap() as u64;
+            assert!(inserted < total as u64 / 2, "{inserted} of {total} rows were inserted");
+            assert_eq!(e["statement"].as_u64(), Some(inserted + 1), "the statements before the one named ran");
+        });
+    }
+
+    #[test]
+    fn a_cancel_with_nothing_running_does_not_stop_the_next_script() {
+        without_hanging(async {
+            let f = TempDb::with("CREATE TABLE t (x)");
+            let d = open(&f).await;
+            let console = d.console().unwrap();
+            console.cancel().await.unwrap();
+            let r = console.execute("INSERT INTO t VALUES (1); INSERT INTO t VALUES (2); SELECT count(*) FROM t").await.unwrap();
+            assert_eq!(r.rows, vec![vec![json!(2)]]);
+
+            // Nor does one that came after a script it stopped had ended
+            let mut running = start(&d, format!("SELECT 1; {ENDLESS}"));
+            cancel_until_stopped(&d, &mut running, SOON).await;
+            console.cancel().await.unwrap();
+            let r = console.execute("INSERT INTO t VALUES (3); SELECT count(*) FROM t").await.unwrap();
+            assert_eq!(r.rows, vec![vec![json!(3)]]);
+        });
+    }
+
+    #[test]
+    fn a_cancelled_write_says_it_rolled_the_transaction_back() {
+        without_hanging(async {
+            let f = TempDb::with("CREATE TABLE t (x); INSERT INTO t VALUES (1);");
+            let d = open(&f).await;
+            let console = d.console().unwrap();
+            assert!(console.execute("BEGIN; INSERT INTO t VALUES (2)").await.unwrap().in_transaction);
+
+            // A cancelled read leaves the transaction as it was
+            let mut running = start(&d, ENDLESS.to_string());
+            let (e, _) = cancel_until_stopped(&d, &mut running, SOON).await;
+            assert_eq!(e["message"], "canceling statement due to user request");
+            assert_eq!(e["detail"], JsonValue::Null);
+            assert!(d.editor().in_transaction());
+            assert!(d.transactions().unwrap().is_open().await.unwrap());
+
+            // A cancelled write takes the whole transaction with it, and says so
+            let mut running = start(&d, format!("UPDATE t SET x = ({ENDLESS})"));
+            let (e, _) = cancel_until_stopped(&d, &mut running, SOON).await;
+            assert_eq!(e["message"], "canceling statement due to user request");
+            assert_eq!(e["detail"], "The transaction was rolled back.");
+            assert_eq!((e["code"].as_str(), e["statement"].clone()), (Some("SQLITE_INTERRUPT"), JsonValue::Null));
+            assert!(!d.editor().in_transaction());
+            assert!(!d.transactions().unwrap().is_open().await.unwrap());
+            let r = console.execute("SELECT x FROM t").await.unwrap();
+            assert_eq!((r.rows, r.in_transaction), (vec![vec![json!(1)]], false), "the insert before it was undone too");
+        });
     }
 
     #[tokio::test]
