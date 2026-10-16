@@ -10,6 +10,8 @@ interface ExportMenuProps {
   defaultName: string;
   side?: "up" | "down";
   totalRows?: number;
+  /** The total is an estimate: shown with a ~ and counted exactly before exporting. */
+  totalRowsEstimated?: boolean;
   onFetchAll?: () => Promise<{ columns: QueryColumn[]; rows: unknown[][] }>;
 }
 
@@ -20,7 +22,7 @@ const formats: { value: ExportFormat; label: string }[] = [
 
 export default function ExportMenu({
   columns, rows, defaultName,
-  side = "down", totalRows, onFetchAll,
+  side = "down", totalRows, totalRowsEstimated, onFetchAll,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -88,7 +90,7 @@ export default function ExportMenu({
               <div className="-mx-1 my-1 border-t border-border" />
               <div className="px-2 pt-1.5 pb-1">
                 <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                  All rows ({totalRows.toLocaleString()})
+                  All rows ({totalRowsEstimated ? "~" : ""}{totalRows.toLocaleString()})
                 </span>
               </div>
               {formats.map((f) => (

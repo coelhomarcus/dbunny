@@ -6,6 +6,7 @@ import {
   RefreshCw,
   Columns3,
   ListFilter,
+  Loader,
 } from "lucide-react";
 import ExportMenu from "./ExportMenu";
 import Button from "./ui/Button";
@@ -18,6 +19,9 @@ interface TableViewHeaderProps {
   schema: string;
   table: string;
   totalRows?: number;
+  totalRowsEstimated?: boolean;
+  counting: boolean;
+  onCountExactly: () => void;
   hasNoPk: boolean;
   selectedCount: number;
   deleting: boolean;
@@ -43,7 +47,7 @@ interface TableViewHeaderProps {
 }
 
 export default function TableViewHeader({
-  schema, table, totalRows, hasNoPk,
+  schema, table, totalRows, totalRowsEstimated, counting, onCountExactly, hasNoPk,
   selectedCount, deleting, onDelete,
   hasPendingChanges, dirtyRowCount, saveError, saving, onSave, onDiscard,
   refreshing, loading, spinKey, onRefresh,
@@ -55,11 +59,23 @@ export default function TableViewHeader({
     <PageHeader className="justify-between">
       <div className="flex min-w-0 items-center gap-3">
         <HeaderTitle label={`Table · ${schema}`}>{table}</HeaderTitle>
-        {totalRows !== undefined && (
-          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
-            {totalRows.toLocaleString()} rows
-          </span>
-        )}
+        {totalRows !== undefined &&
+          (totalRowsEstimated ? (
+            <button
+              type="button"
+              onClick={onCountExactly}
+              disabled={counting}
+              title="Estimated from the table statistics. Click for an exact count."
+              className="flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-default"
+            >
+              {counting ? <Loader size={11} className="animate-spin" /> : "~"}
+              {totalRows.toLocaleString()} rows
+            </button>
+          ) : (
+            <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
+              {totalRows.toLocaleString()} rows
+            </span>
+          ))}
         {hasNoPk && (
           <span className="text-sm text-warning-foreground/80">
             no primary key - editing disabled
@@ -132,6 +148,7 @@ export default function TableViewHeader({
             rows={rows}
             defaultName={`${schema}.${table}`}
             totalRows={totalRows}
+            totalRowsEstimated={totalRowsEstimated}
             onFetchAll={onFetchAllRows}
           />
         )}

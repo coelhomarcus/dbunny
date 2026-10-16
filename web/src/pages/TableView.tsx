@@ -97,7 +97,10 @@ export default function TableView() {
   }, [editing, pending, isActive]);
 
   const fetchAllRows = useCallback(async () => {
-    const total = data?.totalRows ?? 0;
+    // An estimated total could miss rows, so count exactly before exporting everything
+    const total = data?.totalRowsEstimated
+      ? await api.countTableRows(schema!, table!)
+      : (data?.totalRows ?? 0);
     const batchSize = 100;
     const pages = Math.ceil(total / batchSize);
     const sortColumn = tableData.sorting[0]?.id;
@@ -129,7 +132,7 @@ export default function TableView() {
     }
 
     return { columns, rows: allRows.slice(0, offset) };
-  }, [schema, table, data?.totalRows, tableData.sorting, tableData.filters, tableData.filterMode, api]);
+  }, [schema, table, data?.totalRows, data?.totalRowsEstimated, tableData.sorting, tableData.filters, tableData.filterMode, api]);
 
   const columns = useMemo<ColumnDef<unknown[], unknown>[]>(() => {
     if (!data?.columns) return [];
@@ -156,6 +159,9 @@ export default function TableView() {
         schema={schema!}
         table={table!}
         totalRows={data?.totalRows}
+        totalRowsEstimated={data?.totalRowsEstimated}
+        counting={tableData.counting}
+        onCountExactly={tableData.countExactly}
         hasNoPk={hasNoPk}
         selectedCount={selection.selectedRows.size}
         deleting={pending.deleting}
@@ -330,6 +336,8 @@ export default function TableView() {
           <Pagination
             page={tableData.page}
             totalPages={tableData.totalPages}
+            estimated={data.totalRowsEstimated}
+            hasNext={data.totalRowsEstimated ? data.rows.length === tableData.pageSize : undefined}
             onPageChange={guard(tableData.setPage)}
             pageSize={tableData.pageSize}
             pageSizeOptions={tableData.pageSizeOptions}

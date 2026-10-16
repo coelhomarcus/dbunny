@@ -37,6 +37,8 @@ pub struct TableDataResponse {
     pub columns: Vec<QueryColumn>,
     pub rows: Vec<Vec<JsonValue>>,
     pub total_rows: i64,
+    /// True when `total_rows` comes from the table statistics instead of an exact count.
+    pub total_rows_estimated: bool,
     pub page: i64,
     pub page_size: i64,
 }
@@ -472,6 +474,27 @@ fn db_message(e: &tokio_postgres::Error) -> String {
     }
 }
 
+/// Below this many rows an exact count is cheap, and the statistics are often stale.
+const ESTIMATE_THRESHOLD: i64 = 100_000;
+
+/// Row estimate from the table statistics (updated by VACUUM / ANALYZE), or None for
+/// views, tables never analyzed, and anything small enough to just count.
+async fn estimated_rows(
+    client: &tokio_postgres::Client,
+    relation: &str,
+) -> Result<Option<i64>, tokio_postgres::Error> {
+    let row = client
+        .query_opt(
+            "SELECT reltuples::bigint FROM pg_class \
+             WHERE oid = to_regclass($1) AND relkind IN ('r', 'p', 'm')",
+            &[&relation],
+        )
+        .await?;
+    Ok(row
+        .map(|r| r.get::<_, i64>(0))
+        .filter(|&estimate| estimate >= ESTIMATE_THRESHOLD))
+}
+
 async fn count_rows(
     client: &tokio_postgres::Client,
     relation: &str,
@@ -575,10 +598,21 @@ pub async fn get_table_data(
 
     let relation = format!("{}.{}", quote_ident(&schema), quote_ident(&table));
 
-    // Get total count (of the filtered rows)
-    let total_rows = count_rows(&client, &relation, &where_sql, &where_params)
-        .await
-        .map_err(|e| db_message(&e))?;
+    // Total rows: exact for small tables or when filtering, estimated for big unfiltered ones
+    let estimate = if where_sql.is_empty() {
+        estimated_rows(&client, &relation).await.map_err(|e| db_message(&e))?
+    } else {
+        None
+    };
+    let (total_rows, total_rows_estimated) = match estimate {
+        Some(estimate) => (estimate, true),
+        None => (
+            count_rows(&client, &relation, &where_sql, &where_params)
+                .await
+                .map_err(|e| db_message(&e))?,
+            false,
+        ),
+    };
 
     // Get paginated data
     let output = select_table_page(&client, &relation, &where_sql, &where_params, &order_clause, page_size, offset)
@@ -589,9 +623,25 @@ pub async fn get_table_data(
         columns: output.columns,
         rows: output.rows,
         total_rows,
+        total_rows_estimated,
         page,
         page_size,
     })
+}
+
+/// Exact number of rows of a table, for when the view only shows an estimate.
+#[tauri::command]
+pub async fn count_table_rows(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    table: String,
+) -> Result<i64, String> {
+    let client = state.client(&session_id).await?;
+    let relation = format!("{}.{}", quote_ident(&schema), quote_ident(&table));
+    count_rows(&client, &relation, "", &[])
+        .await
+        .map_err(|e| db_message(&e))
 }
 
 #[tauri::command]
@@ -954,6 +1004,32 @@ mod server_tests {
         assert_eq!(matching_ids(&client, &[evil], false).await.unwrap(), (vec![], 0));
         // The table is still there
         assert_eq!(matching_ids(&client, &[], false).await.unwrap().1, 4);
+    }
+
+    // --- row count estimate ---
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn big_analyzed_tables_get_an_estimate_and_small_ones_do_not() {
+        let client = connect().await;
+        client
+            .batch_execute(
+                "CREATE TEMP TABLE est_big AS SELECT g AS id FROM generate_series(1, 150000) g; \
+                 CREATE TEMP TABLE est_small AS SELECT g AS id FROM generate_series(1, 50) g; \
+                 CREATE TEMP VIEW est_view AS SELECT * FROM est_big; \
+                 ANALYZE est_big; ANALYZE est_small",
+            )
+            .await
+            .unwrap();
+
+        let estimate = estimated_rows(&client, "pg_temp.\"est_big\"").await.unwrap().expect("a big table is estimated");
+        assert!((140_000..=160_000).contains(&estimate), "{estimate}");
+        assert_eq!(count_rows(&client, "pg_temp.\"est_big\"", "", &[]).await.unwrap(), 150_000);
+
+        // Small tables, views and unknown names are counted exactly instead
+        assert_eq!(estimated_rows(&client, "pg_temp.\"est_small\"").await.unwrap(), None);
+        assert_eq!(estimated_rows(&client, "pg_temp.\"est_view\"").await.unwrap(), None);
+        assert_eq!(estimated_rows(&client, "pg_temp.\"missing\"").await.unwrap(), None);
     }
 }
 

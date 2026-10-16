@@ -30,6 +30,7 @@ export function useTableData(schema?: string, table?: string) {
   const [filters, setFilters] = useState<TableFilter[]>([]);
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [refreshing, setRefreshing] = useState(false);
+  const [counting, setCounting] = useState(false);
   const [spinKey, setSpinKey] = useState(0);
 
   const pkColumns = useMemo(
@@ -98,6 +99,20 @@ export function useTableData(schema?: string, table?: string) {
     setPageSizeState(readPageSize(schema, table));
   }, [schema, table]);
 
+  /** Replaces the estimated total with an exact count. */
+  const countExactly = useCallback(async () => {
+    if (!schema || !table) return;
+    setCounting(true);
+    try {
+      const total = await api.countTableRows(schema, table);
+      setData((prev) => (prev ? { ...prev, totalRows: total, totalRowsEstimated: false } : prev));
+    } catch (err) {
+      setError(typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to count rows");
+    } finally {
+      setCounting(false);
+    }
+  }, [schema, table, api]);
+
   /** Applies the filter bar's conditions (incomplete ones are ignored) and goes to page 1. */
   const applyFilters = useCallback((next: TableFilter[], mode: FilterMode) => {
     setFilters(next.filter(isActiveFilter));
@@ -137,6 +152,8 @@ export function useTableData(schema?: string, table?: string) {
     filters,
     filterMode,
     applyFilters,
+    counting,
+    countExactly,
     refreshing,
     spinKey,
     refresh,

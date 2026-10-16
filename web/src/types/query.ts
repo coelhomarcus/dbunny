@@ -47,6 +47,8 @@ export interface TableDataResponse {
   columns: QueryColumn[];
   rows: unknown[][];
   totalRows: number;
+  /** totalRows comes from the table statistics, not an exact count. */
+  totalRowsEstimated?: boolean;
   page: number;
   pageSize: number;
 }

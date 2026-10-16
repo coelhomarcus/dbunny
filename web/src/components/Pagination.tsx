@@ -2,6 +2,10 @@ import Button from "./ui/Button";
 interface PaginationProps {
   page: number;
   totalPages: number;
+  /** The page count comes from an estimated total. */
+  estimated?: boolean;
+  /** Overrides "is there a next page", for when the total is only an estimate. */
+  hasNext?: boolean;
   onPageChange: (page: number) => void;
   pageSize: number;
   pageSizeOptions: number[];
@@ -11,6 +15,8 @@ interface PaginationProps {
 export default function Pagination({
   page,
   totalPages,
+  estimated,
+  hasNext,
   onPageChange,
   pageSize,
   pageSizeOptions,
@@ -36,13 +42,18 @@ export default function Pagination({
       {totalPages > 1 && (
         <div className="flex items-center gap-3">
           <span>
-            Page {page} of {totalPages}
+            Page {page} of {estimated ? "~" : ""}{totalPages}
           </span>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}>
               Previous
             </Button>
-            <Button variant="outline" size="sm" onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onPageChange(estimated ? page + 1 : Math.min(totalPages, page + 1))}
+              disabled={!(hasNext ?? page < totalPages)}
+            >
               Next
             </Button>
           </div>

@@ -92,6 +92,11 @@ export function createSessionApi(sessionId: string | null) {
       });
     },
 
+    /** Exact row count, for tables whose total is only an estimate. */
+    async countTableRows(schema: string, table: string) {
+      return invoke<number>("count_table_rows", { sessionId, schema, table });
+    },
+
     async query(sql: string) {
       return invoke<QueryResult>("execute_query", { sessionId, sql });
     },

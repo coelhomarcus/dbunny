@@ -129,6 +129,7 @@ pub fn run() {
             commands::schema::get_completion_schema,
             commands::query::execute_query,
             commands::query::get_table_data,
+            commands::query::count_table_rows,
             commands::query::update_row,
             commands::query::delete_rows,
             commands::saved::get_saved_connections,
