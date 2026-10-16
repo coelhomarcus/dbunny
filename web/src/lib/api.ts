@@ -14,6 +14,7 @@ import type {
   SavedConnection,
   SavedConnectionInput,
   TableStructure,
+  ExplainResult,
 } from "@/types";
 
 /** Calls that don't belong to a connection. */
@@ -110,6 +111,33 @@ export function createSessionApi(sessionId: string | null) {
 
     async query(sql: string) {
       return invoke<QueryResult>("execute_query", { sessionId, sql });
+    },
+
+    /** Stops whatever the query editor is running. */
+    async cancelQuery() {
+      return invoke<void>("cancel_query", { sessionId });
+    },
+
+    /** Opens a transaction that every editor run joins until commit or rollback. */
+    async beginTransaction() {
+      return invoke<void>("begin_transaction", { sessionId });
+    },
+
+    async commitTransaction() {
+      return invoke<void>("commit_transaction", { sessionId });
+    },
+
+    async rollbackTransaction() {
+      return invoke<void>("rollback_transaction", { sessionId });
+    },
+
+    async transactionOpen() {
+      return invoke<boolean>("transaction_open", { sessionId });
+    },
+
+    /** Plan of one statement; with `analyze` it really runs and is rolled back. */
+    async explain(sql: string, analyze: boolean) {
+      return invoke<ExplainResult>("explain_query", { sessionId, sql, analyze });
     },
 
     async updateRow(
