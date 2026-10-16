@@ -142,6 +142,8 @@ pub fn run() {
             commands::connect::connect_database,
             commands::connect::get_databases,
             commands::query::import_rows,
+            commands::alter::preview_structure_change,
+            commands::alter::apply_structure_change,
             commands::editor::cancel_query,
             commands::editor::begin_transaction,
             commands::editor::commit_transaction,
