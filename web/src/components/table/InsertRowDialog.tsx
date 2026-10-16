@@ -35,16 +35,25 @@ function InsertForm({
   schema,
   table,
   columns,
+  initialValues,
   onInsert,
   onClose,
 }: {
   schema: string;
   table: string;
   columns: ColumnInfo[];
+  initialValues?: Record<string, string | null>;
   onInsert: (values: Record<string, string | null>) => Promise<void>;
   onClose: () => void;
 }) {
-  const [fields, setFields] = useState<Record<string, Field>>({});
+  const [fields, setFields] = useState<Record<string, Field>>(() =>
+    Object.fromEntries(
+      Object.entries(initialValues ?? {}).map(([name, value]) => [
+        name,
+        { touched: true, isNull: value === null, text: value ?? "" },
+      ]),
+    ),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,10 +84,15 @@ function InsertForm({
       className="max-w-xl"
       title={
         <>
-          Insert row <span className="font-normal text-muted-foreground">in {schema}.{table}</span>
+          {initialValues ? "Clone row" : "Insert row"}{" "}
+          <span className="font-normal text-muted-foreground">in {schema}.{table}</span>
         </>
       }
-      description="Fields you leave alone get the column's default (or NULL)."
+      description={
+        initialValues
+          ? "Filled in from the copied row. Keys with a default are left out so they get a new value."
+          : "Fields you leave alone get the column's default (or NULL)."
+      }
       footer={
         <>
           {error && <p className="mr-auto min-w-0 flex-1 break-words text-xs text-destructive-foreground">{error}</p>}
@@ -185,6 +199,8 @@ export default function InsertRowDialog({
   schema: string;
   table: string;
   columns: ColumnInfo[];
+  /** Starting values, for cloning a row. */
+  initialValues?: Record<string, string | null>;
   onInsert: (values: Record<string, string | null>) => Promise<void>;
   onClose: () => void;
 }) {

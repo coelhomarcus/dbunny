@@ -21,7 +21,9 @@ import ConfirmDialog from "../components/ui/ConfirmDialog";
 import FilterBar from "../components/table/FilterBar";
 import InsertRowDialog from "../components/table/InsertRowDialog";
 import Button from "../components/ui/Button";
-import { TriangleAlert } from "lucide-react";
+import { ArrowUpRight, Ban, Braces, Copy, CopyPlus, Database, Filter, Sheet, TriangleAlert } from "lucide-react";
+import ContextMenu, { type ContextMenuItem } from "../components/ui/ContextMenu";
+import { rowsToInsertSql, rowsToJson, rowsToTsv, valueText } from "../lib/copyRows";
 import Checkbox from "../components/Checkbox";
 import TableViewHeader from "../components/TableViewHeader";
 import SortableColumnHeader from "../components/SortableColumnHeader";
@@ -84,7 +86,10 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   });
 
   const [filtersOpen, setFiltersOpen] = useState(() => (initialFilters?.length ?? 0) > 0);
-  const [insertOpen, setInsertOpen] = useState(false);
+  // Insert dialog: open, optionally filled from a cloned row
+  const [insert, setInsert] = useState<{ initialValues?: Record<string, string | null> } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; rowIndex: number; colName: string } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   const editing = useCellEditing({
     data,
@@ -191,6 +196,84 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
     manualPagination: true,
   });
 
+  /** The row as shown on screen, pending edits included. */
+  const shownRow = (rowIndex: number) =>
+    data!.columns.map((col, i) => {
+      const pendingValue = pending.pendingChanges[rowIndex]?.[col.name];
+      return pendingValue !== undefined ? pendingValue : data!.rows[rowIndex][i];
+    });
+
+  const menuItems = ((): ContextMenuItem[] => {
+    if (!menu || !data) return [];
+    const { rowIndex, colName } = menu;
+    const colIdx = data.columns.findIndex((c) => c.name === colName);
+    const column = columnInfos.find((c) => c.name === colName);
+    const row = shownRow(rowIndex);
+    const value = row[colIdx];
+    // Right-clicking inside a multi-row selection acts on the whole selection
+    const targetRows =
+      selection.selectedRows.has(rowIndex) && selection.selectedRows.size > 1
+        ? [...selection.selectedRows].sort((a, b) => a - b).map(shownRow)
+        : [row];
+    const rowsLabel = targetRows.length > 1 ? `${targetRows.length} rows` : "row";
+    const copy = (text: string) => navigator.clipboard.writeText(text);
+    const link = foreignKeyLink(column, row, data.columns);
+    const editable = !hasNoPk && editorFor(column, value).kind !== "readonly";
+
+    const items: ContextMenuItem[] = [
+      { label: "Copy value", icon: <Copy />, onSelect: () => copy(valueText(value)) },
+      { label: `Copy ${rowsLabel} as JSON`, icon: <Braces />, onSelect: () => copy(rowsToJson(data.columns, targetRows)) },
+      { label: `Copy ${rowsLabel} as TSV`, icon: <Sheet />, onSelect: () => copy(rowsToTsv(data.columns, targetRows)) },
+      { label: `Copy ${rowsLabel} as INSERT`, icon: <Database />, onSelect: () => copy(rowsToInsertSql(schema!, table!, data.columns, targetRows)) },
+      "separator",
+      {
+        label: value === null ? `Filter: ${colName} is NULL` : "Filter by this value",
+        icon: <Filter />,
+        onSelect: guard(() => {
+          const filter: TableFilter =
+            value === null
+              ? { column: colName, operator: "is null", value: "" }
+              : { column: colName, operator: "=", value: toEditText(value) };
+          // Added to "match all" filters; with "match any" it would widen the result instead
+          const keep = tableData.filterMode === "all" ? tableData.filters : [];
+          tableData.applyFilters([...keep, filter], "all");
+          setFiltersOpen(true);
+        }),
+      },
+    ];
+    if (link) {
+      items.push({
+        label: `Open referenced row in ${column!.foreignKey!.table}`,
+        icon: <ArrowUpRight />,
+        onSelect: guard(() => navigate(link.path, { state: { filters: link.filters } })),
+      });
+    }
+    items.push("separator");
+    if (editable && (column?.isNullable ?? true)) {
+      items.push({
+        label: "Set to NULL",
+        icon: <Ban />,
+        disabled: value === null,
+        onSelect: () => editing.setCellValue(rowIndex, colName, true, ""),
+      });
+    }
+    items.push({
+      label: "Clone row",
+      icon: <CopyPlus />,
+      onSelect: guard(() => {
+        const initialValues: Record<string, string | null> = {};
+        data.columns.forEach((col, i) => {
+          const info = columnInfos.find((c) => c.name === col.name);
+          // Generated values and keys with a default (serial, uuid) must get new ones
+          if (!info || info.isGenerated || (info.isPrimaryKey && info.defaultValue !== null)) return;
+          initialValues[col.name] = row[i] === null || row[i] === undefined ? null : toEditText(row[i]);
+        });
+        setInsert({ initialValues });
+      }),
+    });
+    return items;
+  })();
+
   return (
     <div className="h-full flex flex-col">
       <TableViewHeader
@@ -219,7 +302,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         onRefresh={guard(tableData.refresh)}
         hasCustomWidths={resize.hasCustomWidths}
         onResetWidths={resize.resetWidths}
-        onInsertRow={guard(() => setInsertOpen(true))}
+        onInsertRow={guard(() => setInsert({}))}
         filterCount={tableData.filters.length}
         filtersOpen={filtersOpen}
         onToggleFilters={() => setFiltersOpen((open) => !open)}
@@ -356,6 +439,8 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                             onCancel={editing.cancelEdit}
                             onExpand={() => setExpandedCell(editing.editingCell)}
                             linkLabel={link ? `Open the referenced row in ${columnInfo!.foreignKey!.table}` : undefined}
+                            menuOpen={menu?.rowIndex === rowIndex && menu.colName === col.name}
+                            onContextMenu={(e) => setMenu({ x: e.clientX, y: e.clientY, rowIndex, colName: col.name })}
                             onFollowLink={
                               link ? guard(() => navigate(link.path, { state: { filters: link.filters } })) : undefined
                             }
@@ -394,6 +479,8 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         </div>
       )}
 
+      <ContextMenu position={menu} items={menuItems} onClose={closeMenu} />
+
       <CellEditorDialog
         open={editorDialogOpen}
         column={editingCell?.colName ?? ""}
@@ -407,11 +494,12 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       />
 
       <InsertRowDialog
-        open={insertOpen}
+        open={insert !== null}
         schema={schema!}
         table={table!}
         columns={columnInfos}
-        onClose={() => setInsertOpen(false)}
+        initialValues={insert?.initialValues}
+        onClose={() => setInsert(null)}
         onInsert={async (values) => {
           await api.insertRow(schema!, table!, values);
           await tableData.refresh();

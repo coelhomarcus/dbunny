@@ -28,6 +28,9 @@ interface EditableCellProps {
   /** Foreign key cells: opens the row this value references. */
   onFollowLink?: () => void;
   linkLabel?: string;
+  onContextMenu: (e: React.MouseEvent) => void;
+  /** The context menu is open on this cell. */
+  menuOpen?: boolean;
 }
 
 const MAX_PREVIEW = 300;
@@ -50,7 +53,7 @@ export default function EditableCell({
   displayValue, isDirty, isEditing, hasNoPk, editor, nullable,
   editValue, editIsNull, inputRef,
   onStartEdit, onEditValueChange, onSetNull, onConfirm, onCommit, onCancel, onExpand,
-  onFollowLink, linkLabel,
+  onFollowLink, linkLabel, onContextMenu, menuOpen,
 }: EditableCellProps) {
   const cellRef = useRef<HTMLTableCellElement>(null);
   const editable = !hasNoPk && editor.kind !== "readonly";
@@ -60,9 +63,15 @@ export default function EditableCell({
     <td
       ref={cellRef}
       className={`relative p-0 overflow-hidden border-b border-r border-border ${isDirty ? "bg-warning/8" : ""} ${
-        isEditing && !inlineEditing ? "ring-1 ring-inset ring-primary/60" : ""
+        (isEditing && !inlineEditing) || menuOpen ? "ring-1 ring-inset ring-primary/60" : ""
       }`}
       onClick={() => editable && !isEditing && onStartEdit()}
+      onContextMenu={(e) => {
+        // An inline edit keeps its own native menu (copy/paste in the input)
+        if (inlineEditing) return;
+        e.preventDefault();
+        onContextMenu(e);
+      }}
     >
       <div
         className={`px-3 py-1.5 truncate overflow-hidden ${inlineEditing ? "invisible" : ""} ${

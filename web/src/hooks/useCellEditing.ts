@@ -34,14 +34,12 @@ export function useCellEditing({ data, hasNoPk, pendingChanges, setPendingChange
     [hasNoPk, pendingChanges],
   );
 
-  /** Saves `text` (or NULL) as the edited cell's pending value and closes the editor. */
-  const commitEdit = useCallback(
-    (isNull: boolean, text: string) => {
-      if (!editingCell || !data) return;
-      const { rowIndex, colName } = editingCell;
+  /** Records `text` (or NULL) as a cell's pending value; a value equal to the original clears it. */
+  const setCellValue = useCallback(
+    (rowIndex: number, colName: string, isNull: boolean, text: string) => {
+      if (!data) return;
       const colIdx = data.columns.findIndex((c) => c.name === colName);
-      const originalValue = data.rows[rowIndex][colIdx];
-      const outcome = resolveEdit(originalValue, isNull, text);
+      const outcome = resolveEdit(data.rows[rowIndex][colIdx], isNull, text);
 
       setPendingChanges((prev) => {
         const rowChanges = { ...(prev[rowIndex] ?? {}) };
@@ -57,10 +55,18 @@ export function useCellEditing({ data, hasNoPk, pendingChanges, setPendingChange
         }
         return { ...prev, [rowIndex]: rowChanges };
       });
+    },
+    [data, setPendingChanges],
+  );
 
+  /** Saves `text` (or NULL) as the edited cell's pending value and closes the editor. */
+  const commitEdit = useCallback(
+    (isNull: boolean, text: string) => {
+      if (!editingCell) return;
+      setCellValue(editingCell.rowIndex, editingCell.colName, isNull, text);
       setEditingCell(null);
     },
-    [editingCell, data, setPendingChanges],
+    [editingCell, setCellValue],
   );
 
   const confirmEdit = useCallback(() => commitEdit(editIsNull, editValue), [commitEdit, editIsNull, editValue]);
@@ -88,6 +94,7 @@ export function useCellEditing({ data, hasNoPk, pendingChanges, setPendingChange
     startEdit,
     confirmEdit,
     commitEdit,
+    setCellValue,
     cancelEdit,
   };
 }
