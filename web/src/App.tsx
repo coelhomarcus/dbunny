@@ -11,6 +11,7 @@ import QueryEditor from "./pages/QueryEditor";
 import TableView from "./pages/TableView";
 import TableStructure from "./pages/TableStructure";
 import FunctionView from "./pages/FunctionView";
+import ObjectView from "./pages/ObjectView";
 
 export default function App() {
   useEffect(() => {
@@ -75,6 +76,8 @@ function TabPane({
                 <Route path=":schema/:table" element={<TableView />} />
                 <Route path=":schema/:table/structure" element={<TableStructure />} />
                 <Route path=":schema/function/:name" element={<FunctionView />} />
+                <Route path=":schema/sequence/:name" element={<ObjectView kind="sequence" />} />
+                <Route path=":schema/type/:name" element={<ObjectView kind="type" />} />
               </Route>
             </Routes>
           </MemoryRouter>

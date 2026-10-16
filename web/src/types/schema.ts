@@ -5,7 +5,29 @@ export interface SchemaInfo {
 export interface TableInfo {
   name: string;
   schema: string;
-  type: "table" | "view";
+  type: "table" | "view" | "matview";
+}
+
+/** A sequence or type listed in the explorer. */
+export interface SchemaObject {
+  name: string;
+  /** For types: "enum", "domain", "composite" or "range". */
+  kind: string;
+}
+
+export interface ExtensionInfo {
+  name: string;
+  version: string;
+  schema: string;
+  comment: string | null;
+}
+
+/** Facts and DDL of a sequence or type. */
+export interface ObjectDefinition {
+  kind: string;
+  facts: [string, string][];
+  comment: string | null;
+  ddl: string;
 }
 
 /** A foreign key: `columns` of this table point at `refColumns` of `schema.table`. */

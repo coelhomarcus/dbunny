@@ -16,6 +16,9 @@ import type {
   SavedConnectionInput,
   TableStructure,
   ExplainResult,
+  SchemaObject,
+  ExtensionInfo,
+  ObjectDefinition,
 } from "@/types";
 
 /** Calls that don't belong to a connection. */
@@ -58,6 +61,27 @@ export function createSessionApi(sessionId: string | null) {
 
     async getViews(schema: string) {
       return invoke<TableInfo[]>("get_views", { sessionId, schema });
+    },
+
+    async getMaterializedViews(schema: string) {
+      return invoke<TableInfo[]>("get_materialized_views", { sessionId, schema });
+    },
+
+    async getSequences(schema: string) {
+      return invoke<SchemaObject[]>("get_sequences", { sessionId, schema });
+    },
+
+    async getTypes(schema: string) {
+      return invoke<SchemaObject[]>("get_types", { sessionId, schema });
+    },
+
+    async getExtensions() {
+      return invoke<ExtensionInfo[]>("get_extensions", { sessionId });
+    },
+
+    /** Facts and DDL of a sequence or a type. */
+    async getObjectDefinition(schema: string, name: string, kind: "sequence" | "type") {
+      return invoke<ObjectDefinition>("get_object_definition", { sessionId, schema, name, kind });
     },
 
     async getFunctions(schema: string) {
