@@ -514,6 +514,16 @@ mod tests {
     }
 
     #[test]
+    fn encoded_names_reach_the_driver_decoded() {
+        // As the form writes them: "#", "?" and "@" in names are percent-encoded
+        let url = url::Url::parse("postgresql://admin%40corp:p%23ss@db.example.com:5432/app%232").unwrap();
+        let (config, _) = connection_config(&url).unwrap();
+        assert_eq!(config.get_user(), Some("admin@corp"));
+        assert_eq!(config.get_password(), Some(&b"p#ss"[..]));
+        assert_eq!(config.get_dbname(), Some("app#2"));
+    }
+
+    #[test]
     fn config_without_query_still_parses() {
         let url = url::Url::parse("postgresql://u@localhost/db").unwrap();
         let (config, _) = connection_config(&url).unwrap();

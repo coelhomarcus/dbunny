@@ -32,8 +32,8 @@ export function parseConnectionUrl(url: string): Partial<ConnectionFields> {
       // A socket folder comes percent-encoded: postgresql://user@%2Ftmp/db
       host: decodeURIComponent(parsed.hostname || ""),
       port: parsed.port || "5432",
-      database: parsed.pathname.replace(/^\//, "") || "",
-      user: parsed.username || "",
+      database: decodeURIComponent(parsed.pathname.replace(/^\//, "")),
+      user: decodeURIComponent(parsed.username || ""),
       password: decodeURIComponent(parsed.password || ""),
       ssl: SSL_MODES.has(parsed.searchParams.get("sslmode") ?? ""),
       sslMode: (["verify-ca", "verify-full"].includes(parsed.searchParams.get("sslmode") ?? "")
@@ -56,10 +56,12 @@ export function buildConnectionUrl(fields: ConnectionFields): string {
   const ssl = fields.ssl && !socket;
   const host = socket ? encodeURIComponent(fields.host.trim()) : fields.host;
   const file = (name: string, path: string) => (ssl && path.trim() ? `${name}=${encodeURIComponent(path.trim())}` : false);
+  // Names are encoded too: a "#", "?" or "/" in them would otherwise end that part of the URL
+  const name = encodeURIComponent(user);
   const auth = user
     ? password
-      ? `${user}:${encodeURIComponent(password)}@`
-      : `${user}@`
+      ? `${name}:${encodeURIComponent(password)}@`
+      : `${name}@`
     : "";
   const portPart = port ? `:${port}` : "";
   const params = [
@@ -70,7 +72,7 @@ export function buildConnectionUrl(fields: ConnectionFields): string {
     readOnly && `options=${encodeURIComponent(READ_ONLY_OPTION)}`,
   ].filter(Boolean);
   const query = params.length ? `?${params.join("&")}` : "";
-  return `postgresql://${auth}${host}${portPart}/${database}${query}`;
+  return `postgresql://${auth}${host}${portPart}/${encodeURIComponent(database)}${query}`;
 }
 
 /** The form's SSL fields as saved with a connection (null when SSL is off). */
