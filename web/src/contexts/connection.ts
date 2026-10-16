@@ -1,6 +1,6 @@
 import { createContext } from "react";
 import type { SessionApi } from "../lib/api";
-import type { ConnectionInfo } from "@/types";
+import type { ConnectionInfo, SshConfig } from "@/types";
 
 export interface ConnectionContextValue {
   isConnected: boolean;
@@ -11,7 +11,11 @@ export interface ConnectionContextValue {
   /** API bound to this tab's session. */
   api: SessionApi;
   error: string | null;
-  connect: (url: string, saved?: { name: string; color?: string | null }) => Promise<void>;
+  connect: (
+    url: string,
+    saved?: { name: string; color?: string | null },
+    tunnel?: { ssh?: SshConfig | null; trustHostKey?: string },
+  ) => Promise<void>;
   disconnect: () => Promise<void>;
 }
 

@@ -1,9 +1,7 @@
-import {
-  ChevronsUpDown,
-  ChevronUp,
-  ChevronDown,
-} from "lucide-react";
+import { ChevronsUpDown, ChevronUp, ChevronDown, KeyRound, Link2, Sparkles } from "lucide-react";
 import type { ColumnInfo } from "@/types";
+import { columnFacts, shortType } from "../lib/columnMeta";
+import Tooltip from "./Tooltip";
 
 interface SortableColumnHeaderProps {
   id: string;
@@ -13,19 +11,30 @@ interface SortableColumnHeaderProps {
   onResizeStart: (e: React.MouseEvent) => void;
 }
 
-function normalizeType(type: string): string {
-  if (type.startsWith("timestamp")) return "timestamp";
-  if (type.startsWith("time ")) return "time";
-  if (type === "character varying") return "varchar";
-  if (type === "double precision") return "float8";
-  if (type === "character") return "char";
-  return type;
+function ColumnIcon({ column }: { column: ColumnInfo }) {
+  if (column.isPrimaryKey) return <KeyRound size={12} className="shrink-0 text-warning-foreground" aria-label="Primary key" />;
+  if (column.foreignKey) return <Link2 size={12} className="shrink-0 text-info-foreground" aria-label="Foreign key" />;
+  if (column.isGenerated) return <Sparkles size={12} className="shrink-0 text-muted-foreground" aria-label="Generated" />;
+  return null;
 }
 
 export default function SortableColumnHeader({
   id, columnInfo, sorted, onToggleSort, onResizeStart,
 }: SortableColumnHeaderProps) {
   const isActive = sorted !== false;
+  const facts = columnInfo ? columnFacts(columnInfo) : [];
+
+  const label = (
+    <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+      {columnInfo && <ColumnIcon column={columnInfo} />}
+      <span className="font-semibold truncate text-foreground">{id}</span>
+      {columnInfo?.typeName && (
+        <span className="text-muted-foreground shrink-0 font-normal text-xs">
+          {shortType(columnInfo.typeName)}
+        </span>
+      )}
+    </span>
+  );
 
   return (
     <th
@@ -35,21 +44,13 @@ export default function SortableColumnHeader({
       }`}
     >
       <span className="flex items-center justify-between gap-2 overflow-hidden">
-        <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-          {columnInfo?.isPrimaryKey && (
-            <span className="text-xs text-warning-foreground/80 font-mono shrink-0">
-              PK
-            </span>
-          )}
-          <span className={`font-semibold truncate ${isActive ? "text-foreground" : "text-foreground"}`}>
-            {id}
-          </span>
-          {columnInfo?.dataType && (
-            <span className="text-muted-foreground shrink-0 font-normal text-xs">
-              {normalizeType(columnInfo.dataType)}
-            </span>
-          )}
-        </span>
+        {facts.length > 0 ? (
+          <Tooltip label={facts.join("\n")} side="bottom" className="min-w-0">
+            {label}
+          </Tooltip>
+        ) : (
+          label
+        )}
         <span className={`shrink-0 transition-colors ${
           isActive
             ? "text-info-foreground"

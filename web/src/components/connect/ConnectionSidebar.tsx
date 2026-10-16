@@ -28,12 +28,6 @@ function ConnectionIcon({ color, size = "md" }: { color: string; size?: "sm" | "
   );
 }
 
-/** "db.acme.io · shop", with the port only when it isn't the default. */
-function connectionSummary(conn: SavedConnection) {
-  const host = conn.port && conn.port !== 5432 ? `${conn.host}:${conn.port}` : conn.host;
-  return `${host} · ${conn.database}`;
-}
-
 function ConnectionRow({
   conn,
   selected,
@@ -75,7 +69,6 @@ function ConnectionRow({
       onKeyDown={(e) => {
         if (e.key === "Enter") onConnect();
       }}
-      title="Double-click to connect"
       className={cn(
         "group relative flex h-12 items-center gap-2.5 rounded-lg px-2 cursor-pointer outline-none",
         "focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -85,14 +78,14 @@ function ConnectionRow({
       <ConnectionIcon color={conn.color || DEFAULT_COLOR} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium leading-snug">{conn.name || "Unnamed"}</div>
-        <div className="truncate text-xs leading-snug text-muted-foreground">{connectionSummary(conn)}</div>
+        <div className="truncate text-xs leading-snug text-muted-foreground">{conn.database}</div>
       </div>
       <div className="absolute right-1.5 flex items-center gap-0.5 rounded-md opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
         <Button
           variant="ghost-muted"
           size="icon-xs"
           className="bg-chrome"
-          title="Connect"
+          aria-label="Connect"
           onClick={(e) => { e.stopPropagation(); onConnect(); }}
         >
           <ArrowRight />
@@ -101,7 +94,7 @@ function ConnectionRow({
           variant="ghost-muted"
           size="icon-xs"
           className="bg-chrome hover:bg-destructive/10 hover:text-destructive-foreground"
-          title="Delete"
+          aria-label="Delete"
           onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
         >
           <Trash2 />
@@ -160,7 +153,7 @@ export default function ConnectionSidebar({
             <span className="text-[13px] font-semibold">Connections</span>
             {count > 0 && <Badge>{count}</Badge>}
           </div>
-          <Button variant="ghost-muted" size="icon-sm" onClick={onNew} title="New connection">
+          <Button variant="ghost-muted" size="icon-sm" onClick={onNew} aria-label="New connection">
             <Plus />
           </Button>
         </div>

@@ -1,0 +1,72 @@
+import type { ColumnInfo } from "./schema";
+
+export interface TableMeta {
+  kind: "table" | "view" | "materialized view" | "partitioned table" | "foreign table" | string;
+  owner: string;
+  comment: string | null;
+  /** From the statistics; null when the table was never analyzed. */
+  rowEstimate: number | null;
+  tableBytes: number | null;
+  indexesBytes: number | null;
+  totalBytes: number | null;
+}
+
+export interface IndexInfo {
+  name: string;
+  columns: string[];
+  method: string;
+  isUnique: boolean;
+  isPrimary: boolean;
+  /** Created by a constraint (primary key, unique, exclusion). */
+  backsConstraint: boolean;
+  /** WHERE clause of a partial index. */
+  predicate: string | null;
+  definition: string;
+  bytes: number | null;
+}
+
+export interface ConstraintInfo {
+  name: string;
+  kind: "primary key" | "unique" | "check" | "foreign key" | "exclusion" | string;
+  definition: string;
+}
+
+export interface ForeignKeyInfo {
+  name: string;
+  columns: string[];
+  refSchema: string;
+  refTable: string;
+  refColumns: string[];
+  onUpdate: string;
+  onDelete: string;
+}
+
+export interface ReferencedBy {
+  name: string;
+  schema: string;
+  table: string;
+  columns: string[];
+}
+
+export interface TriggerInfo {
+  name: string;
+  timing: string;
+  events: string[];
+  level: string;
+  function: string;
+  enabled: boolean;
+  definition: string;
+}
+
+export interface TableStructure {
+  meta: TableMeta;
+  columns: ColumnInfo[];
+  indexes: IndexInfo[];
+  constraints: ConstraintInfo[];
+  foreignKeys: ForeignKeyInfo[];
+  referencedBy: ReferencedBy[];
+  triggers: TriggerInfo[];
+  ddl: string;
+  /** Sections that couldn't be read, usually for lack of permission. */
+  warnings: string[];
+}

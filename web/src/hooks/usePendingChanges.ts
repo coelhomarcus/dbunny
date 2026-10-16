@@ -1,7 +1,7 @@
 import { useState, useCallback, type Dispatch, type SetStateAction } from "react";
 import { type SortingState } from "@tanstack/react-table";
 import { useApi } from "../contexts/useConnection";
-import type { TableDataResponse, ColumnInfo } from "@/types";
+import type { TableDataResponse, ColumnInfo, TableFilter, FilterMode } from "@/types";
 import type { PendingChanges } from "./useCellEditing";
 
 interface UsePendingChangesOptions {
@@ -11,18 +11,28 @@ interface UsePendingChangesOptions {
   pkColumns: ColumnInfo[];
   hasNoPk: boolean;
   selectedRows: Set<number>;
-  fetchData: (s: string, t: string, pg: number, ps: number, sort: SortingState) => Promise<TableDataResponse>;
+  fetchData: (
+    s: string,
+    t: string,
+    pg: number,
+    ps: number,
+    sort: SortingState,
+    filters: TableFilter[],
+    filterMode: FilterMode,
+  ) => Promise<TableDataResponse>;
   setData: (d: TableDataResponse) => void;
   setSelectedRows: Dispatch<SetStateAction<Set<number>>>;
   page: number;
   pageSize: number;
   sorting: SortingState;
+  filters: TableFilter[];
+  filterMode: FilterMode;
 }
 
 export function usePendingChanges({
   data, schema, table, pkColumns, hasNoPk,
   selectedRows, fetchData, setData, setSelectedRows,
-  page, pageSize, sorting,
+  page, pageSize, sorting, filters, filterMode,
 }: UsePendingChangesOptions) {
   const api = useApi();
   const [pendingChanges, setPendingChanges] = useState<PendingChanges>({});
@@ -49,7 +59,7 @@ export function usePendingChanges({
         }
         await api.updateRow(schema, table, { primaryKey, updates });
       }
-      const fresh = await fetchData(schema, table, page, pageSize, sorting);
+      const fresh = await fetchData(schema, table, page, pageSize, sorting, filters, filterMode);
       setData(fresh);
       setPendingChanges({});
     } catch (err) {
@@ -57,7 +67,7 @@ export function usePendingChanges({
     } finally {
       setSaving(false);
     }
-  }, [data, schema, table, hasPendingChanges, pendingChanges, pkColumns, fetchData, page, pageSize, sorting, setData, api]);
+  }, [data, schema, table, hasPendingChanges, pendingChanges, pkColumns, fetchData, page, pageSize, sorting, filters, filterMode, setData, api]);
 
   const handleDelete = useCallback(async () => {
     if (!data || !schema || !table || selectedRows.size === 0 || hasNoPk) return;
@@ -75,7 +85,7 @@ export function usePendingChanges({
       });
 
       await api.deleteRows(schema, table, primaryKeys);
-      const fresh = await fetchData(schema, table, page, pageSize, sorting);
+      const fresh = await fetchData(schema, table, page, pageSize, sorting, filters, filterMode);
       setData(fresh);
       setSelectedRows(new Set());
       setPendingChanges({});
@@ -84,7 +94,7 @@ export function usePendingChanges({
     } finally {
       setDeleting(false);
     }
-  }, [data, schema, table, selectedRows, hasNoPk, pkColumns, fetchData, page, pageSize, sorting, setData, setSelectedRows, api]);
+  }, [data, schema, table, selectedRows, hasNoPk, pkColumns, fetchData, page, pageSize, sorting, filters, filterMode, setData, setSelectedRows, api]);
 
   const discardChanges = useCallback(() => {
     setPendingChanges({});

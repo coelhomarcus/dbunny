@@ -2,6 +2,7 @@ use serde::Deserialize;
 use tauri::State;
 use uuid::Uuid;
 
+use super::ssh::SshConfig;
 use super::state::AppState;
 use super::storage::{save_connections_to_file, SavedConnection, SavedConnectionInfo};
 
@@ -15,7 +16,11 @@ pub struct SavedConnectionInput {
     pub database: String,
     pub user: String,
     pub password: String,
+    #[serde(default)]
+    pub ssh: Option<SshConfig>,
     pub ssl: bool,
+    #[serde(default)]
+    pub read_only: bool,
     pub color: String,
 }
 
@@ -48,6 +53,7 @@ pub async fn save_connection(
 
         let created_at = connections[pos].created_at.clone();
 
+        let read_only = connection.read_only;
         connections[pos] = SavedConnection::new(
             &state.encryption_key,
             id.clone(),
@@ -57,15 +63,18 @@ pub async fn save_connection(
             connection.database,
             connection.user,
             connection.password,
+            connection.ssh,
             connection.ssl,
             connection.color,
             created_at,
             now,
         )?;
+        connections[pos].read_only = read_only;
 
         connections[pos].clone()
     } else {
-        let new_connection = SavedConnection::new(
+        let read_only = connection.read_only;
+        let mut new_connection = SavedConnection::new(
             &state.encryption_key,
             Uuid::new_v4().to_string(),
             connection.name,
@@ -74,11 +83,13 @@ pub async fn save_connection(
             connection.database,
             connection.user,
             connection.password,
+            connection.ssh,
             connection.ssl,
             connection.color,
             now.clone(),
             now,
         )?;
+        new_connection.read_only = read_only;
 
         connections.push(new_connection.clone());
         new_connection

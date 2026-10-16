@@ -1,4 +1,4 @@
-import { Eye, EyeOff, LogOut } from "lucide-react";
+import { Eye, EyeOff, Lock, LogOut } from "lucide-react";
 import type { ConnectionInfo } from "@/types";
 import ThemeToggle from "../ui/ThemeToggle";
 
@@ -26,10 +26,16 @@ export default function StatusBar({
         <span className="size-1.5 rounded-full bg-success" />
         Connected
       </span>
+      {connectionInfo?.readOnly && (
+        <span className="flex items-center gap-1 rounded bg-warning/12 px-1.5 py-px font-medium text-warning-foreground">
+          <Lock size={10} />
+          Read-only
+        </span>
+      )}
       {/* The toggle sits on the details it reveals */}
       <button
         onClick={onToggleReveal}
-        title={revealed ? "Hide connection details" : "Show connection details"}
+        aria-label={revealed ? "Hide connection details" : "Show connection details"}
         className="group flex h-5 items-center gap-2 rounded-md px-1.5 font-mono transition-colors cursor-pointer hover:bg-accent hover:text-foreground"
       >
         <span>{revealed ? host : mask(host)}</span>

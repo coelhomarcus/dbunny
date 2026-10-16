@@ -9,6 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
+use super::ssh::SshConfig;
+
 const PBKDF2_SALT: &[u8] = b"dbunny-connection-salt-v1";
 const PBKDF2_ITERATIONS: u32 = 100_000;
 
@@ -20,6 +22,9 @@ struct SensitiveData {
     database: String,
     user: String,
     password: String,
+    /// SSH tunnel settings, secrets included; absent in files from older versions.
+    #[serde(default)]
+    ssh: Option<SshConfig>,
 }
 
 /// Stored on disk. Only metadata is plaintext; everything else is in `encrypted_data`.
@@ -30,6 +35,9 @@ pub struct SavedConnection {
     pub name: String,
     pub encrypted_data: String,
     pub ssl: bool,
+    /// Every transaction starts read-only; missing in files from older versions.
+    #[serde(default)]
+    pub read_only: bool,
     pub color: String,
     pub created_at: String,
     pub updated_at: String,
@@ -46,7 +54,9 @@ pub struct SavedConnectionInfo {
     pub database: String,
     pub user: String,
     pub password: String,
+    pub ssh: Option<SshConfig>,
     pub ssl: bool,
+    pub read_only: bool,
     pub color: String,
     pub created_at: String,
     pub updated_at: String,
@@ -188,6 +198,7 @@ impl SavedConnection {
         database: String,
         user: String,
         password: String,
+        ssh: Option<SshConfig>,
         ssl: bool,
         color: String,
         created_at: String,
@@ -199,6 +210,7 @@ impl SavedConnection {
             database,
             user,
             password,
+            ssh,
         };
         let json = serde_json::to_string(&sensitive)
             .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?;
@@ -209,6 +221,7 @@ impl SavedConnection {
             name,
             encrypted_data,
             ssl,
+            read_only: false,
             color,
             created_at,
             updated_at,
@@ -228,7 +241,9 @@ impl SavedConnection {
             database: sensitive.database,
             user: sensitive.user,
             password: sensitive.password,
+            ssh: sensitive.ssh,
             ssl: self.ssl,
+            read_only: self.read_only,
             color: self.color.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),

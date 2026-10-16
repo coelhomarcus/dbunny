@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, type ReactNode } from "react";
 import { api, createSessionApi } from "../lib/api";
-import type { ConnectionInfo } from "@/types";
+import type { ConnectionInfo, SshConfig } from "@/types";
+import { hostKeyProblem } from "../lib/sshHostKey";
 import type { TabSessionInfo } from "./workspace";
 import { ConnectionContext } from "./connection";
 
@@ -22,16 +23,21 @@ export function ConnectionProvider({
   const [error, setError] = useState<string | null>(null);
 
   const connect = useCallback(
-    async (url: string, saved?: { name: string; color?: string | null }) => {
+    async (
+      url: string,
+      saved?: { name: string; color?: string | null },
+      tunnel?: { ssh?: SshConfig | null; trustHostKey?: string },
+    ) => {
       setIsConnecting(true);
       setError(null);
       try {
-        const response = await api.connect(url);
+        const response = await api.connect(url, tunnel?.ssh, tunnel?.trustHostKey);
         const info = {
           database: response.database,
           host: response.host,
           port: response.port,
           serverVersion: response.serverVersion,
+          readOnly: response.readOnly,
         };
         setSessionId(response.sessionId);
         setConnectionInfo(info);
@@ -43,6 +49,8 @@ export function ConnectionProvider({
           sessionId: response.sessionId,
         });
       } catch (err) {
+        // An SSH host key to confirm isn't an error to show: the page asks the user instead
+        if (hostKeyProblem(err)) throw err;
         const message = typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to connect";
         setError(message);
         throw err;

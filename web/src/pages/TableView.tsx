@@ -1,18 +1,29 @@
-import { useEffect, useMemo, useCallback } from "react";
-import { useParams } from "react-router";
+import { useEffect, useMemo, useCallback, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router";
 import {
   useReactTable,
   getCoreRowModel,
   type ColumnDef,
 } from "@tanstack/react-table";
-import type { QueryColumn } from "@/types";
+import type { ColumnInfo, QueryColumn, TableFilter } from "@/types";
+import { editorFor, toEditText, type CellEditor } from "../lib/cellEdit";
+import { isJsonType, shortType } from "../lib/columnMeta";
+import CellEditorDialog from "../components/table/CellEditorDialog";
 import { useTableData } from "../hooks/useTableData";
-import { useApi } from "../contexts/useConnection";
+import { useApi, useConnection } from "../contexts/useConnection";
 import { useTab } from "../contexts/workspace";
 import { useCellEditing } from "../hooks/useCellEditing";
 import { useRowSelection } from "../hooks/useRowSelection";
 import { useColumnResize } from "../hooks/useColumnResize";
 import { usePendingChanges } from "../hooks/usePendingChanges";
+import { useDiscardGuard } from "../hooks/useDiscardGuard";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
+import FilterBar from "../components/table/FilterBar";
+import InsertRowDialog from "../components/table/InsertRowDialog";
+import Button from "../components/ui/Button";
+import { ArrowUpRight, Ban, Braces, Copy, CopyPlus, Database, Filter, Sheet, TriangleAlert } from "lucide-react";
+import ContextMenu, { type ContextMenuItem } from "../components/ui/ContextMenu";
+import { rowsToInsertSql, rowsToJson, rowsToTsv, valueText } from "../lib/copyRows";
 import Checkbox from "../components/Checkbox";
 import TableViewHeader from "../components/TableViewHeader";
 import SortableColumnHeader from "../components/SortableColumnHeader";
@@ -20,14 +31,42 @@ import EditableCell from "../components/EditableCell";
 import Pagination from "../components/Pagination";
 import { TableSkeleton } from "../components/Skeleton";
 
+/** Where a foreign key cell leads: the referenced table, filtered to the matching row. */
+function foreignKeyLink(column: ColumnInfo | undefined, row: unknown[], columns: QueryColumn[]) {
+  const fk = column?.foreignKey;
+  if (!fk) return null;
+  const filters: TableFilter[] = [];
+  for (const [i, name] of fk.columns.entries()) {
+    const value = row[columns.findIndex((c) => c.name === name)];
+    // A key with a NULL part references nothing
+    if (value === null || value === undefined) return null;
+    filters.push({ column: fk.refColumns[i], operator: "=", value: toEditText(value) });
+  }
+  return { path: `/db/${encodeURIComponent(fk.schema)}/${encodeURIComponent(fk.table)}`, filters };
+}
+
+/**
+ * Every navigation (sidebar, foreign key link) gets a fresh view, opened with the
+ * filters it was given, so nothing from the previous table carries over.
+ */
 export default function TableView() {
+  const location = useLocation();
+  const state = location.state as { filters?: TableFilter[] } | null;
+  return <TableViewContent key={location.key} initialFilters={state?.filters} />;
+}
+
+function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }) {
   const { schema, table } = useParams<{ schema: string; table: string }>();
   const api = useApi();
+  const navigate = useNavigate();
   // Hidden window tabs stay mounted; only the visible one reacts to shortcuts
   const { isActive } = useTab();
 
-  const tableData = useTableData(schema, table);
+  const tableData = useTableData(schema, table, initialFilters);
   const { data, columnInfos, loading, error, hasNoPk } = tableData;
+  const readOnly = useConnection().connectionInfo?.readOnly ?? false;
+  // Rows can't be changed without a primary key to find them, or on a read-only connection
+  const editLocked = hasNoPk || readOnly;
 
   const selection = useRowSelection(data?.rows.length ?? 0);
   const resize = useColumnResize();
@@ -45,26 +84,53 @@ export default function TableView() {
     page: tableData.page,
     pageSize: tableData.pageSize,
     sorting: tableData.sorting,
+    filters: tableData.filters,
+    filterMode: tableData.filterMode,
   });
+
+  const [filtersOpen, setFiltersOpen] = useState(() => (initialFilters?.length ?? 0) > 0);
+  // Insert dialog: open, optionally filled from a cloned row
+  const [insert, setInsert] = useState<{ initialValues?: Record<string, string | null> } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; rowIndex: number; colName: string } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   const editing = useCellEditing({
     data,
-    hasNoPk,
+    hasNoPk: editLocked,
     pendingChanges: pending.pendingChanges,
     setPendingChanges: pending.setPendingChanges,
   });
 
-  useEffect(() => {
-    pending.setPendingChanges({});
-    editing.cancelEdit();
-    selection.setSelectedRows(new Set());
-    resize.resetWidths();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema, table]);
+  // The cell whose inline edit moved to the dialog editor (compared by identity, so a new edit starts inline)
+  const [expandedCell, setExpandedCell] = useState<typeof editing.editingCell>(null);
+  const editingCell = editing.editingCell;
+  const editingColumn = editingCell ? columnInfos.find((c) => c.name === editingCell.colName) : undefined;
+  const editingEditor: CellEditor | null = (() => {
+    if (!editingCell || !data) return null;
+    if (expandedCell === editingCell) return { kind: "long", json: isJsonType(editingColumn) };
+    const colIdx = data.columns.findIndex((c) => c.name === editingCell.colName);
+    const pendingValue = pending.pendingChanges[editingCell.rowIndex]?.[editingCell.colName];
+    return editorFor(editingColumn, pendingValue !== undefined ? pendingValue : data.rows[editingCell.rowIndex]?.[colIdx]);
+  })();
+  const editorDialogOpen = editingEditor?.kind === "long";
+
+  // Loading other rows (page, sorting, refresh) invalidates edits and selection by position
+  const { discardChanges } = pending;
+  const { cancelEdit } = editing;
+  const { setSelectedRows } = selection;
+  const resetRowState = useCallback(() => {
+    discardChanges();
+    cancelEdit();
+    setSelectedRows(new Set());
+  }, [discardChanges, cancelEdit, setSelectedRows]);
+  const discardGuard = useDiscardGuard(pending.dirtyRowCount, resetRowState);
+  const { guard } = discardGuard;
 
   useEffect(() => {
     if (!isActive) return;
     function onKeyDown(e: KeyboardEvent) {
+      // The dialog editor handles its own keys
+      if (editorDialogOpen) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         if (editing.editingCell) editing.confirmEdit();
@@ -74,10 +140,13 @@ export default function TableView() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editing, pending, isActive]);
+  }, [editing, pending, isActive, editorDialogOpen]);
 
   const fetchAllRows = useCallback(async () => {
-    const total = data?.totalRows ?? 0;
+    // An estimated total could miss rows, so count exactly before exporting everything
+    const total = data?.totalRowsEstimated
+      ? await api.countTableRows(schema!, table!)
+      : (data?.totalRows ?? 0);
     const batchSize = 100;
     const pages = Math.ceil(total / batchSize);
     const sortColumn = tableData.sorting[0]?.id;
@@ -85,6 +154,8 @@ export default function TableView() {
     const params = {
       pageSize: batchSize, sortColumn,
       sortDirection: sortColumn ? sortDirection : undefined,
+      filters: tableData.filters,
+      filterMode: tableData.filterMode,
     };
 
     const concurrency = 5;
@@ -107,7 +178,7 @@ export default function TableView() {
     }
 
     return { columns, rows: allRows.slice(0, offset) };
-  }, [schema, table, data?.totalRows, tableData.sorting, api]);
+  }, [schema, table, data?.totalRows, data?.totalRowsEstimated, tableData.sorting, tableData.filters, tableData.filterMode, api]);
 
   const columns = useMemo<ColumnDef<unknown[], unknown>[]>(() => {
     if (!data?.columns) return [];
@@ -122,11 +193,89 @@ export default function TableView() {
     data: data?.rows ?? [],
     columns,
     state: { sorting: tableData.sorting },
-    onSortingChange: tableData.setSorting,
+    onSortingChange: guard(tableData.setSorting),
     getCoreRowModel: getCoreRowModel(),
     manualSorting: true,
     manualPagination: true,
   });
+
+  /** The row as shown on screen, pending edits included. */
+  const shownRow = (rowIndex: number) =>
+    data!.columns.map((col, i) => {
+      const pendingValue = pending.pendingChanges[rowIndex]?.[col.name];
+      return pendingValue !== undefined ? pendingValue : data!.rows[rowIndex][i];
+    });
+
+  const menuItems = ((): ContextMenuItem[] => {
+    if (!menu || !data) return [];
+    const { rowIndex, colName } = menu;
+    const colIdx = data.columns.findIndex((c) => c.name === colName);
+    const column = columnInfos.find((c) => c.name === colName);
+    const row = shownRow(rowIndex);
+    const value = row[colIdx];
+    // Right-clicking inside a multi-row selection acts on the whole selection
+    const targetRows =
+      selection.selectedRows.has(rowIndex) && selection.selectedRows.size > 1
+        ? [...selection.selectedRows].sort((a, b) => a - b).map(shownRow)
+        : [row];
+    const rowsLabel = targetRows.length > 1 ? `${targetRows.length} rows` : "row";
+    const copy = (text: string) => navigator.clipboard.writeText(text);
+    const link = foreignKeyLink(column, row, data.columns);
+    const editable = !editLocked && editorFor(column, value).kind !== "readonly";
+
+    const items: ContextMenuItem[] = [
+      { label: "Copy value", icon: <Copy />, onSelect: () => copy(valueText(value)) },
+      { label: `Copy ${rowsLabel} as JSON`, icon: <Braces />, onSelect: () => copy(rowsToJson(data.columns, targetRows)) },
+      { label: `Copy ${rowsLabel} as TSV`, icon: <Sheet />, onSelect: () => copy(rowsToTsv(data.columns, targetRows)) },
+      { label: `Copy ${rowsLabel} as INSERT`, icon: <Database />, onSelect: () => copy(rowsToInsertSql(schema!, table!, data.columns, targetRows)) },
+      "separator",
+      {
+        label: value === null ? `Filter: ${colName} is NULL` : "Filter by this value",
+        icon: <Filter />,
+        onSelect: guard(() => {
+          const filter: TableFilter =
+            value === null
+              ? { column: colName, operator: "is null", value: "" }
+              : { column: colName, operator: "=", value: toEditText(value) };
+          // Added to "match all" filters; with "match any" it would widen the result instead
+          const keep = tableData.filterMode === "all" ? tableData.filters : [];
+          tableData.applyFilters([...keep, filter], "all");
+          setFiltersOpen(true);
+        }),
+      },
+    ];
+    if (link) {
+      items.push({
+        label: `Open referenced row in ${column!.foreignKey!.table}`,
+        icon: <ArrowUpRight />,
+        onSelect: guard(() => navigate(link.path, { state: { filters: link.filters } })),
+      });
+    }
+    items.push("separator");
+    if (editable && (column?.isNullable ?? true)) {
+      items.push({
+        label: "Set to NULL",
+        icon: <Ban />,
+        disabled: value === null,
+        onSelect: () => editing.setCellValue(rowIndex, colName, true, ""),
+      });
+    }
+    if (!readOnly) items.push({
+      label: "Clone row",
+      icon: <CopyPlus />,
+      onSelect: guard(() => {
+        const initialValues: Record<string, string | null> = {};
+        data.columns.forEach((col, i) => {
+          const info = columnInfos.find((c) => c.name === col.name);
+          // Generated values and keys with a default (serial, uuid) must get new ones
+          if (!info || info.isGenerated || (info.isPrimaryKey && info.defaultValue !== null)) return;
+          initialValues[col.name] = row[i] === null || row[i] === undefined ? null : toEditText(row[i]);
+        });
+        setInsert({ initialValues });
+      }),
+    });
+    return items;
+  })();
 
   return (
     <div className="h-full flex flex-col">
@@ -134,7 +283,11 @@ export default function TableView() {
         schema={schema!}
         table={table!}
         totalRows={data?.totalRows}
+        totalRowsEstimated={data?.totalRowsEstimated}
+        counting={tableData.counting}
+        onCountExactly={tableData.countExactly}
         hasNoPk={hasNoPk}
+        readOnly={readOnly}
         selectedCount={selection.selectedRows.size}
         deleting={pending.deleting}
         onDelete={pending.handleDelete}
@@ -150,13 +303,26 @@ export default function TableView() {
         refreshing={tableData.refreshing}
         loading={loading}
         spinKey={tableData.spinKey}
-        onRefresh={tableData.refresh}
+        onRefresh={guard(tableData.refresh)}
         hasCustomWidths={resize.hasCustomWidths}
         onResetWidths={resize.resetWidths}
+        onInsertRow={guard(() => setInsert({}))}
+        filterCount={tableData.filters.length}
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen((open) => !open)}
         columns={data?.columns}
         rows={data?.rows}
         onFetchAllRows={fetchAllRows}
       />
+
+      {filtersOpen && columnInfos.length > 0 && (
+        <FilterBar
+          columns={columnInfos.map((c) => c.name)}
+          applied={tableData.filters}
+          mode={tableData.filterMode}
+          onApply={guard(tableData.applyFilters)}
+        />
+      )}
 
       {error && <div className="px-4 py-3 text-destructive-foreground text-sm border-b border-border bg-destructive/5">{error}</div>}
 
@@ -231,7 +397,7 @@ export default function TableView() {
                   return (
                     <tr
                       key={rowIndex}
-                      className={`${rowBg} hover:bg-accent`}
+                      className={`${rowBg} group/row hover:bg-accent`}
                     >
                       <td className="border-b border-r border-border px-3 py-1.5">
                         <Checkbox
@@ -241,6 +407,8 @@ export default function TableView() {
                       </td>
                       {data.columns.map((col, colIdx) => {
                         const originalValue = row[colIdx];
+                        const columnInfo = columnInfos.find((c) => c.name === col.name);
+                        const link = foreignKeyLink(columnInfo, row, data.columns);
                         const isDirty =
                           pending.pendingChanges[rowIndex]?.[col.name] !==
                           undefined;
@@ -250,6 +418,7 @@ export default function TableView() {
                         const isEditing =
                           editing.editingCell?.rowIndex === rowIndex &&
                           editing.editingCell?.colName === col.name;
+                        const editor = isEditing && editingEditor ? editingEditor : editorFor(columnInfo, displayValue);
 
                         return (
                           <EditableCell
@@ -258,15 +427,27 @@ export default function TableView() {
                             displayValue={displayValue}
                             isDirty={isDirty}
                             isEditing={isEditing}
-                            hasNoPk={hasNoPk}
+                            hasNoPk={editLocked}
+                            editor={editor}
+                            nullable={columnInfo?.isNullable ?? true}
                             editValue={editing.editValue}
+                            editIsNull={editing.editIsNull}
                             inputRef={editing.inputRef}
                             onStartEdit={() =>
                               editing.startEdit(rowIndex, col.name, originalValue)
                             }
                             onEditValueChange={editing.setEditValue}
+                            onSetNull={editing.setEditNull}
                             onConfirm={editing.confirmEdit}
+                            onCommit={editing.commitEdit}
                             onCancel={editing.cancelEdit}
+                            onExpand={() => setExpandedCell(editing.editingCell)}
+                            linkLabel={link ? `Open the referenced row in ${columnInfo!.foreignKey!.table}` : undefined}
+                            menuOpen={menu?.rowIndex === rowIndex && menu.colName === col.name}
+                            onContextMenu={(e) => setMenu({ x: e.clientX, y: e.clientY, rowIndex, colName: col.name })}
+                            onFollowLink={
+                              link ? guard(() => navigate(link.path, { state: { filters: link.filters } })) : undefined
+                            }
                           />
                         );
                       })}
@@ -275,18 +456,71 @@ export default function TableView() {
                 })}
               </tbody>
             </table>
+            {data.rows.length === 0 && !loading && (
+              <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
+                <p className="text-sm font-medium">
+                  {tableData.filters.length > 0 ? "No rows match the filters" : "This table has no rows"}
+                </p>
+                {tableData.filters.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={guard(() => tableData.applyFilters([], "all"))}>
+                    Clear filters
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
 
           <Pagination
             page={tableData.page}
             totalPages={tableData.totalPages}
-            onPageChange={tableData.setPage}
+            estimated={data.totalRowsEstimated}
+            hasNext={data.totalRowsEstimated ? data.rows.length === tableData.pageSize : undefined}
+            onPageChange={guard(tableData.setPage)}
             pageSize={tableData.pageSize}
             pageSizeOptions={tableData.pageSizeOptions}
-            onPageSizeChange={tableData.setPageSize}
+            onPageSizeChange={guard(tableData.setPageSize)}
           />
         </div>
       )}
+
+      <ContextMenu position={menu} items={menuItems} onClose={closeMenu} />
+
+      <CellEditorDialog
+        open={editorDialogOpen}
+        column={editingCell?.colName ?? ""}
+        typeLabel={editingColumn ? shortType(editingColumn.typeName) : undefined}
+        // Starts from the inline draft, which begins as the cell's (pending) value
+        value={editing.editIsNull ? null : editing.editValue}
+        json={editingEditor?.kind === "long" && editingEditor.json}
+        nullable={editingColumn?.isNullable ?? true}
+        onApply={editing.commitEdit}
+        onCancel={editing.cancelEdit}
+      />
+
+      <InsertRowDialog
+        open={insert !== null}
+        schema={schema!}
+        table={table!}
+        columns={columnInfos}
+        initialValues={insert?.initialValues}
+        onClose={() => setInsert(null)}
+        onInsert={async (values) => {
+          await api.insertRow(schema!, table!, values);
+          await tableData.refresh();
+        }}
+      />
+
+      <ConfirmDialog
+        open={discardGuard.isConfirming}
+        onClose={discardGuard.cancel}
+        onConfirm={discardGuard.confirm}
+        icon={<TriangleAlert />}
+        tone="destructive"
+        title="Discard unsaved changes?"
+        description={`${pending.dirtyRowCount} row${pending.dirtyRowCount > 1 ? "s have" : " has"} unsaved edits. Loading other rows would discard them.`}
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
+      />
     </div>
   );
 }

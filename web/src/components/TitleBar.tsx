@@ -84,7 +84,6 @@ function WindowTab({
       tabIndex={0}
       aria-selected={active}
       data-active={active}
-      title={tab.subtitle ?? undefined}
       onMouseDown={(e) => {
         if (e.button === 0) onActivate();
       }}
@@ -195,7 +194,6 @@ export default function TitleBar() {
           variant="ghost-muted"
           size="icon-sm"
           onClick={toggleSidebar}
-          title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
           aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
         >
           <PanelLeft />
@@ -212,7 +210,7 @@ export default function TitleBar() {
             onClose={() => closeTab(tab.id)}
           />
         ))}
-        <Button variant="ghost-muted" size="icon-xs" className="mb-1.5 ml-0.5" onClick={openTab} title="New tab">
+        <Button variant="ghost-muted" size="icon-xs" className="mb-1.5 ml-0.5" onClick={openTab} aria-label="New tab">
           <Plus />
         </Button>
       </div>

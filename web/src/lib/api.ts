@@ -1,22 +1,28 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ConnectResponse,
+  SshConfig,
   SchemaInfo,
   TableInfo,
   FunctionInfo,
   FunctionDetail,
   ColumnInfo,
   CompletionSchema,
+  FilterMode,
+  TableFilter,
   QueryResult,
   TableDataResponse,
   SavedConnection,
   SavedConnectionInput,
+  TableStructure,
+  ExplainResult,
 } from "@/types";
 
 /** Calls that don't belong to a connection. */
 export const api = {
-  async connect(connectionUrl: string) {
-    return invoke<ConnectResponse>("connect", { connectionUrl });
+  /** Connects, optionally through SSH. `trustHostKey` is an SSH host key fingerprint the user confirmed. */
+  async connect(connectionUrl: string, ssh?: SshConfig | null, trustHostKey?: string) {
+    return invoke<ConnectResponse>("connect", { connectionUrl, ssh: ssh ?? null, trustHostKey: trustHostKey ?? null });
   },
 
   async disconnect(sessionId: string) {
@@ -66,6 +72,11 @@ export function createSessionApi(sessionId: string | null) {
       return invoke<ColumnInfo[]>("get_columns", { sessionId, schema, table });
     },
 
+    /** Indexes, constraints, keys, triggers, sizes and DDL of a table or view. */
+    async getTableStructure(schema: string, table: string) {
+      return invoke<TableStructure>("get_table_structure", { sessionId, schema, table });
+    },
+
     async getCompletionSchema() {
       return invoke<CompletionSchema>("get_completion_schema", { sessionId });
     },
@@ -78,6 +89,8 @@ export function createSessionApi(sessionId: string | null) {
         pageSize?: number;
         sortColumn?: string;
         sortDirection?: "asc" | "desc";
+        filters?: TableFilter[];
+        filterMode?: FilterMode;
       }
     ) {
       return invoke<TableDataResponse>("get_table_data", {
@@ -88,8 +101,45 @@ export function createSessionApi(sessionId: string | null) {
       });
     },
 
+    /** Inserts a row. Columns left out get their defaults; a null value is SQL NULL. */
+    async insertRow(schema: string, table: string, values: Record<string, string | null>) {
+      return invoke<number>("insert_row", { sessionId, schema, table, values });
+    },
+
+    /** Exact row count, for tables whose total is only an estimate. */
+    async countTableRows(schema: string, table: string) {
+      return invoke<number>("count_table_rows", { sessionId, schema, table });
+    },
+
     async query(sql: string) {
       return invoke<QueryResult>("execute_query", { sessionId, sql });
+    },
+
+    /** Stops whatever the query editor is running. */
+    async cancelQuery() {
+      return invoke<void>("cancel_query", { sessionId });
+    },
+
+    /** Opens a transaction that every editor run joins until commit or rollback. */
+    async beginTransaction() {
+      return invoke<void>("begin_transaction", { sessionId });
+    },
+
+    async commitTransaction() {
+      return invoke<void>("commit_transaction", { sessionId });
+    },
+
+    async rollbackTransaction() {
+      return invoke<void>("rollback_transaction", { sessionId });
+    },
+
+    async transactionOpen() {
+      return invoke<boolean>("transaction_open", { sessionId });
+    },
+
+    /** Plan of one statement; with `analyze` it really runs and is rolled back. */
+    async explain(sql: string, analyze: boolean) {
+      return invoke<ExplainResult>("explain_query", { sessionId, sql, analyze });
     },
 
     async updateRow(

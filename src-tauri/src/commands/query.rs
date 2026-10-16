@@ -3,11 +3,15 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tauri::State;
-use tokio_postgres::types::Type;
-use tokio_postgres::Row;
+use tokio_postgres::types::{ToSql, Type};
+use tokio_postgres::{Row, SimpleQueryMessage};
 use uuid::Uuid;
 
-use super::state::AppState;
+use super::pgtext::{is_native, text_to_json};
+use super::sqlsplit::split_statements;
+use super::state::{AppState, Notice};
+use super::tableedit::{build_delete, build_insert, build_update};
+use super::tablefilter::{build_where, quote_ident, TableFilter, TextParam};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +28,12 @@ pub struct QueryResult {
     pub row_count: usize,
     pub rows_affected: Option<u64>,
     pub duration: u64,
+    /// How many statements the script had (1 for a plain query).
+    pub statement_count: usize,
+    /// Notices the server sent while the script ran (`RAISE NOTICE`, warnings).
+    pub notices: Vec<Notice>,
+    /// The script ran inside the editor's open transaction.
+    pub in_transaction: bool,
 }
 
 #[derive(Serialize)]
@@ -32,6 +42,8 @@ pub struct TableDataResponse {
     pub columns: Vec<QueryColumn>,
     pub rows: Vec<Vec<JsonValue>>,
     pub total_rows: i64,
+    /// True when `total_rows` comes from the table statistics instead of an exact count.
+    pub total_rows_estimated: bool,
     pub page: i64,
     pub page_size: i64,
 }
@@ -43,6 +55,9 @@ pub struct TableDataParams {
     pub page_size: Option<i64>,
     pub sort_column: Option<String>,
     pub sort_direction: Option<String>,
+    pub filters: Option<Vec<TableFilter>>,
+    /// "any" joins the filters with OR; anything else (or none) with AND.
+    pub filter_mode: Option<String>,
 }
 
 fn try_get_string(row: &Row, i: usize) -> JsonValue {
@@ -120,7 +135,7 @@ fn row_to_json_values(row: &Row) -> Vec<JsonValue> {
                 Ok(None) => JsonValue::Null,
                 Err(_) => try_get_string(row, i),
             },
-            Type::TIME | Type::TIMETZ => match row.try_get::<_, Option<NaiveTime>>(i) {
+            Type::TIME => match row.try_get::<_, Option<NaiveTime>>(i) {
                 Ok(Some(v)) => JsonValue::String(v.format("%H:%M:%S%.f").to_string()),
                 Ok(None) => JsonValue::Null,
                 Err(_) => try_get_string(row, i),
@@ -281,10 +296,13 @@ fn row_to_json_values(row: &Row) -> Vec<JsonValue> {
     values
 }
 
-fn pg_error_to_json(e: tokio_postgres::Error) -> String {
+/// Error as JSON for the UI. `offset` shifts the position to be relative to the whole
+/// script, and `statement` is the (1-based index, total) of the failing statement
+/// when the script had more than one.
+pub(crate) fn pg_error_in_script(e: tokio_postgres::Error, offset: i64, statement: Option<(usize, usize)>) -> String {
     if let Some(db) = e.as_db_error() {
         let position = match db.position() {
-            Some(tokio_postgres::error::ErrorPosition::Original(p)) => Some(*p),
+            Some(tokio_postgres::error::ErrorPosition::Original(p)) => Some((*p as i64 + offset).max(1)),
             _ => None,
         };
         serde_json::json!({
@@ -294,6 +312,8 @@ fn pg_error_to_json(e: tokio_postgres::Error) -> String {
             "hint": db.hint(),
             "position": position,
             "code": db.code().code(),
+            "statement": statement.map(|(index, _)| index),
+            "statementCount": statement.map(|(_, total)| total),
         })
         .to_string()
     } else {
@@ -306,21 +326,9 @@ fn columns_from_statement(columns: &[tokio_postgres::Column]) -> Vec<QueryColumn
         .iter()
         .map(|c| QueryColumn {
             name: c.name().to_string(),
-            data_type: c.type_().oid().to_string(),
+            data_type: c.type_().name().to_string(),
         })
         .collect()
-}
-
-fn json_value_to_pg_literal(v: &JsonValue) -> String {
-    match v {
-        JsonValue::Null => "NULL".to_string(),
-        JsonValue::Bool(b) => if *b { "TRUE".to_string() } else { "FALSE".to_string() },
-        JsonValue::Number(n) => n.to_string(),
-        JsonValue::String(s) => format!("'{}'", s.replace('\'', "''")),
-        JsonValue::Array(_) | JsonValue::Object(_) => {
-            format!("'{}'", v.to_string().replace('\'', "''"))
-        }
-    }
 }
 
 async fn get_valid_columns(
@@ -340,62 +348,216 @@ async fn get_valid_columns(
     Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
 }
 
+/// Result of running one statement.
+struct StatementOutput {
+    columns: Vec<QueryColumn>,
+    rows: Vec<Vec<JsonValue>>,
+    /// Set for statements that return no rows (INSERT without RETURNING, DDL...).
+    rows_affected: Option<u64>,
+}
+
+/// Runs a single statement and returns its rows as JSON.
+///
+/// Types the binary decoders know are read directly. If any column has another type
+/// (enum, interval, inet, money, range, domain...), the statement runs through the
+/// text protocol and each value is converted from its text form.
+async fn run_statement(
+    client: &tokio_postgres::Client,
+    sql: &str,
+) -> Result<StatementOutput, tokio_postgres::Error> {
+    let stmt = client.prepare(sql).await?;
+
+    if stmt.columns().is_empty() {
+        let affected = client.execute(&stmt, &[]).await?;
+        return Ok(StatementOutput {
+            columns: vec![],
+            rows: vec![],
+            rows_affected: Some(affected),
+        });
+    }
+
+    let columns = columns_from_statement(stmt.columns());
+
+    let rows = if stmt.columns().iter().all(|c| is_native(c.type_())) {
+        let rows = client.query(&stmt, &[]).await?;
+        rows.iter().map(row_to_json_values).collect()
+    } else {
+        let types: Vec<Type> = stmt.columns().iter().map(|c| c.type_().clone()).collect();
+        let messages = client.simple_query(sql).await?;
+        messages
+            .iter()
+            .filter_map(|message| match message {
+                SimpleQueryMessage::Row(row) => Some(
+                    types
+                        .iter()
+                        .enumerate()
+                        .map(|(i, ty)| match row.try_get(i).ok().flatten() {
+                            Some(text) => text_to_json(ty, text),
+                            None => JsonValue::Null,
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .collect()
+    };
+
+    Ok(StatementOutput {
+        columns,
+        rows,
+        rows_affected: None,
+    })
+}
+
 #[tauri::command]
 pub async fn execute_query(
     state: State<'_, AppState>,
     session_id: String,
     sql: String,
 ) -> Result<QueryResult, String> {
-    if sql.trim().is_empty() {
+    let statements = split_statements(&sql);
+    if statements.is_empty() {
         return Err("SQL query is required".into());
     }
 
-    let client = state.client(&session_id).await?;
+    let (client, in_transaction) = state.editor_client(&session_id).await?;
+    let notices = state.notices(&session_id).await?;
+    // Only this run's notices are returned
+    notices.lock().unwrap().clear();
+    let total = statements.len();
 
     let start = std::time::Instant::now();
-    let stmt = client
-        .prepare(&sql)
-        .await
-        .map_err(pg_error_to_json)?;
+    // The result set of the last statement that returns rows is the one shown;
+    // statements without rows only add to the affected count.
+    let mut shown: Option<StatementOutput> = None;
+    let mut affected: u64 = 0;
+    for (index, statement) in statements.iter().enumerate() {
+        let output = run_statement(&client, &statement.text).await.map_err(|e| {
+            pg_error_in_script(e, statement.offset as i64, (total > 1).then_some((index + 1, total)))
+        })?;
+        match output.rows_affected {
+            Some(count) => affected += count,
+            None => shown = Some(output),
+        }
+    }
+    let duration = start.elapsed().as_millis() as u64;
+    let notices = std::mem::take(&mut *notices.lock().unwrap());
 
-    let sql_upper = sql.trim().to_uppercase();
-    let is_query = sql_upper.starts_with("SELECT")
-        || sql_upper.starts_with("WITH")
-        || sql_upper.starts_with("TABLE")
-        || sql_upper.starts_with("VALUES")
-        || sql_upper.starts_with("EXPLAIN")
-        || sql_upper.starts_with("SHOW");
-
-    if is_query {
-        let columns = columns_from_statement(stmt.columns());
-        let rows = client
-            .query(&stmt, &[])
-            .await
-            .map_err(pg_error_to_json)?;
-        let duration = start.elapsed().as_millis() as u64;
-        let row_count = rows.len();
-        let json_rows: Vec<Vec<JsonValue>> = rows.iter().map(row_to_json_values).collect();
-        Ok(QueryResult {
-            columns,
-            rows: json_rows,
-            row_count,
+    Ok(match shown {
+        Some(output) => QueryResult {
+            row_count: output.rows.len(),
+            columns: output.columns,
+            rows: output.rows,
             rows_affected: None,
             duration,
-        })
-    } else {
-        let affected = client
-            .execute(&stmt, &[])
-            .await
-            .map_err(pg_error_to_json)?;
-        let duration = start.elapsed().as_millis() as u64;
-        Ok(QueryResult {
+            statement_count: total,
+            notices,
+            in_transaction,
+        },
+        None => QueryResult {
             columns: vec![],
             rows: vec![],
             row_count: affected as usize,
             rows_affected: Some(affected),
             duration,
-        })
+            statement_count: total,
+            notices,
+            in_transaction,
+        },
+    })
+}
+
+/// The server's own message for a failed statement, without the driver's prefix.
+pub(crate) fn db_message(e: &tokio_postgres::Error) -> String {
+    match e.as_db_error() {
+        Some(db) => db.message().to_string(),
+        None => e.to_string(),
     }
+}
+
+/// Below this many rows an exact count is cheap, and the statistics are often stale.
+const ESTIMATE_THRESHOLD: i64 = 100_000;
+
+/// Row estimate from the table statistics (updated by VACUUM / ANALYZE), or None for
+/// views, tables never analyzed, and anything small enough to just count.
+async fn estimated_rows(
+    client: &tokio_postgres::Client,
+    relation: &str,
+) -> Result<Option<i64>, tokio_postgres::Error> {
+    let row = client
+        .query_opt(
+            "SELECT reltuples::bigint FROM pg_class \
+             WHERE oid = to_regclass($1) AND relkind IN ('r', 'p', 'm')",
+            &[&relation],
+        )
+        .await?;
+    Ok(row
+        .map(|r| r.get::<_, i64>(0))
+        .filter(|&estimate| estimate >= ESTIMATE_THRESHOLD))
+}
+
+async fn count_rows(
+    client: &tokio_postgres::Client,
+    relation: &str,
+    where_sql: &str,
+    params: &[TextParam],
+) -> Result<i64, tokio_postgres::Error> {
+    let param_refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    let row = client
+        .query_one(&format!("SELECT COUNT(*) FROM {relation}{where_sql}"), &param_refs)
+        .await?;
+    Ok(row.get(0))
+}
+
+/// One page of a table. The columns the binary decoders can't read are selected as text
+/// and converted afterwards, since a statement with parameters can't use the text protocol.
+#[allow(clippy::too_many_arguments)]
+async fn select_table_page(
+    client: &tokio_postgres::Client,
+    relation: &str,
+    where_sql: &str,
+    params: &[TextParam],
+    order_clause: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<StatementOutput, tokio_postgres::Error> {
+    let probe = client.prepare(&format!("SELECT * FROM {relation}")).await?;
+    let types: Vec<Type> = probe.columns().iter().map(|c| c.type_().clone()).collect();
+    let select_list = probe
+        .columns()
+        .iter()
+        .map(|c| {
+            let name = quote_ident(c.name());
+            if is_native(c.type_()) {
+                name
+            } else {
+                format!("{name}::text AS {name}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = format!("SELECT {select_list} FROM {relation}{where_sql}{order_clause} LIMIT {limit} OFFSET {offset}");
+    let stmt = client.prepare(&sql).await?;
+    let param_refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    let rows = client.query(&stmt, &param_refs).await?;
+
+    let mut json_rows: Vec<Vec<JsonValue>> = rows.iter().map(row_to_json_values).collect();
+    for row in &mut json_rows {
+        for (i, value) in row.iter_mut().enumerate() {
+            if !is_native(&types[i]) {
+                if let JsonValue::String(text) = value {
+                    *value = text_to_json(&types[i], text);
+                }
+            }
+        }
+    }
+
+    Ok(StatementOutput {
+        columns: columns_from_statement(probe.columns()),
+        rows: json_rows,
+        rows_affected: None,
+    })
 }
 
 #[tauri::command]
@@ -413,55 +575,104 @@ pub async fn get_table_data(
         .as_ref()
         .and_then(|p| p.page_size)
         .unwrap_or(50)
-        .clamp(1, 100);
+        .clamp(1, 500);
     let offset = (page - 1) * page_size;
+
+    let valid_columns = get_valid_columns(&client, &schema, &table).await?;
 
     // Build ORDER BY clause
     let mut order_clause = String::new();
-    if let Some(ref p) = params {
-        if let Some(ref sort_col) = p.sort_column {
-            let valid_columns = get_valid_columns(&client, &schema, &table).await?;
-            if valid_columns.contains(sort_col) {
-                let dir = match p.sort_direction.as_deref() {
-                    Some("desc") => "DESC",
-                    _ => "ASC",
-                };
-                order_clause = format!(" ORDER BY \"{}\" {}", sort_col, dir);
-            }
+    if let Some(sort_col) = params.as_ref().and_then(|p| p.sort_column.as_ref()) {
+        if valid_columns.contains(sort_col) {
+            let dir = match params.as_ref().and_then(|p| p.sort_direction.as_deref()) {
+                Some("desc") => "DESC",
+                _ => "ASC",
+            };
+            order_clause = format!(" ORDER BY {} {}", quote_ident(sort_col), dir);
         }
     }
 
-    // Get total count
-    let count_sql = format!("SELECT COUNT(*) as total FROM \"{}\".\"{}\"", schema, table);
-    let count_row = client
-        .query_one(&count_sql as &str, &[])
-        .await
-        .map_err(|e| e.to_string())?;
-    let total_rows: i64 = count_row.get(0);
+    // Build WHERE clause from the filters
+    let filters = params.as_ref().and_then(|p| p.filters.as_deref()).unwrap_or(&[]);
+    let match_any = params.as_ref().and_then(|p| p.filter_mode.as_deref()) == Some("any");
+    let (where_sql, where_params) = build_where(filters, match_any, &valid_columns)?;
+
+    let relation = format!("{}.{}", quote_ident(&schema), quote_ident(&table));
+
+    // Total rows: exact for small tables or when filtering, estimated for big unfiltered ones
+    let estimate = if where_sql.is_empty() {
+        estimated_rows(&client, &relation).await.map_err(|e| db_message(&e))?
+    } else {
+        None
+    };
+    let (total_rows, total_rows_estimated) = match estimate {
+        Some(estimate) => (estimate, true),
+        None => (
+            count_rows(&client, &relation, &where_sql, &where_params)
+                .await
+                .map_err(|e| db_message(&e))?,
+            false,
+        ),
+    };
 
     // Get paginated data
-    let data_sql = format!(
-        "SELECT * FROM \"{}\".\"{}\"{}  LIMIT {} OFFSET {}",
-        schema, table, order_clause, page_size, offset
-    );
-    let stmt = client
-        .prepare(&data_sql)
+    let output = select_table_page(&client, &relation, &where_sql, &where_params, &order_clause, page_size, offset)
         .await
-        .map_err(|e| e.to_string())?;
-    let columns = columns_from_statement(stmt.columns());
-    let rows = client
-        .query(&stmt, &[])
-        .await
-        .map_err(|e| e.to_string())?;
-    let json_rows: Vec<Vec<JsonValue>> = rows.iter().map(row_to_json_values).collect();
+        .map_err(|e| db_message(&e))?;
 
     Ok(TableDataResponse {
-        columns,
-        rows: json_rows,
+        columns: output.columns,
+        rows: output.rows,
         total_rows,
+        total_rows_estimated,
         page,
         page_size,
     })
+}
+
+/// Inserts one row. Only the columns present in `values` are written; the rest get
+/// their defaults. A null value is SQL NULL.
+#[tauri::command]
+pub async fn insert_row(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    table: String,
+    values: serde_json::Map<String, JsonValue>,
+) -> Result<u64, String> {
+    let client = state.client(&session_id).await?;
+    let valid_columns = get_valid_columns(&client, &schema, &table).await?;
+    let relation = format!("{}.{}", quote_ident(&schema), quote_ident(&table));
+    insert_into(&client, &relation, &values, &valid_columns).await
+}
+
+async fn insert_into(
+    client: &tokio_postgres::Client,
+    relation: &str,
+    values: &serde_json::Map<String, JsonValue>,
+    valid_columns: &[String],
+) -> Result<u64, String> {
+    let (sql, params) = build_insert(relation, values, valid_columns)?;
+    let param_refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    client
+        .execute(&sql, &param_refs)
+        .await
+        .map_err(|e| db_message(&e))
+}
+
+/// Exact number of rows of a table, for when the view only shows an estimate.
+#[tauri::command]
+pub async fn count_table_rows(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    table: String,
+) -> Result<i64, String> {
+    let client = state.client(&session_id).await?;
+    let relation = format!("{}.{}", quote_ident(&schema), quote_ident(&table));
+    count_rows(&client, &relation, "", &[])
+        .await
+        .map_err(|e| db_message(&e))
 }
 
 #[tauri::command]
@@ -473,47 +684,23 @@ pub async fn update_row(
     primary_key: serde_json::Map<String, JsonValue>,
     updates: serde_json::Map<String, JsonValue>,
 ) -> Result<serde_json::Value, String> {
-    if primary_key.is_empty() {
-        return Err("primaryKey is required".into());
-    }
-    if updates.is_empty() {
-        return Err("updates is required".into());
-    }
-
     let client = state.client(&session_id).await?;
+    let affected = update_in(&client, &schema, &table, &primary_key, &updates).await?;
+    Ok(serde_json::json!({ "rowsAffected": affected }))
+}
 
-    let valid_columns = get_valid_columns(&client, &schema, &table).await?;
-
-    for col in updates.keys().chain(primary_key.keys()) {
-        if !valid_columns.contains(col) {
-            return Err(format!("Invalid column: {}", col));
-        }
-    }
-
-    let mut set_clauses = Vec::new();
-    for (col, val) in &updates {
-        set_clauses.push(format!("\"{}\" = {}", col, json_value_to_pg_literal(val)));
-    }
-
-    let mut where_clauses = Vec::new();
-    for (col, val) in &primary_key {
-        where_clauses.push(format!("\"{}\" = {}", col, json_value_to_pg_literal(val)));
-    }
-
-    let sql = format!(
-        "UPDATE \"{}\".\"{}\" SET {} WHERE {}",
-        schema,
-        table,
-        set_clauses.join(", "),
-        where_clauses.join(" AND ")
-    );
-
-    let result = client
-        .execute(&sql as &str, &[])
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(serde_json::json!({ "rowsAffected": result }))
+async fn update_in(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+    primary_key: &serde_json::Map<String, JsonValue>,
+    updates: &serde_json::Map<String, JsonValue>,
+) -> Result<u64, String> {
+    let valid_columns = get_valid_columns(client, schema, table).await?;
+    let relation = format!("{}.{}", quote_ident(schema), quote_ident(table));
+    let (sql, params) = build_update(&relation, primary_key, updates, &valid_columns)?;
+    let refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    client.execute(sql.as_str(), &refs).await.map_err(|e| db_message(&e))
 }
 
 #[tauri::command]
@@ -524,42 +711,462 @@ pub async fn delete_rows(
     table: String,
     primary_keys: Vec<serde_json::Map<String, JsonValue>>,
 ) -> Result<serde_json::Value, String> {
-    if primary_keys.is_empty() {
-        return Err("primaryKeys is required".into());
+    let client = state.client(&session_id).await?;
+    let deleted = delete_from(&client, &schema, &table, &primary_keys).await?;
+    Ok(serde_json::json!({ "rowsDeleted": deleted }))
+}
+
+async fn delete_from(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+    primary_keys: &[serde_json::Map<String, JsonValue>],
+) -> Result<u64, String> {
+    let valid_columns = get_valid_columns(client, schema, table).await?;
+    let relation = format!("{}.{}", quote_ident(schema), quote_ident(table));
+    let (sql, params) = build_delete(&relation, primary_keys, &valid_columns)?;
+    let refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    client.execute(sql.as_str(), &refs).await.map_err(|e| db_message(&e))
+}
+
+/// Tests that need a real server. Run them with:
+///   DBUNNY_TEST_DATABASE_URL=postgresql://user:pass@localhost/db cargo test --lib -- --ignored
+/// Everything they create is temporary (pg_temp) and disappears with the connection.
+#[cfg(test)]
+mod server_tests {
+    use super::*;
+    use serde_json::json;
+
+    async fn connect() -> tokio_postgres::Client {
+        let url = std::env::var("DBUNNY_TEST_DATABASE_URL")
+            .expect("set DBUNNY_TEST_DATABASE_URL to run the server tests");
+        let (client, connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+            .await
+            .expect("could not connect to the test database");
+        tokio::spawn(connection);
+        client
     }
 
-    let client = state.client(&session_id).await?;
+    async fn run(client: &tokio_postgres::Client, sql: &str) -> StatementOutput {
+        run_statement(client, sql).await.unwrap_or_else(|e| panic!("{sql}: {e}"))
+    }
 
-    let valid_columns = get_valid_columns(&client, &schema, &table).await?;
-    if let Some(first) = primary_keys.first() {
-        for col in first.keys() {
-            if !valid_columns.contains(col) {
-                return Err(format!("Invalid column: {}", col));
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn unusual_types_are_readable_instead_of_binary() {
+        let client = connect().await;
+        client.batch_execute("CREATE TYPE pg_temp.mood AS ENUM ('sad', 'happy')").await.unwrap();
+        client.batch_execute("CREATE DOMAIN pg_temp.posint AS int CHECK (VALUE > 0)").await.unwrap();
+
+        let out = run(
+            &client,
+            "SELECT 'happy'::pg_temp.mood, 5::pg_temp.posint, ARRAY['sad','happy']::pg_temp.mood[], \
+             int4range(1, 10), '1 day 02:00:00'::interval, '10.0.0.1/24'::inet, '10:00:00+02'::timetz, \
+             ARRAY[1,2]::int4[], true, 7::int8, NULL::interval, 'abc'::bytea",
+        )
+        .await;
+
+        assert_eq!(out.rows.len(), 1);
+        assert_eq!(
+            out.rows[0],
+            vec![
+                json!("happy"),
+                json!(5),
+                json!(["sad", "happy"]),
+                json!("[1,10)"),
+                json!("1 day 02:00:00"),
+                json!("10.0.0.1/24"),
+                json!("10:00:00+02"),
+                json!([1, 2]),
+                json!(true),
+                json!(7),
+                JsonValue::Null,
+                json!("YWJj"),
+            ]
+        );
+        assert_eq!(out.columns[0].data_type, "mood");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn native_types_still_use_the_binary_path() {
+        let client = connect().await;
+        let out = run(&client, "SELECT 1::int4, 'a'::text, 1.5::float8, '{\"a\":1}'::jsonb, ARRAY['x','y']::text[]").await;
+        assert_eq!(
+            out.rows[0],
+            vec![json!(1), json!("a"), json!(1.5), json!({"a": 1}), json!(["x", "y"])]
+        );
+        assert_eq!(out.columns[0].data_type, "int4");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn insert_returning_gives_rows_and_plain_insert_gives_a_count() {
+        let client = connect().await;
+        client.batch_execute("CREATE TEMP TABLE returning_test (id int)").await.unwrap();
+
+        let returned = run(&client, "INSERT INTO returning_test VALUES (1), (2) RETURNING id").await;
+        assert_eq!(returned.rows, vec![vec![json!(1)], vec![json!(2)]]);
+        assert_eq!(returned.rows_affected, None);
+
+        let plain = run(&client, "INSERT INTO returning_test VALUES (3)").await;
+        assert!(plain.rows.is_empty());
+        assert_eq!(plain.rows_affected, Some(1));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn a_table_with_an_enum_and_nulls_reads_back_correctly() {
+        let client = connect().await;
+        client.batch_execute("CREATE TYPE pg_temp.size AS ENUM ('s', 'm', 'l')").await.unwrap();
+        client
+            .batch_execute("CREATE TEMP TABLE shirts (id int PRIMARY KEY, size pg_temp.size, tags text[], note text)")
+            .await
+            .unwrap();
+        client
+            .batch_execute("INSERT INTO shirts VALUES (1, 'm', ARRAY['a','b'], NULL), (2, NULL, NULL, 'x')")
+            .await
+            .unwrap();
+
+        let out = run(&client, "SELECT * FROM shirts ORDER BY id").await;
+        assert_eq!(out.rows[0], vec![json!(1), json!("m"), json!(["a", "b"]), JsonValue::Null]);
+        assert_eq!(out.rows[1], vec![json!(2), JsonValue::Null, JsonValue::Null, json!("x")]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn a_script_runs_each_statement_in_order() {
+        let client = connect().await;
+        let script = "CREATE TEMP TABLE script_test (id int); \
+                      INSERT INTO script_test VALUES (1), (2); \
+                      INSERT INTO script_test VALUES (3); \
+                      SELECT count(*)::int AS n FROM script_test";
+        let mut shown = None;
+        for statement in split_statements(script) {
+            let out = run(&client, &statement.text).await;
+            if out.rows_affected.is_none() {
+                shown = Some(out);
             }
         }
+        assert_eq!(shown.unwrap().rows, vec![vec![json!(3)]]);
     }
 
-    let mut total_deleted: u64 = 0;
-    for pk in &primary_keys {
-        let mut where_clauses = Vec::new();
-        for (col, val) in pk {
-            where_clauses.push(format!("\"{}\" = {}", col, json_value_to_pg_literal(val)));
-        }
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn semicolons_in_strings_and_function_bodies_survive_on_a_real_server() {
+        let client = connect().await;
+        let script = "CREATE FUNCTION pg_temp.two() RETURNS int AS $$ BEGIN PERFORM 1; RETURN 2; END; $$ LANGUAGE plpgsql; \
+                      SELECT 'a;b' AS s, pg_temp.two() AS n";
+        let statements = split_statements(script);
+        assert_eq!(statements.len(), 2);
+        run(&client, &statements[0].text).await;
+        let out = run(&client, &statements[1].text).await;
+        assert_eq!(out.rows, vec![vec![json!("a;b"), json!(2)]]);
+    }
 
-        let sql = format!(
-            "DELETE FROM \"{}\".\"{}\" WHERE {}",
-            schema,
-            table,
-            where_clauses.join(" AND ")
-        );
-
-        let result = client
-            .execute(&sql as &str, &[])
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn error_positions_are_shifted_to_the_whole_script() {
+        let client = connect().await;
+        let script = "SELECT 1;\n  SELECT nope";
+        let statements = split_statements(script);
+        let err = run_statement(&client, &statements[1].text)
             .await
-            .map_err(|e| e.to_string())?;
-
-        total_deleted += result;
+            .err()
+            .expect("the second statement should fail");
+        let json: serde_json::Value = serde_json::from_str(&pg_error_in_script(err, statements[1].offset as i64, Some((2, 2)))).unwrap();
+        let position = json["position"].as_u64().unwrap() as usize;
+        // The position points at "nope", counted in characters from the start of the script
+        let at_position: String = script.chars().skip(position - 1).take(4).collect();
+        assert_eq!(at_position, "nope");
+        assert_eq!(json["statement"], 2);
+        assert_eq!(json["statementCount"], 2);
     }
 
-    Ok(serde_json::json!({ "rowsDeleted": total_deleted }))
+    // --- table filters ---
+
+    async fn filter_fixture(client: &tokio_postgres::Client) {
+        client.batch_execute("CREATE TYPE pg_temp.mood AS ENUM ('sad', 'happy')").await.unwrap();
+        client
+            .batch_execute(
+                "CREATE TEMP TABLE filt (id int PRIMARY KEY, name text, mood pg_temp.mood, tags text[]); \
+                 INSERT INTO filt VALUES \
+                   (1, 'ana', 'happy', ARRAY['a']), \
+                   (2, 'bruno', 'sad', NULL), \
+                   (3, NULL, 'happy', ARRAY['b','c']), \
+                   (4, 'ana maria', NULL, NULL)",
+            )
+            .await
+            .unwrap();
+    }
+
+    fn filter(column: &str, operator: &str, value: &str) -> TableFilter {
+        TableFilter { column: column.into(), operator: operator.into(), value: value.into() }
+    }
+
+    const COLUMNS: [&str; 4] = ["id", "name", "mood", "tags"];
+
+    /// Ids of the rows matching the filters, plus the count the table view would report.
+    async fn matching_ids(
+        client: &tokio_postgres::Client,
+        filters: &[TableFilter],
+        match_any: bool,
+    ) -> Result<(Vec<i64>, i64), String> {
+        let valid: Vec<String> = COLUMNS.iter().map(|c| c.to_string()).collect();
+        let (where_sql, params) = build_where(filters, match_any, &valid)?;
+        let page = select_table_page(client, "pg_temp.filt", &where_sql, &params, " ORDER BY \"id\"", 100, 0)
+            .await
+            .map_err(|e| db_message(&e))?;
+        let count = count_rows(client, "pg_temp.filt", &where_sql, &params).await.map_err(|e| db_message(&e))?;
+        let ids = page.rows.iter().map(|r| r[0].as_i64().unwrap()).collect();
+        Ok((ids, count))
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn filters_compare_with_the_column_type() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        assert_eq!(matching_ids(&client, &[filter("id", ">=", "3")], false).await.unwrap(), (vec![3, 4], 2));
+        assert_eq!(matching_ids(&client, &[filter("id", "!=", "1")], false).await.unwrap(), (vec![2, 3, 4], 3));
+        assert_eq!(matching_ids(&client, &[filter("id", "in", "1, 4, 9")], false).await.unwrap(), (vec![1, 4], 2));
+        assert_eq!(matching_ids(&client, &[filter("id", "not in", "1,2")], false).await.unwrap(), (vec![3, 4], 2));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn text_filters_and_null_checks_work() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        assert_eq!(matching_ids(&client, &[filter("name", "like", "ana%")], false).await.unwrap().0, vec![1, 4]);
+        assert_eq!(matching_ids(&client, &[filter("name", "ilike", "ANA")], false).await.unwrap().0, vec![1]);
+        assert_eq!(matching_ids(&client, &[filter("name", "not like", "ana%")], false).await.unwrap().0, vec![2]);
+        assert_eq!(matching_ids(&client, &[filter("name", "is null", "")], false).await.unwrap().0, vec![3]);
+        assert_eq!(matching_ids(&client, &[filter("tags", "is not null", "")], false).await.unwrap().0, vec![1, 3]);
+        // like on a non-text column compares its text form
+        assert_eq!(matching_ids(&client, &[filter("id", "like", "1%")], false).await.unwrap().0, vec![1]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn enum_columns_can_be_filtered_and_are_still_readable() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        let valid: Vec<String> = COLUMNS.iter().map(|c| c.to_string()).collect();
+        let (where_sql, params) = build_where(&[filter("mood", "=", "happy")], false, &valid).unwrap();
+        let page = select_table_page(&client, "pg_temp.filt", &where_sql, &params, " ORDER BY \"id\"", 100, 0).await.unwrap();
+        assert_eq!(page.rows.len(), 2);
+        assert_eq!(page.rows[0], vec![json!(1), json!("ana"), json!("happy"), json!(["a"])]);
+        assert_eq!(page.rows[1], vec![json!(3), JsonValue::Null, json!("happy"), json!(["b", "c"])]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn several_filters_match_all_or_any() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        let filters = [filter("name", "like", "ana%"), filter("id", ">", "1")];
+        assert_eq!(matching_ids(&client, &filters, false).await.unwrap().0, vec![4]);
+        assert_eq!(matching_ids(&client, &filters, true).await.unwrap().0, vec![1, 2, 3, 4]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn a_value_of_the_wrong_type_fails_with_the_servers_message() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        let err = matching_ids(&client, &[filter("id", "=", "abc")], false).await.unwrap_err();
+        assert!(err.contains("invalid input syntax for type integer"), "{err}");
+        assert!(!err.contains("db error"), "{err}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn filter_values_are_never_run_as_sql() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        let evil = filter("name", "=", "x'; DROP TABLE filt; --");
+        assert_eq!(matching_ids(&client, &[evil], false).await.unwrap(), (vec![], 0));
+        // The table is still there
+        assert_eq!(matching_ids(&client, &[], false).await.unwrap().1, 4);
+    }
+
+    // --- row count estimate ---
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn big_analyzed_tables_get_an_estimate_and_small_ones_do_not() {
+        let client = connect().await;
+        client
+            .batch_execute(
+                "CREATE TEMP TABLE est_big AS SELECT g AS id FROM generate_series(1, 150000) g; \
+                 CREATE TEMP TABLE est_small AS SELECT g AS id FROM generate_series(1, 50) g; \
+                 CREATE TEMP VIEW est_view AS SELECT * FROM est_big; \
+                 ANALYZE est_big; ANALYZE est_small",
+            )
+            .await
+            .unwrap();
+
+        let estimate = estimated_rows(&client, "pg_temp.\"est_big\"").await.unwrap().expect("a big table is estimated");
+        assert!((140_000..=160_000).contains(&estimate), "{estimate}");
+        assert_eq!(count_rows(&client, "pg_temp.\"est_big\"", "", &[]).await.unwrap(), 150_000);
+
+        // Small tables, views and unknown names are counted exactly instead
+        assert_eq!(estimated_rows(&client, "pg_temp.\"est_small\"").await.unwrap(), None);
+        assert_eq!(estimated_rows(&client, "pg_temp.\"est_view\"").await.unwrap(), None);
+        assert_eq!(estimated_rows(&client, "pg_temp.\"missing\"").await.unwrap(), None);
+    }
+
+    // --- inserting rows ---
+
+    async fn insert_fixture(client: &tokio_postgres::Client) -> Vec<String> {
+        client.batch_execute("CREATE TYPE pg_temp.mood AS ENUM ('sad', 'happy')").await.unwrap();
+        client
+            .batch_execute(
+                "CREATE TEMP TABLE ins (id serial PRIMARY KEY, name text NOT NULL, mood pg_temp.mood, \
+                 created timestamptz DEFAULT now(), note text DEFAULT 'x')",
+            )
+            .await
+            .unwrap();
+        ["id", "name", "mood", "created", "note"].iter().map(|c| c.to_string()).collect()
+    }
+
+    fn values(pairs: serde_json::Value) -> serde_json::Map<String, JsonValue> {
+        pairs.as_object().unwrap().clone()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn untouched_columns_get_their_defaults() {
+        let client = connect().await;
+        let columns = insert_fixture(&client).await;
+        let affected = insert_into(&client, "pg_temp.ins", &values(json!({"name": "ana"})), &columns).await.unwrap();
+        assert_eq!(affected, 1);
+        let row = run(&client, "SELECT id, name, mood, created IS NOT NULL AS has_created, note FROM ins").await;
+        assert_eq!(row.rows[0], vec![json!(1), json!("ana"), JsonValue::Null, json!(true), json!("x")]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn an_explicit_null_overrides_the_default() {
+        let client = connect().await;
+        let columns = insert_fixture(&client).await;
+        insert_into(&client, "pg_temp.ins", &values(json!({"name": "ana", "note": null})), &columns).await.unwrap();
+        let row = run(&client, "SELECT note FROM ins").await;
+        assert_eq!(row.rows[0], vec![JsonValue::Null]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn enums_numbers_and_empty_strings_are_converted_by_the_server() {
+        let client = connect().await;
+        let columns = insert_fixture(&client).await;
+        insert_into(&client, "pg_temp.ins", &values(json!({"id": 42, "name": "", "mood": "happy"})), &columns).await.unwrap();
+        let row = run(&client, "SELECT id, name, mood FROM ins").await;
+        assert_eq!(row.rows[0], vec![json!(42), json!(""), json!("happy")]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn constraint_and_type_errors_come_back_as_the_servers_message() {
+        let client = connect().await;
+        let columns = insert_fixture(&client).await;
+        // name is NOT NULL and has no default
+        let err = insert_into(&client, "pg_temp.ins", &values(json!({})), &columns).await.unwrap_err();
+        assert!(err.contains("null value in column \"name\""), "{err}");
+        let err = insert_into(&client, "pg_temp.ins", &values(json!({"name": "a", "id": "abc"})), &columns).await.unwrap_err();
+        assert!(err.contains("invalid input syntax for type integer"), "{err}");
+        let err = insert_into(&client, "pg_temp.ins", &values(json!({"name": "a", "mood": "angry"})), &columns).await.unwrap_err();
+        assert!(err.contains("invalid input value for enum"), "{err}");
+        // Nothing was inserted by the failures
+        assert_eq!(count_rows(&client, "pg_temp.ins", "", &[]).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn a_table_of_only_defaults_accepts_an_empty_insert() {
+        let client = connect().await;
+        client.batch_execute("CREATE TEMP TABLE only_defaults (id serial, tag text DEFAULT 'new')").await.unwrap();
+        let columns: Vec<String> = vec!["id".into(), "tag".into()];
+        insert_into(&client, "pg_temp.only_defaults", &values(json!({})), &columns).await.unwrap();
+        let row = run(&client, "SELECT id, tag FROM only_defaults").await;
+        assert_eq!(row.rows[0], vec![json!(1), json!("new")]);
+    }
+
+    async fn edit_fixture(client: &tokio_postgres::Client) {
+        client
+            .batch_execute(
+                "CREATE TYPE pg_temp.level AS ENUM ('low', 'high'); \
+                 CREATE TEMP TABLE parents (id int PRIMARY KEY); \
+                 CREATE TEMP TABLE items ( \
+                   id int, at timestamptz, name text, level pg_temp.level, data jsonb, \
+                   parent_id int REFERENCES parents (id), \
+                   PRIMARY KEY (id, at)); \
+                 INSERT INTO parents VALUES (1); \
+                 INSERT INTO items VALUES \
+                   (1, '2026-01-01T10:00:00Z', 'one', 'low', NULL, NULL), \
+                   (2, '2026-01-02T10:00:00Z', 'two', 'low', NULL, NULL), \
+                   (3, '2026-01-03T10:00:00Z', 'three', 'low', NULL, NULL);",
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn temp_schema(client: &tokio_postgres::Client) -> String {
+        client
+            .query_one("SELECT nspname::text FROM pg_namespace WHERE oid = pg_my_temp_schema()", &[])
+            .await
+            .unwrap()
+            .get(0)
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn updates_convert_values_server_side_and_find_rows_by_composite_keys() {
+        let client = connect().await;
+        edit_fixture(&client).await;
+        let schema = temp_schema(&client).await;
+
+        let key = values(json!({"id": 2, "at": "2026-01-02T10:00:00Z"}));
+        let updates = values(json!({"name": "it's \\ fine'); DROP TABLE items; --", "level": "high", "data": "{\"a\": [1, 2]}"}));
+        assert_eq!(update_in(&client, &schema, "items", &key, &updates).await.unwrap(), 1);
+
+        let row = client
+            .query_one("SELECT name, level::text, data->'a'->>1 FROM items WHERE id = 2", &[])
+            .await
+            .unwrap();
+        assert_eq!(row.get::<_, String>(0), "it's \\ fine'); DROP TABLE items; --");
+        assert_eq!(row.get::<_, String>(1), "high");
+        assert_eq!(row.get::<_, String>(2), "2");
+
+        // NULL is a real NULL; a key that matches nothing changes nothing
+        assert_eq!(update_in(&client, &schema, "items", &key, &values(json!({"name": null}))).await.unwrap(), 1);
+        let name: Option<String> = client.query_one("SELECT name FROM items WHERE id = 2", &[]).await.unwrap().get(0);
+        assert_eq!(name, None);
+        let missing = values(json!({"id": 2, "at": "2030-01-01T00:00:00Z"}));
+        assert_eq!(update_in(&client, &schema, "items", &missing, &values(json!({"name": "x"}))).await.unwrap(), 0);
+
+        let err = update_in(&client, &schema, "items", &key, &values(json!({"level": "medium"}))).await.unwrap_err();
+        assert!(err.contains("invalid input value for enum"), "{err}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn deletes_are_all_or_nothing() {
+        let client = connect().await;
+        edit_fixture(&client).await;
+        let schema = temp_schema(&client).await;
+        let key = |id: i32, day: i32| values(json!({"id": id, "at": format!("2026-01-0{day}T10:00:00Z")}));
+
+        // Row 3 is referenced, so deleting 1 and 3 together must fail and keep both
+        client.batch_execute("CREATE TEMP TABLE refs (item_id int, item_at timestamptz, FOREIGN KEY (item_id, item_at) REFERENCES items (id, at)); INSERT INTO refs VALUES (3, '2026-01-03T10:00:00Z')").await.unwrap();
+        let err = delete_from(&client, &schema, "items", &[key(1, 1), key(3, 3)]).await.unwrap_err();
+        assert!(err.contains("foreign key"), "{err}");
+        let left: i64 = client.query_one("SELECT count(*) FROM items", &[]).await.unwrap().get(0);
+        assert_eq!(left, 3);
+
+        assert_eq!(delete_from(&client, &schema, "items", &[key(1, 1), key(2, 2)]).await.unwrap(), 2);
+        let left: i64 = client.query_one("SELECT count(*) FROM items", &[]).await.unwrap().get(0);
+        assert_eq!(left, 1);
+    }
 }

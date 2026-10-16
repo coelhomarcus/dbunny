@@ -20,9 +20,26 @@ const variants = {
     "border-destructive bg-destructive text-white shadow-xs shadow-destructive/25 " +
     "inset-shadow-[0_1px_rgb(255_255_255/0.18)] hover:bg-destructive/90 " +
     "active:inset-shadow-[0_1px_rgb(0_0_0/0.12)] active:shadow-none",
+  // Same finish as the filled buttons above (border, light edge on top, shadow in its
+  // own colour), in other colours
+  success:
+    "border-success bg-success text-white shadow-xs shadow-success/25 " +
+    "inset-shadow-[0_1px_rgb(255_255_255/0.2)] hover:bg-success/90 " +
+    "active:inset-shadow-[0_1px_rgb(0_0_0/0.12)] active:shadow-none",
+  warning:
+    "border-warning bg-warning text-zinc-950 shadow-xs shadow-warning/25 " +
+    "inset-shadow-[0_1px_rgb(255_255_255/0.3)] hover:bg-warning/90 " +
+    "active:inset-shadow-[0_1px_rgb(0_0_0/0.12)] active:shadow-none",
+  neutral:
+    "border-foreground/15 bg-foreground/[0.07] text-foreground shadow-xs shadow-black/10 " +
+    "inset-shadow-[0_1px_rgb(255_255_255/0.1)] hover:bg-foreground/[0.11] " +
+    "active:inset-shadow-[0_1px_rgb(0_0_0/0.08)] active:shadow-none",
+  // Bordered button without a fill colour: same finish as the filled ones (light edge on
+  // top, soft shadow, pushed-in on press), just tuned for the card surface
   outline:
-    "border-input bg-card text-foreground shadow-xs/5 hover:bg-card-hover " +
-    "dark:inset-shadow-[0_1px_rgb(255_255_255/0.04)] active:shadow-none",
+    "border-input bg-card text-foreground shadow-xs shadow-black/10 " +
+    "inset-shadow-[0_1px_rgb(255_255_255/0.7)] dark:inset-shadow-[0_1px_rgb(255_255_255/0.07)] hover:bg-card-hover " +
+    "active:inset-shadow-[0_1px_rgb(0_0_0/0.08)] active:shadow-none",
   secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-accent",
   ghost: "border-transparent text-foreground hover:bg-accent data-[active=true]:bg-accent",
   "ghost-muted":
@@ -54,6 +71,12 @@ export const inputClass =
   "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/20 " +
   "disabled:opacity-55 dark:bg-muted " +
   "aria-invalid:border-destructive/60 aria-invalid:ring-3 aria-invalid:ring-destructive/15";
+
+/** Native <select> styled like the inputs. */
+export const selectClass =
+  "h-8 min-w-0 rounded-lg border border-input bg-card px-2 text-sm text-foreground shadow-xs/5 outline-none " +
+  "cursor-pointer hover:bg-card-hover focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/20 " +
+  "disabled:opacity-55";
 
 export const segmentedListClass = "flex w-fit items-center gap-0.5 rounded-lg bg-muted p-0.5";
 

@@ -1,13 +1,15 @@
 import { useState, useRef } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "../lib/cn";
 
 interface TooltipProps {
   label: string;
   children: React.ReactNode;
   side?: "right" | "left" | "top" | "bottom";
+  className?: string;
 }
 
-export default function Tooltip({ label, children, side = "right" }: TooltipProps) {
+export default function Tooltip({ label, children, side = "right", className }: TooltipProps) {
   const [pos, setPos] = useState<React.CSSProperties | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -28,13 +30,13 @@ export default function Tooltip({ label, children, side = "right" }: TooltipProp
   }
 
   return (
-    <div ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)} className="inline-flex">
+    <div ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)} className={cn("inline-flex", className)}>
       {children}
       {pos &&
         createPortal(
           <div
             style={{ ...pos, position: "fixed" }}
-            className="z-9999 pointer-events-none whitespace-nowrap bg-popover border border-border text-popover-foreground text-xs px-2.5 py-1 rounded-md shadow-lg"
+            className="z-9999 pointer-events-none max-w-80 whitespace-pre-line bg-popover border border-border text-popover-foreground text-xs px-2.5 py-1 rounded-md shadow-lg"
           >
             {label}
           </div>,

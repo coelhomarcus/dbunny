@@ -1,7 +1,7 @@
 import type { ComponentProps } from "react";
 import { buttonClass, type ButtonSize, type ButtonVariant } from "./styles";
 
-type ButtonProps = ComponentProps<"button"> & {
+export type ButtonProps = ComponentProps<"button"> & {
   variant?: ButtonVariant;
   size?: ButtonSize;
 };

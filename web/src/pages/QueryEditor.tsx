@@ -2,23 +2,42 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useConnection } from "../contexts/useConnection";
 import { useTab } from "../contexts/workspace";
 import { tabState } from "../lib/tabState";
-import type { CompletionSchema, QueryResult } from "@/types";
+import type { CompletionSchema, ExplainResult, QueryResult } from "@/types";
 import QueryResults from "../components/QueryResults";
 import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
-import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
+import { Plus, X, Upload, Download, Loader, ShieldCheck, ShieldOff, AlertTriangle, Square, Workflow, ChevronDown, GitCommitVertical } from "lucide-react";
+import SegmentedTabs from "../components/ui/SegmentedTabs";
+import Popover from "../components/ui/Popover";
+import Badge from "../components/ui/Badge";
+import PlanView from "../components/query/PlanView";
+import NoticeList from "../components/query/NoticeList";
 import ExportMenu from "../components/ExportMenu";
 import Button from "../components/ui/Button";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 
 type TabMeta = {
   id: number;
   label: string;
 };
 
+type ResultView = "results" | "messages" | "plan";
+
 type TabPayload = {
   sql: string;
   result: QueryResult | null;
   error: string | null;
+  plan?: ExplainResult | null;
+  view?: ResultView;
 };
+
+/** Plain transaction statements typed in the editor are routed to the transaction controls. */
+function transactionCommand(sql: string): "begin" | "commit" | "rollback" | null {
+  const statement = sql.replace(/--[^\n]*/g, " ").trim().replace(/;$/, "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (statement === "BEGIN" || statement === "BEGIN TRANSACTION" || statement === "BEGIN WORK" || statement === "START TRANSACTION") return "begin";
+  if (statement === "COMMIT" || statement === "END" || statement === "COMMIT TRANSACTION" || statement === "COMMIT WORK") return "commit";
+  if (statement === "ROLLBACK" || statement === "ABORT" || statement === "ROLLBACK TRANSACTION" || statement === "ROLLBACK WORK") return "rollback";
+  return null;
+}
 
 type DangerInfo = {
   rule: string;
@@ -113,6 +132,12 @@ export default function QueryEditor() {
   const [result, setResult] = useState<QueryResult | null>(initial.result);
   const [error, setError] = useState<string | null>(initial.error);
   const [running, setRunning] = useState(false);
+  const [plan, setPlan] = useState<ExplainResult | null>(initial.plan ?? null);
+  const [view, setView] = useState<ResultView>(initial.view ?? "results");
+  const [inTransaction, setInTransaction] = useState(false);
+  const [txBusy, setTxBusy] = useState(false);
+  const [explainMenuOpen, setExplainMenuOpen] = useState(false);
+  const explainButtonRef = useRef<HTMLButtonElement>(null);
   const [safeMode, setSafeMode] = useState(saved.safeMode);
   const [pendingDangers, setPendingDangers] = useState<DangerInfo[] | null>(null);
   const pendingSqlRef = useRef<string | null>(null);
@@ -145,6 +170,11 @@ export default function QueryEditor() {
     loadCompletionSchema();
   }, [loadCompletionSchema]);
 
+  // The transaction lives on the server side of the connection; ask whether one is open
+  useEffect(() => {
+    api.transactionOpen().then(setInTransaction).catch(() => {});
+  }, [api]);
+
   // On unmount (e.g. opening a table), keep the SQL being edited. The tab list and
   // active tab are already written to `saved` by switchTab/addTab/closeTab; writing
   // them here too would restore stale values (a closed tab coming back as active).
@@ -171,6 +201,8 @@ export default function QueryEditor() {
     editorRef.current?.setValue(payload.sql);
     setResult(payload.result);
     setError(payload.error);
+    setPlan(payload.plan ?? null);
+    setView(payload.view ?? "results");
   }
 
   function addTab() {
@@ -186,6 +218,8 @@ export default function QueryEditor() {
     editorRef.current?.setValue("");
     setResult(null);
     setError(null);
+    setPlan(null);
+    setView("results");
   }
 
   function closeTab(e: React.MouseEvent, id: number) {
@@ -208,6 +242,8 @@ export default function QueryEditor() {
       editorRef.current?.setValue(payload.sql);
       setResult(payload.result);
       setError(payload.error);
+      setPlan(payload.plan ?? null);
+      setView(payload.view ?? "results");
     }
   }
 
@@ -239,7 +275,37 @@ export default function QueryEditor() {
     }
   }
 
+  /** Shows a result view and remembers it for the active query tab. */
+  const showView = useCallback((next: ResultView) => {
+    setView(next);
+    const payload = saved.payloads.get(activeIdRef.current);
+    if (payload) payload.view = next;
+  }, [saved]);
+
+  const runTransaction = useCallback(async (command: "begin" | "commit" | "rollback") => {
+    setTxBusy(true);
+    setError(null);
+    try {
+      if (command === "begin") await api.beginTransaction();
+      else if (command === "commit") await api.commitTransaction();
+      else await api.rollbackTransaction();
+    } catch (err) {
+      setError(typeof err === "string" ? err : err instanceof Error ? err.message : "Transaction failed");
+      setResult(null);
+      showView("results");
+    } finally {
+      // Commit and rollback close the transaction even when they fail
+      setInTransaction(await api.transactionOpen().catch(() => false));
+      setTxBusy(false);
+    }
+  }, [api, showView]);
+
   const executeQuery = useCallback(async (sql: string) => {
+    const txCommand = transactionCommand(sql);
+    if (txCommand) {
+      await runTransaction(txCommand);
+      return;
+    }
     setRunning(true);
     setError(null);
     setResult(null);
@@ -249,6 +315,8 @@ export default function QueryEditor() {
       setResult(res);
       const payload = saved.payloads.get(activeIdRef.current);
       if (payload) { payload.result = res; payload.error = null; }
+      // A script that only printed messages opens on them
+      showView(res.columns.length === 0 && (res.notices?.length ?? 0) > 0 ? "messages" : "results");
       if (DDL_PATTERN.test(sql)) loadCompletionSchema();
     } catch (err) {
       await delay;
@@ -256,10 +324,31 @@ export default function QueryEditor() {
       setError(msg);
       const payload = saved.payloads.get(activeIdRef.current);
       if (payload) { payload.result = null; payload.error = msg; }
+      showView("results");
     } finally {
       setRunning(false);
     }
-  }, [loadCompletionSchema, api, saved]);
+  }, [loadCompletionSchema, api, saved, runTransaction, showView]);
+
+  const explain = useCallback(async (analyze: boolean) => {
+    setExplainMenuOpen(false);
+    const sql = editorRef.current?.getSelectionOrValue() ?? "";
+    if (!sql.trim()) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const res = await api.explain(sql, analyze);
+      setPlan(res);
+      const payload = saved.payloads.get(activeIdRef.current);
+      if (payload) payload.plan = res;
+      showView("plan");
+    } catch (err) {
+      setError(typeof err === "string" ? err : err instanceof Error ? err.message : "EXPLAIN failed");
+      showView("results");
+    } finally {
+      setRunning(false);
+    }
+  }, [api, saved, showView]);
 
   const runQuery = useCallback(async () => {
     const editor = editorRef.current;
@@ -293,43 +382,30 @@ export default function QueryEditor() {
 
   return (
     <div className="h-full flex flex-col">
-      {pendingDangers && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-            <div className="px-5 pt-5 pb-4">
-              <div className="flex items-center gap-2.5 mb-1">
-                <div className="flex items-center justify-center w-7 h-7 rounded-full bg-destructive/15">
-                  <AlertTriangle size={14} className="text-destructive-foreground" />
-                </div>
-                <h3 className="text-sm font-semibold text-foreground">Query blocked by Safe Mode</h3>
-              </div>
-              <p className="text-sm text-muted-foreground mt-2">
-                {pendingDangers.length === 1
-                  ? "A potentially destructive operation was detected."
-                  : `${pendingDangers.length} potentially destructive operations were detected.`}
-              </p>
+      <ConfirmDialog
+        open={pendingDangers !== null}
+        onClose={cancelDangerousQuery}
+        onConfirm={confirmDangerousQuery}
+        icon={<AlertTriangle />}
+        tone="destructive"
+        title="Query blocked by Safe Mode"
+        description={
+          pendingDangers?.length === 1
+            ? "A potentially destructive operation was detected."
+            : `${pendingDangers?.length ?? 0} potentially destructive operations were detected.`
+        }
+        cancelLabel="Cancel"
+        confirmLabel="Run anyway"
+      >
+        <div className="rounded-xl border border-border bg-muted divide-y divide-border">
+          {(pendingDangers ?? []).map((d, i) => (
+            <div key={i} className="px-3 py-2.5">
+              <span className="font-mono text-xs font-medium text-destructive-foreground block">{d.rule}</span>
+              <span className="text-xs text-muted-foreground block mt-0.5">{d.detail}</span>
             </div>
-
-            <div className="mx-5 mb-4 rounded-xl border border-border bg-muted divide-y divide-border">
-              {pendingDangers.map((d, i) => (
-                <div key={i} className="px-3 py-2.5">
-                  <span className="font-mono text-xs font-medium text-destructive-foreground block">{d.rule}</span>
-                  <span className="text-xs text-muted-foreground block mt-0.5">{d.detail}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2 px-5 py-3.5 border-t border-border bg-muted">
-              <Button variant="destructive" size="sm" onClick={confirmDangerousQuery}>
-                Run anyway
-              </Button>
-              <Button variant="ghost-muted" size="sm" onClick={cancelDangerousQuery}>
-                Cancel
-              </Button>
-            </div>
-          </div>
+          ))}
         </div>
-      )}
+      </ConfirmDialog>
 
       {/* Editor panel */}
       <div className="flex flex-col flex-1 min-h-0 border-b border-border">
@@ -369,7 +445,7 @@ export default function QueryEditor() {
                 </button>
               );
             })}
-            <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={addTab} title="New query tab">
+            <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={addTab} aria-label="New query tab">
               <Plus />
             </Button>
           </div>
@@ -393,8 +469,64 @@ export default function QueryEditor() {
             </span>
             <Loader className={`size-4 animate-spin absolute inset-0 m-auto transition-opacity duration-200 ${running ? "opacity-100" : "opacity-0"}`} />
           </Button>
+          {running && (
+            <Button variant="outline" size="sm" onClick={() => api.cancelQuery().catch(() => {})}>
+              <Square className="size-3 fill-current" />
+              Cancel
+            </Button>
+          )}
+          <Button
+            ref={explainButtonRef}
+            variant="ghost-muted"
+            size="sm"
+            onClick={() => setExplainMenuOpen((open) => !open)}
+            disabled={running}
+            aria-expanded={explainMenuOpen}
+          >
+            <Workflow />
+            Explain
+            <ChevronDown className="size-3" />
+          </Button>
+          <Popover open={explainMenuOpen} onClose={() => setExplainMenuOpen(false)} anchorRef={explainButtonRef} className="w-64 p-1">
+            <button
+              type="button"
+              onClick={() => explain(false)}
+              className="w-full rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-accent"
+            >
+              <div className="text-[13px] font-medium">Explain</div>
+              <div className="text-xs text-muted-foreground">The planner's estimate, nothing runs</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => explain(true)}
+              className="w-full rounded-md px-2.5 py-1.5 text-left cursor-pointer hover:bg-accent"
+            >
+              <div className="text-[13px] font-medium">Explain analyze</div>
+              <div className="text-xs text-muted-foreground">Runs the query for real times, then rolls it back</div>
+            </button>
+          </Popover>
+          {inTransaction ? (
+            <div className="flex items-center gap-1.5">
+              <Badge variant="warning">
+                <GitCommitVertical />
+                Transaction open
+              </Badge>
+              <Button variant="success" size="xs" onClick={() => runTransaction("commit")} disabled={txBusy || running}>
+                Commit
+              </Button>
+              <Button variant="outline" size="xs" onClick={() => runTransaction("rollback")} disabled={txBusy || running}>
+                Rollback
+              </Button>
+            </div>
+          ) : (
+            <Button variant="ghost-muted" size="sm" onClick={() => runTransaction("begin")} disabled={txBusy || running}>
+              <GitCommitVertical />
+              Begin
+            </Button>
+          )}
           {result && (
             <span className="text-sm text-muted-foreground">
+              {(result.statementCount ?? 1) > 1 && `${result.statementCount} statements · `}
               {result.rowsAffected != null
                 ? `${result.rowsAffected} rows affected in ${result.duration}ms`
                 : `${result.rowCount} rows in ${result.duration}ms`}
@@ -414,16 +546,16 @@ export default function QueryEditor() {
               size="sm"
               className={safeMode ? "text-success-foreground" : undefined}
               onClick={() => setSafeMode((v) => !v)}
-              title={safeMode ? "Safe Mode ON - click to disable" : "Safe Mode OFF - click to enable"}
+              aria-pressed={safeMode}
             >
               {safeMode ? <ShieldCheck /> : <ShieldOff />}
               {safeMode ? "Safe" : "Unsafe"}
             </Button>
-            <Button variant="ghost-muted" size="sm" onClick={importQuery} title="Import .sql file">
+            <Button variant="ghost-muted" size="sm" onClick={importQuery}>
               <Upload />
               Import
             </Button>
-            <Button variant="ghost-muted" size="sm" onClick={exportQuery} title="Export as .sql file">
+            <Button variant="ghost-muted" size="sm" onClick={exportQuery}>
               <Download />
               Export SQL
             </Button>
@@ -431,9 +563,39 @@ export default function QueryEditor() {
         </div>
       </div>
 
-      {/* Results panel */}
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <QueryResults result={result} error={error} running={running} />
+      {/* Results panel: tabs appear once there are messages or a plan to show */}
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+        {(plan || (result?.notices?.length ?? 0) > 0) && (
+          <div className="flex shrink-0 items-center border-b border-border px-2 py-1.5">
+            <SegmentedTabs
+              value={view}
+              onChange={showView}
+              options={[
+                { value: "results", label: "Results" },
+                {
+                  value: "messages",
+                  label: (
+                    <>
+                      Messages <span className="text-xs tabular-nums text-muted-foreground">{result?.notices?.length ?? 0}</span>
+                    </>
+                  ),
+                },
+                ...(plan ? [{ value: "plan" as const, label: "Plan" }] : []),
+              ]}
+            />
+          </div>
+        )}
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {view === "plan" && plan && !error ? (
+            <PlanView explain={plan} />
+          ) : view === "messages" && !error ? (
+            <div className="h-full overflow-auto">
+              <NoticeList notices={result?.notices ?? []} />
+            </div>
+          ) : (
+            <QueryResults result={result} error={error} running={running} />
+          )}
+        </div>
       </div>
     </div>
   );

@@ -21,10 +21,31 @@ pub struct TableInfo {
 pub struct ColumnInfo {
     pub name: String,
     pub data_type: String,
+    /// The type as Postgres prints it (`varchar(80)`, `mood`, `integer[]`), unlike the
+    /// standard `data_type` which says `USER-DEFINED` or `ARRAY` for those.
+    pub type_name: String,
     pub is_nullable: bool,
     pub default_value: Option<String>,
     pub ordinal_position: i32,
     pub is_primary_key: bool,
+    /// Generated or `GENERATED ALWAYS AS IDENTITY`: the server computes it, so it can't be written.
+    pub is_generated: bool,
+    pub comment: Option<String>,
+    /// Labels of the column's enum type, in their declared order.
+    pub enum_values: Option<Vec<String>>,
+    /// The first foreign key that includes this column.
+    pub foreign_key: Option<ForeignKeyRef>,
+}
+
+/// A foreign key constraint: `columns` of this table point at `ref_columns` of the referenced one.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ForeignKeyRef {
+    pub constraint: String,
+    pub schema: String,
+    pub table: String,
+    pub columns: Vec<String>,
+    pub ref_columns: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -231,41 +252,93 @@ pub async fn get_columns(
     table: String,
 ) -> Result<Vec<ColumnInfo>, String> {
     let client = state.client(&session_id).await?;
+    table_columns(&client, &schema, &table).await.map_err(|e| e.to_string())
+}
+
+pub(crate) async fn table_columns(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+) -> Result<Vec<ColumnInfo>, tokio_postgres::Error> {
+    let foreign_keys = table_foreign_keys(client, schema, table).await?;
 
     let rows = client
         .query(
-            "SELECT c.column_name as name, c.data_type as data_type, \
-             (c.is_nullable = 'YES') as is_nullable, \
-             c.column_default as default_value, \
-             c.ordinal_position::int as ordinal_position, \
-             EXISTS ( \
-               SELECT 1 FROM information_schema.table_constraints tc \
-               JOIN information_schema.key_column_usage kcu \
-                 ON tc.constraint_name = kcu.constraint_name \
-                 AND tc.table_schema = kcu.table_schema \
-                 AND tc.table_name = kcu.table_name \
-               WHERE tc.constraint_type = 'PRIMARY KEY' \
-                 AND tc.table_schema = $1 \
-                 AND tc.table_name = $2 \
-                 AND kcu.column_name = c.column_name \
-             ) as is_primary_key \
+            "SELECT c.column_name AS name, c.data_type AS data_type, \
+             format_type(a.atttypid, a.atttypmod) AS type_name, \
+             (c.is_nullable = 'YES') AS is_nullable, \
+             c.column_default AS default_value, \
+             c.ordinal_position::int AS ordinal_position, \
+             COALESCE(a.attnum = ANY(pk.conkey), false) AS is_primary_key, \
+             COALESCE(c.is_generated = 'ALWAYS' OR c.identity_generation = 'ALWAYS', false) AS is_generated, \
+             col_description(cls.oid, a.attnum) AS comment, \
+             (SELECT array_agg(e.enumlabel::text ORDER BY e.enumsortorder) \
+                FROM pg_enum e WHERE e.enumtypid = a.atttypid) AS enum_values \
              FROM information_schema.columns c \
+             JOIN pg_namespace ns ON ns.nspname = c.table_schema \
+             JOIN pg_class cls ON cls.relnamespace = ns.oid AND cls.relname = c.table_name \
+             JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name \
+             LEFT JOIN pg_constraint pk ON pk.conrelid = cls.oid AND pk.contype = 'p' \
              WHERE c.table_schema = $1 AND c.table_name = $2 \
              ORDER BY c.ordinal_position",
             &[&schema, &table],
         )
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
     Ok(rows
         .iter()
-        .map(|r| ColumnInfo {
-            name: r.get("name"),
-            data_type: r.get("data_type"),
-            is_nullable: r.get("is_nullable"),
-            default_value: r.get("default_value"),
-            ordinal_position: r.get("ordinal_position"),
-            is_primary_key: r.get("is_primary_key"),
+        .map(|r| {
+            let name: String = r.get("name");
+            let foreign_key = foreign_keys.iter().find(|fk| fk.columns.contains(&name)).cloned();
+            ColumnInfo {
+                data_type: r.get("data_type"),
+                type_name: r.get("type_name"),
+                is_nullable: r.get("is_nullable"),
+                default_value: r.get("default_value"),
+                ordinal_position: r.get("ordinal_position"),
+                is_primary_key: r.get("is_primary_key"),
+                is_generated: r.get("is_generated"),
+                comment: r.get("comment"),
+                enum_values: r.get("enum_values"),
+                foreign_key,
+                name,
+            }
+        })
+        .collect())
+}
+
+async fn table_foreign_keys(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+) -> Result<Vec<ForeignKeyRef>, tokio_postgres::Error> {
+    // conkey/confkey are parallel arrays of attribute numbers; WITH ORDINALITY keeps their order
+    let rows = client
+        .query(
+            "SELECT con.conname AS constraint_name, fn.nspname AS ref_schema, fc.relname AS ref_table, \
+             ARRAY(SELECT a.attname::text FROM unnest(con.conkey) WITH ORDINALITY k(num, i) \
+                   JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.num ORDER BY k.i) AS columns, \
+             ARRAY(SELECT a.attname::text FROM unnest(con.confkey) WITH ORDINALITY k(num, i) \
+                   JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.num ORDER BY k.i) AS ref_columns \
+             FROM pg_constraint con \
+             JOIN pg_class c ON c.oid = con.conrelid \
+             JOIN pg_namespace n ON n.oid = c.relnamespace \
+             JOIN pg_class fc ON fc.oid = con.confrelid \
+             JOIN pg_namespace fn ON fn.oid = fc.relnamespace \
+             WHERE con.contype = 'f' AND n.nspname = $1 AND c.relname = $2 \
+             ORDER BY con.conname",
+            &[&schema, &table],
+        )
+        .await?;
+
+    Ok(rows
+        .iter()
+        .map(|r| ForeignKeyRef {
+            constraint: r.get("constraint_name"),
+            schema: r.get("ref_schema"),
+            table: r.get("ref_table"),
+            columns: r.get("columns"),
+            ref_columns: r.get("ref_columns"),
         })
         .collect())
 }
@@ -385,4 +458,98 @@ pub async fn get_completion_schema(
         relations,
         functions,
     })
+}
+
+/// Tests that need a real server, see `query::server_tests`.
+#[cfg(test)]
+mod server_tests {
+    use super::*;
+
+    async fn connect() -> tokio_postgres::Client {
+        let url = std::env::var("DBUNNY_TEST_DATABASE_URL")
+            .expect("set DBUNNY_TEST_DATABASE_URL to run the server tests");
+        let (client, connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+            .await
+            .expect("could not connect to the test database");
+        tokio::spawn(connection);
+        client
+    }
+
+    async fn temp_schema(client: &tokio_postgres::Client) -> String {
+        client
+            .query_one("SELECT nspname::text FROM pg_namespace WHERE oid = pg_my_temp_schema()", &[])
+            .await
+            .unwrap()
+            .get(0)
+    }
+
+    async fn fixture(client: &tokio_postgres::Client) -> String {
+        client
+            .batch_execute(
+                "CREATE TYPE pg_temp.mood AS ENUM ('sad', 'ok', 'happy'); \
+                 CREATE TEMP TABLE regions (code text, country text, PRIMARY KEY (country, code)); \
+                 CREATE TEMP TABLE users (id int PRIMARY KEY, name text); \
+                 CREATE TEMP TABLE posts ( \
+                   id int GENERATED ALWAYS AS IDENTITY PRIMARY KEY, \
+                   author_id int REFERENCES users (id), \
+                   country text, region text, \
+                   feeling pg_temp.mood, \
+                   title text NOT NULL, \
+                   title_length int GENERATED ALWAYS AS (length(title)) STORED, \
+                   FOREIGN KEY (country, region) REFERENCES regions (country, code)); \
+                 COMMENT ON COLUMN posts.title IS 'Shown in the feed';",
+            )
+            .await
+            .unwrap();
+        temp_schema(client).await
+    }
+
+    fn column<'a>(columns: &'a [ColumnInfo], name: &str) -> &'a ColumnInfo {
+        columns.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("no column {name}"))
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn columns_know_their_foreign_keys() {
+        let client = connect().await;
+        let schema = fixture(&client).await;
+        let columns = table_columns(&client, &schema, "posts").await.unwrap();
+
+        let author = column(&columns, "author_id").foreign_key.as_ref().unwrap();
+        assert_eq!((author.table.as_str(), author.schema.as_str()), ("users", schema.as_str()));
+        assert_eq!((author.columns.clone(), author.ref_columns.clone()), (vec!["author_id".to_string()], vec!["id".to_string()]));
+
+        // Both columns of a composite key point at the same constraint, in the declared order
+        let region = column(&columns, "region").foreign_key.clone().unwrap();
+        assert_eq!(region, column(&columns, "country").foreign_key.clone().unwrap());
+        assert_eq!(region.columns, vec!["country", "region"]);
+        assert_eq!(region.ref_columns, vec!["country", "code"]);
+
+        assert!(column(&columns, "title").foreign_key.is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn columns_know_enums_generated_values_and_comments() {
+        let client = connect().await;
+        let schema = fixture(&client).await;
+        let columns = table_columns(&client, &schema, "posts").await.unwrap();
+
+        assert_eq!(column(&columns, "feeling").enum_values.clone().unwrap(), vec!["sad", "ok", "happy"]);
+        assert!(column(&columns, "title").enum_values.is_none());
+        assert_eq!(column(&columns, "feeling").data_type, "USER-DEFINED");
+        assert!(column(&columns, "feeling").type_name.ends_with("mood"));
+        assert_eq!(column(&columns, "author_id").type_name, "integer");
+
+        assert!(column(&columns, "id").is_generated, "identity always");
+        assert!(column(&columns, "title_length").is_generated, "stored generated");
+        assert!(!column(&columns, "title").is_generated);
+
+        assert_eq!(column(&columns, "title").comment.as_deref(), Some("Shown in the feed"));
+        assert!(column(&columns, "id").is_primary_key);
+        assert!(!column(&columns, "author_id").is_primary_key);
+
+        let regions = table_columns(&client, &schema, "regions").await.unwrap();
+        assert!(regions.iter().all(|c| c.is_primary_key), "composite primary key");
+    }
 }

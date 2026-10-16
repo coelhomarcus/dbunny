@@ -5,9 +5,14 @@ import {
   Trash2,
   RefreshCw,
   Columns3,
+  ListFilter,
+  Lock,
+  Loader,
+  Plus,
 } from "lucide-react";
 import ExportMenu from "./ExportMenu";
 import Button from "./ui/Button";
+import Badge from "./ui/Badge";
 import { HeaderTitle, PageHeader } from "./layout/PageHeader";
 import { segmentedItemClass, segmentedListClass } from "./ui/styles";
 import type { QueryColumn } from "@/types";
@@ -16,7 +21,12 @@ interface TableViewHeaderProps {
   schema: string;
   table: string;
   totalRows?: number;
+  totalRowsEstimated?: boolean;
+  counting: boolean;
+  onCountExactly: () => void;
   hasNoPk: boolean;
+  /** Read-only connection: no insert, edit or delete. */
+  readOnly: boolean;
   selectedCount: number;
   deleting: boolean;
   onDelete: () => void;
@@ -32,37 +42,59 @@ interface TableViewHeaderProps {
   onRefresh: () => void;
   hasCustomWidths: boolean;
   onResetWidths: () => void;
+  onInsertRow: () => void;
+  filterCount: number;
+  filtersOpen: boolean;
+  onToggleFilters: () => void;
   columns?: QueryColumn[];
   rows?: unknown[][];
   onFetchAllRows?: () => Promise<{ columns: QueryColumn[]; rows: unknown[][] }>;
 }
 
 export default function TableViewHeader({
-  schema, table, totalRows, hasNoPk,
+  schema, table, totalRows, totalRowsEstimated, counting, onCountExactly, hasNoPk, readOnly,
   selectedCount, deleting, onDelete,
   hasPendingChanges, dirtyRowCount, saveError, saving, onSave, onDiscard,
   refreshing, loading, spinKey, onRefresh,
   hasCustomWidths, onResetWidths,
+  onInsertRow, filterCount, filtersOpen, onToggleFilters,
   columns, rows, onFetchAllRows,
 }: TableViewHeaderProps) {
   return (
     <PageHeader className="justify-between">
       <div className="flex min-w-0 items-center gap-3">
         <HeaderTitle label={`Table · ${schema}`}>{table}</HeaderTitle>
-        {totalRows !== undefined && (
-          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
-            {totalRows.toLocaleString()} rows
+        {totalRows !== undefined &&
+          (totalRowsEstimated ? (
+            <button
+              type="button"
+              onClick={onCountExactly}
+              disabled={counting}
+              aria-label="Estimated row count, click for an exact count"
+              className="flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-default"
+            >
+              {counting ? <Loader size={11} className="animate-spin" /> : "~"}
+              {totalRows.toLocaleString()} rows
+            </button>
+          ) : (
+            <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
+              {totalRows.toLocaleString()} rows
+            </span>
+          ))}
+        {readOnly ? (
+          <span className="flex items-center gap-1 text-sm text-warning-foreground/80">
+            <Lock size={12} />
+            read-only connection
           </span>
-        )}
-        {hasNoPk && (
+        ) : hasNoPk ? (
           <span className="text-sm text-warning-foreground/80">
             no primary key - editing disabled
           </span>
-        )}
+        ) : null}
       </div>
 
       <div className="flex items-center gap-2">
-        {selectedCount > 0 && !hasNoPk && (
+        {selectedCount > 0 && !hasNoPk && !readOnly && (
           <Button variant="destructive" size="sm" onClick={onDelete} disabled={deleting}>
             <Trash2 />
             {deleting
@@ -89,7 +121,25 @@ export default function TableViewHeader({
           </div>
         )}
 
-        <Button variant="ghost-muted" size="icon-sm" onClick={onRefresh} disabled={refreshing || loading} title="Refresh">
+        {!readOnly && (
+          <Button variant="ghost-muted" size="sm" onClick={onInsertRow}>
+            <Plus />
+            Insert
+          </Button>
+        )}
+
+        <Button
+          variant="ghost-muted"
+          size="sm"
+          data-active={filtersOpen || filterCount > 0}
+          onClick={onToggleFilters}
+        >
+          <ListFilter />
+          Filter
+          {filterCount > 0 && <Badge variant="info">{filterCount}</Badge>}
+        </Button>
+
+        <Button variant="ghost-muted" size="icon-sm" onClick={onRefresh} disabled={refreshing || loading} aria-label="Refresh">
           <RefreshCw
             key={spinKey}
             className={
@@ -103,7 +153,7 @@ export default function TableViewHeader({
         </Button>
 
         {hasCustomWidths && (
-          <Button variant="ghost-muted" size="icon-sm" onClick={onResetWidths} title="Reset column widths">
+          <Button variant="ghost-muted" size="icon-sm" onClick={onResetWidths} aria-label="Reset column widths">
             <Columns3 />
           </Button>
         )}
@@ -114,6 +164,7 @@ export default function TableViewHeader({
             rows={rows}
             defaultName={`${schema}.${table}`}
             totalRows={totalRows}
+            totalRowsEstimated={totalRowsEstimated}
             onFetchAll={onFetchAllRows}
           />
         )}
