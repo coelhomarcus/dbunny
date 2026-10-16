@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { Plus, Table2, X } from "lucide-react";
 import type { NewColumn } from "@/types";
 import { useApi } from "../../contexts/useConnection";
+import { useTab } from "../../contexts/workspace";
+import { requestOpenQuery } from "../../lib/openQuery";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useSqlDialect } from "../../hooks/useSqlDialect";
 import Dialog from "../ui/Dialog";
@@ -40,6 +43,8 @@ function Builder({
   onClose: () => void;
 }) {
   const api = useApi();
+  const navigate = useNavigate();
+  const { tabId } = useTab();
   const dialect = useSqlDialect();
   const capabilities = useCapabilities();
   const suggestedTypes = dialect === "sqlite" ? SQLITE_TYPES : COMMON_TYPES;
@@ -163,7 +168,16 @@ function Builder({
           </Button>
         </div>
 
-        <SqlPreviewBox source={sql} error={previewError} />
+        <SqlPreviewBox
+          source={sql}
+          error={previewError}
+          onOpen={() => {
+            if (!sql) return;
+            requestOpenQuery(tabId, sql);
+            onClose();
+            navigate("/db/query");
+          }}
+        />
       </div>
     </Dialog>
   );

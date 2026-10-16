@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { ArrowRight, Columns3, KeyRound, ListTree, PenLine, ShieldCheck, Trash2 } from "lucide-react";
 import type { ColumnInfo, CompletionRelation, StructureChange } from "@/types";
 import { useApi } from "../../contexts/useConnection";
+import { useTab } from "../../contexts/workspace";
+import { requestOpenQuery } from "../../lib/openQuery";
 import { cn } from "../../lib/cn";
 import Dialog from "../ui/Dialog";
 import CheckOption from "../ui/CheckOption";
@@ -85,6 +88,8 @@ function ChangeForm({
   onClose: () => void;
 }) {
   const api = useApi();
+  const navigate = useNavigate();
+  const { tabId } = useTab();
   const capabilities = useCapabilities();
   const suggestedTypes = useSqlDialect() === "sqlite" ? SQLITE_TYPES : COMMON_TYPES;
   const column = "column" in draft ? draft.column : null;
@@ -408,7 +413,16 @@ function ChangeForm({
             <option key={t} value={t} />
           ))}
         </datalist>
-        <SqlPreviewBox source={sql} error={previewError} />
+        <SqlPreviewBox
+          source={sql}
+          error={previewError}
+          onOpen={() => {
+            if (!sql) return;
+            requestOpenQuery(tabId, sql);
+            onClose();
+            navigate("/db/query");
+          }}
+        />
       </div>
     </Dialog>
   );

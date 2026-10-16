@@ -29,6 +29,7 @@ import { isMac } from "../lib/platform";
 import { getSettings } from "../lib/settings";
 import { notAvailableFor } from "../lib/engines";
 import { useCapabilities } from "../hooks/useCapabilities";
+import { bindOpenQuery } from "../lib/openQuery";
 
 const MOD = isMac ? "⌘" : "Ctrl+";
 const SHIFT = isMac ? "⇧" : "Shift+";
@@ -276,22 +277,27 @@ function QueryEditorPanel() {
     setView(payload.view ?? "results");
   }
 
-  function addTab(options: { label?: string; savedId?: string } = {}) {
+  function addTab(options: { label?: string; savedId?: string; sql?: string } = {}) {
     saveCurrentSql();
     const id = saved.nextId++;
     const label = options.label ?? `Query ${id}`;
-    saved.payloads.set(id, { sql: "", result: null, error: null });
+    const sql = options.sql ?? "";
+    saved.payloads.set(id, { sql, result: null, error: null });
     const newMetas = [...tabMetas, { id, label, savedId: options.savedId }];
     setTabMetas(newMetas);
     saved.tabMetas = newMetas;
     setActiveId(id);
     saved.activeId = id;
-    editorRef.current?.setValue("");
+    editorRef.current?.setValue(sql);
     setResult(null);
     setError(null);
     setPlan(null);
     setView("results");
   }
+
+  const openSql = useRef(addTab);
+  openSql.current = addTab;
+  useEffect(() => bindOpenQuery(tabId, (sql) => openSql.current({ sql })), [tabId]);
 
   // Read from the editor's change handler, which is created once
   const latest = useRef({ tabMetas, activeId, savedQueries });
