@@ -4,6 +4,7 @@ import { useApi, useConnection } from "../contexts/useConnection";
 import type { RelationKind } from "../lib/api";
 import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
 import RelationActionDialog, { type RelationAction, type RelationTarget } from "./schema/RelationActionDialog";
+import CreateTableDialog from "./schema/CreateTableDialog";
 import { quoteIdent } from "../lib/copyRows";
 import type { SchemaInfo, TableInfo, FunctionInfo, SchemaObject, ExtensionInfo } from "@/types";
 import type { SessionApi } from "../lib/api";
@@ -26,6 +27,7 @@ import {
   Table as TableIcon,
   Columns3,
   CopyPlus,
+  Plus,
   type LucideProps,
 } from "lucide-react";
 
@@ -148,6 +150,8 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
   const [menu, setMenu] = useState<{ x: number; y: number; target: RelationTarget } | null>(null);
   const [action, setAction] = useState<{ action: RelationAction; target: RelationTarget } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Schema the table builder is open for
+  const [newTableIn, setNewTableIn] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -329,6 +333,18 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
                 return (
                   <SubFolder
                     key={spec.kind}
+                    action={
+                      spec.kind === "tables" && !readOnly ? (
+                        <button
+                          type="button"
+                          aria-label={`New table in ${schema.name}`}
+                          onClick={() => setNewTableIn(schema.name)}
+                          className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer"
+                        >
+                          <Plus size={12} />
+                        </button>
+                      ) : undefined
+                    }
                     label={spec.label}
                     folderColor={`${spec.color} opacity-70`}
                     open={expanded.has(key)}
@@ -405,6 +421,16 @@ export default function SchemaTree({ schemaToExpand, onSchemaExpanded }: SchemaT
           ))
         ))}
 
+      <CreateTableDialog
+        schema={newTableIn}
+        onCreated={(table) => {
+          const schema = newTableIn!;
+          reloadFolder(schema, "table");
+          setExpanded((prev) => new Set([...prev, schema, `${schema}:tables`]));
+          navigate(relationPath(schema, table));
+        }}
+        onClose={() => setNewTableIn(null)}
+      />
       <ContextMenu position={menu} items={menu ? menuItems(menu.target) : []} onClose={() => setMenu(null)} />
       <RelationActionDialog
         action={action?.action ?? null}
@@ -431,8 +457,11 @@ function SubFolder({
   open,
   folder,
   onToggle,
+  action,
   children,
 }: {
+  /** Shown at the right on hover, e.g. "new table". */
+  action?: React.ReactNode;
   label: string;
   folderColor: string;
   open: boolean;
@@ -442,22 +471,26 @@ function SubFolder({
 }) {
   return (
     <div>
-      <button
-        onClick={onToggle}
-        className="w-full flex h-7 items-center gap-1.5 rounded-md pl-5 pr-2 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors group"
-      >
-        <Chevron open={open} />
-        <Folder size={15} className={`shrink-0 ${folderColor}`} />
-        <span className="truncate text-sm">{label}</span>
-        {folder.loading && (
-          <Loader size={10} className="ml-auto shrink-0 animate-spin text-muted-foreground" />
-        )}
-        {folder.loaded && folder.items.length > 0 && (
-          <span className="ml-auto text-[10px] text-muted-foreground/70">
-            {folder.items.length}
-          </span>
-        )}
-      </button>
+      {/* The action sits next to the toggle, not inside it: a button can't contain another */}
+      <div className="group relative">
+        <button
+          onClick={onToggle}
+          className={`w-full flex h-7 items-center gap-1.5 rounded-md pl-5 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors ${action ? "pr-8" : "pr-2"}`}
+        >
+          <Chevron open={open} />
+          <Folder size={15} className={`shrink-0 ${folderColor}`} />
+          <span className="truncate text-sm">{label}</span>
+          {folder.loading && (
+            <Loader size={10} className="ml-auto shrink-0 animate-spin text-muted-foreground" />
+          )}
+          {folder.loaded && folder.items.length > 0 && (
+            <span className="ml-auto text-[10px] text-muted-foreground/70">
+              {folder.items.length}
+            </span>
+          )}
+        </button>
+        {action && <span className="absolute right-1.5 top-1/2 flex -translate-y-1/2">{action}</span>}
+      </div>
       {open && folder.loaded && (
         <div>
           {folder.items.length === 0 ? (

@@ -81,3 +81,12 @@ export type StructureChange =
   | { kind: "setComment"; name: string; comment: string | null }
   | { kind: "createIndex"; name: string | null; columns: string[]; unique: boolean; method: string; concurrently: boolean }
   | { kind: "dropIndex"; name: string; cascade: boolean };
+
+/** One column in the table builder. */
+export interface NewColumn {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  primaryKey: boolean;
+  default: string | null;
+}
