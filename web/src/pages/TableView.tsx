@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useCallback, useState } from "react";
-import { useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import {
   useReactTable,
   getCoreRowModel,
   type ColumnDef,
 } from "@tanstack/react-table";
-import type { QueryColumn } from "@/types";
+import type { ColumnInfo, QueryColumn, TableFilter } from "@/types";
+import { toEditText } from "../lib/cellEdit";
 import { useTableData } from "../hooks/useTableData";
 import { useApi } from "../contexts/useConnection";
 import { useTab } from "../contexts/workspace";
@@ -26,13 +27,38 @@ import EditableCell from "../components/EditableCell";
 import Pagination from "../components/Pagination";
 import { TableSkeleton } from "../components/Skeleton";
 
+/** Where a foreign key cell leads: the referenced table, filtered to the matching row. */
+function foreignKeyLink(column: ColumnInfo | undefined, row: unknown[], columns: QueryColumn[]) {
+  const fk = column?.foreignKey;
+  if (!fk) return null;
+  const filters: TableFilter[] = [];
+  for (const [i, name] of fk.columns.entries()) {
+    const value = row[columns.findIndex((c) => c.name === name)];
+    // A key with a NULL part references nothing
+    if (value === null || value === undefined) return null;
+    filters.push({ column: fk.refColumns[i], operator: "=", value: toEditText(value) });
+  }
+  return { path: `/db/${encodeURIComponent(fk.schema)}/${encodeURIComponent(fk.table)}`, filters };
+}
+
+/**
+ * Every navigation (sidebar, foreign key link) gets a fresh view, opened with the
+ * filters it was given, so nothing from the previous table carries over.
+ */
 export default function TableView() {
+  const location = useLocation();
+  const state = location.state as { filters?: TableFilter[] } | null;
+  return <TableViewContent key={location.key} initialFilters={state?.filters} />;
+}
+
+function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }) {
   const { schema, table } = useParams<{ schema: string; table: string }>();
   const api = useApi();
+  const navigate = useNavigate();
   // Hidden window tabs stay mounted; only the visible one reacts to shortcuts
   const { isActive } = useTab();
 
-  const tableData = useTableData(schema, table);
+  const tableData = useTableData(schema, table, initialFilters);
   const { data, columnInfos, loading, error, hasNoPk } = tableData;
 
   const selection = useRowSelection(data?.rows.length ?? 0);
@@ -55,7 +81,7 @@ export default function TableView() {
     filterMode: tableData.filterMode,
   });
 
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(() => (initialFilters?.length ?? 0) > 0);
   const [insertOpen, setInsertOpen] = useState(false);
 
   const editing = useCellEditing({
@@ -76,14 +102,6 @@ export default function TableView() {
   }, [discardChanges, cancelEdit, setSelectedRows]);
   const discardGuard = useDiscardGuard(pending.dirtyRowCount, resetRowState);
   const { guard } = discardGuard;
-
-  useEffect(() => {
-    pending.setPendingChanges({});
-    editing.cancelEdit();
-    selection.setSelectedRows(new Set());
-    resize.resetWidths();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema, table]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -195,8 +213,6 @@ export default function TableView() {
 
       {filtersOpen && columnInfos.length > 0 && (
         <FilterBar
-          // Reset the draft when moving to another table
-          key={`${schema}.${table}`}
           columns={columnInfos.map((c) => c.name)}
           applied={tableData.filters}
           mode={tableData.filterMode}
@@ -277,7 +293,7 @@ export default function TableView() {
                   return (
                     <tr
                       key={rowIndex}
-                      className={`${rowBg} hover:bg-accent`}
+                      className={`${rowBg} group/row hover:bg-accent`}
                     >
                       <td className="border-b border-r border-border px-3 py-1.5">
                         <Checkbox
@@ -287,6 +303,8 @@ export default function TableView() {
                       </td>
                       {data.columns.map((col, colIdx) => {
                         const originalValue = row[colIdx];
+                        const columnInfo = columnInfos.find((c) => c.name === col.name);
+                        const link = foreignKeyLink(columnInfo, row, data.columns);
                         const isDirty =
                           pending.pendingChanges[rowIndex]?.[col.name] !==
                           undefined;
@@ -315,6 +333,10 @@ export default function TableView() {
                             onSetNull={editing.setEditNull}
                             onConfirm={editing.confirmEdit}
                             onCancel={editing.cancelEdit}
+                            linkLabel={link ? `Open the referenced row in ${columnInfo!.foreignKey!.table}` : undefined}
+                            onFollowLink={
+                              link ? guard(() => navigate(link.path, { state: { filters: link.filters } })) : undefined
+                            }
                           />
                         );
                       })}

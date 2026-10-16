@@ -1,3 +1,5 @@
+import { ArrowUpRight } from "lucide-react";
+
 interface EditableCellProps {
   value: unknown;
   displayValue: unknown;
@@ -13,6 +15,9 @@ interface EditableCellProps {
   onSetNull: () => void;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Foreign key cells: opens the row this value references. */
+  onFollowLink?: () => void;
+  linkLabel?: string;
 }
 
 const MAX_PREVIEW = 300;
@@ -29,6 +34,7 @@ export default function EditableCell({
   displayValue, isDirty, isEditing, hasNoPk,
   editValue, editIsNull, inputRef,
   onStartEdit, onEditValueChange, onSetNull, onConfirm, onCancel,
+  onFollowLink, linkLabel,
 }: EditableCellProps) {
   return (
     <td
@@ -42,6 +48,19 @@ export default function EditableCell({
       >
         {renderValue(displayValue)}
       </div>
+      {onFollowLink && !isEditing && (
+        <button
+          type="button"
+          aria-label={linkLabel}
+          onClick={(e) => {
+            e.stopPropagation();
+            onFollowLink();
+          }}
+          className="absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md bg-card text-info-foreground opacity-0 shadow-xs transition-opacity cursor-pointer group-hover/row:opacity-100 hover:bg-accent focus-visible:opacity-100"
+        >
+          <ArrowUpRight size={13} />
+        </button>
+      )}
       {isEditing && (
         <>
           <input

@@ -18,7 +18,11 @@ function readPageSize(schema?: string, table?: string): number {
   return PAGE_SIZE_OPTIONS.includes(n) ? n : DEFAULT_PAGE_SIZE;
 }
 
-export function useTableData(schema?: string, table?: string) {
+/**
+ * Rows of one table. The view is remounted for every navigation, so state starts
+ * fresh per table; `initialFilters` opens it already filtered (foreign key links).
+ */
+export function useTableData(schema?: string, table?: string, initialFilters: TableFilter[] = []) {
   const api = useApi();
   const [data, setData] = useState<TableDataResponse | null>(null);
   const [columnInfos, setColumnInfos] = useState<ColumnInfo[]>([]);
@@ -27,7 +31,7 @@ export function useTableData(schema?: string, table?: string) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSizeState] = useState(() => readPageSize(schema, table));
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [filters, setFilters] = useState<TableFilter[]>([]);
+  const [filters, setFilters] = useState<TableFilter[]>(initialFilters);
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [refreshing, setRefreshing] = useState(false);
   const [counting, setCounting] = useState(false);
@@ -88,15 +92,6 @@ export function useTableData(schema?: string, table?: string) {
     if (key) localStorage.setItem(key, String(size));
     setPageSizeState(size);
     setPage(1);
-  }, [schema, table]);
-
-  // Reset state when table changes
-  useEffect(() => {
-    setPage(1);
-    setSorting([]);
-    setFilters([]);
-    setFilterMode("all");
-    setPageSizeState(readPageSize(schema, table));
   }, [schema, table]);
 
   /** Replaces the estimated total with an exact count. */
