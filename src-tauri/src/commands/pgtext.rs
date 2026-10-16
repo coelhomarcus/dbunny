@@ -10,6 +10,19 @@ use serde_json::Value as JsonValue;
 use tokio_postgres::types::{Kind, Type};
 
 /// Types whose binary values are decoded directly into JSON by the query code.
+/// Largest integer JavaScript represents exactly (2^53 - 1).
+const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+
+/// An integer as JSON: a number while JavaScript can hold it exactly, text beyond that, so
+/// a big bigint (ids, snowflakes) keeps every digit when it's shown, edited or used as a key.
+pub fn int_to_json(n: i64) -> JsonValue {
+    if (-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&n) {
+        JsonValue::Number(n.into())
+    } else {
+        JsonValue::String(n.to_string())
+    }
+}
+
 pub fn is_native(ty: &Type) -> bool {
     matches!(
         *ty,
@@ -71,7 +84,7 @@ pub fn text_to_json(ty: &Type, text: &str) -> JsonValue {
         },
         Type::INT2 | Type::INT4 | Type::OID | Type::INT8 => text
             .parse::<i64>()
-            .map(|n| JsonValue::Number(n.into()))
+            .map(int_to_json)
             .unwrap_or_else(|_| JsonValue::String(text.to_string())),
         Type::FLOAT4 | Type::FLOAT8 => text
             .parse::<f64>()
@@ -176,7 +189,10 @@ mod tests {
         assert_eq!(text_to_json(&Type::BOOL, "t"), json!(true));
         assert_eq!(text_to_json(&Type::BOOL, "f"), json!(false));
         assert_eq!(text_to_json(&Type::INT4, "-42"), json!(-42));
-        assert_eq!(text_to_json(&Type::INT8, "9007199254740993"), json!(9007199254740993_i64));
+        assert_eq!(text_to_json(&Type::INT8, "9007199254740991"), json!(9007199254740991_i64));
+        // Past what JavaScript holds exactly, the digits travel as text
+        assert_eq!(text_to_json(&Type::INT8, "9007199254740993"), json!("9007199254740993"));
+        assert_eq!(text_to_json(&Type::INT8, "-9223372036854775808"), json!("-9223372036854775808"));
         assert_eq!(text_to_json(&Type::FLOAT8, "1.5"), json!(1.5));
         assert_eq!(text_to_json(&Type::FLOAT8, "NaN"), json!("NaN"));
         assert_eq!(text_to_json(&Type::FLOAT8, "Infinity"), json!("Infinity"));

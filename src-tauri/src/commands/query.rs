@@ -7,7 +7,7 @@ use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::{Row, SimpleQueryMessage};
 use uuid::Uuid;
 
-use super::pgtext::{is_native, text_to_json};
+use super::pgtext::{int_to_json, is_native, text_to_json};
 use super::sqlsplit::split_statements;
 use super::state::{AppState, Notice};
 use super::tableedit::{build_delete, build_import_batches, build_insert, build_update};
@@ -116,7 +116,7 @@ fn row_to_json_values(row: &Row) -> Vec<JsonValue> {
                 Err(_) => try_get_string(row, i),
             },
             Type::INT8 => match row.try_get::<_, Option<i64>>(i) {
-                Ok(Some(v)) => JsonValue::Number(v.into()),
+                Ok(Some(v)) => int_to_json(v),
                 Ok(None) => JsonValue::Null,
                 Err(_) => try_get_string(row, i),
             },
@@ -216,11 +216,7 @@ fn row_to_json_values(row: &Row) -> Vec<JsonValue> {
                 Err(_) => try_get_string(row, i),
             },
             Type::INT8_ARRAY => match row.try_get::<_, Option<Vec<i64>>>(i) {
-                Ok(Some(v)) => JsonValue::Array(
-                    v.into_iter()
-                        .map(|n| JsonValue::Number(n.into()))
-                        .collect(),
-                ),
+                Ok(Some(v)) => JsonValue::Array(v.into_iter().map(int_to_json).collect()),
                 Ok(None) => JsonValue::Null,
                 Err(_) => try_get_string(row, i),
             },
@@ -1243,6 +1239,34 @@ mod server_tests {
 
         let err = update_in(&client, &schema, "items", &key, &values(json!({"level": "medium"}))).await.unwrap_err();
         assert!(err.contains("invalid input value for enum"), "{err}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn big_bigint_keys_keep_every_digit_through_read_edit_and_delete() {
+        let client = connect().await;
+        client
+            .batch_execute(
+                "CREATE TEMP TABLE snow (id bigint PRIMARY KEY, name text); \
+                 INSERT INTO snow VALUES (1234567890123456789, 'a'), (1234567890123456800, 'b'), (7, 'small')",
+            )
+            .await
+            .unwrap();
+        let schema = temp_schema(&client).await;
+        let relation = format!("{}.{}", quote_ident(&schema), quote_ident("snow"));
+        let page = select_table_page(&client, &relation, "", &[], " ORDER BY id", 50, 0).await.unwrap();
+        let ids: Vec<JsonValue> = page.rows.iter().map(|r| r[0].clone()).collect();
+        // Small ids stay numbers; the big ones come as text, distinct even where a float would merge them
+        assert_eq!(ids, vec![json!(7), json!("1234567890123456789"), json!("1234567890123456800")]);
+
+        // The value as the app holds it finds exactly its row
+        let key = values(json!({"id": ids[1]}));
+        assert_eq!(update_in(&client, &schema, "snow", &key, &values(json!({"name": "edited"}))).await.unwrap(), 1);
+        let names: Vec<String> = client.query("SELECT name FROM snow ORDER BY id", &[]).await.unwrap().iter().map(|r| r.get(0)).collect();
+        assert_eq!(names, vec!["small", "edited", "b"]);
+        assert_eq!(delete_from(&client, &schema, "snow", &[key]).await.unwrap(), 1);
+        let left: i64 = client.query_one("SELECT count(*) FROM snow WHERE id = 1234567890123456800", &[]).await.unwrap().get(0);
+        assert_eq!(left, 1, "the neighbour a rounded key would have hit is still there");
     }
 
     #[tokio::test]
