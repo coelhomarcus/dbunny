@@ -44,24 +44,31 @@ const SQL_WORDS = new Set(
     .filter(Boolean),
 );
 
-// Words that must be quoted when used as identifiers in PostgreSQL
-const RESERVED = new Set(
-  ("all analyse analyze and any array as asc asymmetric both case cast check collate column " +
-    "constraint create current_catalog current_date current_role current_time current_timestamp " +
-    "current_user default deferrable desc distinct do else end except false fetch for foreign from " +
-    "grant group having in initially intersect into lateral leading limit localtime localtimestamp " +
-    "not null offset on only or order placing primary references returning select session_user " +
-    "some symmetric system_user table then to trailing true union unique user using variadic when " +
-    "where window with").split(" "),
-);
+function reservedWords(dialect: SqlDialectName): Set<string> {
+  const spec = dialectFor(dialect).spec;
+  return new Set(
+    [spec.keywords, spec.types, spec.builtin]
+      .join(" ")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean),
+  );
+}
 
-/** Quotes an identifier the way PostgreSQL needs it (mixed case, special chars, reserved words). */
-export function quoteIdent(name: string) {
-  if (/^[a-z_][a-z0-9_$]*$/.test(name) && !RESERVED.has(name)) return name;
+/** Quotes an identifier for the active SQL dialect (reserved words, case, special chars). */
+export function quoteIdentForDialect(name: string, dialect: SqlDialectName) {
+  const reserved = reservedWords(dialect);
+  const word = name.toLowerCase();
+  if (/^[a-z_][a-z0-9_$]*$/.test(name) && !reserved.has(word)) return name;
   return `"${name.replace(/"/g, '""')}"`;
 }
 
-function applyFor(name: string) {
+/** PostgreSQL quoting for copy/export helpers that aren't tied to the editor dialect. */
+export function quoteIdent(name: string) {
+  return quoteIdentForDialect(name, "postgres");
+}
+
+function applyFor(name: string, quoteIdent: (n: string) => string) {
   const quoted = quoteIdent(name);
   return quoted === name ? undefined : quoted;
 }
@@ -71,22 +78,22 @@ function nsKey(name: string) {
   return name.replace(/\./g, "\\.");
 }
 
-function buildNamespace(schema: CompletionSchema): SQLNamespace {
+function buildNamespace(schema: CompletionSchema, quoteIdent: (n: string) => string): SQLNamespace {
   const ns: Record<string, { self: Completion; children: Record<string, SQLNamespace> }> = {};
   const schemaLevel = (name: string) =>
     (ns[nsKey(name)] ??= {
-      self: { label: name, type: "namespace", detail: "schema", apply: applyFor(name) },
+      self: { label: name, type: "namespace", detail: "schema", apply: applyFor(name, quoteIdent) },
       children: {},
     }).children;
 
   for (const rel of schema.relations) {
     schemaLevel(rel.schema)[nsKey(rel.name)] = {
-      self: { label: rel.name, type: "type", detail: rel.type, apply: applyFor(rel.name) },
+      self: { label: rel.name, type: "type", detail: rel.type, apply: applyFor(rel.name, quoteIdent) },
       children: rel.columns.map((c) => ({
         label: c.name,
         type: "property",
         detail: c.dataType,
-        apply: applyFor(c.name),
+        apply: applyFor(c.name, quoteIdent),
       })),
     };
   }
@@ -100,7 +107,7 @@ function buildNamespace(schema: CompletionSchema): SQLNamespace {
         label: fn.name,
         type: "function",
         detail: `(${fn.argumentTypes})${fn.returnType ? ` → ${fn.returnType}` : ""}`,
-        apply: applyFor(fn.name),
+        apply: applyFor(fn.name, quoteIdent),
       },
       children: [],
     };
@@ -188,7 +195,7 @@ function positionKind(before: string): "table" | "column" | null {
  * Columns of the tables used in the current statement (FROM / JOIN / UPDATE / INTO),
  * offered without needing a `table.` prefix.
  */
-function columnsInScope(index: RelationIndex): CompletionSource {
+function columnsInScope(index: RelationIndex, quoteIdent: (n: string) => string): CompletionSource {
   return (context) => {
     const word = context.matchBefore(/[\w$]*/);
     if (!word || context.state.sliceDoc(word.from - 1, word.from) === ".") return null;
@@ -213,7 +220,7 @@ function columnsInScope(index: RelationIndex): CompletionSource {
           label: col.name,
           type: "property",
           detail: seen.size > 1 ? `${rel.name} · ${col.dataType}` : col.dataType,
-          apply: applyFor(col.name),
+          apply: applyFor(col.name, quoteIdent),
           boost: 2,
         });
       }
@@ -227,11 +234,11 @@ function columnsInScope(index: RelationIndex): CompletionSource {
  * anything. Once a word is typed, lang-sql's schema source takes over; options
  * here match its fields exactly so the two don't show duplicates.
  */
-function tablesAfterKeyword(schema: CompletionSchema): CompletionSource {
+function tablesAfterKeyword(schema: CompletionSchema, quoteIdent: (n: string) => string): CompletionSource {
   const current = schema.currentSchema ?? "public";
   const options: Completion[] = schema.relations.map((rel) => {
     if (rel.schema === current) {
-      return { label: rel.name, type: "type", detail: rel.type, apply: applyFor(rel.name) };
+      return { label: rel.name, type: "type", detail: rel.type, apply: applyFor(rel.name, quoteIdent) };
     }
     const qualified = `${rel.schema}.${rel.name}`;
     const applied = `${quoteIdent(rel.schema)}.${quoteIdent(rel.name)}`;
@@ -283,6 +290,7 @@ const phraseSource = ifNotIn(
  */
 export function sqlCompletion(schema: CompletionSchema | null, name: SqlDialectName = "postgres"): Extension {
   const dialect = dialectFor(name);
+  const quoteIdent = (ident: string) => quoteIdentForDialect(ident, name);
   const known = new Set<string>();
   const sources: CompletionSource[] = [
     keywordCompletionSource(dialect, true),
@@ -301,12 +309,12 @@ export function sqlCompletion(schema: CompletionSchema | null, name: SqlDialectN
       withoutSelfAlias(
         schemaCompletionSource({
           dialect,
-          schema: buildNamespace(schema),
+          schema: buildNamespace(schema, quoteIdent),
           defaultSchema: schema.currentSchema ?? "public",
         }),
       ),
-      ifNotIn(SKIP_NODES, columnsInScope(indexRelations(schema))),
-      ifNotIn(SKIP_NODES, tablesAfterKeyword(schema)),
+      ifNotIn(SKIP_NODES, columnsInScope(indexRelations(schema), quoteIdent)),
+      ifNotIn(SKIP_NODES, tablesAfterKeyword(schema, quoteIdent)),
     );
   }
 

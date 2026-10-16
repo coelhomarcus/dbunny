@@ -97,11 +97,12 @@ function TabPane({
                 <Route path="roles" element={<RolesView />} />
                 <Route path=":schema/:table" element={<TableView />} />
                 <Route path=":schema/:table/structure" element={<TableStructure />} />
-                <Route path=":schema/function/:name" element={<FunctionView />} />
-                <Route path=":schema/sequence/:name" element={<ObjectView kind="sequence" />} />
-                <Route path=":schema/type/:name" element={<ObjectView kind="type" />} />
-                <Route path=":schema/index/:name" element={<ObjectView kind="index" />} />
-                <Route path=":schema/trigger/:name" element={<ObjectView kind="trigger" />} />
+                {/* `obj/` so tables named index, trigger, … can use `:table/structure` */}
+                <Route path=":schema/obj/function/:name" element={<FunctionView />} />
+                <Route path=":schema/obj/sequence/:name" element={<ObjectView kind="sequence" />} />
+                <Route path=":schema/obj/type/:name" element={<ObjectView kind="type" />} />
+                <Route path=":schema/obj/index/:name" element={<ObjectView kind="index" />} />
+                <Route path=":schema/obj/trigger/:name" element={<ObjectView kind="trigger" />} />
               </Route>
             </Routes>
           </MemoryRouter>

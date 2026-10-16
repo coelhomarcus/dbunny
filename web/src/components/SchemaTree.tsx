@@ -91,15 +91,15 @@ function objectPath(schema: string, object: ExplorerObject): string {
   switch (object.kind) {
     case "function":
     case "procedure":
-      return `/db/${s}/function/${n}?args=${encodeURIComponent(object.detail)}`;
+      return `/db/${s}/obj/function/${n}?args=${encodeURIComponent(object.detail)}`;
     case "sequence":
-      return `/db/${s}/sequence/${n}`;
+      return `/db/${s}/obj/sequence/${n}`;
     case "type":
-      return `/db/${s}/type/${n}`;
+      return `/db/${s}/obj/type/${n}`;
     case "index":
-      return `/db/${s}/index/${n}`;
+      return `/db/${s}/obj/index/${n}`;
     case "trigger":
-      return `/db/${s}/trigger/${n}`;
+      return `/db/${s}/obj/trigger/${n}`;
     default:
       return relationPath(schema, object.name);
   }
@@ -318,7 +318,7 @@ export default function SchemaTree() {
   /** The open page belongs to this object (a table's structure tab counts as the table). */
   function isActive(schema: string, object: ExplorerObject) {
     if (object.kind === "function" || object.kind === "procedure") {
-      return location.pathname.includes("/function/") && params.schema === schema && params.name === object.name;
+      return location.pathname.includes("/obj/function/") && params.schema === schema && params.name === object.name;
     }
     const current = decodeURIComponent(location.pathname);
     const target = decodeURIComponent(objectPath(schema, object));

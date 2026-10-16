@@ -57,6 +57,10 @@ pub enum Affinity {
 impl Affinity {
     pub fn of(declared: &str) -> Affinity {
         let t = declared.to_ascii_uppercase();
+        // STRICT `ANY` keeps the storage class; treat it like an untyped column (no conversion).
+        if t == "ANY" {
+            return Affinity::Blob;
+        }
         let has = |part: &str| t.contains(part);
         if has("INT") {
             Affinity::Integer
@@ -255,6 +259,7 @@ mod tests {
     #[test]
     fn affinity_follows_the_declared_type() {
         let cases = [
+            ("ANY", Affinity::Blob),
             ("INTEGER", Affinity::Integer),
             ("tinyint", Affinity::Integer),
             ("POINT", Affinity::Integer),

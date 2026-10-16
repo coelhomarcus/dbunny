@@ -31,7 +31,7 @@ impl Data for SqliteDriver {
         let page_size = params.page_size.unwrap_or(50).clamp(1, 500);
         let offset = (page - 1) * page_size;
         let (schema, table) = (schema.to_owned(), table.to_owned());
-        self.on_tables(move |c| {
+        self.on_tables_for(schema.clone(), table.clone(), move |c| {
             let shape = TableShape::read(c, &schema, &table)?;
             let order = order_clause_in(SQLITE, &sort_keys(&params), &shape.columns);
             let filters = params.filters.as_deref().unwrap_or(&[]);
@@ -77,14 +77,15 @@ impl Data for SqliteDriver {
 
     async fn count_rows(&self, schema: &str, table: &str) -> Result<i64, String> {
         let relation = relation(schema, table);
-        self.on_tables(move |c| Ok(count(c, &relation, "", &[])?)).await
+        self.on_tables_for(schema.to_owned(), table.to_owned(), move |c| Ok(count(c, &relation, "", &[])?))
+            .await
     }
 
     /// Inserts one row. Only the columns present in `values` are written; the rest get
     /// their defaults. A null value is SQL NULL.
     async fn insert_row(&self, schema: &str, table: &str, values: JsonMap) -> Result<u64, String> {
         let (schema, table) = (schema.to_owned(), table.to_owned());
-        self.on_tables(move |c| {
+        self.on_tables_for(schema.clone(), table.clone(), move |c| {
             let shape = TableShape::read(c, &schema, &table)?;
             let (sql, params) =
                 build_insert_in(SQLITE, &relation(&schema, &table), &values, &shape.columns, &shape).map_err(Failure::message)?;
@@ -97,7 +98,7 @@ impl Data for SqliteDriver {
     /// since it was read (or a key that matches several rows) stops the save.
     async fn save_rows(&self, schema: &str, table: &str, changes: Vec<RowChange>) -> Result<u64, String> {
         let (schema, table) = (schema.to_owned(), table.to_owned());
-        self.on_tables(move |c| {
+        self.on_tables_for(schema.clone(), table.clone(), move |c| {
             let shape = TableShape::read(c, &schema, &table)?;
             let relation = relation(&schema, &table);
             let total = changes.len();
@@ -123,7 +124,7 @@ impl Data for SqliteDriver {
 
     async fn delete_rows(&self, schema: &str, table: &str, keys: Vec<JsonMap>) -> Result<u64, String> {
         let (schema, table) = (schema.to_owned(), table.to_owned());
-        self.on_tables(move |c| {
+        self.on_tables_for(schema.clone(), table.clone(), move |c| {
             let shape = TableShape::read(c, &schema, &table)?;
             let relation = relation(&schema, &table);
             // Every key is checked before anything runs; no keys at all gets the builder's own error
@@ -160,7 +161,7 @@ impl Data for SqliteDriver {
         rows: Vec<Vec<Option<String>>>,
     ) -> Result<u64, String> {
         let (schema, table) = (schema.to_owned(), table.to_owned());
-        self.on_tables(move |c| {
+        self.on_tables_for(schema.clone(), table.clone(), move |c| {
             let shape = TableShape::read(c, &schema, &table)?;
             let batches = build_import_batches_in(SQLITE, &relation(&schema, &table), &columns, &rows, &shape.columns, &shape)
                 .map_err(Failure::message)?;
@@ -184,12 +185,27 @@ impl Data for SqliteDriver {
 }
 
 impl SqliteDriver {
-    /// Runs `f` on the tables' connection, putting a failure in the app's words.
+    /// Runs `f` on the tables' connection (structure changes and DDL).
     pub(super) async fn on_tables<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> Result<T, Failure> + Send + 'static,
     ) -> Result<T, String> {
         match self.tables().run(move |c| Ok(f(c))).await? {
+            Ok(value) => Ok(value),
+            Err(failure) => Err(self.describe(failure)),
+        }
+    }
+
+    /// Runs `f` on the connection that can see the table (`temp` may be on the editor only).
+    pub(super) async fn on_tables_for<T: Send + 'static>(
+        &self,
+        schema: String,
+        table: String,
+        f: impl FnOnce(&mut Connection) -> Result<T, Failure> + Send + 'static,
+    ) -> Result<T, String> {
+        let (rs, rt) = (schema.clone(), table.clone());
+        let outcome = self.with_schema_conn(&rs, Some(&rt), move |c| Ok(f(c))).await?;
+        match outcome {
             Ok(value) => Ok(value),
             Err(failure) => Err(self.describe(failure)),
         }
