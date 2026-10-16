@@ -4,6 +4,7 @@ import type { ColumnInfo, CompletionRelation, StructureChange } from "@/types";
 import { useApi } from "../../contexts/useConnection";
 import { cn } from "../../lib/cn";
 import Dialog from "../ui/Dialog";
+import CheckOption from "../ui/CheckOption";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
 import Checkbox from "../Checkbox";
@@ -22,18 +23,6 @@ export type ChangeDraft =
 const COMMON_TYPES = ["text", "varchar(255)", "integer", "bigint", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
 const INDEX_METHODS = ["btree", "hash", "gin", "gist", "brin"];
 const REFERENTIAL_ACTIONS = ["NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"];
-
-function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
-  return (
-    <div className="flex cursor-pointer items-start gap-2.5 select-none" onClick={() => onChange(!checked)}>
-      <Checkbox checked={checked} onChange={() => onChange(!checked)} className="mt-0.5" />
-      <span>
-        <span className="block text-[13px] font-medium">{label}</span>
-        {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
-      </span>
-    </div>
-  );
-}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -297,7 +286,7 @@ function ChangeForm({
                 ))}
               </datalist>
             </Field>
-            <Toggle checked={!nullable} onChange={(v) => setNullable(!v)} label="Required (NOT NULL)" hint="Existing rows need a default to satisfy it" />
+            <CheckOption checked={!nullable} onChange={(v) => setNullable(!v)} label="Required (NOT NULL)" hint="Existing rows need a default to satisfy it" />
           </>
         )}
         {(draft.kind === "addColumn" || draft.kind === "setDefault") && (
@@ -330,8 +319,8 @@ function ChangeForm({
                 </select>
               </Field>
             </div>
-            <Toggle checked={unique} onChange={setUnique} label="Unique" hint="Refuses rows that repeat these values" />
-            <Toggle checked={concurrently} onChange={setConcurrently} label="Build concurrently" hint="Slower, but doesn't block writes to the table meanwhile" />
+            <CheckOption checked={unique} onChange={setUnique} label="Unique" hint="Refuses rows that repeat these values" />
+            <CheckOption checked={concurrently} onChange={setConcurrently} label="Build concurrently" hint="Slower, but doesn't block writes to the table meanwhile" />
           </>
         )}
         {(draft.kind === "addUnique" || draft.kind === "addForeignKey") && (
@@ -405,7 +394,7 @@ function ChangeForm({
           </Field>
         )}
         {destructive && (
-          <Toggle checked={cascade} onChange={setCascade} label="Cascade" hint="Also drops views and constraints that depend on it" />
+          <CheckOption checked={cascade} onChange={setCascade} label="Cascade" hint="Also drops views and constraints that depend on it" />
         )}
 
         <div>

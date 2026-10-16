@@ -2,9 +2,9 @@ import { useState, type FormEvent } from "react";
 import { Copy, PenLine, Trash2, Eraser } from "lucide-react";
 import type { RelationKind } from "../../lib/api";
 import Dialog from "../ui/Dialog";
+import CheckOption from "../ui/CheckOption";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
-import Checkbox from "../Checkbox";
 
 export type RelationAction = "rename" | "duplicate" | "truncate" | "drop";
 
@@ -15,19 +15,6 @@ export interface RelationTarget {
 }
 
 const KIND_LABEL: Record<RelationKind, string> = { table: "table", view: "view", matview: "materialized view" };
-
-function Option({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint: string }) {
-  return (
-    // A div, not a label: a label would also click the checkbox button and toggle twice
-    <div className="flex cursor-pointer items-start gap-2.5 select-none" onClick={() => onChange(!checked)}>
-      <Checkbox checked={checked} onChange={() => onChange(!checked)} className="mt-0.5" />
-      <span>
-        <span className="block text-[13px] font-medium">{label}</span>
-        <span className="block text-xs text-muted-foreground">{hint}</span>
-      </span>
-    </div>
-  );
-}
 
 function ActionForm({
   action,
@@ -103,13 +90,13 @@ function ActionForm({
           </label>
         )}
         {action === "duplicate" && (
-          <Option checked={withData} onChange={setWithData} label="Copy the rows too" hint="Otherwise the copy starts empty" />
+          <CheckOption checked={withData} onChange={setWithData} label="Copy the rows too" hint="Otherwise the copy starts empty" />
         )}
         {action === "truncate" && (
-          <Option checked={restartIdentity} onChange={setRestartIdentity} label="Restart identity" hint="Serial and identity columns start counting from 1 again" />
+          <CheckOption checked={restartIdentity} onChange={setRestartIdentity} label="Restart identity" hint="Serial and identity columns start counting from 1 again" />
         )}
         {destructive && (
-          <Option
+          <CheckOption
             checked={cascade}
             onChange={setCascade}
             label="Cascade"

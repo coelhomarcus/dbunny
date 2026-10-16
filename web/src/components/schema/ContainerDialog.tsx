@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Database, FolderPlus, PenLine, Trash2 } from "lucide-react";
 import Dialog from "../ui/Dialog";
+import CheckOption from "../ui/CheckOption";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
-import Checkbox from "../Checkbox";
 
 export type ContainerKind = "schema" | "database";
 export type ContainerAction = "create" | "rename" | "drop";
@@ -19,19 +19,6 @@ export interface ContainerOptions {
   name: string;
   cascade: boolean;
   force: boolean;
-}
-
-function Option({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint: string }) {
-  return (
-    // A div, not a label: a label would also click the checkbox button and toggle twice
-    <div className="flex cursor-pointer items-start gap-2.5 select-none" onClick={() => onChange(!checked)}>
-      <Checkbox checked={checked} onChange={() => onChange(!checked)} className="mt-0.5" />
-      <span>
-        <span className="block text-[13px] font-medium">{label}</span>
-        <span className="block text-xs text-muted-foreground">{hint}</span>
-      </span>
-    </div>
-  );
 }
 
 function ContainerForm({
@@ -117,10 +104,10 @@ function ContainerForm({
           </label>
         )}
         {destructive && kind === "schema" && (
-          <Option checked={cascade} onChange={setCascade} label="Cascade" hint="Also drops everything in it; without it, only an empty schema can go" />
+          <CheckOption checked={cascade} onChange={setCascade} label="Cascade" hint="Also drops everything in it; without it, only an empty schema can go" />
         )}
         {destructive && kind === "database" && (
-          <Option checked={force} onChange={setForce} label="Disconnect its sessions" hint="Ends the connections still using it instead of failing (PostgreSQL 13+)" />
+          <CheckOption checked={force} onChange={setForce} label="Disconnect its sessions" hint="Ends the connections still using it instead of failing (PostgreSQL 13+)" />
         )}
         {destructive && (
           <label className="flex flex-col gap-1.5">
