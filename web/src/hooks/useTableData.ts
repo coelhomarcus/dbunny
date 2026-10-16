@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { type SortingState, type OnChangeFn } from "@tanstack/react-table";
 import { useApi } from "../contexts/useConnection";
-import type { TableDataResponse, ColumnInfo } from "@/types";
+import type { TableDataResponse, ColumnInfo, TableFilter, FilterMode } from "@/types";
+import { isActiveFilter } from "../lib/tableFilters";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const DEFAULT_PAGE_SIZE = 50;
@@ -26,6 +27,8 @@ export function useTableData(schema?: string, table?: string) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSizeState] = useState(() => readPageSize(schema, table));
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [filters, setFilters] = useState<TableFilter[]>([]);
+  const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [refreshing, setRefreshing] = useState(false);
   const [spinKey, setSpinKey] = useState(0);
 
@@ -37,7 +40,15 @@ export function useTableData(schema?: string, table?: string) {
   const totalPages = data ? Math.ceil(data.totalRows / pageSize) : 0;
 
   const fetchData = useCallback(
-    (s: string, t: string, pg: number, ps: number, sort: SortingState) => {
+    (
+      s: string,
+      t: string,
+      pg: number,
+      ps: number,
+      sort: SortingState,
+      filterList: TableFilter[] = [],
+      mode: FilterMode = "all",
+    ) => {
       const sortColumn = sort[0]?.id;
       const sortDirection = sort[0]?.desc
         ? ("desc" as const)
@@ -47,6 +58,8 @@ export function useTableData(schema?: string, table?: string) {
         pageSize: ps,
         sortColumn,
         sortDirection: sortColumn ? sortDirection : undefined,
+        filters: filterList,
+        filterMode: mode,
       });
     },
     [api],
@@ -58,7 +71,7 @@ export function useTableData(schema?: string, table?: string) {
     setError(null);
 
     Promise.all([
-      fetchData(schema, table, page, pageSize, sorting),
+      fetchData(schema, table, page, pageSize, sorting, filters, filterMode),
       api.getColumns(schema, table),
     ])
       .then(([tableData, cols]) => {
@@ -67,7 +80,7 @@ export function useTableData(schema?: string, table?: string) {
       })
       .catch((err) => setError(typeof err === "string" ? err : err.message))
       .finally(() => setLoading(false));
-  }, [schema, table, page, pageSize, sorting, fetchData, api]);
+  }, [schema, table, page, pageSize, sorting, filters, filterMode, fetchData, api]);
 
   const setPageSize = useCallback((size: number) => {
     const key = storageKey(schema, table);
@@ -80,22 +93,31 @@ export function useTableData(schema?: string, table?: string) {
   useEffect(() => {
     setPage(1);
     setSorting([]);
+    setFilters([]);
+    setFilterMode("all");
     setPageSizeState(readPageSize(schema, table));
   }, [schema, table]);
+
+  /** Applies the filter bar's conditions (incomplete ones are ignored) and goes to page 1. */
+  const applyFilters = useCallback((next: TableFilter[], mode: FilterMode) => {
+    setFilters(next.filter(isActiveFilter));
+    setFilterMode(mode);
+    setPage(1);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!schema || !table) return;
     setRefreshing(true);
     setSpinKey((k) => k + 1);
     try {
-      const fresh = await fetchData(schema, table, page, pageSize, sorting);
+      const fresh = await fetchData(schema, table, page, pageSize, sorting, filters, filterMode);
       setData(fresh);
     } catch (err) {
       setError(typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to refresh");
     } finally {
       setRefreshing(false);
     }
-  }, [schema, table, page, pageSize, sorting, fetchData]);
+  }, [schema, table, page, pageSize, sorting, filters, filterMode, fetchData]);
 
   return {
     data,
@@ -112,6 +134,9 @@ export function useTableData(schema?: string, table?: string) {
     totalPages,
     sorting,
     setSorting: setSorting as OnChangeFn<SortingState>,
+    filters,
+    filterMode,
+    applyFilters,
     refreshing,
     spinKey,
     refresh,

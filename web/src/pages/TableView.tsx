@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback } from "react";
+import { useEffect, useMemo, useCallback, useState } from "react";
 import { useParams } from "react-router";
 import {
   useReactTable,
@@ -15,6 +15,7 @@ import { useColumnResize } from "../hooks/useColumnResize";
 import { usePendingChanges } from "../hooks/usePendingChanges";
 import { useDiscardGuard } from "../hooks/useDiscardGuard";
 import Dialog from "../components/ui/Dialog";
+import FilterBar from "../components/table/FilterBar";
 import Button from "../components/ui/Button";
 import Checkbox from "../components/Checkbox";
 import TableViewHeader from "../components/TableViewHeader";
@@ -48,7 +49,11 @@ export default function TableView() {
     page: tableData.page,
     pageSize: tableData.pageSize,
     sorting: tableData.sorting,
+    filters: tableData.filters,
+    filterMode: tableData.filterMode,
   });
+
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const editing = useCellEditing({
     data,
@@ -100,6 +105,8 @@ export default function TableView() {
     const params = {
       pageSize: batchSize, sortColumn,
       sortDirection: sortColumn ? sortDirection : undefined,
+      filters: tableData.filters,
+      filterMode: tableData.filterMode,
     };
 
     const concurrency = 5;
@@ -122,7 +129,7 @@ export default function TableView() {
     }
 
     return { columns, rows: allRows.slice(0, offset) };
-  }, [schema, table, data?.totalRows, tableData.sorting, api]);
+  }, [schema, table, data?.totalRows, tableData.sorting, tableData.filters, tableData.filterMode, api]);
 
   const columns = useMemo<ColumnDef<unknown[], unknown>[]>(() => {
     if (!data?.columns) return [];
@@ -168,10 +175,24 @@ export default function TableView() {
         onRefresh={guard(tableData.refresh)}
         hasCustomWidths={resize.hasCustomWidths}
         onResetWidths={resize.resetWidths}
+        filterCount={tableData.filters.length}
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen((open) => !open)}
         columns={data?.columns}
         rows={data?.rows}
         onFetchAllRows={fetchAllRows}
       />
+
+      {filtersOpen && columnInfos.length > 0 && (
+        <FilterBar
+          // Reset the draft when moving to another table
+          key={`${schema}.${table}`}
+          columns={columnInfos.map((c) => c.name)}
+          applied={tableData.filters}
+          mode={tableData.filterMode}
+          onApply={guard(tableData.applyFilters)}
+        />
+      )}
 
       {error && <div className="px-4 py-3 text-destructive-foreground text-sm border-b border-border bg-destructive/5">{error}</div>}
 
@@ -292,6 +313,18 @@ export default function TableView() {
                 })}
               </tbody>
             </table>
+            {data.rows.length === 0 && !loading && (
+              <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
+                <p className="text-sm font-medium">
+                  {tableData.filters.length > 0 ? "No rows match the filters" : "This table has no rows"}
+                </p>
+                {tableData.filters.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={guard(() => tableData.applyFilters([], "all"))}>
+                    Clear filters
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
 
           <Pagination

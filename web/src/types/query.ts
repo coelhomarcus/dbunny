@@ -24,6 +24,17 @@ export interface QueryError {
   hint?: string;
 }
 
+/** One condition of the table view's filter bar. */
+export interface TableFilter {
+  column: string;
+  /** SQL operator, see FILTER_OPERATORS */
+  operator: string;
+  value: string;
+}
+
+/** How several filters combine: every one ("all") or at least one ("any"). */
+export type FilterMode = "all" | "any";
+
 export interface TableDataRequest {
   page: number;
   pageSize: number;

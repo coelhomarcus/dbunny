@@ -3,13 +3,14 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tauri::State;
-use tokio_postgres::types::Type;
+use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::{Row, SimpleQueryMessage};
 use uuid::Uuid;
 
 use super::pgtext::{is_native, text_to_json};
 use super::sqlsplit::split_statements;
 use super::state::AppState;
+use super::tablefilter::{build_where, quote_ident, TableFilter, TextParam};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +48,9 @@ pub struct TableDataParams {
     pub page_size: Option<i64>,
     pub sort_column: Option<String>,
     pub sort_direction: Option<String>,
+    pub filters: Option<Vec<TableFilter>>,
+    /// "any" joins the filters with OR; anything else (or none) with AND.
+    pub filter_mode: Option<String>,
 }
 
 fn try_get_string(row: &Row, i: usize) -> JsonValue {
@@ -460,6 +464,78 @@ pub async fn execute_query(
     })
 }
 
+/// The server's own message for a failed statement, without the driver's prefix.
+fn db_message(e: &tokio_postgres::Error) -> String {
+    match e.as_db_error() {
+        Some(db) => db.message().to_string(),
+        None => e.to_string(),
+    }
+}
+
+async fn count_rows(
+    client: &tokio_postgres::Client,
+    relation: &str,
+    where_sql: &str,
+    params: &[TextParam],
+) -> Result<i64, tokio_postgres::Error> {
+    let param_refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    let row = client
+        .query_one(&format!("SELECT COUNT(*) FROM {relation}{where_sql}"), &param_refs)
+        .await?;
+    Ok(row.get(0))
+}
+
+/// One page of a table. The columns the binary decoders can't read are selected as text
+/// and converted afterwards, since a statement with parameters can't use the text protocol.
+#[allow(clippy::too_many_arguments)]
+async fn select_table_page(
+    client: &tokio_postgres::Client,
+    relation: &str,
+    where_sql: &str,
+    params: &[TextParam],
+    order_clause: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<StatementOutput, tokio_postgres::Error> {
+    let probe = client.prepare(&format!("SELECT * FROM {relation}")).await?;
+    let types: Vec<Type> = probe.columns().iter().map(|c| c.type_().clone()).collect();
+    let select_list = probe
+        .columns()
+        .iter()
+        .map(|c| {
+            let name = quote_ident(c.name());
+            if is_native(c.type_()) {
+                name
+            } else {
+                format!("{name}::text AS {name}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = format!("SELECT {select_list} FROM {relation}{where_sql}{order_clause} LIMIT {limit} OFFSET {offset}");
+    let stmt = client.prepare(&sql).await?;
+    let param_refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    let rows = client.query(&stmt, &param_refs).await?;
+
+    let mut json_rows: Vec<Vec<JsonValue>> = rows.iter().map(row_to_json_values).collect();
+    for row in &mut json_rows {
+        for (i, value) in row.iter_mut().enumerate() {
+            if !is_native(&types[i]) {
+                if let JsonValue::String(text) = value {
+                    *value = text_to_json(&types[i], text);
+                }
+            }
+        }
+    }
+
+    Ok(StatementOutput {
+        columns: columns_from_statement(probe.columns()),
+        rows: json_rows,
+        rows_affected: None,
+    })
+}
+
 #[tauri::command]
 pub async fn get_table_data(
     state: State<'_, AppState>,
@@ -475,40 +551,39 @@ pub async fn get_table_data(
         .as_ref()
         .and_then(|p| p.page_size)
         .unwrap_or(50)
-        .clamp(1, 100);
+        .clamp(1, 500);
     let offset = (page - 1) * page_size;
+
+    let valid_columns = get_valid_columns(&client, &schema, &table).await?;
 
     // Build ORDER BY clause
     let mut order_clause = String::new();
-    if let Some(ref p) = params {
-        if let Some(ref sort_col) = p.sort_column {
-            let valid_columns = get_valid_columns(&client, &schema, &table).await?;
-            if valid_columns.contains(sort_col) {
-                let dir = match p.sort_direction.as_deref() {
-                    Some("desc") => "DESC",
-                    _ => "ASC",
-                };
-                order_clause = format!(" ORDER BY \"{}\" {}", sort_col, dir);
-            }
+    if let Some(sort_col) = params.as_ref().and_then(|p| p.sort_column.as_ref()) {
+        if valid_columns.contains(sort_col) {
+            let dir = match params.as_ref().and_then(|p| p.sort_direction.as_deref()) {
+                Some("desc") => "DESC",
+                _ => "ASC",
+            };
+            order_clause = format!(" ORDER BY {} {}", quote_ident(sort_col), dir);
         }
     }
 
-    // Get total count
-    let count_sql = format!("SELECT COUNT(*) as total FROM \"{}\".\"{}\"", schema, table);
-    let count_row = client
-        .query_one(&count_sql as &str, &[])
+    // Build WHERE clause from the filters
+    let filters = params.as_ref().and_then(|p| p.filters.as_deref()).unwrap_or(&[]);
+    let match_any = params.as_ref().and_then(|p| p.filter_mode.as_deref()) == Some("any");
+    let (where_sql, where_params) = build_where(filters, match_any, &valid_columns)?;
+
+    let relation = format!("{}.{}", quote_ident(&schema), quote_ident(&table));
+
+    // Get total count (of the filtered rows)
+    let total_rows = count_rows(&client, &relation, &where_sql, &where_params)
         .await
-        .map_err(|e| e.to_string())?;
-    let total_rows: i64 = count_row.get(0);
+        .map_err(|e| db_message(&e))?;
 
     // Get paginated data
-    let data_sql = format!(
-        "SELECT * FROM \"{}\".\"{}\"{}  LIMIT {} OFFSET {}",
-        schema, table, order_clause, page_size, offset
-    );
-    let output = run_statement(&client, &data_sql)
+    let output = select_table_page(&client, &relation, &where_sql, &where_params, &order_clause, page_size, offset)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| db_message(&e))?;
 
     Ok(TableDataResponse {
         columns: output.columns,
@@ -771,6 +846,114 @@ mod server_tests {
         assert_eq!(at_position, "nope");
         assert_eq!(json["statement"], 2);
         assert_eq!(json["statementCount"], 2);
+    }
+
+    // --- table filters ---
+
+    async fn filter_fixture(client: &tokio_postgres::Client) {
+        client.batch_execute("CREATE TYPE pg_temp.mood AS ENUM ('sad', 'happy')").await.unwrap();
+        client
+            .batch_execute(
+                "CREATE TEMP TABLE filt (id int PRIMARY KEY, name text, mood pg_temp.mood, tags text[]); \
+                 INSERT INTO filt VALUES \
+                   (1, 'ana', 'happy', ARRAY['a']), \
+                   (2, 'bruno', 'sad', NULL), \
+                   (3, NULL, 'happy', ARRAY['b','c']), \
+                   (4, 'ana maria', NULL, NULL)",
+            )
+            .await
+            .unwrap();
+    }
+
+    fn filter(column: &str, operator: &str, value: &str) -> TableFilter {
+        TableFilter { column: column.into(), operator: operator.into(), value: value.into() }
+    }
+
+    const COLUMNS: [&str; 4] = ["id", "name", "mood", "tags"];
+
+    /// Ids of the rows matching the filters, plus the count the table view would report.
+    async fn matching_ids(
+        client: &tokio_postgres::Client,
+        filters: &[TableFilter],
+        match_any: bool,
+    ) -> Result<(Vec<i64>, i64), String> {
+        let valid: Vec<String> = COLUMNS.iter().map(|c| c.to_string()).collect();
+        let (where_sql, params) = build_where(filters, match_any, &valid)?;
+        let page = select_table_page(client, "pg_temp.filt", &where_sql, &params, " ORDER BY \"id\"", 100, 0)
+            .await
+            .map_err(|e| db_message(&e))?;
+        let count = count_rows(client, "pg_temp.filt", &where_sql, &params).await.map_err(|e| db_message(&e))?;
+        let ids = page.rows.iter().map(|r| r[0].as_i64().unwrap()).collect();
+        Ok((ids, count))
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn filters_compare_with_the_column_type() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        assert_eq!(matching_ids(&client, &[filter("id", ">=", "3")], false).await.unwrap(), (vec![3, 4], 2));
+        assert_eq!(matching_ids(&client, &[filter("id", "!=", "1")], false).await.unwrap(), (vec![2, 3, 4], 3));
+        assert_eq!(matching_ids(&client, &[filter("id", "in", "1, 4, 9")], false).await.unwrap(), (vec![1, 4], 2));
+        assert_eq!(matching_ids(&client, &[filter("id", "not in", "1,2")], false).await.unwrap(), (vec![3, 4], 2));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn text_filters_and_null_checks_work() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        assert_eq!(matching_ids(&client, &[filter("name", "like", "ana%")], false).await.unwrap().0, vec![1, 4]);
+        assert_eq!(matching_ids(&client, &[filter("name", "ilike", "ANA")], false).await.unwrap().0, vec![1]);
+        assert_eq!(matching_ids(&client, &[filter("name", "not like", "ana%")], false).await.unwrap().0, vec![2]);
+        assert_eq!(matching_ids(&client, &[filter("name", "is null", "")], false).await.unwrap().0, vec![3]);
+        assert_eq!(matching_ids(&client, &[filter("tags", "is not null", "")], false).await.unwrap().0, vec![1, 3]);
+        // like on a non-text column compares its text form
+        assert_eq!(matching_ids(&client, &[filter("id", "like", "1%")], false).await.unwrap().0, vec![1]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn enum_columns_can_be_filtered_and_are_still_readable() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        let valid: Vec<String> = COLUMNS.iter().map(|c| c.to_string()).collect();
+        let (where_sql, params) = build_where(&[filter("mood", "=", "happy")], false, &valid).unwrap();
+        let page = select_table_page(&client, "pg_temp.filt", &where_sql, &params, " ORDER BY \"id\"", 100, 0).await.unwrap();
+        assert_eq!(page.rows.len(), 2);
+        assert_eq!(page.rows[0], vec![json!(1), json!("ana"), json!("happy"), json!(["a"])]);
+        assert_eq!(page.rows[1], vec![json!(3), JsonValue::Null, json!("happy"), json!(["b", "c"])]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn several_filters_match_all_or_any() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        let filters = [filter("name", "like", "ana%"), filter("id", ">", "1")];
+        assert_eq!(matching_ids(&client, &filters, false).await.unwrap().0, vec![4]);
+        assert_eq!(matching_ids(&client, &filters, true).await.unwrap().0, vec![1, 2, 3, 4]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn a_value_of_the_wrong_type_fails_with_the_servers_message() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        let err = matching_ids(&client, &[filter("id", "=", "abc")], false).await.unwrap_err();
+        assert!(err.contains("invalid input syntax for type integer"), "{err}");
+        assert!(!err.contains("db error"), "{err}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn filter_values_are_never_run_as_sql() {
+        let client = connect().await;
+        filter_fixture(&client).await;
+        let evil = filter("name", "=", "x'; DROP TABLE filt; --");
+        assert_eq!(matching_ids(&client, &[evil], false).await.unwrap(), (vec![], 0));
+        // The table is still there
+        assert_eq!(matching_ids(&client, &[], false).await.unwrap().1, 4);
     }
 }
 

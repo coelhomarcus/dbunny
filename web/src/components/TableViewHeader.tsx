@@ -5,9 +5,11 @@ import {
   Trash2,
   RefreshCw,
   Columns3,
+  ListFilter,
 } from "lucide-react";
 import ExportMenu from "./ExportMenu";
 import Button from "./ui/Button";
+import Badge from "./ui/Badge";
 import { HeaderTitle, PageHeader } from "./layout/PageHeader";
 import { segmentedItemClass, segmentedListClass } from "./ui/styles";
 import type { QueryColumn } from "@/types";
@@ -32,6 +34,9 @@ interface TableViewHeaderProps {
   onRefresh: () => void;
   hasCustomWidths: boolean;
   onResetWidths: () => void;
+  filterCount: number;
+  filtersOpen: boolean;
+  onToggleFilters: () => void;
   columns?: QueryColumn[];
   rows?: unknown[][];
   onFetchAllRows?: () => Promise<{ columns: QueryColumn[]; rows: unknown[][] }>;
@@ -43,6 +48,7 @@ export default function TableViewHeader({
   hasPendingChanges, dirtyRowCount, saveError, saving, onSave, onDiscard,
   refreshing, loading, spinKey, onRefresh,
   hasCustomWidths, onResetWidths,
+  filterCount, filtersOpen, onToggleFilters,
   columns, rows, onFetchAllRows,
 }: TableViewHeaderProps) {
   return (
@@ -88,6 +94,18 @@ export default function TableViewHeader({
             </Button>
           </div>
         )}
+
+        <Button
+          variant="ghost-muted"
+          size="sm"
+          data-active={filtersOpen || filterCount > 0}
+          onClick={onToggleFilters}
+          title="Filter rows"
+        >
+          <ListFilter />
+          Filter
+          {filterCount > 0 && <Badge variant="info">{filterCount}</Badge>}
+        </Button>
 
         <Button variant="ghost-muted" size="icon-sm" onClick={onRefresh} disabled={refreshing || loading} title="Refresh">
           <RefreshCw

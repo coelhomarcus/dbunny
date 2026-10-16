@@ -7,6 +7,8 @@ import type {
   FunctionDetail,
   ColumnInfo,
   CompletionSchema,
+  FilterMode,
+  TableFilter,
   QueryResult,
   TableDataResponse,
   SavedConnection,
@@ -78,6 +80,8 @@ export function createSessionApi(sessionId: string | null) {
         pageSize?: number;
         sortColumn?: string;
         sortDirection?: "asc" | "desc";
+        filters?: TableFilter[];
+        filterMode?: FilterMode;
       }
     ) {
       return invoke<TableDataResponse>("get_table_data", {
