@@ -13,6 +13,9 @@ import { useCellEditing } from "../hooks/useCellEditing";
 import { useRowSelection } from "../hooks/useRowSelection";
 import { useColumnResize } from "../hooks/useColumnResize";
 import { usePendingChanges } from "../hooks/usePendingChanges";
+import { useDiscardGuard } from "../hooks/useDiscardGuard";
+import Dialog from "../components/ui/Dialog";
+import Button from "../components/ui/Button";
 import Checkbox from "../components/Checkbox";
 import TableViewHeader from "../components/TableViewHeader";
 import SortableColumnHeader from "../components/SortableColumnHeader";
@@ -53,6 +56,18 @@ export default function TableView() {
     pendingChanges: pending.pendingChanges,
     setPendingChanges: pending.setPendingChanges,
   });
+
+  // Loading other rows (page, sorting, refresh) invalidates edits and selection by position
+  const { discardChanges } = pending;
+  const { cancelEdit } = editing;
+  const { setSelectedRows } = selection;
+  const resetRowState = useCallback(() => {
+    discardChanges();
+    cancelEdit();
+    setSelectedRows(new Set());
+  }, [discardChanges, cancelEdit, setSelectedRows]);
+  const discardGuard = useDiscardGuard(pending.dirtyRowCount, resetRowState);
+  const { guard } = discardGuard;
 
   useEffect(() => {
     pending.setPendingChanges({});
@@ -122,7 +137,7 @@ export default function TableView() {
     data: data?.rows ?? [],
     columns,
     state: { sorting: tableData.sorting },
-    onSortingChange: tableData.setSorting,
+    onSortingChange: guard(tableData.setSorting),
     getCoreRowModel: getCoreRowModel(),
     manualSorting: true,
     manualPagination: true,
@@ -150,7 +165,7 @@ export default function TableView() {
         refreshing={tableData.refreshing}
         loading={loading}
         spinKey={tableData.spinKey}
-        onRefresh={tableData.refresh}
+        onRefresh={guard(tableData.refresh)}
         hasCustomWidths={resize.hasCustomWidths}
         onResetWidths={resize.resetWidths}
         columns={data?.columns}
@@ -282,13 +297,30 @@ export default function TableView() {
           <Pagination
             page={tableData.page}
             totalPages={tableData.totalPages}
-            onPageChange={tableData.setPage}
+            onPageChange={guard(tableData.setPage)}
             pageSize={tableData.pageSize}
             pageSizeOptions={tableData.pageSizeOptions}
-            onPageSizeChange={tableData.setPageSize}
+            onPageSizeChange={guard(tableData.setPageSize)}
           />
         </div>
       )}
+
+      <Dialog
+        open={discardGuard.isConfirming}
+        onClose={discardGuard.cancel}
+        title="Discard unsaved changes?"
+        description={`${pending.dirtyRowCount} row${pending.dirtyRowCount > 1 ? "s have" : " has"} unsaved edits. Loading other rows would discard them.`}
+        footer={
+          <>
+            <Button variant="ghost-muted" size="sm" onClick={discardGuard.cancel}>
+              Keep editing
+            </Button>
+            <Button variant="destructive" size="sm" onClick={discardGuard.confirm}>
+              Discard changes
+            </Button>
+          </>
+        }
+      />
     </div>
   );
 }
