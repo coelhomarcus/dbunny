@@ -130,6 +130,7 @@ pub fn run() {
             commands::query::execute_query,
             commands::query::get_table_data,
             commands::query::count_table_rows,
+            commands::query::insert_row,
             commands::query::update_row,
             commands::query::delete_rows,
             commands::saved::get_saved_connections,

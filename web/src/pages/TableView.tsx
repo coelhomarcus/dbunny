@@ -16,6 +16,7 @@ import { usePendingChanges } from "../hooks/usePendingChanges";
 import { useDiscardGuard } from "../hooks/useDiscardGuard";
 import Dialog from "../components/ui/Dialog";
 import FilterBar from "../components/table/FilterBar";
+import InsertRowDialog from "../components/table/InsertRowDialog";
 import Button from "../components/ui/Button";
 import Checkbox from "../components/Checkbox";
 import TableViewHeader from "../components/TableViewHeader";
@@ -54,6 +55,7 @@ export default function TableView() {
   });
 
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [insertOpen, setInsertOpen] = useState(false);
 
   const editing = useCellEditing({
     data,
@@ -181,6 +183,7 @@ export default function TableView() {
         onRefresh={guard(tableData.refresh)}
         hasCustomWidths={resize.hasCustomWidths}
         onResetWidths={resize.resetWidths}
+        onInsertRow={guard(() => setInsertOpen(true))}
         filterCount={tableData.filters.length}
         filtersOpen={filtersOpen}
         onToggleFilters={() => setFiltersOpen((open) => !open)}
@@ -345,6 +348,18 @@ export default function TableView() {
           />
         </div>
       )}
+
+      <InsertRowDialog
+        open={insertOpen}
+        schema={schema!}
+        table={table!}
+        columns={columnInfos}
+        onClose={() => setInsertOpen(false)}
+        onInsert={async (values) => {
+          await api.insertRow(schema!, table!, values);
+          await tableData.refresh();
+        }}
+      />
 
       <Dialog
         open={discardGuard.isConfirming}

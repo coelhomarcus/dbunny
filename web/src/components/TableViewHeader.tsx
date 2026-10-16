@@ -7,6 +7,7 @@ import {
   Columns3,
   ListFilter,
   Loader,
+  Plus,
 } from "lucide-react";
 import ExportMenu from "./ExportMenu";
 import Button from "./ui/Button";
@@ -38,6 +39,7 @@ interface TableViewHeaderProps {
   onRefresh: () => void;
   hasCustomWidths: boolean;
   onResetWidths: () => void;
+  onInsertRow: () => void;
   filterCount: number;
   filtersOpen: boolean;
   onToggleFilters: () => void;
@@ -52,7 +54,7 @@ export default function TableViewHeader({
   hasPendingChanges, dirtyRowCount, saveError, saving, onSave, onDiscard,
   refreshing, loading, spinKey, onRefresh,
   hasCustomWidths, onResetWidths,
-  filterCount, filtersOpen, onToggleFilters,
+  onInsertRow, filterCount, filtersOpen, onToggleFilters,
   columns, rows, onFetchAllRows,
 }: TableViewHeaderProps) {
   return (
@@ -110,6 +112,11 @@ export default function TableViewHeader({
             </Button>
           </div>
         )}
+
+        <Button variant="ghost-muted" size="sm" onClick={onInsertRow} title="Insert a row">
+          <Plus />
+          Insert
+        </Button>
 
         <Button
           variant="ghost-muted"

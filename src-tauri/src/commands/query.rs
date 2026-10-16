@@ -10,6 +10,7 @@ use uuid::Uuid;
 use super::pgtext::{is_native, text_to_json};
 use super::sqlsplit::split_statements;
 use super::state::AppState;
+use super::tableedit::build_insert;
 use super::tablefilter::{build_where, quote_ident, TableFilter, TextParam};
 
 #[derive(Serialize)]
@@ -629,6 +630,36 @@ pub async fn get_table_data(
     })
 }
 
+/// Inserts one row. Only the columns present in `values` are written; the rest get
+/// their defaults. A null value is SQL NULL.
+#[tauri::command]
+pub async fn insert_row(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    table: String,
+    values: serde_json::Map<String, JsonValue>,
+) -> Result<u64, String> {
+    let client = state.client(&session_id).await?;
+    let valid_columns = get_valid_columns(&client, &schema, &table).await?;
+    let relation = format!("{}.{}", quote_ident(&schema), quote_ident(&table));
+    insert_into(&client, &relation, &values, &valid_columns).await
+}
+
+async fn insert_into(
+    client: &tokio_postgres::Client,
+    relation: &str,
+    values: &serde_json::Map<String, JsonValue>,
+    valid_columns: &[String],
+) -> Result<u64, String> {
+    let (sql, params) = build_insert(relation, values, valid_columns)?;
+    let param_refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    client
+        .execute(&sql, &param_refs)
+        .await
+        .map_err(|e| db_message(&e))
+}
+
 /// Exact number of rows of a table, for when the view only shows an estimate.
 #[tauri::command]
 pub async fn count_table_rows(
@@ -1030,6 +1061,82 @@ mod server_tests {
         assert_eq!(estimated_rows(&client, "pg_temp.\"est_small\"").await.unwrap(), None);
         assert_eq!(estimated_rows(&client, "pg_temp.\"est_view\"").await.unwrap(), None);
         assert_eq!(estimated_rows(&client, "pg_temp.\"missing\"").await.unwrap(), None);
+    }
+
+    // --- inserting rows ---
+
+    async fn insert_fixture(client: &tokio_postgres::Client) -> Vec<String> {
+        client.batch_execute("CREATE TYPE pg_temp.mood AS ENUM ('sad', 'happy')").await.unwrap();
+        client
+            .batch_execute(
+                "CREATE TEMP TABLE ins (id serial PRIMARY KEY, name text NOT NULL, mood pg_temp.mood, \
+                 created timestamptz DEFAULT now(), note text DEFAULT 'x')",
+            )
+            .await
+            .unwrap();
+        ["id", "name", "mood", "created", "note"].iter().map(|c| c.to_string()).collect()
+    }
+
+    fn values(pairs: serde_json::Value) -> serde_json::Map<String, JsonValue> {
+        pairs.as_object().unwrap().clone()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn untouched_columns_get_their_defaults() {
+        let client = connect().await;
+        let columns = insert_fixture(&client).await;
+        let affected = insert_into(&client, "pg_temp.ins", &values(json!({"name": "ana"})), &columns).await.unwrap();
+        assert_eq!(affected, 1);
+        let row = run(&client, "SELECT id, name, mood, created IS NOT NULL AS has_created, note FROM ins").await;
+        assert_eq!(row.rows[0], vec![json!(1), json!("ana"), JsonValue::Null, json!(true), json!("x")]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn an_explicit_null_overrides_the_default() {
+        let client = connect().await;
+        let columns = insert_fixture(&client).await;
+        insert_into(&client, "pg_temp.ins", &values(json!({"name": "ana", "note": null})), &columns).await.unwrap();
+        let row = run(&client, "SELECT note FROM ins").await;
+        assert_eq!(row.rows[0], vec![JsonValue::Null]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn enums_numbers_and_empty_strings_are_converted_by_the_server() {
+        let client = connect().await;
+        let columns = insert_fixture(&client).await;
+        insert_into(&client, "pg_temp.ins", &values(json!({"id": 42, "name": "", "mood": "happy"})), &columns).await.unwrap();
+        let row = run(&client, "SELECT id, name, mood FROM ins").await;
+        assert_eq!(row.rows[0], vec![json!(42), json!(""), json!("happy")]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn constraint_and_type_errors_come_back_as_the_servers_message() {
+        let client = connect().await;
+        let columns = insert_fixture(&client).await;
+        // name is NOT NULL and has no default
+        let err = insert_into(&client, "pg_temp.ins", &values(json!({})), &columns).await.unwrap_err();
+        assert!(err.contains("null value in column \"name\""), "{err}");
+        let err = insert_into(&client, "pg_temp.ins", &values(json!({"name": "a", "id": "abc"})), &columns).await.unwrap_err();
+        assert!(err.contains("invalid input syntax for type integer"), "{err}");
+        let err = insert_into(&client, "pg_temp.ins", &values(json!({"name": "a", "mood": "angry"})), &columns).await.unwrap_err();
+        assert!(err.contains("invalid input value for enum"), "{err}");
+        // Nothing was inserted by the failures
+        assert_eq!(count_rows(&client, "pg_temp.ins", "", &[]).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn a_table_of_only_defaults_accepts_an_empty_insert() {
+        let client = connect().await;
+        client.batch_execute("CREATE TEMP TABLE only_defaults (id serial, tag text DEFAULT 'new')").await.unwrap();
+        let columns: Vec<String> = vec!["id".into(), "tag".into()];
+        insert_into(&client, "pg_temp.only_defaults", &values(json!({})), &columns).await.unwrap();
+        let row = run(&client, "SELECT id, tag FROM only_defaults").await;
+        assert_eq!(row.rows[0], vec![json!(1), json!("new")]);
     }
 }
 

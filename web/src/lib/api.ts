@@ -92,6 +92,11 @@ export function createSessionApi(sessionId: string | null) {
       });
     },
 
+    /** Inserts a row. Columns left out get their defaults; a null value is SQL NULL. */
+    async insertRow(schema: string, table: string, values: Record<string, string | null>) {
+      return invoke<number>("insert_row", { sessionId, schema, table, values });
+    },
+
     /** Exact row count, for tables whose total is only an estimate. */
     async countTableRows(schema: string, table: string) {
       return invoke<number>("count_table_rows", { sessionId, schema, table });

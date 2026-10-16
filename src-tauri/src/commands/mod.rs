@@ -7,3 +7,4 @@ pub mod storage;
 pub mod pgtext;
 pub mod sqlsplit;
 pub mod tablefilter;
+pub mod tableedit;
