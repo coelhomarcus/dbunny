@@ -60,6 +60,10 @@ export default function ResultsBar({
               {result.rowsAffected != null
                 ? `${result.rowsAffected.toLocaleString()} row${result.rowsAffected === 1 ? "" : "s"} affected`
                 : `${result.rowCount.toLocaleString()} row${result.rowCount === 1 ? "" : "s"}`}
+              {/* A big change brings back only its first rows */}
+              {result.rowsAffected != null && result.rows.length > 0 && result.rows.length < result.rowsAffected && (
+                <span className="text-muted-foreground"> · first {result.rows.length.toLocaleString()} shown</span>
+              )}
             </span>
           </span>
           <span className="flex items-center gap-1.5 tabular-nums">

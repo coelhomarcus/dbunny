@@ -430,6 +430,89 @@ async fn run_statement(
     })
 }
 
+/// Rows of a change shown in the editor; the count of every changed row still comes back.
+const CHANGED_ROWS_SHOWN: usize = 500;
+const CHANGED_PREFIX: &str = "WITH dbunny_changed AS (\n";
+
+/// The first word of a statement, past comments.
+fn leading_keyword(sql: &str) -> String {
+    let mut rest = sql;
+    loop {
+        rest = rest.trim_start();
+        if let Some(after) = rest.strip_prefix("--") {
+            rest = after.split_once('\n').map_or("", |(_, tail)| tail);
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after.split_once("*/").map_or("", |(_, tail)| tail);
+        } else {
+            break;
+        }
+    }
+    rest.chars().take_while(|c| c.is_ascii_alphabetic()).collect::<String>().to_ascii_lowercase()
+}
+
+/// An INSERT, UPDATE or DELETE rewritten to also return the rows it changed: the statement
+/// still runs once, the server counts every changed row and sends back the first ones.
+/// None for anything else, or when the statement already says what to return (RETURNING)
+/// or brings its own WITH, which this can't nest safely.
+fn with_changed_rows(sql: &str) -> Option<String> {
+    if !matches!(leading_keyword(sql).as_str(), "insert" | "update" | "delete") {
+        return None;
+    }
+    let lower = sql.to_ascii_lowercase();
+    let has_word = |word: &str| {
+        lower.match_indices(word).any(|(i, _)| {
+            let before = lower[..i].chars().next_back();
+            let after = lower[i + word.len()..].chars().next();
+            !before.is_some_and(|c| c.is_alphanumeric() || c == '_') && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+        })
+    };
+    if has_word("returning") {
+        return None;
+    }
+    // On new lines, so a comment at the end of the statement can't swallow what follows
+    Some(format!(
+        "{CHANGED_PREFIX}{sql}\nRETURNING *\n) SELECT (SELECT count(*) FROM dbunny_changed) AS dbunny_total, * FROM dbunny_changed LIMIT {CHANGED_ROWS_SHOWN}"
+    ))
+}
+
+/// The rewritten statement's output as the changed rows: the count column goes, and the
+/// count becomes the number of rows affected.
+fn changed_rows_output(mut output: StatementOutput) -> StatementOutput {
+    let total = output
+        .rows
+        .first()
+        .and_then(|row| row.first())
+        .and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok()))
+        .unwrap_or(0);
+    output.columns.remove(0);
+    for row in &mut output.rows {
+        row.remove(0);
+    }
+    output.rows_affected = Some(total);
+    output
+}
+
+/// Runs one statement of the editor's script, with the changed rows of an INSERT, UPDATE
+/// or DELETE. A rewrite the server can't take (an insert into a view whose rules don't
+/// return rows, say) is refused before anything runs, and then the statement runs as typed.
+async fn run_editor_statement(
+    client: &tokio_postgres::Client,
+    sql: &str,
+    offset: i64,
+    in_transaction: bool,
+    position: Option<(usize, usize)>,
+) -> Result<StatementOutput, String> {
+    if let Some(rewritten) = with_changed_rows(sql) {
+        match run_statement(client, &rewritten).await {
+            Ok(output) => return Ok(changed_rows_output(output)),
+            // In a transaction the failure has aborted it, so there's no second try
+            Err(e) if !in_transaction && e.code() == Some(&tokio_postgres::error::SqlState::FEATURE_NOT_SUPPORTED) => {}
+            Err(e) => return Err(pg_error_in_script(e, offset - CHANGED_PREFIX.chars().count() as i64, position)),
+        }
+    }
+    run_statement(client, sql).await.map_err(|e| pg_error_in_script(e, offset, position))
+}
+
 #[tauri::command]
 pub async fn execute_query(
     state: State<'_, AppState>,
@@ -453,10 +536,14 @@ pub async fn execute_query(
     let mut shown: Option<StatementOutput> = None;
     let mut affected: u64 = 0;
     for (index, statement) in statements.iter().enumerate() {
-        let output = run_statement(&client, &statement.text).await.map_err(|e| {
-            pg_error_in_script(e, statement.offset as i64, (total > 1).then_some((index + 1, total)))
-        })?;
+        let position = (total > 1).then_some((index + 1, total));
+        let output = run_editor_statement(&client, &statement.text, statement.offset as i64, in_transaction, position).await?;
         match output.rows_affected {
+            // A change that brought its rows back is shown, and still counts as affected
+            Some(count) if !output.columns.is_empty() => {
+                affected += count;
+                shown = Some(output);
+            }
             Some(count) => affected += count,
             None => shown = Some(output),
         }
@@ -469,7 +556,8 @@ pub async fn execute_query(
             row_count: output.rows.len(),
             columns: output.columns,
             rows: output.rows,
-            rows_affected: None,
+            // The changed rows on show: the count of all of them
+            rows_affected: output.rows_affected,
             duration,
             statement_count: total,
             notices,
@@ -837,6 +925,19 @@ mod tests {
 
     fn key(column: &str, direction: &str) -> SortKey {
         SortKey { column: column.into(), direction: Some(direction.into()) }
+    }
+
+    #[test]
+    fn only_plain_changes_get_their_rows_back() {
+        assert!(with_changed_rows("UPDATE t SET a = 1 WHERE id = 7").is_some());
+        assert!(with_changed_rows("  -- fix it\n/* note */ delete from t").is_some());
+        assert!(with_changed_rows("insert into t values (1)").is_some());
+        assert!(with_changed_rows("SELECT 1").is_none());
+        assert!(with_changed_rows("WITH x AS (SELECT 1) UPDATE t SET a = 1").is_none(), "its own WITH");
+        assert!(with_changed_rows("UPDATE t SET a = 1 RETURNING id").is_none(), "already returns rows");
+        assert!(with_changed_rows("update t set returning_count = 1").is_some(), "a column named like the keyword");
+        let sql = with_changed_rows("UPDATE t SET a = 1 -- trailing comment").unwrap();
+        assert!(sql.contains("-- trailing comment\nRETURNING *\n)"), "{sql}");
     }
 
     #[test]
@@ -1325,6 +1426,42 @@ mod server_tests {
 
         assert_eq!(save_rows(&client, &schema, "edits", &[change(1, 10), change(2, 20)]).await.unwrap(), 2);
         assert_eq!(qty(&client).await, vec![10, 20]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn changes_in_the_editor_show_the_rows_they_changed() {
+        let client = connect().await;
+        client.batch_execute("CREATE TEMP TABLE stock (id int PRIMARY KEY, qty int); INSERT INTO stock SELECT g, 0 FROM generate_series(1, 600) g").await.unwrap();
+        let run = |sql: &'static str| {
+            let client = &client;
+            async move { run_editor_statement(client, sql, 0, false, None).await }
+        };
+
+        let out = run("UPDATE stock SET qty = 9 WHERE id = 7 -- one row").await.unwrap();
+        assert_eq!(out.rows_affected, Some(1));
+        assert_eq!(out.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), vec!["id", "qty"]);
+        assert_eq!(out.rows, vec![vec![json!(7), json!(9)]]);
+
+        // Every row is changed and counted; the first ones come back
+        let out = run("DELETE FROM stock WHERE id > 50").await.unwrap();
+        assert_eq!(out.rows_affected, Some(550));
+        assert_eq!(out.rows.len(), CHANGED_ROWS_SHOWN.min(550));
+        let left: i64 = client.query_one("SELECT count(*) FROM stock", &[]).await.unwrap().get(0);
+        assert_eq!(left, 50, "the statement ran once, in full");
+
+        // Nothing matched: no rows, zero affected
+        let out = run("UPDATE stock SET qty = 1 WHERE id = -1").await.unwrap();
+        assert_eq!((out.rows_affected, out.rows.len()), (Some(0), 0));
+
+        // RETURNING of its own is left as typed
+        let out = run("INSERT INTO stock VALUES (1000, 5) RETURNING id").await.unwrap();
+        assert_eq!((out.rows_affected, out.rows.clone()), (None, vec![vec![json!(1000)]]));
+
+        // Errors still point into the statement as typed
+        let err = run("UPDATE stock SET nope = 1").await.err().expect("an unknown column fails");
+        let error: serde_json::Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(error["position"], json!(18), "{err}");
     }
 
     #[tokio::test]
