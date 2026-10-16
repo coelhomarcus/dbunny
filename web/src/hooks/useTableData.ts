@@ -48,7 +48,11 @@ export function useTableData(schema?: string, table?: string, initialFilters: Ta
   useEffect(() => {
     if (!schema || !table) return;
     let cancel = false;
-    api.getRelationKind(schema, table).then((kind) => !cancel && setRelationType(kind)).catch(() => {});
+    // If the lookup fails it's taken for a table: the server still refuses writes to a view
+    api
+      .getRelationKind(schema, table)
+      .then((kind) => !cancel && setRelationType(kind ?? "table"))
+      .catch(() => !cancel && setRelationType("table"));
     return () => {
       cancel = true;
     };
