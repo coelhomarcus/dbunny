@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bindOpenQuery } from "../lib/openQuery";
 import {
   closeDocument as closeIn,
@@ -28,6 +28,9 @@ interface DocumentsValue {
   renameSchema: (schema: string, newName: string) => void;
   dropRelation: (schema: string, name: string) => void;
   dropSchema: (schema: string) => void;
+  /** The open data tab for this table reloads. No-op when it is not open. */
+  refreshData: (schema: string, name: string) => void;
+  registerDataRefresh: (key: string, refresh: () => void) => () => void;
   dirtyIds: ReadonlySet<string>;
   setQueryDirty: (id: string, dirty: boolean) => void;
 }
@@ -38,6 +41,7 @@ export function DocumentsProvider({ children }: { children: ReactNode }) {
   const { tabId } = useTab();
   const [documents, setDocuments] = useState(() => seedQuery(emptyDocuments()));
   const [dirtyIds, setDirtyIds] = useState<ReadonlySet<string>>(() => new Set());
+  const refreshers = useRef(new Map<string, () => void>());
 
   const openDocument = useCallback((target: OpenTarget) => setDocuments((state) => openIn(state, target)), []);
   const focusDocument = useCallback((id: string) => setDocuments((state) => focusIn(state, id)), []);
@@ -62,6 +66,15 @@ export function DocumentsProvider({ children }: { children: ReactNode }) {
   const renameSchema = useCallback((schema: string, newName: string) => setDocuments((state) => renameSchemaIn(state, schema, newName)), []);
   const dropRelation = useCallback((schema: string, name: string) => setDocuments((state) => dropRelationIn(state, schema, name)), []);
   const dropSchema = useCallback((schema: string) => setDocuments((state) => dropSchemaIn(state, schema)), []);
+  const refreshData = useCallback((schema: string, name: string) => {
+    refreshers.current.get(`${schema}.${name}`)?.();
+  }, []);
+  const registerDataRefresh = useCallback((key: string, refresh: () => void) => {
+    refreshers.current.set(key, refresh);
+    return () => {
+      if (refreshers.current.get(key) === refresh) refreshers.current.delete(key);
+    };
+  }, []);
   const setQueryDirty = useCallback((id: string, dirty: boolean) => {
     setDirtyIds((prev) => {
       const has = prev.has(id);
@@ -78,9 +91,9 @@ export function DocumentsProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       documents, openDocument, focusDocument, closeDocument, renameQuery, setQuerySaved, renameRelation, renameSchema,
-      dropRelation, dropSchema, dirtyIds, setQueryDirty,
+      dropRelation, dropSchema, refreshData, registerDataRefresh, dirtyIds, setQueryDirty,
     }),
-    [documents, openDocument, focusDocument, closeDocument, renameQuery, setQuerySaved, renameRelation, renameSchema, dropRelation, dropSchema, dirtyIds, setQueryDirty],
+    [documents, openDocument, focusDocument, closeDocument, renameQuery, setQuerySaved, renameRelation, renameSchema, dropRelation, dropSchema, refreshData, registerDataRefresh, dirtyIds, setQueryDirty],
   );
 
   return <DocumentsContext.Provider value={value}>{children}</DocumentsContext.Provider>;

@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo, type ComponentType, type ReactNode } from "react";
-import { useLocation, useNavigate } from "react-router";
 import { useDocuments } from "../contexts/DocumentsContext";
 import type { DataIcon } from "../lib/documents";
 import { useApi, useConnection } from "../contexts/useConnection";
@@ -84,8 +83,6 @@ const CATEGORY_CAPABILITY: Partial<Record<string, keyof Capabilities>> = {
 };
 
 const RELATION_KINDS: Partial<Record<ObjectKind, RelationKind>> = { table: "table", view: "view", matview: "matview" };
-
-const relationPath = (schema: string, name: string) => `/db/${encodeURIComponent(schema)}/${encodeURIComponent(name)}`;
 
 const objectKey = (schema: string, object: ExplorerObject) => `${schema}.${object.name}:${object.kind}:${object.detail}`;
 
@@ -177,9 +174,7 @@ function GroupRow({
  * under each table.
  */
 export default function SchemaTree() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { documents, openDocument } = useDocuments();
+  const { documents, openDocument, renameRelation, renameSchema, dropRelation, dropSchema, refreshData } = useDocuments();
   const api = useApi();
   const { connectionInfo } = useConnection();
   const readOnly = connectionInfo?.readOnly ?? false;
@@ -291,12 +286,6 @@ export default function SchemaTree() {
     return !capability || capabilities[capability] === true;
   };
 
-  const isCurrent = (t: RelationTarget) => {
-    const current = decodeURIComponent(location.pathname);
-    const target = decodeURIComponent(relationPath(t.schema, t.name));
-    return current === target || current.startsWith(`${target}/`);
-  };
-
   /** The front document is this object. A structure tab counts as its table. */
   function isActive(schema: string, object: ExplorerObject) {
     const front = documents.items.find((doc) => doc.id === documents.activeId);
@@ -329,23 +318,17 @@ export default function SchemaTree() {
   ) {
     if (kind === "rename") {
       await api.renameRelation(target.schema, target.name, target.kind, options.newName);
-      if (isCurrent(target)) navigate(relationPath(target.schema, options.newName));
+      renameRelation(target.schema, target.name, options.newName);
     } else if (kind === "duplicate") {
       await api.duplicateTable(target.schema, target.name, options.newName, options.withData);
     } else if (kind === "truncate") {
       await api.truncateTable(target.schema, target.name, options.restartIdentity, options.cascade);
-      // Reopen so the emptied table is shown
-      if (isCurrent(target)) navigate(relationPath(target.schema, target.name));
+      refreshData(target.schema, target.name);
     } else {
       await api.dropRelation(target.schema, target.name, target.kind, options.cascade);
-      if (isCurrent(target)) navigate("/db/query");
+      dropRelation(target.schema, target.name);
     }
     load(false);
-  }
-
-  /** Whether the open page belongs to the schema. */
-  function inSchema(schema: string) {
-    return decodeURIComponent(location.pathname).startsWith(`/db/${schema}/`);
   }
 
   async function runContainer(request: ContainerRequest, options: ContainerOptions) {
@@ -356,11 +339,11 @@ export default function SchemaTree() {
     } else if (kind === "rename") {
       await api.renameSchema(name, options.name);
       setPins((prev) => prev.map((p) => (p.schema === name ? { ...p, schema: options.name } : p)));
-      if (inSchema(name)) navigate("/db/query");
+      renameSchema(name, options.name);
     } else {
       await api.dropSchema(name, options.cascade);
       setPins((prev) => prev.filter((p) => p.schema !== name));
-      if (inSchema(name)) navigate("/db/query");
+      dropSchema(name);
     }
     load(false);
   }
@@ -414,7 +397,7 @@ export default function SchemaTree() {
             .refreshMaterializedView(target.schema, target.name)
             .then(() => {
               setNotice(null);
-              if (isCurrent(target)) navigate(relationPath(target.schema, target.name));
+              refreshData(target.schema, target.name);
             })
             .catch((err) => setNotice(typeof err === "string" ? err : "Refresh failed"));
         },

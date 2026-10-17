@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useCallback, useState, useRef } from "react";
-import { useNavigate } from "react-router";
+import { useDocuments } from "../contexts/DocumentsContext";
 import {
   useReactTable,
   getCoreRowModel,
@@ -49,7 +49,7 @@ function foreignKeyLink(column: ColumnInfo | undefined, row: unknown[], columns:
     if (value === null || value === undefined) return null;
     filters.push({ column: fk.refColumns[i], operator: "=", value: toEditText(value) });
   }
-  return { path: `/db/${encodeURIComponent(fk.schema)}/${encodeURIComponent(fk.table)}`, filters };
+  return { schema: fk.schema, name: fk.table, filters };
 }
 
 export default function TableView({
@@ -78,7 +78,7 @@ function TableViewContent({
   active: boolean;
 }) {
   const api = useApi();
-  const navigate = useNavigate();
+  const { openDocument, registerDataRefresh } = useDocuments();
   const initialFilters = filterRequest?.filters;
 
   const tableData = useTableData(schema, table, initialFilters);
@@ -182,6 +182,7 @@ function TableViewContent({
   }, [discardChanges, cancelEdit, setSelectedRows]);
   const discardGuard = useDiscardGuard(pending.dirtyRowCount + (draft ? 1 : 0), resetRowState);
   const { guard } = discardGuard;
+  useEffect(() => registerDataRefresh(`${schema}.${table}`, () => guard(tableData.refresh)()), [schema, table, registerDataRefresh, guard, tableData.refresh]);
   const seenFilter = useRef(filterRequest?.id);
   useEffect(() => {
     if (!filterRequest || filterRequest.id === seenFilter.current) return;
@@ -394,7 +395,7 @@ function TableViewContent({
       items.push({
         label: `Open referenced row in ${column!.foreignKey!.table}`,
         icon: <ArrowUpRight />,
-        onSelect: guard(() => navigate(link.path, { state: { filters: link.filters } })),
+        onSelect: guard(() => openDocument({ kind: "data", schema: link.schema, name: link.name, icon: "table", filters: link.filters })),
       });
     }
     items.push("separator");
@@ -652,7 +653,7 @@ function TableViewContent({
                             columnSelectionEnd={selectedColumn === col.name && rowIndex === data.rows.length - 1}
                             onContextMenu={(e) => setMenu({ x: e.clientX, y: e.clientY, rowIndex, colName: col.name })}
                             onFollowLink={
-                              link ? guard(() => navigate(link.path, { state: { filters: link.filters } })) : undefined
+                              link ? guard(() => openDocument({ kind: "data", schema: link.schema, name: link.name, icon: "table", filters: link.filters })) : undefined
                             }
                           />
                         );
