@@ -8,6 +8,7 @@ import {
   focusDocument as focusIn,
   openDocument as openIn,
   renameQuery as renameQueryIn,
+  setQuerySaved as setQuerySavedIn,
   renameRelation as renameRelationIn,
   renameSchema as renameSchemaIn,
   seedQuery,
@@ -22,6 +23,7 @@ interface DocumentsValue {
   focusDocument: (id: string) => void;
   closeDocument: (id: string) => void;
   renameQuery: (id: string, title: string) => void;
+  setQuerySaved: (id: string, savedId: string, title: string) => void;
   renameRelation: (schema: string, name: string, newName: string) => void;
   renameSchema: (schema: string, newName: string) => void;
   dropRelation: (schema: string, name: string) => void;
@@ -49,6 +51,10 @@ export function DocumentsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   const renameQuery = useCallback((id: string, title: string) => setDocuments((state) => renameQueryIn(state, id, title)), []);
+  const setQuerySaved = useCallback(
+    (id: string, savedId: string, title: string) => setDocuments((state) => setQuerySavedIn(state, id, savedId, title)),
+    [],
+  );
   const renameRelation = useCallback(
     (schema: string, name: string, newName: string) => setDocuments((state) => renameRelationIn(state, schema, name, newName)),
     [],
@@ -71,10 +77,10 @@ export function DocumentsProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
-      documents, openDocument, focusDocument, closeDocument, renameQuery, renameRelation, renameSchema,
+      documents, openDocument, focusDocument, closeDocument, renameQuery, setQuerySaved, renameRelation, renameSchema,
       dropRelation, dropSchema, dirtyIds, setQueryDirty,
     }),
-    [documents, openDocument, focusDocument, closeDocument, renameQuery, renameRelation, renameSchema, dropRelation, dropSchema, dirtyIds, setQueryDirty],
+    [documents, openDocument, focusDocument, closeDocument, renameQuery, setQuerySaved, renameRelation, renameSchema, dropRelation, dropSchema, dirtyIds, setQueryDirty],
   );
 
   return <DocumentsContext.Provider value={value}>{children}</DocumentsContext.Provider>;

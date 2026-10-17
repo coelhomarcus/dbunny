@@ -132,6 +132,13 @@ export function closeDocument(state: DocumentsState, id: string): DocumentsState
   return { ...state, items, activeId: neighbor?.id ?? null };
 }
 
+export function setQuerySaved(state: DocumentsState, id: string, savedId: string, title: string): DocumentsState {
+  return {
+    ...state,
+    items: state.items.map((doc) => (doc.id === id && doc.kind === "query" ? { ...doc, savedId, title } : doc)),
+  };
+}
+
 export function renameQuery(state: DocumentsState, id: string, title: string): DocumentsState {
   const trimmed = title.trim();
   if (!trimmed) return state;

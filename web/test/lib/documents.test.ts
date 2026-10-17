@@ -8,6 +8,7 @@ import {
   openDocument,
   renameRelation,
   seedQuery,
+  setQuerySaved,
 } from "../../src/lib/documents.ts";
 
 const filter = { column: "id", operator: "=", value: "1" };
@@ -86,6 +87,14 @@ test("a foreign-key open records a new filter request and a plain focus does not
   assert.deepEqual(again.items[0].filterRequest, { id: 2, filters: [{ ...filter, value: "2" }] });
   const plain = openDocument(again, { kind: "data", schema: "public", name: "comments", icon: "table" });
   assert.equal(plain.items[0].filterRequest?.id, 2);
+});
+
+test("setQuerySaved stores the id used to focus that query later", () => {
+  const opened = openDocument(emptyDocuments(), { kind: "query", sql: "select 1" });
+  const saved = setQuerySaved(opened, opened.items[0].id, "s1", "Daily");
+  const again = openDocument(saved, { kind: "query", sql: "other", savedId: "s1", title: "Daily" });
+  assert.equal(again.items.length, 1);
+  assert.equal(again.activeId, opened.activeId);
 });
 
 test("seedQuery opens Query 1 only when the list is empty", () => {
