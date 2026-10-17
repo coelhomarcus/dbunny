@@ -108,6 +108,17 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
 
   const [filtersOpen, setFiltersOpen] = useState(() => (initialFilters?.length ?? 0) > 0);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
+  useEffect(() => {
+    if (!selectedColumn) return;
+    const column = selectedColumn;
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target instanceof Element ? e.target : null;
+      if (target?.closest(`[data-grid-column="${CSS.escape(column)}"]`)) return;
+      setSelectedColumn(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [selectedColumn]);
   // A new row edited in the grid. Missing keys are left to the column default.
   const [draft, setDraft] = useState<Record<string, string | null> | null>(null);
   const [draftCol, setDraftCol] = useState<string | null>(null);
@@ -548,7 +559,9 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                             setDraftExpanded(false);
                           }}
                           onExpand={() => setDraftExpanded(true)}
+                          columnName={col.name}
                           columnSelected={selectedColumn === col.name}
+                          columnSelectionEnd={selectedColumn === col.name && data.rows.length === 0}
                           onContextMenu={() => {}}
                         />
                       );
@@ -616,7 +629,9 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                             onExpand={() => setExpandedCell(editing.editingCell)}
                             linkLabel={link ? `Open the referenced row in ${columnInfo!.foreignKey!.table}` : undefined}
                             menuOpen={menu?.rowIndex === rowIndex && menu.colName === col.name}
+                            columnName={col.name}
                             columnSelected={selectedColumn === col.name}
+                            columnSelectionEnd={selectedColumn === col.name && rowIndex === data.rows.length - 1}
                             onContextMenu={(e) => setMenu({ x: e.clientX, y: e.clientY, rowIndex, colName: col.name })}
                             onFollowLink={
                               link ? guard(() => navigate(link.path, { state: { filters: link.filters } })) : undefined
