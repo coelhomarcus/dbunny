@@ -24,6 +24,7 @@ dist-ssr
 *.sw?
 .claude
 .superpowers
+docs/superpowers
 
 # Rust / Tauri
 src-tauri/target/
