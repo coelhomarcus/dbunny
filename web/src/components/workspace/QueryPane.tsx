@@ -483,9 +483,21 @@ function QueryPaneBody({
             />
           </div>
 
-          {/* Actions: run on the left, the rest quieter on the right */}
+          {/* Actions: run and save on the left, the rest quieter on the right */}
           <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-2.5 select-none">
             <RunButton disabled={running} explainAnalyze={capabilities.explainAnalyze} onRun={runQuery} onExplain={explain} />
+            <Tooltip label={justSaved ? "Saved" : `Save the query (${MOD}S)`} side="top">
+              <Button
+                variant="ghost-muted"
+                size="icon-sm"
+                className={justSaved ? "text-success-foreground hover:text-success-foreground" : undefined}
+                onClick={() => saveActiveQuery()}
+                disabled={!savedStorageKey}
+                aria-label="Save the query"
+              >
+                {justSaved ? <Check /> : <Save />}
+              </Button>
+            </Tooltip>
             {formatError && <span className="min-w-0 truncate text-xs text-destructive-foreground">Couldn't format: {formatError}</span>}
             <div className="ml-auto flex items-center gap-0.5">
               <Button
@@ -522,18 +534,6 @@ function QueryPaneBody({
                   aria-label="Safe mode"
                 >
                   {safeMode ? <ShieldCheck /> : <ShieldOff />}
-                </Button>
-              </Tooltip>
-              <Tooltip label={justSaved ? "Saved" : `Save the query (${MOD}S)`} side="top">
-                <Button
-                  variant="ghost-muted"
-                  size="icon-sm"
-                  className={justSaved ? "text-success-foreground hover:text-success-foreground" : undefined}
-                  onClick={() => saveActiveQuery()}
-                  disabled={!savedStorageKey}
-                  aria-label="Save the query"
-                >
-                  {justSaved ? <Check /> : <Save />}
                 </Button>
               </Tooltip>
               <Tooltip label="More actions" side="top">
