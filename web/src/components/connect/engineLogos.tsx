@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { EngineCardId } from "../../lib/engines";
+import { engineLabel, type EngineCardId } from "../../lib/engines";
 import { cn } from "../../lib/cn";
 
 // Each database's mark: the logo paths come from Simple Icons (simple-icons@16.33.0, CC0 1.0), drawn
@@ -21,9 +21,26 @@ const MARKS: Record<EngineCardId, { path: string; color: string; wide?: boolean 
   },
 };
 
-/** A database's logo in a tile tinted with its colour. */
-export default function EngineLogo({ engine, size = "md", className }: { engine: EngineCardId; size?: "sm" | "md"; className?: string }) {
+/** A database's logo in a tile tinted with its colour. `bare` is just the mark, for a line of text. */
+export default function EngineLogo({
+  engine,
+  size = "md",
+  bare = false,
+  className,
+}: {
+  engine: EngineCardId;
+  size?: "sm" | "md";
+  bare?: boolean;
+  className?: string;
+}) {
   const { path, color, wide } = MARKS[engine];
+  if (bare) {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" role="img" aria-label={engineLabel(engine)} className={cn("size-3 shrink-0", className)}>
+        <path d={path} />
+      </svg>
+    );
+  }
   const style: CSSProperties = {
     color,
     backgroundColor: `color-mix(in srgb, ${color} 14%, transparent)`,

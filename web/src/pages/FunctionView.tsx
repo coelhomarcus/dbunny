@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "react-router";
 import { Braces, Copy, Check } from "lucide-react";
 import { DetailSkeleton } from "../components/Skeleton";
 import { useApi } from "../contexts/useConnection";
@@ -8,10 +7,7 @@ import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import type { FunctionDetail } from "@/types";
 import { writeClipboardText } from "../lib/clipboard";
 
-export default function FunctionView() {
-  const { schema, name } = useParams<{ schema: string; name: string }>();
-  const [searchParams] = useSearchParams();
-  const args = searchParams.get("args") ?? "";
+export default function FunctionView({ schema, name, detail: args }: { schema: string; name: string; detail: string }) {
   const [detail, setDetail] = useState<FunctionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

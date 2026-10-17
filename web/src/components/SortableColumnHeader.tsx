@@ -16,10 +16,11 @@ interface SortableColumnHeaderProps {
   onResizeStart: (e: React.MouseEvent) => void;
 }
 
-function ColumnIcon({ column }: { column: ColumnInfo }) {
-  if (column.isPrimaryKey) return <KeyRound size={12} className="shrink-0 text-warning-foreground" aria-label="Primary key" />;
-  if (column.foreignKey) return <Link2 size={12} className="shrink-0 text-info-foreground" aria-label="Foreign key" />;
-  if (column.isGenerated) return <Sparkles size={12} className="shrink-0 text-muted-foreground" aria-label="Generated" />;
+function ColumnIcon({ column, selected }: { column: ColumnInfo; selected: boolean }) {
+  const color = selected ? "text-zinc-950" : undefined;
+  if (column.isPrimaryKey) return <KeyRound size={12} className={`shrink-0 ${color ?? "text-warning-foreground"}`} aria-label="Primary key" />;
+  if (column.foreignKey) return <Link2 size={12} className={`shrink-0 ${color ?? "text-info-foreground"}`} aria-label="Foreign key" />;
+  if (column.isGenerated) return <Sparkles size={12} className={`shrink-0 ${color ?? "text-muted-foreground"}`} aria-label="Generated" />;
   return null;
 }
 
@@ -31,7 +32,7 @@ export default function SortableColumnHeader({
 
   const label = (
     <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-      {columnInfo && <ColumnIcon column={columnInfo} />}
+      {columnInfo && <ColumnIcon column={columnInfo} selected={selected} />}
       <span className={`truncate font-semibold ${selected ? "text-zinc-950" : "text-foreground"}`}>{id}</span>
       {columnInfo?.typeName && (
         <span className={`shrink-0 text-[11px] font-normal ${selected ? "text-zinc-800" : "text-muted-foreground"}`}>

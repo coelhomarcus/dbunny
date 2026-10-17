@@ -1,56 +1,39 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { useConnection } from "../contexts/useConnection";
-import { useTab } from "../contexts/workspace";
-import { tabState } from "../lib/tabState";
+import { useConnection } from "../../contexts/useConnection";
+import { useDocuments } from "../../contexts/DocumentsContext";
 import type { CompletionSchema, ExplainResult, QueryResult } from "@/types";
-import QueryResults from "../components/QueryResults";
-import SqlEditor, { type SqlEditorHandle } from "../components/SqlEditor";
-import { Plus, X, Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, History, Check, MoreHorizontal, AlignLeft, Save } from "lucide-react";
-import RunButton from "../components/query/RunButton";
-import TransactionButton from "../components/query/TransactionButton";
-import ResultsBar from "../components/query/ResultsBar";
-import Tooltip from "../components/Tooltip";
+import QueryResults from "../QueryResults";
+import SqlEditor, { type SqlEditorHandle } from "../SqlEditor";
+import { Upload, Download, ShieldCheck, ShieldOff, AlertTriangle, History, Check, MoreHorizontal, AlignLeft, Save } from "lucide-react";
+import RunButton from "../query/RunButton";
+import TransactionButton from "../query/TransactionButton";
+import ResultsBar from "../query/ResultsBar";
+import Tooltip from "../Tooltip";
 import { createPortal } from "react-dom";
-import { useRightPanel } from "../contexts/rightPanel";
-import type { RunScope } from "../components/SqlEditor";
-import SegmentedTabs from "../components/ui/SegmentedTabs";
-import Popover from "../components/ui/Popover";
-import PlanView from "../components/query/PlanView";
-import NoticeList from "../components/query/NoticeList";
-import HistoryPanel, { type LibraryView } from "../components/query/HistoryPanel";
-import SideCard from "../components/layout/SideCard";
-import Dialog from "../components/ui/Dialog";
-import Input from "../components/ui/Input";
-import { loadSaved, removeSaved, saveQuery, savedKey, type SavedQuery } from "../lib/savedQueries";
-import { addToHistory, clearHistory, errorSummary, historyKey, loadHistory, removeFromHistory, type HistoryEntry } from "../lib/queryHistory";
-import Button from "../components/ui/Button";
-import ConfirmDialog from "../components/ui/ConfirmDialog";
-import { isMac } from "../lib/platform";
-import { getSettings } from "../lib/settings";
-import { notAvailableFor } from "../lib/engines";
-import { useCapabilities } from "../hooks/useCapabilities";
-import { bindOpenQuery } from "../lib/openQuery";
+import { useRightPanel } from "../../contexts/rightPanel";
+import type { RunScope } from "../SqlEditor";
+import SegmentedTabs from "../ui/SegmentedTabs";
+import Popover from "../ui/Popover";
+import PlanView from "../query/PlanView";
+import NoticeList from "../query/NoticeList";
+import HistoryPanel, { type LibraryView } from "../query/HistoryPanel";
+import SideCard from "../layout/SideCard";
+import Dialog from "../ui/Dialog";
+import Input from "../ui/Input";
+import { loadSaved, removeSaved, saveQuery, savedKey, type SavedQuery } from "../../lib/savedQueries";
+import { addToHistory, clearHistory, errorSummary, historyKey, loadHistory, removeFromHistory, type HistoryEntry } from "../../lib/queryHistory";
+import Button from "../ui/Button";
+import ConfirmDialog from "../ui/ConfirmDialog";
+import { isMac } from "../../lib/platform";
+import { getSettings } from "../../lib/settings";
+import { notAvailableFor } from "../../lib/engines";
+import { useCapabilities } from "../../hooks/useCapabilities";
 
 const MOD = isMac ? "⌘" : "Ctrl+";
 const SHIFT = isMac ? "⇧" : "Shift+";
 const ALT = isMac ? "⌥" : "Alt+";
 
-type TabMeta = {
-  id: number;
-  label: string;
-  /** The saved query this tab was opened from or saved as; saving again updates it. */
-  savedId?: string;
-};
-
 type ResultView = "results" | "messages" | "plan";
-
-type TabPayload = {
-  sql: string;
-  result: QueryResult | null;
-  error: string | null;
-  plan?: ExplainResult | null;
-  view?: ResultView;
-};
 
 /** Plain transaction statements typed in the editor are routed to the transaction controls. */
 function transactionCommand(sql: string): "begin" | "commit" | "rollback" | null {
@@ -65,28 +48,6 @@ type DangerInfo = {
   rule: string;
   detail: string;
 };
-
-// Kept per window tab, so it survives navigating to a table and back
-type QueryEditorState = {
-  nextId: number;
-  tabMetas: TabMeta[];
-  activeId: number;
-  safeMode: boolean;
-  payloads: Map<number, TabPayload>;
-  // Autocomplete catalog, reused when coming back to the page
-  completion: { sessionId: string | null; schema: CompletionSchema } | null;
-};
-
-function createQueryEditorState(): QueryEditorState {
-  return {
-    nextId: 2,
-    tabMetas: [{ id: 1, label: "Query 1" }],
-    activeId: 1,
-    safeMode: getSettings().safeModeByDefault,
-    payloads: new Map([[1, { sql: "SELECT 1;", result: null, error: null }]]),
-    completion: null,
-  };
-}
 
 // Statements that can add/remove tables, columns or functions
 const DDL_PATTERN = /\b(CREATE|ALTER|DROP|RENAME)\b/i;
@@ -125,26 +86,20 @@ function detectDangerousStatements(sql: string): DangerInfo[] {
   return dangers;
 }
 
-/**
- * Makes the saved state consistent before it's used: only tabs that still have
- * their payload, and an active tab that exists. Protects against state left
- * inconsistent by older versions instead of crashing on mount.
- */
-function repairQueryEditorState(saved: QueryEditorState) {
-  saved.tabMetas = saved.tabMetas.filter((t) => saved.payloads.has(t.id));
-  if (saved.tabMetas.length === 0) {
-    const fresh = createQueryEditorState();
-    saved.tabMetas = fresh.tabMetas;
-    saved.payloads = fresh.payloads;
-    saved.nextId = Math.max(saved.nextId, fresh.nextId);
-  }
-  if (!saved.tabMetas.some((t) => t.id === saved.activeId)) {
-    saved.activeId = saved.tabMetas[0].id;
-  }
-}
-
-/** The SQL editor, when the engine has one; otherwise a note that it doesn't. */
-export default function QueryEditor() {
+/** One query. The connection's document list owns the tabs; this pane is a single editor. */
+export default function QueryPane({
+  documentId,
+  initialSql,
+  savedId: savedIdProp,
+  title,
+  active,
+}: {
+  documentId: string;
+  initialSql: string;
+  savedId?: string;
+  title: string;
+  active: boolean;
+}) {
   const { connectionInfo } = useConnection();
   const capabilities = useCapabilities();
   if (!capabilities.console) {
@@ -155,14 +110,26 @@ export default function QueryEditor() {
       </div>
     );
   }
-  return <QueryEditorPanel />;
+  return <QueryPaneBody documentId={documentId} initialSql={initialSql} savedId={savedIdProp} title={title} active={active} />;
 }
 
-function QueryEditorPanel() {
-  const { tabId, isActive } = useTab();
+function QueryPaneBody({
+  documentId,
+  initialSql,
+  savedId: savedIdProp,
+  title,
+  active,
+}: {
+  documentId: string;
+  initialSql: string;
+  savedId?: string;
+  title: string;
+  active: boolean;
+}) {
+  const { openDocument, setQueryDirty, setQuerySaved } = useDocuments();
   const rightPanel = useRightPanel();
   const renderSidePanel = (panel: React.ReactNode) => (rightPanel ? createPortal(panel, rightPanel) : null);
-  const { api, sessionId, connectionInfo } = useConnection();
+  const { api, connectionInfo } = useConnection();
   const capabilities = useCapabilities();
   const historyStorageKey = connectionInfo ? historyKey(connectionInfo) : null;
   const [history, setHistory] = useState<HistoryEntry[]>(() => (historyStorageKey ? loadHistory(historyStorageKey) : []));
@@ -181,9 +148,7 @@ function QueryEditorPanel() {
     clearTimeout(formatErrorTimer.current);
     formatErrorTimer.current = setTimeout(() => setFormatError(null), 5000);
   }, []);
-  // Tabs of saved queries whose text differs from what's saved
-  const [dirtyIds, setDirtyIds] = useState<Set<number>>(() => new Set());
-  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [linkedSavedId, setLinkedSavedId] = useState(savedIdProp);
   // Share of the height the editor takes over the results, remembered across sessions
   const [split, setSplit] = useState(() => {
     try {
@@ -194,49 +159,30 @@ function QueryEditorPanel() {
     }
   });
   const columnRef = useRef<HTMLDivElement>(null);
-  const saved = tabState(tabId, "queryEditor", createQueryEditorState);
-  repairQueryEditorState(saved);
-  const [tabMetas, setTabMetas] = useState<TabMeta[]>(saved.tabMetas);
-  const [activeId, setActiveId] = useState(saved.activeId);
-  const initial = saved.payloads.get(saved.activeId)!;
-  const [result, setResult] = useState<QueryResult | null>(initial.result);
-  const [error, setError] = useState<string | null>(initial.error);
+  const [result, setResult] = useState<QueryResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const [plan, setPlan] = useState<ExplainResult | null>(initial.plan ?? null);
-  const [view, setView] = useState<ResultView>(initial.view ?? "results");
+  const [plan, setPlan] = useState<ExplainResult | null>(null);
+  const [view, setView] = useState<ResultView>("results");
   const [inTransaction, setInTransaction] = useState(false);
   const [txBusy, setTxBusy] = useState(false);
   // When the running query started, for the elapsed time under the results
   const [runningSince, setRunningSince] = useState<number | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
-  const [safeMode, setSafeMode] = useState(saved.safeMode);
+  const [safeMode, setSafeMode] = useState(() => getSettings().safeModeByDefault);
   const [pendingDangers, setPendingDangers] = useState<DangerInfo[] | null>(null);
   const pendingSqlRef = useRef<string | null>(null);
-  const [completionSchema, setCompletionSchema] = useState<CompletionSchema | null>(() =>
-    saved.completion?.sessionId === sessionId ? saved.completion.schema : null,
-  );
+  const [completionSchema, setCompletionSchema] = useState<CompletionSchema | null>(null);
 
   const editorRef = useRef<SqlEditorHandle | null>(null);
-  const activeIdRef = useRef(activeId);
-
-  useEffect(() => {
-    activeIdRef.current = activeId;
-  }, [activeId]);
-
-  useEffect(() => {
-    saved.safeMode = safeMode;
-  }, [safeMode, saved]);
 
   const loadCompletionSchema = useCallback(() => {
     api
       .getCompletionSchema()
-      .then((schema) => {
-        saved.completion = { sessionId, schema };
-        setCompletionSchema(schema);
-      })
+      .then((schema) => setCompletionSchema(schema))
       .catch(() => {});
-  }, [api, sessionId, saved]);
+  }, [api]);
 
   useEffect(() => {
     loadCompletionSchema();
@@ -247,93 +193,29 @@ function QueryEditorPanel() {
     if (capabilities.transactions) api.transactionOpen().then(setInTransaction).catch(() => {});
   }, [api, capabilities.transactions]);
 
-  // On unmount (e.g. opening a table), keep the SQL being edited. The tab list and
-  // active tab are already written to `saved` by switchTab/addTab/closeTab; writing
-  // them here too would restore stale values (a closed tab coming back as active).
+  // A double-click rename of a saved query updates the stored name too.
   useEffect(() => {
-    return () => {
-      const editor = editorRef.current;
-      const payload = saved.payloads.get(activeIdRef.current);
-      if (editor && payload) payload.sql = editor.getValue();
-    };
-  }, [saved]);
-
-  function saveCurrentSql() {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const payload = saved.payloads.get(activeId);
-    if (payload) payload.sql = editor.getValue();
-  }
-
-  function switchTab(id: number) {
-    saveCurrentSql();
-    setActiveId(id);
-    saved.activeId = id;
-    const payload = saved.payloads.get(id)!;
-    editorRef.current?.setValue(payload.sql);
-    setResult(payload.result);
-    setError(payload.error);
-    setPlan(payload.plan ?? null);
-    setView(payload.view ?? "results");
-  }
-
-  function addTab(options: { label?: string; savedId?: string; sql?: string } = {}) {
-    saveCurrentSql();
-    const id = saved.nextId++;
-    const label = options.label ?? `Query ${id}`;
-    const sql = options.sql ?? "";
-    saved.payloads.set(id, { sql, result: null, error: null });
-    const newMetas = [...tabMetas, { id, label, savedId: options.savedId }];
-    setTabMetas(newMetas);
-    saved.tabMetas = newMetas;
-    setActiveId(id);
-    saved.activeId = id;
-    editorRef.current?.setValue(sql);
-    setResult(null);
-    setError(null);
-    setPlan(null);
-    setView("results");
-  }
-
-  const openSql = useRef(addTab);
-  openSql.current = addTab;
-  useEffect(() => bindOpenQuery(tabId, (sql) => openSql.current({ sql })), [tabId]);
+    if (!linkedSavedId || !savedStorageKey) return;
+    const stored = savedQueries.find((query) => query.id === linkedSavedId);
+    if (!stored || stored.name === title) return;
+    setSavedQueries(saveQuery(savedStorageKey, { id: stored.id, name: title, sql: stored.sql }).list);
+  }, [title, linkedSavedId, savedStorageKey, savedQueries]);
 
   // Read from the editor's change handler, which is created once
-  const latest = useRef({ tabMetas, activeId, savedQueries });
+  const latest = useRef({ linkedSavedId, savedQueries, initialSql, documentId });
   useEffect(() => {
-    latest.current = { tabMetas, activeId, savedQueries };
+    latest.current = { linkedSavedId, savedQueries, initialSql, documentId };
   });
 
-  /** Marks a tab dirty when its text no longer matches its saved query. */
-  function setDirty(id: number, dirty: boolean) {
-    setDirtyIds((prev) => {
-      if (prev.has(id) === dirty) return prev;
-      const next = new Set(prev);
-      if (dirty) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }
-
   const handleEditorChange = useCallback((sql: string) => {
-    const { tabMetas: metas, activeId: id, savedQueries: list } = latest.current;
-    const savedId = metas.find((t) => t.id === id)?.savedId;
-    if (!savedId) return;
-    const stored = list.find((q) => q.id === savedId);
-    setDirty(id, stored !== undefined && stored.sql !== sql);
-  }, []);
-
-  /** Renames a tab; a saved query's tab renames the query too. */
-  function renameTab(id: number, label: string) {
-    setRenamingId(null);
-    const name = label.trim();
-    const meta = tabMetas.find((t) => t.id === id);
-    if (!meta || !name || name === meta.label) return;
-    updateTabMeta(id, { label: name });
-    const stored = meta.savedId ? savedQueries.find((q) => q.id === meta.savedId) : undefined;
-    if (stored && savedStorageKey) setSavedQueries(saveQuery(savedStorageKey, { id: stored.id, name, sql: stored.sql }).list);
-  }
+    const { linkedSavedId: savedId, savedQueries: list, initialSql: initial, documentId: id } = latest.current;
+    if (savedId) {
+      const stored = list.find((query) => query.id === savedId);
+      setQueryDirty(id, stored !== undefined && stored.sql !== sql);
+    } else {
+      setQueryDirty(id, sql !== initial);
+    }
+  }, [setQueryDirty]);
 
   function startResize(e: React.PointerEvent) {
     const column = columnRef.current;
@@ -358,73 +240,36 @@ function QueryEditorPanel() {
     window.addEventListener("pointerup", onUp);
   }
 
-  /** Opens SQL from the history in a new query tab, leaving the current one as it is. */
+  /** Opens SQL from the history as its own document, leaving this one as it is. */
   function openFromHistory(sql: string, options: { label?: string; savedId?: string } = {}) {
-    // A saved query that's already open is shown instead of opened twice
-    const open = options.savedId && tabMetas.find((t) => t.savedId === options.savedId);
-    if (open) return switchTab(open.id);
-    addTab(options);
-    const payload = saved.payloads.get(saved.activeId);
-    if (payload) payload.sql = sql;
-    editorRef.current?.setValue(sql);
+    if (options.savedId) openDocument({ kind: "query", sql, savedId: options.savedId, title: options.label });
+    else openDocument({ kind: "query", sql });
   }
 
-  function updateTabMeta(id: number, patch: Partial<TabMeta>) {
-    const newMetas = tabMetas.map((t) => (t.id === id ? { ...t, ...patch } : t));
-    setTabMetas(newMetas);
-    saved.tabMetas = newMetas;
-  }
-
-  /** Saves the active tab's SQL: updates its saved query, or asks for a name the first time. */
+  /** Saves this query: updates its saved query, or asks for a name the first time. */
   function saveActiveQuery(name?: string) {
     if (!savedStorageKey) return;
-    const meta = tabMetas.find((t) => t.id === activeId);
     const sql = editorRef.current?.getValue() ?? "";
-    const existing = meta?.savedId ? savedQueries.find((q) => q.id === meta.savedId) : undefined;
+    const existing = linkedSavedId ? savedQueries.find((query) => query.id === linkedSavedId) : undefined;
     if (!existing && name === undefined) {
-      setSaveName(/^Query \d+$/.test(meta?.label ?? "") ? "" : (meta?.label ?? ""));
+      setSaveName(/^Query \d+$/.test(title) ? "" : title);
       return;
     }
     const { list, saved: stored } = saveQuery(savedStorageKey, { id: existing?.id, name: name ?? existing!.name, sql });
     setSavedQueries(list);
-    updateTabMeta(activeId, { label: stored.name, savedId: stored.id });
-    setDirty(activeId, false);
+    setLinkedSavedId(stored.id);
+    setQuerySaved(documentId, stored.id, stored.name);
+    setQueryDirty(documentId, false);
     setSaveName(null);
     setJustSaved(true);
     setTimeout(() => setJustSaved(false), 1500);
   }
 
-  function closeTab(e: React.MouseEvent, id: number) {
-    e.stopPropagation();
-    if (tabMetas.length === 1) return;
-    const index = tabMetas.findIndex((t) => t.id === id);
-    const newMetas = tabMetas.filter((t) => t.id !== id);
-    saved.payloads.delete(id);
-    let newActiveId = activeId;
-    if (id === activeId) {
-      const newIndex = Math.min(index, newMetas.length - 1);
-      newActiveId = newMetas[newIndex].id;
-    }
-    setTabMetas(newMetas);
-    saved.tabMetas = newMetas;
-    setActiveId(newActiveId);
-    saved.activeId = newActiveId;
-    if (id === activeId) {
-      const payload = saved.payloads.get(newActiveId)!;
-      editorRef.current?.setValue(payload.sql);
-      setResult(payload.result);
-      setError(payload.error);
-      setPlan(payload.plan ?? null);
-      setView(payload.view ?? "results");
-    }
-  }
-
   async function exportQuery() {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-    const sql = editorRef.current?.getValue() ?? saved.payloads.get(activeId)?.sql ?? "";
-    const meta = tabMetas.find((t) => t.id === activeId);
-    const defaultName = `${(meta?.label ?? "query").replace(/\s+/g, "_").toLowerCase()}.sql`;
+    const sql = editorRef.current?.getValue() ?? initialSql;
+    const defaultName = `${title.replace(/\s+/g, "_").toLowerCase()}.sql`;
     const path = await save({
       defaultPath: defaultName,
       filters: [{ name: "SQL", extensions: ["sql"] }, { name: "Text", extensions: ["txt"] }],
@@ -442,17 +287,13 @@ function QueryEditorPanel() {
     if (path && typeof path === "string") {
       const sql = await readTextFile(path);
       editorRef.current?.setValue(sql);
-      const payload = saved.payloads.get(activeId);
-      if (payload) payload.sql = sql;
+      handleEditorChange(sql);
     }
   }
 
-  /** Shows a result view and remembers it for the active query tab. */
   const showView = useCallback((next: ResultView) => {
     setView(next);
-    const payload = saved.payloads.get(activeIdRef.current);
-    if (payload) payload.view = next;
-  }, [saved]);
+  }, []);
 
   const runTransaction = useCallback(async (command: "begin" | "commit" | "rollback") => {
     setTxBusy(true);
@@ -486,8 +327,6 @@ function QueryEditorPanel() {
     try {
       const [res] = await Promise.all([api.query(sql), delay]);
       setResult(res);
-      const payload = saved.payloads.get(activeIdRef.current);
-      if (payload) { payload.result = res; payload.error = null; }
       if (historyStorageKey) {
         setHistory(addToHistory(historyStorageKey, {
           sql,
@@ -505,8 +344,6 @@ function QueryEditorPanel() {
       await delay;
       const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "Query failed";
       setError(msg);
-      const payload = saved.payloads.get(activeIdRef.current);
-      if (payload) { payload.result = null; payload.error = msg; }
       if (historyStorageKey) {
         setHistory(addToHistory(historyStorageKey, { sql, durationMs: null, rows: null, error: errorSummary(msg) }));
       }
@@ -518,7 +355,7 @@ function QueryEditorPanel() {
       setRunning(false);
       setRunningSince(null);
     }
-  }, [loadCompletionSchema, api, saved, runTransaction, showView, historyStorageKey, inTransaction, capabilities.transactions]);
+  }, [loadCompletionSchema, api, runTransaction, showView, historyStorageKey, inTransaction, capabilities.transactions]);
 
   const explain = useCallback(async (analyze: boolean) => {
     // EXPLAIN takes one statement: the selection, or the one at the cursor
@@ -530,8 +367,6 @@ function QueryEditorPanel() {
     try {
       const res = await api.explain(sql, analyze);
       setPlan(res);
-      const payload = saved.payloads.get(activeIdRef.current);
-      if (payload) payload.plan = res;
       showView("plan");
     } catch (err) {
       setError(typeof err === "string" ? err : err instanceof Error ? err.message : "EXPLAIN failed");
@@ -540,7 +375,7 @@ function QueryEditorPanel() {
       setRunning(false);
       setRunningSince(null);
     }
-  }, [api, saved, showView]);
+  }, [api, showView]);
 
   const runQuery = useCallback(async (scope: RunScope = "current") => {
     const editor = editorRef.current;
@@ -572,7 +407,7 @@ function QueryEditorPanel() {
     saveRef.current = saveActiveQuery;
   });
   useEffect(() => {
-    if (!isActive) return;
+    if (!active) return;
     function onKeyDown(e: KeyboardEvent) {
       const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
       if (!mod || e.shiftKey || e.altKey || e.key.toLowerCase() !== "s") return;
@@ -582,17 +417,17 @@ function QueryEditorPanel() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isActive]);
+  }, [active]);
 
   // Esc stops the running query (only in the visible tab)
   useEffect(() => {
-    if (!running || !isActive) return;
+    if (!running || !active) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape" && !document.querySelector("[role=dialog][aria-modal]")) cancelQuery();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [running, isActive, cancelQuery]);
+  }, [running, active, cancelQuery]);
 
   function confirmDangerousQuery() {
     const sql = pendingSqlRef.current;
@@ -636,87 +471,11 @@ function QueryEditorPanel() {
 
         {/* Editor panel: its height is dragged with the handle under it */}
         <div className="flex min-h-0 shrink-0 grow-0 flex-col border-b border-border" style={{ flexBasis: `${split}%` }}>
-          {/* Query tabs as compact pills: a lighter level than the connection tabs above */}
-          <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2 select-none">
-            <div role="tablist" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-              {tabMetas.map((tab) => {
-                const active = activeId === tab.id;
-                return (
-                  renamingId === tab.id ? (
-                    <input
-                      key={tab.id}
-                      autoFocus
-                      defaultValue={tab.label}
-                      aria-label="Tab name"
-                      onFocus={(e) => e.currentTarget.select()}
-                      onBlur={(e) => renameTab(tab.id, e.currentTarget.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") renameTab(tab.id, e.currentTarget.value);
-                        if (e.key === "Escape") setRenamingId(null);
-                      }}
-                      className="h-7 w-36 shrink-0 rounded-md border border-ring bg-card px-2 text-[13px] outline-none ring-3 ring-ring/20"
-                    />
-                  ) : (
-                  <button
-                    key={tab.id}
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => switchTab(tab.id)}
-                    onDoubleClick={() => setRenamingId(tab.id)}
-                    // Transition only while hovered, so switching tabs swaps styles instantly
-                    className={`group flex h-7 shrink-0 items-center gap-1 rounded-md pl-2.5 text-[13px] whitespace-nowrap cursor-pointer ${
-                      tabMetas.length > 1 ? "pr-1" : "pr-2.5"
-                    } ${
-                      active
-                        ? "bg-accent font-medium text-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground hover:transition-colors"
-                    }`}
-                  >
-                    {tab.label}
-                    {dirtyIds.has(tab.id) && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="Unsaved changes" />}
-                    {tabMetas.length > 1 && (
-                      <span
-                        onClick={(e) => closeTab(e, tab.id)}
-                        className={`flex size-4 items-center justify-center rounded transition-colors cursor-pointer hover:bg-foreground/10 ${
-                          active
-                            ? "text-muted-foreground hover:text-foreground"
-                            : "text-transparent group-hover:text-muted-foreground hover:text-foreground!"
-                        }`}
-                      >
-                        <X size={10} />
-                      </span>
-                    )}
-                  </button>
-                  )
-                );
-              })}
-              <Button variant="ghost-muted" size="icon-xs" className="ml-0.5 shrink-0" onClick={() => addTab()} aria-label="New query tab">
-                <Plus />
-              </Button>
-            </div>
-            <Button
-              variant="ghost-muted"
-              size="sm"
-              className="shrink-0"
-              data-active={historyOpen}
-              aria-pressed={historyOpen}
-              onClick={() => {
-                // Other tabs on the same database may have changed them since this one loaded
-                if (!historyOpen && historyStorageKey) setHistory(loadHistory(historyStorageKey));
-                if (!historyOpen && savedStorageKey) setSavedQueries(loadSaved(savedStorageKey));
-                setHistoryOpen((open) => !open);
-              }}
-            >
-              <History />
-              History
-            </Button>
-          </div>
-
           {/* SQL editor */}
           <div className="flex-1 min-h-0">
             <SqlEditor
               onMount={(handle) => { editorRef.current = handle; }}
-              initialValue={saved.payloads.get(activeId)?.sql ?? ""}
+              initialValue={initialSql}
               schema={completionSchema}
               onRun={runQuery}
               onChange={handleEditorChange}
@@ -724,11 +483,38 @@ function QueryEditorPanel() {
             />
           </div>
 
-          {/* Actions: run on the left, the rest quieter on the right */}
+          {/* Actions: run and save on the left, the rest quieter on the right */}
           <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-2.5 select-none">
             <RunButton disabled={running} explainAnalyze={capabilities.explainAnalyze} onRun={runQuery} onExplain={explain} />
+            <Tooltip label={justSaved ? "Saved" : `Save the query (${MOD}S)`} side="top">
+              <Button
+                variant="ghost-muted"
+                size="icon-sm"
+                className={justSaved ? "text-success-foreground hover:text-success-foreground" : undefined}
+                onClick={() => saveActiveQuery()}
+                disabled={!savedStorageKey}
+                aria-label="Save the query"
+              >
+                {justSaved ? <Check /> : <Save />}
+              </Button>
+            </Tooltip>
             {formatError && <span className="min-w-0 truncate text-xs text-destructive-foreground">Couldn't format: {formatError}</span>}
             <div className="ml-auto flex items-center gap-0.5">
+              <Button
+                variant="ghost-muted"
+                size="sm"
+                className="shrink-0"
+                data-active={historyOpen}
+                aria-pressed={historyOpen}
+                onClick={() => {
+                  if (!historyOpen && historyStorageKey) setHistory(loadHistory(historyStorageKey));
+                  if (!historyOpen && savedStorageKey) setSavedQueries(loadSaved(savedStorageKey));
+                  setHistoryOpen((open) => !open);
+                }}
+              >
+                <History />
+                History
+              </Button>
               {capabilities.transactions && (
                 <TransactionButton
                   open={inTransaction}
@@ -748,18 +534,6 @@ function QueryEditorPanel() {
                   aria-label="Safe mode"
                 >
                   {safeMode ? <ShieldCheck /> : <ShieldOff />}
-                </Button>
-              </Tooltip>
-              <Tooltip label={justSaved ? "Saved" : `Save the query (${MOD}S)`} side="top">
-                <Button
-                  variant="ghost-muted"
-                  size="icon-sm"
-                  className={justSaved ? "text-success-foreground hover:text-success-foreground" : undefined}
-                  onClick={() => saveActiveQuery()}
-                  disabled={!savedStorageKey}
-                  aria-label="Save the query"
-                >
-                  {justSaved ? <Check /> : <Save />}
                 </Button>
               </Tooltip>
               <Tooltip label="More actions" side="top">
@@ -840,7 +614,7 @@ function QueryEditorPanel() {
             error={error}
             runningSince={runningSince}
             onCancel={cancelQuery}
-            exportName={tabMetas.find((t) => t.id === activeId)?.label.replace(/\s+/g, "_").toLowerCase() ?? "query"}
+            exportName={title.replace(/\s+/g, "_").toLowerCase()}
           />
         </div>
       </div>
@@ -856,10 +630,7 @@ function QueryEditorPanel() {
             onRemoveSaved={(id) => {
               if (!savedStorageKey) return;
               setSavedQueries(removeSaved(savedStorageKey, id));
-              // Tabs keep their SQL, just no longer linked to the deleted query
-              const newMetas = tabMetas.map((t) => (t.savedId === id ? { ...t, savedId: undefined } : t));
-              setTabMetas(newMetas);
-              saved.tabMetas = newMetas;
+              if (linkedSavedId === id) setLinkedSavedId(undefined);
             }}
             onRemove={(id) => historyStorageKey && setHistory(removeFromHistory(historyStorageKey, id))}
             onClear={() => {

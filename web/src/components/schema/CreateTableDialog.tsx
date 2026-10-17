@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
 import { Plus, Table2, X } from "lucide-react";
 import type { ColumnGeneration, CompletionRelation, NewColumn, NewTable } from "@/types";
 import { useApi } from "../../contexts/useConnection";
@@ -44,7 +43,6 @@ function Builder({
   onClose: () => void;
 }) {
   const api = useApi();
-  const navigate = useNavigate();
   const { tabId } = useTab();
   const dialect = useSqlDialect();
   const capabilities = useCapabilities();
@@ -332,7 +330,6 @@ function Builder({
             if (!sql) return;
             requestOpenQuery(tabId, sql);
             onClose();
-            navigate("/db/query");
           }}
         />
       </div>

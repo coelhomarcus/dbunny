@@ -1,10 +1,8 @@
-import { NavLink } from "react-router";
 import { Save, X, Trash2, ListFilter, Lock, FileCode, Plus, KeyRound } from "lucide-react";
 import Button from "./ui/Button";
 import Badge from "./ui/Badge";
 import Tooltip from "./Tooltip";
 import { HeaderTitle, PageHeader } from "./layout/PageHeader";
-import { segmentedItemClass, segmentedListClass } from "./ui/styles";
 import type { RelationType } from "../lib/api";
 
 const LABEL: Record<RelationType, string> = {
@@ -123,15 +121,6 @@ export default function TableViewHeader({
           </>
         )}
 
-        <span className="mx-1 h-5 w-px bg-border" />
-        <div className={segmentedListClass}>
-          <NavLink to={`/db/${schema}/${table}`} end className={({ isActive }) => segmentedItemClass(isActive)}>
-            Data
-          </NavLink>
-          <NavLink to={`/db/${schema}/${table}/structure`} className={({ isActive }) => segmentedItemClass(isActive)}>
-            Structure
-          </NavLink>
-        </div>
       </div>
     </PageHeader>
   );

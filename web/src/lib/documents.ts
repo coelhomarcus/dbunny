@@ -1,0 +1,188 @@
+import type { TableFilter } from "../types/query";
+
+export type DataIcon = "table" | "view" | "matview" | "partition";
+
+export type DocumentKind =
+  | "query"
+  | "data"
+  | "structure"
+  | "activity"
+  | "roles"
+  | "function"
+  | "procedure"
+  | "sequence"
+  | "type"
+  | "index"
+  | "trigger";
+
+export interface FilterRequest {
+  id: number;
+  filters: TableFilter[];
+}
+
+export interface Document {
+  id: string;
+  kind: DocumentKind;
+  title: string;
+  schema?: string;
+  name?: string;
+  detail?: string;
+  savedId?: string;
+  icon?: DataIcon;
+  sql?: string;
+  filterRequest?: FilterRequest;
+}
+
+export interface DocumentsState {
+  items: Document[];
+  activeId: string | null;
+  nextQuery: number;
+  nextId: number;
+}
+
+export type OpenTarget =
+  | { kind: "query"; sql?: string; savedId?: string; title?: string }
+  | { kind: "data"; schema: string; name: string; icon: DataIcon; filters?: TableFilter[] }
+  | { kind: "structure"; schema: string; name: string }
+  | { kind: "activity" }
+  | { kind: "roles" }
+  | {
+      kind: "function" | "procedure" | "sequence" | "type" | "index" | "trigger";
+      schema: string;
+      name: string;
+      detail?: string;
+    };
+
+export function emptyDocuments(): DocumentsState {
+  return { items: [], activeId: null, nextQuery: 1, nextId: 1 };
+}
+
+function sameIdentity(doc: Document, target: Exclude<OpenTarget, { kind: "query" }>): boolean {
+  if (doc.kind !== target.kind) return false;
+  if (target.kind === "activity" || target.kind === "roles") return true;
+  if (doc.schema !== target.schema || doc.name !== target.name) return false;
+  if (target.kind === "function" || target.kind === "procedure") return (doc.detail ?? "") === (target.detail ?? "");
+  return true;
+}
+
+function allocate(state: DocumentsState): { id: string; nextId: number } {
+  return { id: `d${state.nextId}`, nextId: state.nextId + 1 };
+}
+
+export function openDocument(state: DocumentsState, target: OpenTarget): DocumentsState {
+  if (target.kind === "query" && target.savedId) {
+    const existing = state.items.find((doc) => doc.kind === "query" && doc.savedId === target.savedId);
+    if (existing) return { ...state, activeId: existing.id };
+  }
+  if (target.kind !== "query") {
+    const existing = state.items.find((doc) => sameIdentity(doc, target));
+    if (existing) {
+      if (target.kind === "data" && target.filters) {
+        const request = { id: (existing.filterRequest?.id ?? 0) + 1, filters: target.filters };
+        return {
+          ...state,
+          activeId: existing.id,
+          items: state.items.map((doc) => (doc.id === existing.id ? { ...doc, filterRequest: request } : doc)),
+        };
+      }
+      return { ...state, activeId: existing.id };
+    }
+  }
+
+  const { id, nextId } = allocate(state);
+  const titled = target.kind === "query" && target.title !== undefined;
+  const title =
+    target.kind === "query" ? target.title ?? `Query ${state.nextQuery}`
+    : target.kind === "activity" ? "Activity"
+    : target.kind === "roles" ? "Roles"
+    : target.name;
+  const doc: Document = { id, kind: target.kind, title };
+  if (target.kind === "query") {
+    doc.sql = target.sql ?? "";
+    if (target.savedId) doc.savedId = target.savedId;
+  } else if (target.kind !== "activity" && target.kind !== "roles") {
+    doc.schema = target.schema;
+    doc.name = target.name;
+    if (target.kind === "function" || target.kind === "procedure") doc.detail = target.detail ?? "";
+    if (target.kind === "data") {
+      doc.icon = target.icon;
+      if (target.filters) doc.filterRequest = { id: 1, filters: target.filters };
+    }
+  }
+  return {
+    ...state,
+    items: [...state.items, doc],
+    activeId: id,
+    nextId,
+    nextQuery: titled || target.kind !== "query" ? state.nextQuery : state.nextQuery + 1,
+  };
+}
+
+export function focusDocument(state: DocumentsState, id: string): DocumentsState {
+  if (!state.items.some((doc) => doc.id === id)) return state;
+  return { ...state, activeId: id };
+}
+
+export function closeDocument(state: DocumentsState, id: string): DocumentsState {
+  const index = state.items.findIndex((doc) => doc.id === id);
+  if (index < 0) return state;
+  const items = state.items.filter((doc) => doc.id !== id);
+  if (state.activeId !== id) return { ...state, items };
+  const neighbor = items[index] ?? items[index - 1] ?? null;
+  return { ...state, items, activeId: neighbor?.id ?? null };
+}
+
+export function setQuerySaved(state: DocumentsState, id: string, savedId: string, title: string): DocumentsState {
+  return {
+    ...state,
+    items: state.items.map((doc) => (doc.id === id && doc.kind === "query" ? { ...doc, savedId, title } : doc)),
+  };
+}
+
+export function renameQuery(state: DocumentsState, id: string, title: string): DocumentsState {
+  const trimmed = title.trim();
+  if (!trimmed) return state;
+  return {
+    ...state,
+    items: state.items.map((doc) => (doc.id === id && doc.kind === "query" ? { ...doc, title: trimmed } : doc)),
+  };
+}
+
+export function renameRelation(state: DocumentsState, schema: string, name: string, newName: string): DocumentsState {
+  return {
+    ...state,
+    items: state.items.map((doc) =>
+      (doc.kind === "data" || doc.kind === "structure") && doc.schema === schema && doc.name === name
+        ? { ...doc, name: newName, title: newName }
+        : doc,
+    ),
+  };
+}
+
+export function renameSchema(state: DocumentsState, schema: string, newName: string): DocumentsState {
+  return {
+    ...state,
+    items: state.items.map((doc) => (doc.schema === schema ? { ...doc, schema: newName } : doc)),
+  };
+}
+
+function without(state: DocumentsState, drop: (doc: Document) => boolean): DocumentsState {
+  const removed = new Set(state.items.filter(drop).map((doc) => doc.id));
+  if (removed.size === 0) return state;
+  let next = state;
+  for (const id of removed) next = closeDocument(next, id);
+  return next;
+}
+
+export function dropRelation(state: DocumentsState, schema: string, name: string): DocumentsState {
+  return without(state, (doc) => (doc.kind === "data" || doc.kind === "structure") && doc.schema === schema && doc.name === name);
+}
+
+export function dropSchema(state: DocumentsState, schema: string): DocumentsState {
+  return without(state, (doc) => doc.schema === schema);
+}
+
+export function seedQuery(state: DocumentsState): DocumentsState {
+  if (state.items.length > 0) return state;
+  return openDocument(state, { kind: "query", sql: "SELECT 1;" });
+}

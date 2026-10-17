@@ -1,12 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { NavLink, useNavigate, useParams } from "react-router";
+import { useDocuments } from "../contexts/DocumentsContext";
 import { ArrowUpRight, Ban, Check, Copy, KeyRound, Link2, MessageSquare, MoreHorizontal, PenLine, Plus, Sparkles, Trash2, TriangleAlert, Asterisk, Equal, Type } from "lucide-react";
 import ContextMenu, { type ContextMenuItem } from "../components/ui/ContextMenu";
 import StructureChangeDialog, { type ChangeDraft } from "../components/structure/StructureChangeDialog";
 import PermissionsEditor from "../components/structure/PermissionsEditor";
 import Tooltip from "../components/Tooltip";
 import type { ColumnInfo, StructureChange, TableStructure as Structure } from "@/types";
-import { segmentedItemClass, segmentedListClass } from "../components/ui/styles";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { TableSkeleton } from "../components/Skeleton";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
@@ -24,9 +23,6 @@ import NoticeToast from "../components/ui/NoticeToast";
 
 type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "permissions" | "ddl";
 
-function tablePath(schema: string, table: string) {
-  return `/db/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`;
-}
 
 const th = "sticky top-0 z-[1] bg-card-header border-b border-border px-4 py-2.5 text-left text-[13px] font-medium text-muted-foreground whitespace-nowrap";
 const td = "border-b border-border px-4 py-2 align-top";
@@ -57,11 +53,11 @@ function Mono({ children, className }: { children: ReactNode; className?: string
 
 /** A link to another table that keeps the row's text style. */
 function TableLink({ schema, table, children }: { schema: string; table: string; children: ReactNode }) {
-  const navigate = useNavigate();
+  const { openDocument } = useDocuments();
   return (
     <button
       type="button"
-      onClick={() => navigate(tablePath(schema, table))}
+      onClick={() => openDocument({ kind: "data", schema, name: table, icon: "table" })}
       className="group inline-flex items-center gap-1 rounded text-left font-mono text-xs text-info-foreground hover:underline cursor-pointer"
     >
       {children}
@@ -389,8 +385,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-export default function TableStructure() {
-  const { schema, table } = useParams<{ schema: string; table: string }>();
+export default function TableStructure({ schema, name: table }: { schema: string; name: string }) {
   const api = useApi();
   const key = `${schema}.${table}`;
   const [result, setResult] = useState<{ key: string; structure?: Structure; error?: string } | null>(null);
@@ -484,14 +479,6 @@ export default function TableStructure() {
     <div className="h-full flex flex-col">
       <PageHeader className="justify-between">
         <HeaderTitle label={`Structure · ${schema}`}>{table}</HeaderTitle>
-        <div className={segmentedListClass}>
-          <NavLink to={tablePath(schema!, table!)} end className={({ isActive }) => segmentedItemClass(isActive)}>
-            Data
-          </NavLink>
-          <NavLink to={`${tablePath(schema!, table!)}/structure`} className={({ isActive }) => segmentedItemClass(isActive)}>
-            Structure
-          </NavLink>
-        </div>
       </PageHeader>
 
       {loading ? (

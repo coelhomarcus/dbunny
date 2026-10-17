@@ -63,7 +63,7 @@ export default function ConnectPage() {
     const attempt = async (trustHostKey?: string) => {
       try {
         await connect(connectArgsOf(draft), savedTagOf(draft), trustHostKey);
-        navigate("/db/query");
+        navigate("/db");
       } catch (err) {
         // The SSH server's key is asked about, not shown as an error
         if (hostKeyProblem(err)) throw err;
@@ -145,7 +145,7 @@ export default function ConnectPage() {
           await loadConnections();
           select(conn);
         }}
-        onConnected={() => navigate("/db/query")}
+        onConnected={() => navigate("/db")}
       />
     </div>
   );

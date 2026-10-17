@@ -12,10 +12,7 @@
 </p>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/7e2436b2-2b8c-4cc9-a2ac-d9e1660150d6" />
-    <img src="https://github.com/user-attachments/assets/a237fc1c-56da-464e-921f-b4516e98f26d" width="720" alt="DBunny showing a table's rows, with the explorer on the left" />
-  </picture>
+  <img src="https://github.com/user-attachments/assets/f7cf97d2-0654-48e7-bf6d-76c8172c57f4" width="720" alt="DBunny showing a table's rows, with the explorer on the left" />
 </p>
 
 ## About
