@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Activity, Pause, Play, RefreshCw, Square, TriangleAlert, X, XCircle } from "lucide-react";
+import { Activity, Copy, Pause, Play, RefreshCw, Square, TriangleAlert, X, XCircle } from "lucide-react";
+import ContextMenu, { type ContextMenuItem } from "../components/ui/ContextMenu";
+import { writeClipboardText } from "../lib/clipboard";
 import type { ServerActivity, ServerSession } from "@/types";
 import { useConnection } from "../contexts/useConnection";
+import { useNotify } from "../contexts/NoticeProvider";
 import { useTab } from "../contexts/workspace";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { TableSkeleton } from "../components/Skeleton";
@@ -61,15 +64,18 @@ const STATE_BADGE: Record<string, "success" | "warning" | "destructive" | "neutr
 export default function ActivityView() {
   const { api, connectionInfo } = useConnection();
   const { isActive } = useTab();
+  const notify = useNotify();
   const readOnly = connectionInfo?.readOnly ?? false;
   const [scope, setScope] = useState<"database" | "all">("database");
   const [activity, setActivity] = useState<ServerActivity | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const reportedError = useRef<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [confirm, setConfirm] = useState<{ session: ServerSession; terminate: boolean } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -77,13 +83,19 @@ export default function ActivityView() {
       setRefreshing(true);
       setActivity(await api.getServerActivity(scope === "all"));
       setError(null);
+      reportedError.current = null;
       setLastRefresh(new Date());
     } catch (err) {
-      setError(typeof err === "string" ? err : "Couldn't read the server activity");
+      const text = typeof err === "string" ? err : "Couldn't read the server activity";
+      if (reportedError.current !== text) {
+        reportedError.current = text;
+        notify({ tone: "error", text });
+      }
+      setError(text);
     } finally {
       setRefreshing(false);
     }
-  }, [api, scope]);
+  }, [api, notify, scope]);
 
   useEffect(() => {
     const first = setTimeout(load, 0);
@@ -102,7 +114,7 @@ export default function ActivityView() {
       const sent = await api.signalBackend(session.pid, terminate);
       setMessage(sent ? `${terminate ? "Ended session" : "Cancelled the query of"} ${session.pid}` : `Session ${session.pid} had already finished`);
     } catch (err) {
-      setMessage(typeof err === "string" ? err : "It didn't work");
+      notify({ tone: "error", text: typeof err === "string" ? err : "It didn't work" });
     }
     load();
   }
@@ -159,9 +171,8 @@ export default function ActivityView() {
         </div>
       </PageHeader>
 
-      {(error || message || activity?.limitedView) && (
+      {(message || activity?.limitedView) && (
         <div className="flex shrink-0 flex-col gap-1 border-b border-border px-4 py-2 text-[13px]">
-          {error && <span className="text-destructive-foreground">{error}</span>}
           {message && (
             <button type="button" className="text-left text-muted-foreground cursor-pointer" onClick={() => setMessage(null)}>
               {message}
@@ -178,6 +189,8 @@ export default function ActivityView() {
 
       {!activity && !error ? (
         <TableSkeleton columns={6} rows={8} />
+      ) : !activity ? (
+        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">Couldn't read the server activity.</div>
       ) : (
         <>
           <div className="min-h-0 flex-1 overflow-auto">
@@ -211,6 +224,19 @@ export default function ActivityView() {
                       <tr
                         key={s.pid}
                         onClick={() => setSelected(activeRow ? null : s.pid)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          const items: ContextMenuItem[] = [];
+                          if (s.query) items.push({ label: "Copy query", icon: <Copy />, onSelect: () => writeClipboardText(s.query ?? "") });
+                          if (!s.isSelf && !readOnly) {
+                            if (items.length) items.push("separator");
+                            items.push(
+                              { label: "Cancel query", icon: <Square />, disabled: s.state !== "active", onSelect: () => setConfirm({ session: s, terminate: false }) },
+                              { label: "End session", icon: <XCircle />, destructive: true, onSelect: () => setConfirm({ session: s, terminate: true }) },
+                            );
+                          }
+                          if (items.length) setMenu({ x: e.clientX, y: e.clientY, items });
+                        }}
                         className={cn(
                           "cursor-pointer border-b border-border align-middle transition-colors hover:bg-accent",
                           activeRow ? "bg-accent" : i % 2 ? "bg-muted/50" : "bg-card",
@@ -312,6 +338,7 @@ export default function ActivityView() {
         </>
       )}
 
+      <ContextMenu position={menu} items={menu?.items ?? []} onClose={() => setMenu(null)} />
       <ConfirmDialog
         open={confirm !== null}
         onClose={() => setConfirm(null)}
@@ -419,7 +446,7 @@ function Field({ label, value }: { label: string; value: string }) {
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="truncate text-foreground">
+      <dd className="select-text truncate text-foreground">
         {value}
       </dd>
     </>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { ConnectionProvider } from "./contexts/ConnectionContext";
+import { NoticeProvider } from "./contexts/NoticeProvider";
 import { WorkspaceProvider } from "./contexts/WorkspaceProvider";
 import { TabContext, useWorkspace, type TabSessionInfo } from "./contexts/workspace";
 import type { InitialSession } from "@/types";
@@ -79,13 +80,15 @@ function TabPane({
         )}
       >
         <ConnectionProvider onSessionChange={onSessionChange} initialSession={initialSession}>
-          {/* A tab opened with a session starts on the query editor */}
-          <MemoryRouter initialEntries={[initialSession ? "/db" : "/"]}>
-            <Routes>
-              <Route path="/" element={<ConnectPage />} />
-              <Route path="/db" element={<DatabaseLayout />} />
-            </Routes>
-          </MemoryRouter>
+          <NoticeProvider>
+            {/* A tab opened with a session starts on the query editor */}
+            <MemoryRouter initialEntries={[initialSession ? "/db" : "/"]}>
+              <Routes>
+                <Route path="/" element={<ConnectPage />} />
+                <Route path="/db" element={<DatabaseLayout />} />
+              </Routes>
+            </MemoryRouter>
+          </NoticeProvider>
         </ConnectionProvider>
       </div>
     </TabContext.Provider>

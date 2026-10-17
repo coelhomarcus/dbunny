@@ -3,6 +3,7 @@ import { FileUp, FolderOpen, Loader } from "lucide-react";
 import type { ColumnInfo } from "@/types";
 import { detectDelimiter, looksLikeHeader, matchColumns, parseCsv } from "../../lib/csv";
 import { cn } from "../../lib/cn";
+import { useNotify } from "../../contexts/NoticeProvider";
 import Dialog from "../ui/Dialog";
 import Button from "../ui/Button";
 import Checkbox from "../Checkbox";
@@ -62,7 +63,7 @@ function ImportForm({
   // Per CSV column: the table column it goes into, or null to skip it
   const [mapping, setMapping] = useState<(string | null)[]>(initial?.mapping ?? []);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const notify = useNotify();
 
   const parsed = useMemo(() => (file ? parseCsv(file.text, delimiter) : []), [file, delimiter]);
   const width = parsed.reduce((max, r) => Math.max(max, r.length), 0);
@@ -81,7 +82,6 @@ function ImportForm({
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     const path = await open({ multiple: false, filters: [{ name: "CSV", extensions: ["csv", "tsv", "txt"] }] });
     if (typeof path !== "string") return;
-    setError(null);
     try {
       const text = await readTextFile(path);
       const detected = detectDelimiter(text);
@@ -89,7 +89,7 @@ function ImportForm({
       setDelimiter(detected);
       remap(parseCsv(text, detected), hasHeader);
     } catch (err) {
-      setError(typeof err === "string" ? err : "Couldn't read the file");
+      notify({ tone: "error", text: typeof err === "string" ? err : "Couldn't read the file" });
     }
   }
 
@@ -102,12 +102,11 @@ function ImportForm({
       }),
     );
     setBusy(true);
-    setError(null);
     try {
       await onImport(picked.map((m) => m.target!), rows);
       onClose();
     } catch (err) {
-      setError(typeof err === "string" ? err : "The import failed");
+      notify({ tone: "error", text: typeof err === "string" ? err : "The import failed" });
       setBusy(false);
     }
   }
@@ -146,11 +145,7 @@ function ImportForm({
       description="All rows are inserted in one transaction: if one fails, nothing is imported."
       footer={
         <>
-          {error ? (
-            <p className="mr-auto min-w-0 flex-1 break-words text-xs text-destructive-foreground">{error}</p>
-          ) : (
-            file && <p className="mr-auto text-xs text-muted-foreground tabular-nums">{dataRows.length.toLocaleString()} rows</p>
-          )}
+          {file && <p className="mr-auto text-xs text-muted-foreground tabular-nums">{dataRows.length.toLocaleString()} rows</p>}
           <Button variant="neutral" size="sm" onClick={onClose}>
             Cancel
           </Button>
@@ -240,7 +235,7 @@ function ImportForm({
               </table>
             </div>
             {duplicates.length > 0 && (
-              <p className="text-xs text-destructive-foreground">Each table column can take only one CSV column ({[...new Set(duplicates)].join(", ")}).</p>
+              <p className="select-text text-xs text-destructive-foreground">Each table column can take only one CSV column ({[...new Set(duplicates)].join(", ")}).</p>
             )}
             {dataRows.length > PREVIEW_ROWS && (
               <p className="text-xs text-muted-foreground">Showing the first {PREVIEW_ROWS} of {dataRows.length.toLocaleString()} rows.</p>

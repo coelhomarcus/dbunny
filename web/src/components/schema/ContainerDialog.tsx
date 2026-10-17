@@ -5,6 +5,7 @@ import CheckOption from "../ui/CheckOption";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
 import { useCapabilities } from "../../hooks/useCapabilities";
+import { useNotify } from "../../contexts/NoticeProvider";
 
 export type ContainerKind = "schema" | "database";
 export type ContainerAction = "create" | "rename" | "drop";
@@ -28,7 +29,7 @@ function ContainerForm({
   onClose,
 }: {
   request: ContainerRequest;
-  /** Runs the action; a rejection is shown in the dialog. */
+  /** Runs the action; a rejection is reported as a toast. */
   onRun: (options: ContainerOptions) => Promise<void>;
   onClose: () => void;
 }) {
@@ -38,7 +39,7 @@ function ContainerForm({
   const [force, setForce] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const notify = useNotify();
   const capabilities = useCapabilities();
 
   const destructive = action === "drop";
@@ -49,12 +50,11 @@ function ContainerForm({
     e?.preventDefault();
     if (!canRun || busy) return;
     setBusy(true);
-    setError(null);
     try {
       await onRun({ name: name.trim(), cascade, force });
       onClose();
     } catch (err) {
-      setError(typeof err === "string" ? err : err instanceof Error ? err.message : "It didn't work");
+      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : "It didn't work" });
       setBusy(false);
     }
   }
@@ -88,7 +88,6 @@ function ContainerForm({
       description={config.description}
       footer={
         <>
-          {error && <p className="mr-auto min-w-0 flex-1 break-words text-xs text-destructive-foreground">{error}</p>}
           <Button variant="neutral" size="sm" onClick={onClose} autoFocus={destructive}>
             Cancel
           </Button>

@@ -58,7 +58,7 @@ function Editor({
       footer={
         <>
           {error ? (
-            <p className="mr-auto min-w-0 flex-1 truncate text-xs text-destructive-foreground">{error}</p>
+            <p className="mr-auto min-w-0 flex-1 select-text truncate text-xs text-destructive-foreground">{error}</p>
           ) : (
             <p className="mr-auto text-xs text-muted-foreground">{isMac ? "⌘" : "Ctrl"} Enter to apply</p>
           )}

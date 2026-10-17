@@ -6,8 +6,9 @@ use super::data::db_message;
 use super::structure::table_structure;
 use super::PostgresDriver;
 use crate::db::model::{
-    ColumnInfo, CompletionColumn, CompletionRelation, CompletionSchema, ExplorerObject, ExplorerPartition, ExplorerSchema,
-    ExplorerTree, ExtensionInfo, ForeignKeyRef, FunctionDetail, FunctionInfo, ObjectDefinition, TableStructure,
+    ColumnInfo, CompletionColumn, CompletionRelation, CompletionSchema, Diagram, DiagramColumn, DiagramRelation,
+    DiagramTable, ExplorerObject, ExplorerPartition, ExplorerSchema, ExplorerTree, ExtensionInfo, ForeignKeyRef,
+    FunctionDetail, FunctionInfo, ObjectDefinition, TableStructure,
 };
 use crate::db::Catalog;
 
@@ -16,6 +17,111 @@ use crate::db::Catalog;
 /// session's temporary tables.
 const USER_SCHEMAS: &str = "n.nspname NOT IN ('pg_catalog', 'information_schema') \
     AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp%'";
+
+/// `alias` is a `pg_namespace` in the query (`n`, `fn`, `tn`).
+fn user_namespace(alias: &str) -> String {
+    format!(
+        "{alias}.nspname NOT IN ('pg_catalog', 'information_schema') \
+         AND {alias}.nspname NOT LIKE 'pg\\_toast%' AND {alias}.nspname NOT LIKE 'pg\\_temp%'"
+    )
+}
+
+/// Tables the diagram draws: ordinary tables, foreign tables and partitioned parents.
+const DIAGRAM_RELATIONS: &str = "c.relkind IN ('r', 'f', 'p') AND NOT c.relispartition";
+
+/// Foreign keys that touch `schema`, then the columns of that schema's tables and of the
+/// tables on the other end of those keys.
+async fn diagram(client: &tokio_postgres::Client, schema: &str) -> Result<Diagram, tokio_postgres::Error> {
+    let from_ns = user_namespace("fn");
+    let to_ns = user_namespace("tn");
+    let rels = format!(
+        "SELECT con.conname AS name, con.conrelid AS from_oid, con.confrelid AS to_oid, \
+                fn.nspname AS from_schema, fc.relname AS from_table, \
+                tn.nspname AS to_schema, tc.relname AS to_table, \
+                ARRAY(SELECT a.attname::text FROM unnest(con.conkey) WITH ORDINALITY k(num, i) \
+                      JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.num ORDER BY k.i) AS from_columns, \
+                ARRAY(SELECT a.attname::text FROM unnest(con.confkey) WITH ORDINALITY k(num, i) \
+                      JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.num ORDER BY k.i) AS to_columns, \
+                con.conkey AS conkey, con.confkey AS confkey \
+         FROM pg_constraint con \
+         JOIN pg_class fc ON fc.oid = con.conrelid \
+         JOIN pg_namespace fn ON fn.oid = fc.relnamespace \
+         JOIN pg_class tc ON tc.oid = con.confrelid \
+         JOIN pg_namespace tn ON tn.oid = tc.relnamespace \
+         WHERE con.contype = 'f' \
+           AND fc.relkind IN ('r', 'f', 'p') AND NOT fc.relispartition \
+           AND tc.relkind IN ('r', 'f', 'p') AND NOT tc.relispartition \
+           AND (fn.nspname = $1 OR tn.nspname = $1) \
+           AND {from_ns} AND {to_ns}"
+    );
+    let relation_rows = client
+        .query(
+            &format!("SELECT name, from_schema, from_table, to_schema, to_table, from_columns, to_columns FROM ({rels}) rels ORDER BY from_schema, from_table, name"),
+            &[&schema],
+        )
+        .await?;
+    let relations = relation_rows
+        .iter()
+        .map(|r| DiagramRelation {
+            name: r.get("name"),
+            from_schema: r.get("from_schema"),
+            from_table: r.get("from_table"),
+            from_columns: r.get("from_columns"),
+            to_schema: r.get("to_schema"),
+            to_table: r.get("to_table"),
+            to_columns: r.get("to_columns"),
+        })
+        .collect::<Vec<_>>();
+
+    let home = user_namespace("n");
+    let column_rows = client
+        .query(
+            &format!(
+                "WITH rels AS ({rels}), \
+                 wanted AS ( \
+                   SELECT c.oid, n.nspname AS schema, c.relname AS name \
+                   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                   WHERE n.nspname = $1 AND {DIAGRAM_RELATIONS} AND {home} \
+                   UNION \
+                   SELECT c.oid, n.nspname, c.relname \
+                   FROM rels r \
+                   JOIN pg_class c ON c.oid = r.from_oid OR c.oid = r.to_oid \
+                   JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 ) \
+                 SELECT w.schema, w.name, a.attname AS column_name, \
+                        format_type(a.atttypid, a.atttypmod) AS type_name, a.attnum::int4 AS ordinal, \
+                        EXISTS (SELECT 1 FROM pg_constraint pk \
+                                WHERE pk.conrelid = w.oid AND pk.contype = 'p' AND a.attnum = ANY (pk.conkey)) AS is_primary_key, \
+                        EXISTS (SELECT 1 FROM rels r \
+                                WHERE (r.from_oid = w.oid AND a.attnum = ANY (r.conkey)) \
+                                   OR (r.to_oid = w.oid AND a.attnum = ANY (r.confkey))) AS is_foreign_key \
+                 FROM wanted w \
+                 JOIN pg_attribute a ON a.attrelid = w.oid AND a.attnum > 0 AND NOT a.attisdropped \
+                 ORDER BY w.schema, w.name, a.attnum"
+            ),
+            &[&schema],
+        )
+        .await?;
+
+    let mut tables: Vec<DiagramTable> = Vec::new();
+    for row in &column_rows {
+        let schema_name: String = row.get("schema");
+        let name: String = row.get("name");
+        let column = DiagramColumn {
+            name: row.get("column_name"),
+            type_name: row.get("type_name"),
+            is_primary_key: row.get("is_primary_key"),
+            is_foreign_key: row.get("is_foreign_key"),
+            ordinal: row.get("ordinal"),
+        };
+        if tables.last().is_some_and(|t| t.schema == schema_name && t.name == name) {
+            tables.last_mut().unwrap().columns.push(column);
+        } else {
+            tables.push(DiagramTable { schema: schema_name, name, columns: vec![column] });
+        }
+    }
+    Ok(Diagram { tables, relations })
+}
 
 /// The schemas the explorer lists.
 pub(crate) async fn user_schemas(client: &tokio_postgres::Client) -> Result<Vec<String>, tokio_postgres::Error> {
@@ -30,6 +136,11 @@ impl Catalog for PostgresDriver {
     async fn explorer(&self) -> Result<ExplorerTree, String> {
         let client = self.client().await?;
         explorer(&client).await.map_err(|e| db_message(&e))
+    }
+
+    async fn diagram(&self, schema: &str) -> Result<Diagram, String> {
+        let client = self.client().await?;
+        diagram(&client, schema).await.map_err(|e| db_message(&e))
     }
 
     async fn columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, String> {
@@ -793,5 +904,59 @@ mod server_tests {
         let tree = explorer(&client).await.unwrap();
         let names: Vec<String> = tree.schemas.into_iter().map(|s| s.name).collect();
         assert_eq!(names, schemas, "the sidebar and the explorer list the same schemas");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn diagram_keeps_composite_keys_and_tables_a_key_reaches() {
+        let client = connect().await;
+        let s = "dbunny_diagram";
+        let other = "dbunny_diagram_other";
+        client
+            .batch_execute(&format!(
+                "DROP SCHEMA IF EXISTS {s} CASCADE; DROP SCHEMA IF EXISTS {other} CASCADE; \
+                 CREATE SCHEMA {s}; CREATE SCHEMA {other}; \
+                 CREATE TABLE {other}.accounts (id int PRIMARY KEY); \
+                 CREATE TABLE {other}.lonely (id int PRIMARY KEY); \
+                 CREATE TABLE {s}.users (id int PRIMARY KEY, name text); \
+                 CREATE TABLE {s}.regions (country text, code text, PRIMARY KEY (country, code)); \
+                 CREATE TABLE {s}.posts ( \
+                   id int PRIMARY KEY, \
+                   author_id int REFERENCES {s}.users (id), \
+                   account_id int REFERENCES {other}.accounts (id), \
+                   country text, region text, \
+                   CONSTRAINT posts_region_fk FOREIGN KEY (country, region) REFERENCES {s}.regions (country, code)); \
+                 CREATE TABLE {other}.notes (id int PRIMARY KEY, user_id int REFERENCES {s}.users (id)); \
+                 CREATE VIEW {s}.user_names AS SELECT name FROM {s}.users;"
+            ))
+            .await
+            .unwrap();
+
+        let diagram = diagram(&client, s).await.unwrap();
+        let names: Vec<String> = diagram.tables.iter().map(|t| format!("{}.{}", t.schema, t.name)).collect();
+        for table in ["users", "regions", "posts"] {
+            assert!(names.contains(&format!("{s}.{table}")), "{names:?}");
+        }
+        assert!(names.contains(&format!("{other}.accounts")), "{names:?}");
+        assert!(names.contains(&format!("{other}.notes")), "a table that points here is included: {names:?}");
+        assert!(!names.iter().any(|n| n.ends_with(".lonely")), "{names:?}");
+        assert!(!names.iter().any(|n| n.ends_with(".user_names")), "a view is not a card");
+
+        let posts = diagram.tables.iter().find(|t| t.name == "posts").unwrap();
+        let author = posts.columns.iter().find(|c| c.name == "author_id").unwrap();
+        assert!(author.is_foreign_key && !author.is_primary_key);
+        assert!(posts.columns.iter().any(|c| c.name == "id" && c.is_primary_key));
+
+        let region = diagram.relations.iter().find(|r| r.name == "posts_region_fk").unwrap();
+        assert_eq!(region.from_columns, vec!["country".to_string(), "region".to_string()]);
+        assert_eq!(region.to_columns, vec!["country".to_string(), "code".to_string()]);
+        assert_eq!((region.to_schema.as_str(), region.to_table.as_str()), (s, "regions"));
+
+        let cross = diagram.relations.iter().find(|r| r.to_table == "accounts").unwrap();
+        assert_eq!(cross.to_schema, other);
+        let incoming = diagram.relations.iter().find(|r| r.from_table == "notes").unwrap();
+        assert_eq!((incoming.from_schema.as_str(), incoming.to_table.as_str()), (other, "users"));
+
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE; DROP SCHEMA {other} CASCADE")).await.unwrap();
     }
 }

@@ -141,6 +141,47 @@ pub struct ExplorerTree {
     pub default_schema: Option<String>,
 }
 
+/// One column on a diagram card.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagramColumn {
+    pub name: String,
+    pub type_name: String,
+    pub is_primary_key: bool,
+    pub is_foreign_key: bool,
+    pub ordinal: i32,
+}
+
+/// One table card. A table outside the opened schema is here only because a foreign key reaches it.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagramTable {
+    pub schema: String,
+    pub name: String,
+    pub columns: Vec<DiagramColumn>,
+}
+
+/// One foreign key, including a key that covers several columns. `from` is the table that holds the key.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagramRelation {
+    pub name: String,
+    pub from_schema: String,
+    pub from_table: String,
+    pub from_columns: Vec<String>,
+    pub to_schema: String,
+    pub to_table: String,
+    pub to_columns: Vec<String>,
+}
+
+/// The tables and foreign keys of one schema, plus tables in other schemas those keys touch.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Diagram {
+    pub tables: Vec<DiagramTable>,
+    pub relations: Vec<DiagramRelation>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletionRelation {

@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, type ComponentType, type ReactNode } from "react";
 import { useDocuments } from "../contexts/DocumentsContext";
+import { useNotify } from "../contexts/NoticeProvider";
+import { useTab } from "../contexts/workspace";
 import type { DataIcon } from "../lib/documents";
+import { bindSchemaRefresh } from "../lib/schemaRefresh";
 import { useApi, useConnection } from "../contexts/useConnection";
 import type { RelationKind } from "../lib/api";
 import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
 import RelationActionDialog, { type RelationAction, type RelationTarget } from "./schema/RelationActionDialog";
-import CreateTableDialog from "./schema/CreateTableDialog";
 import { writeClipboardText } from "../lib/clipboard";
 import ContainerDialog, { type ContainerOptions, type ContainerRequest } from "./schema/ContainerDialog";
 import { quoteIdent } from "../lib/copyRows";
@@ -47,6 +49,7 @@ import {
   Database,
   FolderPlus,
   Split,
+  Waypoints,
   type LucideProps,
 } from "lucide-react";
 
@@ -135,7 +138,6 @@ function GroupRow({
   onToggle,
   icon,
   label,
-  count,
   action,
   onContextMenu,
 }: {
@@ -144,7 +146,6 @@ function GroupRow({
   onToggle: () => void;
   icon: ReactNode;
   label: string;
-  count?: number;
   action?: ReactNode;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
@@ -161,8 +162,7 @@ function GroupRow({
       >
         <Chevron open={open} />
         {icon}
-        <span className="truncate">{label}</span>
-        {count !== undefined && <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/70">{count}</span>}
+        <span className="min-w-0 truncate">{label}</span>
       </button>
       {action && <span className="absolute right-1.5 top-1/2 flex -translate-y-1/2">{action}</span>}
     </div>
@@ -170,12 +170,12 @@ function GroupRow({
 }
 
 /**
- * The database's objects: filterable, with pinned tables on top, schemas (when there
- * are several), categories that only show when they have something, and columns
- * under each table.
+ * The database's objects: filterable, with pinned tables on top, one row per schema,
+ * categories that only show when they have something, and columns under each table.
  */
 export default function SchemaTree() {
   const { documents, openDocument, renameRelation, renameSchema, dropRelation, dropSchema, refreshData } = useDocuments();
+  const { tabId } = useTab();
   const api = useApi();
   const { connectionInfo } = useConnection();
   const readOnly = connectionInfo?.readOnly ?? false;
@@ -191,13 +191,12 @@ export default function SchemaTree() {
   const [columns, setColumns] = useState<Record<string, ColumnInfo[] | "loading" | "error">>({});
   const [extensions, setExtensions] = useState<ExtensionInfo[] | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; target: RelationTarget } | null>(null);
+  const [plainMenu, setPlainMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   // Right click on a schema, or the header's "+" (schema null)
   const [schemaMenu, setSchemaMenu] = useState<{ x: number; y: number; schema: string | null } | null>(null);
   const [container, setContainer] = useState<ContainerRequest | null>(null);
   const [action, setAction] = useState<{ action: RelationAction; target: RelationTarget } | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  // Schema the table builder is open for
-  const [newTableIn, setNewTableIn] = useState<string | null>(null);
+  const notify = useNotify();
 
   const load = useCallback(
     async (first: boolean) => {
@@ -216,17 +215,17 @@ export default function SchemaTree() {
             open.add(`s:${home.name}`);
             for (const c of CATEGORIES) if (c.openByDefault) open.add(`c:${home.name}:${c.id}`);
           }
-          // With a single schema there's no schema row, so open its categories directly
-          if (next.schemas.length === 1) for (const c of CATEGORIES) if (c.openByDefault) open.add(`c:${next.schemas[0].name}:${c.id}`);
           setExpanded(open);
         }
       } catch (err) {
-        setError(typeof err === "string" ? err : "Couldn't read the database's objects");
+        const text = typeof err === "string" ? err : "Couldn't read the database's objects";
+        notify({ tone: "error", text });
+        setError(text);
       } finally {
         setRefreshing(false);
       }
     },
-    [api],
+    [api, notify],
   );
 
   useEffect(() => {
@@ -234,6 +233,15 @@ export default function SchemaTree() {
     const timer = setTimeout(() => load(true), 0);
     return () => clearTimeout(timer);
   }, [load]);
+
+  useEffect(
+    () =>
+      bindSchemaRefresh(tabId, (schema) => {
+        void load(false);
+        setExpanded((prev) => new Set([...prev, `s:${schema}`, `c:${schema}:tables`]));
+      }),
+    [tabId, load],
+  );
 
 
   const toggle = useCallback((key: string) => {
@@ -253,7 +261,10 @@ export default function SchemaTree() {
     api
       .getColumns(schema, name)
       .then((cols) => setColumns((prev) => ({ ...prev, [key]: cols })))
-      .catch(() => setColumns((prev) => ({ ...prev, [key]: "error" })));
+      .catch(() => {
+        setColumns((prev) => ({ ...prev, [key]: "error" }));
+        notify({ tone: "error", text: `Couldn't read the columns of ${name}` });
+      });
   }
 
   function togglePin(schema: string, object: ExplorerObject) {
@@ -350,24 +361,42 @@ export default function SchemaTree() {
   }
 
   function schemaMenuItems(schema: string | null): ContextMenuItem[] {
-    // The header's "+": what can be created
+    const diagramOf = (name: string): ContextMenuItem => ({
+      label: "Diagram",
+      icon: <Waypoints />,
+      onSelect: () => openDocument({ kind: "diagram", schema: name }),
+    });
+    const newSchema: ContextMenuItem = {
+      label: "New schema…",
+      icon: <FolderPlus />,
+      onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }),
+    };
+    // The header's "+" never opens a diagram: that stays on the schema, one schema or many.
     if (schema === null) {
+      if (readOnly) return [];
+      if (multiSchema) return capabilities.schemas ? [newSchema] : [];
       return [
-        { label: "New table…", icon: <Table2 />, onSelect: () => setNewTableIn(defaultSchema) },
-        ...(capabilities.schemas
-          ? [{ label: "New schema…", icon: <FolderPlus />, onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }) }]
-          : []),
+        { label: "New table", icon: <Table2 />, onSelect: () => openDocument({ kind: "create-table", schema: defaultSchema }) },
+        ...(capabilities.schemas ? [newSchema] : []),
       ];
     }
-    const items: ContextMenuItem[] = [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(schema)) }];
+    const items: ContextMenuItem[] = [
+      diagramOf(schema),
+      { label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(schema)) },
+    ];
     if (readOnly) return items;
     return [
-      { label: "New table here…", icon: <Table2 />, onSelect: () => setNewTableIn(schema) },
-      { label: "New schema…", icon: <FolderPlus />, onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }) },
-      ...items,
-      "separator",
-      { label: "Rename…", icon: <PenLine />, onSelect: () => setContainer({ kind: "schema", action: "rename", name: schema }) },
-      { label: "Drop…", icon: <Trash2 />, destructive: true, onSelect: () => setContainer({ kind: "schema", action: "drop", name: schema }) },
+      diagramOf(schema),
+      { label: "New table here", icon: <Table2 />, onSelect: () => openDocument({ kind: "create-table", schema }) },
+      ...(capabilities.schemas ? [newSchema] : []),
+      ...items.slice(1),
+      ...(capabilities.schemas
+        ? ([
+            "separator",
+            { label: "Rename…", icon: <PenLine />, onSelect: () => setContainer({ kind: "schema", action: "rename", name: schema }) },
+            { label: "Drop…", icon: <Trash2 />, destructive: true, onSelect: () => setContainer({ kind: "schema", action: "drop", name: schema }) },
+          ] as ContextMenuItem[])
+        : []),
     ];
   }
 
@@ -393,14 +422,10 @@ export default function SchemaTree() {
         label: "Refresh data",
         icon: <RefreshCw />,
         onSelect: () => {
-          setNotice(`Refreshing ${target.name}…`);
           api
             .refreshMaterializedView(target.schema, target.name)
-            .then(() => {
-              setNotice(null);
-              refreshData(target.schema, target.name);
-            })
-            .catch((err) => setNotice(typeof err === "string" ? err : "Refresh failed"));
+            .then(() => refreshData(target.schema, target.name))
+            .catch((err) => notify({ tone: "error", text: typeof err === "string" ? err : "Refresh failed" }));
         },
       });
     }
@@ -422,10 +447,21 @@ export default function SchemaTree() {
     const value = columns[`t:${schema}.${name}`];
     const pad = INDENT[Math.min(depth, INDENT.length - 1)];
     if (value === undefined || value === "loading") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>Loading columns…</div>;
-    if (value === "error") return <div className={cn("py-1 text-xs text-destructive-foreground", pad)}>Couldn't read the columns</div>;
+    if (value === "error") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>Couldn't read the columns</div>;
     if (value.length === 0) return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>No columns</div>;
     return value.map((col) => (
-      <div key={col.name} className={cn("flex h-6 items-center gap-1.5 pr-2 text-xs text-muted-foreground", pad)}>
+      <div
+        key={col.name}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setPlainMenu({
+            x: e.clientX,
+            y: e.clientY,
+            items: [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(col.name)) }],
+          });
+        }}
+        className={cn("flex h-6 items-center gap-1.5 pr-2 text-xs text-muted-foreground", pad)}
+      >
         {col.isPrimaryKey ? (
           <KeyRound size={11} className="shrink-0 text-warning-foreground" aria-label="Primary key" />
         ) : col.foreignKey ? (
@@ -470,9 +506,19 @@ export default function SchemaTree() {
               if (e.key === "Enter") openExplorerObject(schema, object);
             }}
             onContextMenu={(e) => {
-              if (!relation) return;
               e.preventDefault();
-              setMenu({ x: e.clientX, y: e.clientY, target: { schema, name: object.name, kind: relation } });
+              if (relation) {
+                setMenu({ x: e.clientX, y: e.clientY, target: { schema, name: object.name, kind: relation } });
+                return;
+              }
+              setPlainMenu({
+                x: e.clientX,
+                y: e.clientY,
+                items: [
+                  { label: "Open", onSelect: () => openExplorerObject(schema, object) },
+                  { label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(object.name)) },
+                ],
+              });
             }}
             className={cn(
               "flex h-7 w-full items-center gap-1.5 rounded-md pr-8 text-sm transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -569,7 +615,7 @@ export default function SchemaTree() {
       <button
         type="button"
         aria-label={`New table in ${schema}`}
-        onClick={() => setNewTableIn(schema)}
+        onClick={() => openDocument({ kind: "create-table", schema })}
         className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer"
       >
         <Plus size={12} />
@@ -593,7 +639,6 @@ export default function SchemaTree() {
             onToggle={() => toggle(key)}
             icon={<Icon size={14} className={cn("shrink-0 opacity-70", category.color)} />}
             label={category.label}
-            count={items.length}
             action={category.id === "tables" ? newTableButton(schema) : undefined}
           />
           {isOpen(key) && items.map((object) => objectRow(schema, object, depth + 1, category))}
@@ -613,6 +658,7 @@ export default function SchemaTree() {
         p !== null && matches(p.object.name) && CATEGORIES.some((c) => c.kinds.includes(p.object.kind) && categoryShown(c)),
     );
   const defaultSchema = tree?.defaultSchema ?? tree?.schemas[0]?.name ?? "public";
+  const headerMenuLabel = multiSchema ? "New schema" : capabilities.schemas ? "New table or schema" : "New table";
   // Pinned uses its own flag; every other key is an open group.
   const allClosed = ![...expanded].some((key) => key !== "pinned-closed");
 
@@ -623,9 +669,8 @@ export default function SchemaTree() {
       return;
     }
     const open = new Set<string>();
-    const multi = tree.schemas.length > 1;
     for (const schema of tree.schemas) {
-      if (multi) open.add(`s:${schema.name}`);
+      open.add(`s:${schema.name}`);
       for (const category of CATEGORIES) {
         if (!categoryShown(category)) continue;
         if (schema.objects.some((object) => category.kinds.includes(object.kind) && matches(object.name))) {
@@ -645,16 +690,13 @@ export default function SchemaTree() {
       {/* Header: what's here, and the explorer's own actions */}
       <div className="flex h-8 shrink-0 items-center gap-1 pl-3 pr-1.5">
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">Explorer</span>
-        {tree && (
-          <span className="text-[10px] tabular-nums text-muted-foreground/70">{query ? `${shown} of ${total}` : total}</span>
-        )}
         <div className="ml-auto flex items-center">
-          {!readOnly && tree && (
-            <Tooltip label={capabilities.schemas ? "New table or schema" : "New table"} side="bottom">
+          {tree && schemaMenuItems(null).length > 0 && (
+            <Tooltip label={headerMenuLabel} side="bottom">
               <Button
                 variant="ghost-muted"
                 size="icon-xs"
-                aria-label={capabilities.schemas ? "New table or schema" : "New table"}
+                aria-label={headerMenuLabel}
                 aria-expanded={schemaMenu?.schema === null}
                 onClick={(e) => {
                   const r = e.currentTarget.getBoundingClientRect();
@@ -711,19 +753,9 @@ export default function SchemaTree() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        {notice && (
-          <button
-            type="button"
-            className="mb-1 w-full rounded-md bg-muted px-2 py-1.5 text-left text-xs text-muted-foreground cursor-pointer"
-            onClick={() => setNotice(null)}
-          >
-            {notice}
-          </button>
-        )}
-
         {error ? (
           <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-            <p className="text-xs text-destructive-foreground">{error}</p>
+            <p className="text-xs text-muted-foreground">Couldn't read the database's objects.</p>
             <Button variant="outline" size="xs" onClick={() => load(true)}>
               Try again
             </Button>
@@ -743,7 +775,7 @@ export default function SchemaTree() {
             <p className="text-[13px] font-medium">No tables yet</p>
             <p className="text-xs text-muted-foreground">This database has no tables, views or functions of its own.</p>
             {!readOnly && (
-              <Button variant="outline" size="xs" className="mt-1" onClick={() => setNewTableIn(defaultSchema)}>
+              <Button variant="outline" size="xs" className="mt-1" onClick={() => openDocument({ kind: "create-table", schema: defaultSchema })}>
                 <Plus /> Create a table
               </Button>
             )}
@@ -765,7 +797,6 @@ export default function SchemaTree() {
                   onToggle={() => toggle("pinned-closed")}
                   icon={<Pin size={13} className="shrink-0 text-primary/80" />}
                   label="Pinned"
-                  count={pinnedObjects.length}
                 />
                 {!expanded.has("pinned-closed") &&
                   pinnedObjects.map(({ schema, object }) =>
@@ -774,42 +805,34 @@ export default function SchemaTree() {
               </div>
             )}
 
-            {multiSchema
-              ? tree.schemas.map((schema) => {
-                  const key = `s:${schema.name}`;
-                  const count = schema.objects.filter((o) => matches(o.name)).length;
-                  // While filtering, schemas without a match step aside
-                  if (query && count === 0) return null;
-                  return (
-                    <div key={schema.name}>
-                      <GroupRow
-                        depth={0}
-                        open={isOpen(key)}
-                        onToggle={() => toggle(key)}
-                        icon={<Folder size={15} className="shrink-0 text-warning-foreground/80" />}
-                        label={schema.name}
-                        count={count}
-                        action={newTableButton(schema.name)}
-                        // Without schema support there's nothing to do with one
-                        onContextMenu={
-                          capabilities.schemas
-                            ? (e) => {
-                                e.preventDefault();
-                                setSchemaMenu({ x: e.clientX, y: e.clientY, schema: schema.name });
-                              }
-                            : undefined
-                        }
-                      />
-                      {isOpen(key) &&
-                        (schema.objects.length === 0 ? (
-                          <div className="py-1 pl-9 text-xs text-muted-foreground/70">Empty schema</div>
-                        ) : (
-                          categoryGroups(schema.name, schema.objects, 1)
-                        ))}
-                    </div>
-                  );
-                })
-              : tree.schemas.map((schema) => <div key={schema.name}>{categoryGroups(schema.name, schema.objects, 0)}</div>)}
+            {tree.schemas.map((schema) => {
+              const key = `s:${schema.name}`;
+              const count = schema.objects.filter((o) => matches(o.name)).length;
+              // While filtering, schemas without a match step aside
+              if (query && count === 0) return null;
+              return (
+                <div key={schema.name}>
+                  <GroupRow
+                    depth={0}
+                    open={isOpen(key)}
+                    onToggle={() => toggle(key)}
+                    icon={<Folder size={15} className="shrink-0 text-warning-foreground/80" />}
+                    label={schema.name}
+                    action={newTableButton(schema.name)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setSchemaMenu({ x: e.clientX, y: e.clientY, schema: schema.name });
+                    }}
+                  />
+                  {isOpen(key) &&
+                    (schema.objects.length === 0 ? (
+                      <div className="py-1 pl-9 text-xs text-muted-foreground/70">Empty schema</div>
+                    ) : (
+                      categoryGroups(schema.name, schema.objects, 1)
+                    ))}
+                </div>
+              );
+            })}
           </>
         )}
 
@@ -822,7 +845,6 @@ export default function SchemaTree() {
               onToggle={toggleExtensions}
               icon={<Puzzle size={14} className="shrink-0 text-orange-500/80" />}
               label="Extensions"
-              count={extensions?.length}
             />
             {expanded.has("extensions") &&
               (extensions === null ? (
@@ -842,17 +864,8 @@ export default function SchemaTree() {
         )}
       </div>
 
-      <CreateTableDialog
-        schema={newTableIn}
-        onCreated={(table) => {
-          const schema = newTableIn!;
-          load(false);
-          setExpanded((prev) => new Set([...prev, `s:${schema}`, `c:${schema}:tables`]));
-          openDocument({ kind: "data", schema, name: table, icon: "table" });
-        }}
-        onClose={() => setNewTableIn(null)}
-      />
       <ContextMenu position={menu} items={menu ? menuItems(menu.target) : []} onClose={() => setMenu(null)} />
+      <ContextMenu position={plainMenu} items={plainMenu?.items ?? []} onClose={() => setPlainMenu(null)} />
       <ContextMenu position={schemaMenu} items={schemaMenu ? schemaMenuItems(schemaMenu.schema) : []} onClose={() => setSchemaMenu(null)} />
       <ContainerDialog request={container} onRun={(options) => runContainer(container!, options)} onClose={() => setContainer(null)} />
       <RelationActionDialog

@@ -66,7 +66,7 @@ export default function ImportUrlDialog({
         className="font-mono text-xs"
         aria-invalid={invalid}
       />
-      {invalid && <p className="mt-2 text-xs text-destructive-foreground">That doesn't look like a postgres:// connection URL.</p>}
+      {invalid && <p className="mt-2 select-text text-xs text-destructive-foreground">That doesn't look like a postgres:// connection URL.</p>}
     </Dialog>
   );
 }

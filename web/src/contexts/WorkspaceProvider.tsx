@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { GitCommitVertical } from "lucide-react";
 import { api, createSessionApi } from "../lib/api";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -42,37 +42,72 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setActiveTabId(tab.id);
   }, []);
 
-  const closeNow = useCallback(
-    (id: string) => {
-      const index = tabs.findIndex((t) => t.id === id);
-      if (index < 0) return;
-      const closing = tabs[index];
-      if (closing.sessionId) api.disconnect(closing.sessionId).catch(() => {});
-      disposeTabState(id);
+  const snapshot = useRef({ tabs, activeTabId });
+  snapshot.current = { tabs, activeTabId };
 
-      // Always keep one tab open
-      const remaining = tabs.length === 1 ? [newTab()] : tabs.filter((t) => t.id !== id);
-      setTabs(remaining);
-      if (id === activeTabId || tabs.length === 1) {
-        setActiveTabId(remaining[Math.min(index, remaining.length - 1)].id);
+  const closeNow = useCallback((ids: string[]) => {
+    const { tabs: open, activeTabId: active } = snapshot.current;
+    const drop = new Set(ids);
+    const closing = open.filter((tab) => drop.has(tab.id));
+    if (closing.length === 0) return;
+    for (const tab of closing) {
+      if (tab.sessionId) api.disconnect(tab.sessionId).catch(() => {});
+      disposeTabState(tab.id);
+    }
+    let remaining = open.filter((tab) => !drop.has(tab.id));
+    let nextActive = active;
+    if (remaining.length === 0) {
+      const fresh = newTab();
+      remaining = [fresh];
+      nextActive = fresh.id;
+    } else if (drop.has(active)) {
+      const index = open.findIndex((tab) => tab.id === active);
+      let neighbor: WorkspaceTab | undefined;
+      for (let i = index + 1; i < open.length; i++) {
+        if (!drop.has(open[i].id)) {
+          neighbor = open[i];
+          break;
+        }
       }
+      if (!neighbor) {
+        for (let i = index - 1; i >= 0; i--) {
+          if (!drop.has(open[i].id)) {
+            neighbor = open[i];
+            break;
+          }
+        }
+      }
+      nextActive = neighbor?.id ?? remaining[0].id;
+    }
+    snapshot.current = { tabs: remaining, activeTabId: nextActive };
+    setTabs(remaining);
+    setActiveTabId(nextActive);
+  }, []);
+
+  // Tabs whose open transaction would be rolled back by closing them, waiting for a yes
+  const [confirmClose, setConfirmClose] = useState<string[] | null>(null);
+
+  /** Closes tabs, asking once when closing would roll back a transaction opened in one of them. */
+  const closeTabs = useCallback(
+    async (ids: string[]) => {
+      const { tabs: open } = snapshot.current;
+      const unique = [...new Set(ids)].filter((id) => open.some((tab) => tab.id === id));
+      if (unique.length === 0) return;
+      let inTransaction = false;
+      for (const id of unique) {
+        const sessionId = open.find((tab) => tab.id === id)?.sessionId;
+        if (sessionId && (await createSessionApi(sessionId).transactionOpen().catch(() => false))) {
+          inTransaction = true;
+          break;
+        }
+      }
+      if (inTransaction) setConfirmClose(unique);
+      else closeNow(unique);
     },
-    [tabs, activeTabId],
+    [closeNow],
   );
 
-  // A tab whose open transaction would be rolled back by closing it, waiting for a yes
-  const [confirmClose, setConfirmClose] = useState<string | null>(null);
-
-  /** Closes a tab, asking first when closing would roll back a transaction opened in it. */
-  const closeTab = useCallback(
-    async (id: string) => {
-      const sessionId = tabs.find((t) => t.id === id)?.sessionId;
-      const inTransaction = sessionId ? await createSessionApi(sessionId).transactionOpen().catch(() => false) : false;
-      if (inTransaction) setConfirmClose(id);
-      else closeNow(id);
-    },
-    [tabs, closeNow],
-  );
+  const closeTab = useCallback((id: string) => closeTabs([id]), [closeTabs]);
 
   const cycleTab = useCallback(
     (direction: 1 | -1) => {
@@ -92,6 +127,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeTabId,
       openTab,
       closeTab,
+      closeTabs,
       activateTab: setActiveTabId,
       cycleTab,
       updateTab,
@@ -99,7 +135,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setSidebarOpen,
       toggleSidebar,
     }),
-    [tabs, activeTabId, openTab, closeTab, cycleTab, updateTab, sidebarOpen, setSidebarOpen, toggleSidebar],
+    [tabs, activeTabId, openTab, closeTab, closeTabs, cycleTab, updateTab, sidebarOpen, setSidebarOpen, toggleSidebar],
   );
 
   return (
@@ -115,7 +151,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         icon={<GitCommitVertical />}
         tone="destructive"
         title="Close with a transaction open?"
-        description="Its changes haven't been committed, so closing the tab rolls them back."
+        description={
+          confirmClose && confirmClose.length > 1
+            ? "One of these connections has a transaction open. Closing them rolls it back."
+            : "Its changes haven't been committed, so closing the tab rolls them back."
+        }
         confirmLabel="Roll back and close"
       />
     </WorkspaceContext.Provider>

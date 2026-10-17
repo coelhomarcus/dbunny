@@ -2,13 +2,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   closeDocument,
+  closeDocuments,
   dropRelation,
   dropSchema,
   emptyDocuments,
   openDocument,
   renameRelation,
+  renameSchema,
   seedQuery,
   setQuerySaved,
+  updateCreateTable,
 } from "../../src/lib/documents.ts";
 
 const filter = { column: "id", operator: "=", value: "1" };
@@ -40,6 +43,24 @@ test("activity and roles open at most once", () => {
   const activity = openDocument(openDocument(emptyDocuments(), { kind: "activity" }), { kind: "activity" });
   const roles = openDocument(openDocument(activity, { kind: "roles" }), { kind: "roles" });
   assert.deepEqual(roles.items.map((d) => d.kind), ["activity", "roles"]);
+});
+
+test("closing several tabs keeps the nearest one that stays open", () => {
+  let state = emptyDocuments();
+  state = openDocument(state, { kind: "query", title: "A" });
+  state = openDocument(state, { kind: "query", title: "B" });
+  state = openDocument(state, { kind: "query", title: "C" });
+  state = openDocument(state, { kind: "query", title: "D" });
+  const [a, b, c, d] = state.items;
+  const closedRight = closeDocuments({ ...state, activeId: b.id }, [c.id, d.id]);
+  assert.deepEqual(closedRight.items.map((doc) => doc.id), [a.id, b.id]);
+  assert.equal(closedRight.activeId, b.id);
+  const closedActive = closeDocuments({ ...state, activeId: c.id }, [c.id, d.id]);
+  assert.deepEqual(closedActive.items.map((doc) => doc.id), [a.id, b.id]);
+  assert.equal(closedActive.activeId, b.id);
+  const closedAll = closeDocuments(state, state.items.map((doc) => doc.id));
+  assert.deepEqual(closedAll.items, []);
+  assert.equal(closedAll.activeId, null);
 });
 
 test("closing the front tab focuses the right neighbor, and the last tab leaves the list empty", () => {
@@ -95,6 +116,36 @@ test("setQuerySaved stores the id used to focus that query later", () => {
   const again = openDocument(saved, { kind: "query", sql: "other", savedId: "s1", title: "Daily" });
   assert.equal(again.items.length, 1);
   assert.equal(again.activeId, opened.activeId);
+});
+
+test("each new table page is its own tab, and the title follows the name", () => {
+  const first = openDocument(emptyDocuments(), { kind: "create-table", schema: "public" });
+  const second = openDocument(first, { kind: "create-table", schema: "public" });
+  assert.equal(second.items.length, 2);
+  assert.deepEqual(second.items.map((d) => d.title), ["New table", "New table"]);
+  const titled = updateCreateTable(second, second.items[0].id, { title: "invoices", schema: "shop" });
+  assert.equal(titled.items[0].title, "invoices");
+  assert.equal(titled.items[0].schema, "shop");
+  assert.equal(updateCreateTable(titled, titled.items[0].id, { title: "  " }).items[0].title, "New table");
+  const renamed = renameSchema(titled, "public", "billing");
+  assert.equal(renamed.items[1].schema, "billing");
+  assert.equal(renamed.items[0].schema, "shop");
+  const dropped = dropSchema(renamed, "billing");
+  assert.deepEqual(dropped.items.map((d) => d.schema), ["shop"]);
+});
+
+test("a diagram opens once per schema, and renaming the schema renames the tab", () => {
+  const first = openDocument(emptyDocuments(), { kind: "diagram", schema: "public" });
+  const again = openDocument(first, { kind: "diagram", schema: "public" });
+  assert.equal(again.items.length, 1);
+  assert.equal(again.items[0].title, "public");
+  assert.equal(again.activeId, first.activeId);
+  const other = openDocument(again, { kind: "diagram", schema: "billing" });
+  assert.equal(other.items.length, 2);
+  const renamed = renameSchema(other, "public", "shop");
+  assert.equal(renamed.items[0].schema, "shop");
+  assert.equal(renamed.items[0].title, "shop");
+  assert.equal(dropSchema(renamed, "shop").items.map((doc) => doc.schema).join(","), "billing");
 });
 
 test("seedQuery opens Query 1 only when the list is empty", () => {

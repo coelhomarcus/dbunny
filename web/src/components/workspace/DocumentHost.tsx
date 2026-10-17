@@ -8,6 +8,8 @@ import FunctionView from "../../pages/FunctionView";
 import ObjectView from "../../pages/ObjectView";
 import ActivityView from "../../pages/ActivityView";
 import RolesView from "../../pages/RolesView";
+import CreateTablePage from "./CreateTablePage";
+import DiagramPage from "../diagram/DiagramPage";
 import Button from "../ui/Button";
 
 /** Mounts every open document and shows only the one in front. */
@@ -41,7 +43,7 @@ export default function DocumentHost() {
               <QueryPane documentId={doc.id} initialSql={doc.sql ?? ""} savedId={doc.savedId} title={doc.title} active={front && isActive} />
             )}
             {doc.kind === "data" && doc.schema && doc.name && (
-              <TableView schema={doc.schema} name={doc.name} filterRequest={doc.filterRequest} active={front && isActive} />
+              <TableView documentId={doc.id} schema={doc.schema} name={doc.name} filterRequest={doc.filterRequest} active={front && isActive} />
             )}
             {doc.kind === "structure" && doc.schema && doc.name && <TableStructure schema={doc.schema} name={doc.name} />}
             {(doc.kind === "function" || doc.kind === "procedure") && doc.schema && doc.name && (
@@ -52,6 +54,8 @@ export default function DocumentHost() {
             )}
             {doc.kind === "activity" && <ActivityView />}
             {doc.kind === "roles" && <RolesView />}
+            {doc.kind === "create-table" && doc.schema && <CreateTablePage documentId={doc.id} schema={doc.schema} />}
+            {doc.kind === "diagram" && doc.schema && <DiagramPage schema={doc.schema} />}
           </div>
         );
       })}

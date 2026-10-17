@@ -167,7 +167,7 @@ export default function HistoryPanel({
                       <span className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground tabular-nums">
                         {new Date(entry.ranAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
                         {entry.error ? (
-                          <span className="truncate text-destructive-foreground">{entry.error}</span>
+                          <span className="select-text truncate text-destructive-foreground">{entry.error}</span>
                         ) : (
                           <>
                             {entry.rows !== null && <span>{entry.rows.toLocaleString()} rows</span>}

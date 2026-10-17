@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useConnection } from "../../contexts/useConnection";
+import { useNotify } from "../../contexts/NoticeProvider";
 import { useDocuments } from "../../contexts/DocumentsContext";
 import type { CompletionSchema, ExplainResult, QueryResult } from "@/types";
 import QueryResults from "../QueryResults";
@@ -140,14 +141,10 @@ function QueryPaneBody({
   // Name being typed when saving a query for the first time
   const [saveName, setSaveName] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
-  // Why the last format failed, shown for a few seconds next to Run
-  const [formatError, setFormatError] = useState<string | null>(null);
-  const formatErrorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const notify = useNotify();
   const showFormatError = useCallback((message: string) => {
-    setFormatError(message);
-    clearTimeout(formatErrorTimer.current);
-    formatErrorTimer.current = setTimeout(() => setFormatError(null), 5000);
-  }, []);
+    notify({ tone: "error", text: `Couldn't format: ${message}` });
+  }, [notify]);
   const [linkedSavedId, setLinkedSavedId] = useState(savedIdProp);
   // Share of the height the editor takes over the results, remembered across sessions
   const [split, setSplit] = useState(() => {
@@ -303,15 +300,13 @@ function QueryPaneBody({
       else if (command === "commit") await api.commitTransaction();
       else await api.rollbackTransaction();
     } catch (err) {
-      setError(typeof err === "string" ? err : err instanceof Error ? err.message : "Transaction failed");
-      setResult(null);
-      showView("results");
+      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : "Transaction failed" });
     } finally {
       // Commit and rollback close the transaction even when they fail
       setInTransaction(await api.transactionOpen().catch(() => false));
       setTxBusy(false);
     }
-  }, [api, showView]);
+  }, [api, notify]);
 
   const executeQuery = useCallback(async (sql: string) => {
     const txCommand = transactionCommand(sql);
@@ -369,13 +364,12 @@ function QueryPaneBody({
       setPlan(res);
       showView("plan");
     } catch (err) {
-      setError(typeof err === "string" ? err : err instanceof Error ? err.message : "EXPLAIN failed");
-      showView("results");
+      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : "EXPLAIN failed" });
     } finally {
       setRunning(false);
       setRunningSince(null);
     }
-  }, [api, showView]);
+  }, [api, notify]);
 
   const runQuery = useCallback(async (scope: RunScope = "current") => {
     const editor = editorRef.current;
@@ -462,7 +456,7 @@ function QueryPaneBody({
           <div className="rounded-xl border border-border bg-muted divide-y divide-border">
             {(pendingDangers ?? []).map((d, i) => (
               <div key={i} className="px-3 py-2.5">
-                <span className="font-mono text-xs font-medium text-destructive-foreground block">{d.rule}</span>
+                <span className="block select-text font-mono text-xs font-medium text-destructive-foreground">{d.rule}</span>
                 <span className="text-xs text-muted-foreground block mt-0.5">{d.detail}</span>
               </div>
             ))}
@@ -498,7 +492,6 @@ function QueryPaneBody({
                 {justSaved ? <Check /> : <Save />}
               </Button>
             </Tooltip>
-            {formatError && <span className="min-w-0 truncate text-xs text-destructive-foreground">Couldn't format: {formatError}</span>}
             <div className="ml-auto flex items-center gap-0.5">
               <Button
                 variant="ghost-muted"

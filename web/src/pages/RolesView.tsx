@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, X } from "lucide-react";
+import { Copy, Users, X } from "lucide-react";
+import ContextMenu from "../components/ui/ContextMenu";
+import { writeClipboardText } from "../lib/clipboard";
 import type { RoleInfo } from "@/types";
 import { useApi } from "../contexts/useConnection";
 import { useRightPanel } from "../contexts/rightPanel";
@@ -11,6 +13,7 @@ import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
 import { cn } from "../lib/cn";
+import { useNotify } from "../contexts/NoticeProvider";
 
 /** Attributes worth a badge, in the order they're shown. */
 const ATTRIBUTES: { key: keyof RoleInfo; label: string; variant: "destructive" | "warning" | "info" | "neutral" }[] = [
@@ -29,10 +32,12 @@ function rightsOf(role: RoleInfo) {
 export default function RolesView() {
   const api = useApi();
   const rightPanel = useRightPanel();
+  const notify = useNotify();
   const [roles, setRoles] = useState<RoleInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showBuiltin, setShowBuiltin] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; name: string } | null>(null);
   const [shownRole, setShownRole] = useState<RoleInfo | null>(null);
 
   useEffect(() => {
@@ -40,11 +45,16 @@ export default function RolesView() {
     api
       .getRoles()
       .then((list) => !stale && setRoles(list))
-      .catch((err) => !stale && setError(typeof err === "string" ? err : "Couldn't read the roles"));
+      .catch((err) => {
+        if (stale) return;
+        const text = typeof err === "string" ? err : "Couldn't read the roles";
+        notify({ tone: "error", text });
+        setError(text);
+      });
     return () => {
       stale = true;
     };
-  }, [api]);
+  }, [api, notify]);
 
   const shown = (roles ?? []).filter((role) => showBuiltin || !role.isBuiltin);
   const builtinCount = (roles ?? []).filter((role) => role.isBuiltin).length;
@@ -75,7 +85,7 @@ export default function RolesView() {
       </PageHeader>
 
       {error ? (
-        <div className="flex flex-1 items-center justify-center p-4 text-sm text-destructive-foreground">{error}</div>
+        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">Couldn't read the roles.</div>
       ) : !roles ? (
         <TableSkeleton columns={4} rows={8} />
       ) : (
@@ -104,6 +114,10 @@ export default function RolesView() {
                     <tr
                       key={role.name}
                       onClick={() => setSelected(active ? null : role.name)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setMenu({ x: e.clientX, y: e.clientY, name: role.name });
+                      }}
                       className={cn(
                         "cursor-pointer border-b border-border align-middle transition-colors hover:bg-accent",
                         active ? "bg-accent" : index % 2 ? "bg-muted/50" : "bg-card",
@@ -147,6 +161,11 @@ export default function RolesView() {
         </>
       )}
 
+      <ContextMenu
+        position={menu}
+        items={menu ? [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(menu.name) }] : []}
+        onClose={() => setMenu(null)}
+      />
       {rightPanel && createPortal(
         <SideCard open={selected !== null && shownRole !== null} widthClass="w-80" label={shownRole ? shownRole.name : "Role"}>
           {shownRole && <RolePanel role={shownRole} onClose={() => setSelected(null)} />}

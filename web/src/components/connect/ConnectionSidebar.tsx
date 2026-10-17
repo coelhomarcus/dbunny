@@ -1,5 +1,6 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { ArrowRight, Database, Plus, Search, Trash2 } from "lucide-react";
+import ContextMenu, { type ContextMenuItem } from "../ui/ContextMenu";
 import ConnectionGlyph from "../ConnectionGlyph";
 import type { SavedConnection } from "@/types";
 import { cn } from "../../lib/cn";
@@ -43,6 +44,11 @@ function ConnectionRow({
   onDelete: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const menuItems: ContextMenuItem[] = [
+    { label: "Connect", icon: <ArrowRight />, onSelect: onConnect },
+    { label: "Delete", icon: <Trash2 />, destructive: true, onSelect: () => setConfirming(true) },
+  ];
 
   if (confirming) {
     return (
@@ -67,6 +73,10 @@ function ConnectionRow({
       aria-current={selected}
       onClick={onSelect}
       onDoubleClick={onConnect}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY });
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter") onConnect();
       }}
@@ -104,6 +114,7 @@ function ConnectionRow({
           <Trash2 />
         </Button>
       </div>
+      <ContextMenu position={menu} items={menuItems} onClose={() => setMenu(null)} />
     </div>
   );
 }

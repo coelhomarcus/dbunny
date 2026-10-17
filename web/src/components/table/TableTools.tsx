@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { FileUp, Loader, RefreshCw, MoveHorizontal } from "lucide-react";
+import { FileUp, Loader, RefreshCw, MoveHorizontal, TableProperties } from "lucide-react";
 import type { QueryColumn } from "@/types";
 import Button from "../ui/Button";
 import Tooltip from "../Tooltip";
@@ -17,6 +17,7 @@ export default function TableTools({
   loading,
   spinKey,
   onRefresh,
+  onOpenStructure,
   columnsMenu,
   readOnly,
   onImportCsv,
@@ -37,6 +38,7 @@ export default function TableTools({
   loading: boolean;
   spinKey: number;
   onRefresh: () => void;
+  onOpenStructure: () => void;
   columnsMenu: ReactNode;
   readOnly: boolean;
   onImportCsv: () => void;
@@ -72,6 +74,11 @@ export default function TableTools({
             key={spinKey}
             className={refreshing ? "animate-spin" : spinKey > 0 ? "animate-[spin_0.5s_ease-in-out]" : ""}
           />
+        </Button>
+      </Tooltip>
+      <Tooltip label="Structure" side="top">
+        <Button variant="ghost-muted" size="icon-xs" onClick={onOpenStructure} aria-label="Structure">
+          <TableProperties />
         </Button>
       </Tooltip>
       {columnsMenu}

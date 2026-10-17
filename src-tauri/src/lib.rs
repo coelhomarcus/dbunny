@@ -161,6 +161,7 @@ pub fn run() {
             commands::catalog::get_extensions,
             commands::catalog::get_object_definition,
             commands::catalog::get_explorer,
+            commands::catalog::get_diagram,
             commands::schema_edit::rename_relation,
             commands::schema_edit::drop_relation,
             commands::schema_edit::truncate_table,

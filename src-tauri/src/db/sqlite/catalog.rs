@@ -11,15 +11,29 @@ use super::errors::map_statement_error;
 use super::values::standard_type;
 use super::SqliteDriver;
 use crate::db::model::{
-    ColumnInfo, CompletionColumn, CompletionRelation, CompletionSchema, ConstraintInfo, ExplorerObject, ExplorerSchema,
-    ExplorerTree, ExtensionInfo, ForeignKeyInfo, ForeignKeyRef, FunctionDetail, IndexInfo, ObjectDefinition,
-    ReferencedBy, TableMeta, TableStructure, TriggerInfo,
+    ColumnInfo, CompletionColumn, CompletionRelation, CompletionSchema, ConstraintInfo, Diagram, DiagramColumn,
+    DiagramRelation, DiagramTable, ExplorerObject, ExplorerSchema, ExplorerTree, ExtensionInfo, ForeignKeyInfo,
+    ForeignKeyRef, FunctionDetail, IndexInfo, ObjectDefinition, ReferencedBy, TableMeta, TableStructure, TriggerInfo,
 };
 use crate::db::sql::Dialect;
 use crate::db::{unsupported, Catalog, Engine};
 
 #[async_trait]
 impl Catalog for SqliteDriver {
+    async fn diagram(&self, schema: &str) -> Result<Diagram, String> {
+        let schema = schema.to_owned();
+        let editor = self.editor().transaction_state();
+        // Temporary tables live on the editor's connection; everything else, including an
+        // attached database, lives on the tables connection.
+        let temporary = schema == "temp";
+        let run = move |c: &mut Connection| diagram(c, &schema).map_err(db_error(&editor));
+        if temporary {
+            self.editor().run(run).await
+        } else {
+            self.tables().run(run).await
+        }
+    }
+
     async fn explorer(&self) -> Result<ExplorerTree, String> {
         let editor_state = self.editor().transaction_state();
         let mut tree = self
@@ -816,6 +830,155 @@ fn trigger_info(name: String, sql: String) -> TriggerInfo {
     }
 }
 
+/// A foreign key before its parent table is resolved. `to` is empty when the declaration
+/// named no columns, so the parent's primary key has to be read after the parent is known.
+struct OpenKey {
+    from: Vec<String>,
+    raw_table: String,
+    to: Vec<String>,
+}
+
+fn open_foreign_keys(c: &Connection, db: &str, table: &str) -> rusqlite::Result<Vec<OpenKey>> {
+    let mut stmt = c.prepare(&format!("PRAGMA {}.foreign_key_list({})", quote(db), quote(table)))?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>("id")?,
+            r.get::<_, String>("table")?,
+            r.get::<_, String>("from")?,
+            r.get::<_, Option<String>>("to")?,
+        ))
+    })?;
+    let mut keys: Vec<(i64, OpenKey)> = Vec::new();
+    for row in rows {
+        let (id, parent, from, to) = row?;
+        match keys.iter_mut().find(|(k, _)| *k == id) {
+            Some((_, key)) => {
+                key.from.push(from);
+                key.to.extend(to);
+            }
+            None => keys.push((id, OpenKey { from: vec![from], raw_table: parent, to: to.into_iter().collect() })),
+        }
+    }
+    keys.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
+    Ok(keys.into_iter().map(|(_, key)| key).collect())
+}
+
+/// Ordinary tables of `db`: no views, no internal `sqlite_` tables, no virtual tables and
+/// no FTS5 shadow tables.
+fn diagram_tables(c: &Connection, db: &str) -> rusqlite::Result<Vec<String>> {
+    let fts = fts5_virtual_tables(c, db)?;
+    let sql = format!(
+        "SELECT name, sql FROM {}.sqlite_master \
+         WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND sql IS NOT NULL \
+         ORDER BY name",
+        quote(db)
+    );
+    let mut stmt = c.prepare(&sql)?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    rows.filter(|row| {
+        row.as_ref()
+            .map(|(name, sql)| !is_fts5_internal(name, &fts) && !sql.trim_start().to_ascii_lowercase().starts_with("create virtual"))
+            .unwrap_or(true)
+    })
+    .map(|row| row.map(|(name, _)| name))
+    .collect()
+}
+
+fn table_in(c: &Connection, db: &str, name: &str) -> rusqlite::Result<bool> {
+    let sql = format!("SELECT count(*) FROM {}.sqlite_master WHERE type = 'table' AND name = ?1", quote(db));
+    c.query_row(&sql, [name], |r| r.get::<_, i64>(0)).map(|n| n > 0)
+}
+
+/// `raw` is the parent name SQLite stored: a table in `from_db`, or `schema.table` when the
+/// key points at another database of the connection.
+fn resolve_parent(c: &Connection, from_db: &str, raw: &str, dbs: &[String]) -> rusqlite::Result<(String, String)> {
+    if table_in(c, from_db, raw)? {
+        return Ok((from_db.to_string(), raw.to_string()));
+    }
+    let mut best: Option<(String, String)> = None;
+    for db in dbs {
+        let prefix = format!("{db}.");
+        if let Some(rest) = raw.strip_prefix(&prefix) {
+            if table_in(c, db, rest)? && best.as_ref().map(|(found, _)| db.len() > found.len()).unwrap_or(true) {
+                best = Some((db.clone(), rest.to_string()));
+            }
+        }
+    }
+    if let Some(found) = best {
+        return Ok(found);
+    }
+    for db in dbs {
+        if db != from_db && table_in(c, db, raw)? {
+            return Ok((db.clone(), raw.to_string()));
+        }
+    }
+    Ok((from_db.to_string(), raw.to_string()))
+}
+
+fn diagram(c: &Connection, schema: &str) -> rusqlite::Result<Diagram> {
+    let dbs = databases(c)?;
+    if !dbs.iter().any(|db| db == schema) {
+        return Ok(Diagram { tables: Vec::new(), relations: Vec::new() });
+    }
+    let mut all = Vec::new();
+    for db in &dbs {
+        for name in diagram_tables(c, db)? {
+            all.push((db.clone(), name));
+        }
+    }
+    let mut relations = Vec::new();
+    for (db, table) in &all {
+        for key in open_foreign_keys(c, db, table)? {
+            let (to_schema, to_table) = resolve_parent(c, db, &key.raw_table, &dbs)?;
+            let to_columns = if key.to.is_empty() { primary_key(&raw_columns(c, &to_schema, &to_table)?) } else { key.to };
+            relations.push(DiagramRelation {
+                name: format!("{} → {}", key.from.join(", "), to_table),
+                from_schema: db.clone(),
+                from_table: table.clone(),
+                from_columns: key.from,
+                to_schema,
+                to_table,
+                to_columns,
+            });
+        }
+    }
+    relations.retain(|r| r.from_schema == schema || r.to_schema == schema);
+
+    let mut tables = Vec::new();
+    for (db, name) in &all {
+        let in_schema = db == schema;
+        let neighbor = relations.iter().any(|r| {
+            (r.from_schema == *db && r.from_table == *name) || (r.to_schema == *db && r.to_table == *name)
+        });
+        if !in_schema && !neighbor {
+            continue;
+        }
+        let columns = raw_columns(c, db, name)?
+            .into_iter()
+            .filter(|column| column.hidden != 1)
+            .map(|column| DiagramColumn {
+                name: column.name,
+                type_name: column.declared,
+                is_primary_key: column.pk > 0,
+                is_foreign_key: false,
+                ordinal: (column.cid + 1) as i32,
+            })
+            .collect::<Vec<_>>();
+        tables.push(DiagramTable { schema: db.clone(), name: name.clone(), columns });
+    }
+    for table in &mut tables {
+        for column in &mut table.columns {
+            column.is_foreign_key = relations.iter().any(|r| {
+                (r.from_schema == table.schema && r.from_table == table.name && r.from_columns.iter().any(|n| n == &column.name))
+                    || (r.to_schema == table.schema && r.to_table == table.name && r.to_columns.iter().any(|n| n == &column.name))
+            });
+        }
+    }
+    tables.sort_by(|a, b| (a.schema != schema).cmp(&(b.schema != schema)).then(a.schema.cmp(&b.schema)).then(a.name.cmp(&b.name)));
+    relations.sort_by(|a, b| a.from_schema.cmp(&b.from_schema).then(a.from_table.cmp(&b.from_table)).then(a.name.cmp(&b.name)));
+    Ok(Diagram { tables, relations })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -1244,5 +1407,65 @@ mod tests {
         assert_eq!(d.table_structure("main", "posts").await.err().unwrap(), held);
         d.editor().run(|c| c.execute_batch("ROLLBACK").map_err(|e| e.to_string())).await.unwrap();
         assert!(d.explorer().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn diagram_keeps_composite_keys_and_tables_a_key_reaches() {
+        let f = TempDb::with(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT); \
+             CREATE TABLE regions (country TEXT, code TEXT, PRIMARY KEY (country, code)); \
+             CREATE TABLE posts ( \
+               id INTEGER PRIMARY KEY, \
+               author_id INTEGER REFERENCES users (id), \
+               country TEXT, region TEXT, \
+               FOREIGN KEY (country, region) REFERENCES regions (country, code)); \
+             CREATE VIEW user_names AS SELECT name FROM users; \
+             CREATE VIRTUAL TABLE docs USING fts5(title);",
+        );
+        // SQLite rejects `schema.table` inside REFERENCES, so a key into another database is
+        // stored under the table name alone. `temp` is that other database here; the attached
+        // file only holds a table nothing points at.
+        let archive = TempDb::with("CREATE TABLE lonely (id INTEGER PRIMARY KEY);");
+        let d = open(&f).await;
+        let path = archive.path().display().to_string();
+        d.tables()
+            .run(move |c| {
+                c.execute("ATTACH ?1 AS archive", [path]).map_err(|e| e.to_string())?;
+                c.execute_batch(
+                    "CREATE TEMP TABLE accounts (id INTEGER PRIMARY KEY); \
+                     CREATE TABLE payments (id INTEGER PRIMARY KEY, account_id INTEGER REFERENCES accounts (id)); \
+                     CREATE TEMP TABLE notes (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users (id));",
+                )
+                .map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap();
+
+        let diagram = d.diagram("main").await.unwrap();
+        let names: Vec<String> = diagram.tables.iter().map(|t| format!("{}.{}", t.schema, t.name)).collect();
+        assert!(names.contains(&"main.users".to_string()), "{names:?}");
+        assert!(names.contains(&"main.regions".to_string()), "{names:?}");
+        assert!(names.contains(&"main.posts".to_string()), "{names:?}");
+        assert!(names.contains(&"main.payments".to_string()), "{names:?}");
+        assert!(names.contains(&"temp.accounts".to_string()), "{names:?}");
+        assert!(names.contains(&"temp.notes".to_string()), "a table that points here is included: {names:?}");
+        assert!(!names.iter().any(|n| n.ends_with(".lonely")), "{names:?}");
+        assert!(!names.iter().any(|n| n.ends_with(".user_names") || n.ends_with(".docs")), "{names:?}");
+
+        let posts = diagram.tables.iter().find(|t| t.name == "posts").unwrap();
+        let author = posts.columns.iter().find(|c| c.name == "author_id").unwrap();
+        assert!(author.is_foreign_key && !author.is_primary_key);
+        assert!(posts.columns.iter().any(|c| c.name == "id" && c.is_primary_key));
+
+        let region = diagram.relations.iter().find(|r| r.from_columns == ["country".to_string(), "region".to_string()]).unwrap();
+        assert_eq!(region.to_columns, vec!["country".to_string(), "code".to_string()]);
+        assert_eq!((region.to_schema.as_str(), region.to_table.as_str()), ("main", "regions"));
+
+        let cross = diagram.relations.iter().find(|r| r.to_table == "accounts").unwrap();
+        assert_eq!((cross.from_schema.as_str(), cross.from_table.as_str(), cross.to_schema.as_str()), ("main", "payments", "temp"));
+        let incoming = diagram.relations.iter().find(|r| r.from_table == "notes").unwrap();
+        assert_eq!((incoming.from_schema.as_str(), incoming.to_table.as_str()), ("temp", "users"));
+
+        assert!(d.diagram("missing").await.unwrap().tables.is_empty());
     }
 }

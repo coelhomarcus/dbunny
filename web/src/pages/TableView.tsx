@@ -36,7 +36,7 @@ import SortableColumnHeader from "../components/SortableColumnHeader";
 import EditableCell from "../components/EditableCell";
 import Pagination from "../components/Pagination";
 import { TableSkeleton } from "../components/Skeleton";
-import NoticeToast, { type Notice } from "../components/ui/NoticeToast";
+import { useNotify } from "../contexts/NoticeProvider";
 
 /** Where a foreign key cell leads: the referenced table, filtered to the matching row. */
 function foreignKeyLink(column: ColumnInfo | undefined, row: unknown[], columns: QueryColumn[]) {
@@ -53,32 +53,36 @@ function foreignKeyLink(column: ColumnInfo | undefined, row: unknown[], columns:
 }
 
 export default function TableView({
+  documentId,
   schema,
   name,
   filterRequest,
   active,
 }: {
+  documentId: string;
   schema: string;
   name: string;
   filterRequest?: FilterRequest;
   active: boolean;
 }) {
-  return <TableViewContent schema={schema} table={name} filterRequest={filterRequest} active={active} />;
+  return <TableViewContent documentId={documentId} schema={schema} table={name} filterRequest={filterRequest} active={active} />;
 }
 
 function TableViewContent({
+  documentId,
   schema,
   table,
   filterRequest,
   active,
 }: {
+  documentId: string;
   schema: string;
   table: string;
   filterRequest?: FilterRequest;
   active: boolean;
 }) {
   const api = useApi();
-  const { openDocument, registerDataRefresh } = useDocuments();
+  const { openDocument, registerDataRefresh, setQueryDirty } = useDocuments();
   const initialFilters = filterRequest?.filters;
 
   const tableData = useTableData(schema, table, initialFilters);
@@ -137,6 +141,10 @@ function TableViewContent({
   const [draftText, setDraftText] = useState("");
   const [draftIsNull, setDraftIsNull] = useState(true);
   const [draftExpanded, setDraftExpanded] = useState(false);
+
+  useEffect(() => {
+    setQueryDirty(documentId, pending.dirtyRowCount > 0 || draft !== null);
+  }, [documentId, pending.dirtyRowCount, draft, setQueryDirty]);
   const draftInputRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; rowIndex: number; colName: string } | null>(null);
@@ -144,8 +152,7 @@ function TableViewContent({
   const [reviewSql, setReviewSql] = useState<string | null>(null);
   // Open with no text: choose a file; with text: rows pasted into the table
   const [importOpen, setImportOpen] = useState<{ text?: string } | false>(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
-  const dismissNotice = useCallback(() => setNotice(null), []);
+  const notify = useNotify();
   const [sqlCopied, setSqlCopied] = useState(false);
 
   const editing = useCellEditing({
@@ -220,7 +227,7 @@ function TableViewContent({
     if (hadEdits) {
       const err = await pending.handleSave();
       if (err) {
-        setNotice({ tone: "error", text: err });
+        notify({ tone: "error", text: err });
         return;
       }
     }
@@ -229,21 +236,21 @@ function TableViewContent({
         await api.insertRow(schema!, table!, values);
         setDraft(null);
         await tableData.refresh();
-        setNotice({ tone: "success", text: hadEdits ? "Changes saved" : "Row inserted" });
+        notify({ tone: "success", text: hadEdits ? "Changes saved" : "Row inserted" });
       } catch (err) {
-        setNotice({ tone: "error", text: typeof err === "string" ? err : "Couldn't insert the row" });
+        notify({ tone: "error", text: typeof err === "string" ? err : "Couldn't insert the row" });
       }
       return;
     }
-    if (hadEdits) setNotice({ tone: "success", text: "Changes saved" });
-  }, [api, draft, draftCol, draftIsNull, draftText, editing, pending, schema, table, tableData]);
+    if (hadEdits) notify({ tone: "success", text: "Changes saved" });
+  }, [api, draft, draftCol, draftIsNull, draftText, editing, notify, pending, schema, table, tableData]);
 
   const saveAllRef = useRef(saveAll);
   saveAllRef.current = saveAll;
 
   useEffect(() => {
-    if (error) setNotice({ tone: "error", text: error });
-  }, [error]);
+    if (error) notify({ tone: "error", text: error });
+  }, [error, notify]);
 
   useEffect(() => {
     if (draftCol) draftInputRef.current?.focus();
@@ -437,7 +444,7 @@ function TableViewContent({
         onDelete={async () => {
           const count = selection.selectedRows.size;
           const err = await pending.handleDelete();
-          setNotice(err ? { tone: "error", text: err } : { tone: "success", text: `Deleted ${count} row${count === 1 ? "" : "s"}` });
+          notify(err ? { tone: "error", text: err } : { tone: "success", text: `Deleted ${count} row${count === 1 ? "" : "s"}` });
         }}
         hasPendingChanges={pending.hasPendingChanges || draft !== null}
         dirtyRowCount={pending.dirtyRowCount + (draft ? 1 : 0)}
@@ -470,7 +477,7 @@ function TableViewContent({
       )}
 
       {error && !data && (
-        <div className="px-4 py-3 text-sm text-muted-foreground">Couldn't load this table.</div>
+        <div className="select-text px-4 py-3 text-sm text-muted-foreground">Couldn't load this table.</div>
       )}
 
       {loading && !data && <TableSkeleton columns={6} rows={14} />}
@@ -698,6 +705,7 @@ function TableViewContent({
                 loading={loading}
                 spinKey={tableData.spinKey}
                 onRefresh={guard(tableData.refresh)}
+                onOpenStructure={() => openDocument({ kind: "structure", schema: schema!, name: table! })}
                 columnsMenu={<ColumnsMenu layout={layout} />}
                 readOnly={readOnly}
                 onImportCsv={guard(() => setImportOpen({}))}
@@ -788,13 +796,11 @@ function TableViewContent({
         onClose={() => setImportOpen(false)}
         onImport={async (columns, rows) => {
           const count = await api.importRows(schema!, table!, columns, rows);
-          setNotice({ tone: "success", text: `Imported ${count.toLocaleString()} row${count === 1 ? "" : "s"}` });
+          notify({ tone: "success", text: `Imported ${count.toLocaleString()} row${count === 1 ? "" : "s"}` });
           await tableData.refresh();
           return count;
         }}
       />
-
-      <NoticeToast notice={notice} onDismiss={dismissNotice} />
 
       <ConfirmDialog
         open={discardGuard.isConfirming}

@@ -24,6 +24,8 @@ export interface WorkspaceValue {
   activeTabId: string;
   openTab: (initialSession?: InitialSession) => void;
   closeTab: (id: string) => void;
+  /** Closes every listed connection. Asks once if any of them has a transaction open. */
+  closeTabs: (ids: string[]) => void;
   activateTab: (id: string) => void;
   /** Activate the next/previous tab (wraps around). */
   cycleTab: (direction: 1 | -1) => void;

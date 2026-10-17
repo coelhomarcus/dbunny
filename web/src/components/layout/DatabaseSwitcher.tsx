@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Check, ChevronsUpDown, Database, Loader, Plus, Trash2 } from "lucide-react";
 import type { DatabaseInfo } from "@/types";
 import { useConnection } from "../../contexts/useConnection";
+import { useNotify } from "../../contexts/NoticeProvider";
 import { useTab, useWorkspace } from "../../contexts/workspace";
 import { formatBytes } from "../../lib/format";
 import { cn } from "../../lib/cn";
@@ -22,14 +23,18 @@ export default function DatabaseSwitcher() {
   const [open, setOpen] = useState(false);
   const [databases, setDatabases] = useState<DatabaseInfo[] | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [listFailed, setListFailed] = useState(false);
+  const notify = useNotify();
   const [container, setContainer] = useState<ContainerRequest | null>(null);
   const readOnly = connectionInfo?.readOnly ?? false;
   const capabilities = useCapabilities();
 
   function loadDatabases() {
-    setError(null);
-    api.getDatabases().then(setDatabases).catch((err) => setError(typeof err === "string" ? err : "Couldn't list databases"));
+    setListFailed(false);
+    api.getDatabases().then(setDatabases).catch((err) => {
+      setListFailed(true);
+      notify({ tone: "error", text: typeof err === "string" ? err : "Couldn't list databases" });
+    });
   }
 
   function toggle() {
@@ -55,7 +60,6 @@ export default function DatabaseSwitcher() {
 
   async function openDatabase(name: string) {
     setOpening(name);
-    setError(null);
     try {
       const response = await api.connectDatabase(name);
       const tab = tabs.find((t) => t.id === tabId);
@@ -65,7 +69,7 @@ export default function DatabaseSwitcher() {
       });
       setOpen(false);
     } catch (err) {
-      setError(typeof err === "string" ? err : "Couldn't open the database");
+      notify({ tone: "error", text: typeof err === "string" ? err : "Couldn't open the database" });
     } finally {
       setOpening(null);
     }
@@ -114,7 +118,7 @@ export default function DatabaseSwitcher() {
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} dock className="p-1">
         <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Databases on this server</div>
-        {databases === null && !error ? (
+        {databases === null && !listFailed ? (
           <div className="flex justify-center py-3">
             <Loader size={14} className="animate-spin text-muted-foreground" />
           </div>
@@ -160,7 +164,7 @@ export default function DatabaseSwitcher() {
             ))}
           </div>
         )}
-        {error && <p className="px-2 py-1.5 text-xs text-destructive-foreground">{error}</p>}
+        {listFailed && databases === null && <p className="px-2 py-1.5 text-xs text-muted-foreground">Couldn't list databases.</p>}
         <div className="mt-1 flex items-center gap-2 border-t border-border px-2 pb-0.5 pt-1.5">
           <p className="flex-1 text-[11px] text-muted-foreground">Opens in a new tab, with the same login.</p>
           {!readOnly && (

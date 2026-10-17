@@ -13,7 +13,9 @@ export type DocumentKind =
   | "sequence"
   | "type"
   | "index"
-  | "trigger";
+  | "trigger"
+  | "create-table"
+  | "diagram";
 
 export interface FilterRequest {
   id: number;
@@ -51,15 +53,18 @@ export type OpenTarget =
       schema: string;
       name: string;
       detail?: string;
-    };
+    }
+  | { kind: "create-table"; schema: string }
+  | { kind: "diagram"; schema: string };
 
 export function emptyDocuments(): DocumentsState {
   return { items: [], activeId: null, nextQuery: 1, nextId: 1 };
 }
 
-function sameIdentity(doc: Document, target: Exclude<OpenTarget, { kind: "query" }>): boolean {
+function sameIdentity(doc: Document, target: Exclude<OpenTarget, { kind: "query" } | { kind: "create-table" }>): boolean {
   if (doc.kind !== target.kind) return false;
   if (target.kind === "activity" || target.kind === "roles") return true;
+  if (target.kind === "diagram") return doc.schema === target.schema;
   if (doc.schema !== target.schema || doc.name !== target.name) return false;
   if (target.kind === "function" || target.kind === "procedure") return (doc.detail ?? "") === (target.detail ?? "");
   return true;
@@ -74,7 +79,7 @@ export function openDocument(state: DocumentsState, target: OpenTarget): Documen
     const existing = state.items.find((doc) => doc.kind === "query" && doc.savedId === target.savedId);
     if (existing) return { ...state, activeId: existing.id };
   }
-  if (target.kind !== "query") {
+  if (target.kind !== "query" && target.kind !== "create-table") {
     const existing = state.items.find((doc) => sameIdentity(doc, target));
     if (existing) {
       if (target.kind === "data" && target.filters) {
@@ -93,6 +98,8 @@ export function openDocument(state: DocumentsState, target: OpenTarget): Documen
   const titled = target.kind === "query" && target.title !== undefined;
   const title =
     target.kind === "query" ? target.title ?? `Query ${state.nextQuery}`
+    : target.kind === "create-table" ? "New table"
+    : target.kind === "diagram" ? target.schema
     : target.kind === "activity" ? "Activity"
     : target.kind === "roles" ? "Roles"
     : target.name;
@@ -100,6 +107,8 @@ export function openDocument(state: DocumentsState, target: OpenTarget): Documen
   if (target.kind === "query") {
     doc.sql = target.sql ?? "";
     if (target.savedId) doc.savedId = target.savedId;
+  } else if (target.kind === "create-table" || target.kind === "diagram") {
+    doc.schema = target.schema;
   } else if (target.kind !== "activity" && target.kind !== "roles") {
     doc.schema = target.schema;
     doc.name = target.name;
@@ -124,11 +133,31 @@ export function focusDocument(state: DocumentsState, id: string): DocumentsState
 }
 
 export function closeDocument(state: DocumentsState, id: string): DocumentsState {
-  const index = state.items.findIndex((doc) => doc.id === id);
-  if (index < 0) return state;
-  const items = state.items.filter((doc) => doc.id !== id);
-  if (state.activeId !== id) return { ...state, items };
-  const neighbor = items[index] ?? items[index - 1] ?? null;
+  return closeDocuments(state, [id]);
+}
+
+/** Closes every listed tab. The front tab moves to the nearest one that stays open. */
+export function closeDocuments(state: DocumentsState, ids: string[]): DocumentsState {
+  const drop = new Set(ids);
+  if (!state.items.some((doc) => drop.has(doc.id))) return state;
+  const items = state.items.filter((doc) => !drop.has(doc.id));
+  if (!state.activeId || !drop.has(state.activeId)) return { ...state, items };
+  const index = state.items.findIndex((doc) => doc.id === state.activeId);
+  let neighbor: Document | undefined;
+  for (let i = index + 1; i < state.items.length; i++) {
+    if (!drop.has(state.items[i].id)) {
+      neighbor = state.items[i];
+      break;
+    }
+  }
+  if (!neighbor) {
+    for (let i = index - 1; i >= 0; i--) {
+      if (!drop.has(state.items[i].id)) {
+        neighbor = state.items[i];
+        break;
+      }
+    }
+  }
   return { ...state, items, activeId: neighbor?.id ?? null };
 }
 
@@ -136,6 +165,26 @@ export function setQuerySaved(state: DocumentsState, id: string, savedId: string
   return {
     ...state,
     items: state.items.map((doc) => (doc.id === id && doc.kind === "query" ? { ...doc, savedId, title } : doc)),
+  };
+}
+
+export function updateCreateTable(
+  state: DocumentsState,
+  id: string,
+  patch: { title?: string; schema?: string },
+): DocumentsState {
+  return {
+    ...state,
+    items: state.items.map((doc) => {
+      if (doc.id !== id || doc.kind !== "create-table") return doc;
+      const next = { ...doc };
+      if (patch.title !== undefined) {
+        const trimmed = patch.title.trim();
+        next.title = trimmed || "New table";
+      }
+      if (patch.schema !== undefined && patch.schema.trim()) next.schema = patch.schema.trim();
+      return next;
+    }),
   };
 }
 
@@ -162,7 +211,12 @@ export function renameRelation(state: DocumentsState, schema: string, name: stri
 export function renameSchema(state: DocumentsState, schema: string, newName: string): DocumentsState {
   return {
     ...state,
-    items: state.items.map((doc) => (doc.schema === schema ? { ...doc, schema: newName } : doc)),
+    items: state.items.map((doc) => {
+      if (doc.schema !== schema) return doc;
+      const next = { ...doc, schema: newName };
+      if (doc.kind === "diagram") next.title = newName;
+      return next;
+    }),
   };
 }
 

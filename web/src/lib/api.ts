@@ -20,6 +20,7 @@ import type {
   ObjectDefinition,
   ServerActivity,
   ExplorerTree,
+  Diagram,
   DatabaseInfo,
   RoleInfo,
 } from "@/types";
@@ -67,6 +68,11 @@ export function createSessionApi(sessionId: string | null) {
     /** Every schema with its objects, for the explorer. */
     async getExplorer() {
       return invoke<ExplorerTree>("get_explorer", { sessionId });
+    },
+
+    /** Tables, columns and foreign keys for the diagram of one schema. */
+    async getDiagram(schema: string) {
+      return invoke<Diagram>("get_diagram", { sessionId, schema });
     },
 
     async getExtensions() {

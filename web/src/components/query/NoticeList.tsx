@@ -13,7 +13,7 @@ export default function NoticeList({ notices }: { notices: ServerNotice[] }) {
     return <p className="px-4 py-10 text-center text-sm text-muted-foreground">The server sent no messages.</p>;
   }
   return (
-    <ol className="divide-y divide-border font-mono text-xs">
+    <ol className="select-text divide-y divide-border font-mono text-xs">
       {notices.map((notice, i) => (
         <li key={i} className="flex gap-3 px-4 py-2">
           <span className={cn("w-16 shrink-0 font-semibold", SEVERITY[notice.severity] ?? "text-muted-foreground")}>
