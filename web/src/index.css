@@ -220,6 +220,8 @@ body {
 .joined-tab {
   position: relative;
   border: 1px solid transparent;
+  /* Same box on every tab, so the label does not move when one becomes active. */
+  border-bottom-width: 0;
 }
 
 .joined-tab[data-active="true"] {
@@ -297,7 +299,7 @@ body {
 }
 
 .joined-tab[data-active="false"]:hover::before,
-.joined-tab[data-active="false"]:hover + .joined-tab::before {
+.joined-tab[data-active="false"]:hover + .joined-tab[data-active="false"]::before {
   opacity: 0;
 }
 

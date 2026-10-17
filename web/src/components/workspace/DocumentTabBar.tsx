@@ -151,7 +151,7 @@ export default function DocumentTabBar() {
                   }
                   if (e.key === "Escape") setRenamingId(null);
                 }}
-                className="mb-1 h-7 w-36 shrink-0 rounded-md border border-ring bg-card px-2 text-[13px] outline-none ring-3 ring-ring/20"
+                className="mb-1.5 h-7 w-36 shrink-0 rounded-md border border-ring bg-card px-2 text-[13px] outline-none ring-3 ring-ring/20"
               />
             );
           }
@@ -173,10 +173,16 @@ export default function DocumentTabBar() {
                 }
               }}
               className={cn(
-                "joined-tab group flex shrink-0 cursor-pointer items-center gap-1.5 pl-2.5 pr-1 pt-1.5 text-[13px] whitespace-nowrap outline-none",
-                active ? "pb-[7px] text-foreground" : "mb-1 rounded-lg pb-0.5 text-muted-foreground hover:bg-accent hover:text-foreground",
+                "joined-tab group flex h-[34px] shrink-0 cursor-pointer items-center pb-1.5 text-[13px] whitespace-nowrap outline-none",
+                active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
               )}
             >
+              <span
+                className={cn(
+                  "flex h-full min-w-0 items-center gap-1.5 pl-2.5 pr-1",
+                  !active && "rounded-lg group-hover:bg-accent",
+                )}
+              >
               <Icon size={14} className={cn("shrink-0", iconClass(doc))} />
               <span className="max-w-40 truncate">{doc.title}</span>
               {dirtyIds.has(doc.id) && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="Unsaved changes" />}
@@ -194,12 +200,13 @@ export default function DocumentTabBar() {
               >
                 <X size={12} />
               </span>
+              </span>
             </button>
           );
         })}
       </div>
 
-      <div className="mb-1 flex shrink-0 items-center pr-1">
+      <div className="mb-1.5 flex shrink-0 items-center pr-1">
       <button
         type="button"
         aria-label="New query"

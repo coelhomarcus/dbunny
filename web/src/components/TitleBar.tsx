@@ -112,12 +112,16 @@ function WindowTab({
         }
       }}
       className={cn(
-        "joined-tab window-tab group flex min-w-[72px] max-w-[220px] flex-1 basis-0 items-center gap-2 pl-3 pr-1.5 pt-1.5 text-[13px] cursor-default outline-none",
-        active
-          ? "pb-[7px] text-foreground"
-          : "pb-0.5 mb-1 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground hover:transition-colors",
+        "joined-tab window-tab group flex h-[34px] min-w-[72px] max-w-[220px] flex-1 basis-0 items-center pb-1.5 text-[13px] cursor-default outline-none",
+        active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
       )}
     >
+      <span
+        className={cn(
+          "flex h-full min-w-0 flex-1 items-center gap-2 pl-3 pr-1.5",
+          !active && "rounded-lg group-hover:bg-accent",
+        )}
+      >
       {tab.icon ? (
         <ConnectionGlyph icon={tab.icon} size={13} className="shrink-0" style={tab.color ? { color: tab.color } : undefined} />
       ) : tab.color ? (
@@ -141,6 +145,7 @@ function WindowTab({
       >
         <X size={11} />
       </button>
+      </span>
     </div>
   );
 }
@@ -228,7 +233,7 @@ export default function TitleBar() {
             onClose={() => closeTab(tab.id)}
           />
         ))}
-        <Button variant="ghost-muted" size="icon-xs" className="mb-1.5 ml-0.5" onClick={() => openTab()} aria-label="New tab">
+        <Button variant="ghost-muted" size="icon-xs" className="self-center ml-0.5" onClick={() => openTab()} aria-label="New tab">
           <Plus />
         </Button>
       </div>
