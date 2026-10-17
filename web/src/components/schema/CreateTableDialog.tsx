@@ -4,6 +4,7 @@ import { ArrowRight, Plus, Table2, X } from "lucide-react";
 import type { ColumnGeneration, CompletionRelation, NewColumn, NewTable } from "@/types";
 import { useApi } from "../../contexts/useConnection";
 import { useTab } from "../../contexts/workspace";
+import { foreignKeyDraftError, foreignKeysForSpec, guessReference, REFERENTIAL_ACTIONS } from "../../lib/foreignKeyForm";
 import { requestOpenQuery } from "../../lib/openQuery";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useSqlDialect } from "../../hooks/useSqlDialect";
@@ -19,7 +20,6 @@ import { SqlPreviewBox } from "./SqlPreview";
 const COMMON_TYPES = ["bigserial", "bigint", "integer", "text", "varchar(255)", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
 // SQLite stores a few kinds of value; the type decides how a column converts what is written to it
 const SQLITE_TYPES = ["INTEGER", "TEXT", "REAL", "NUMERIC", "BLOB"];
-const REFERENTIAL_ACTIONS = ["NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"];
 const PARTITION_METHODS = ["RANGE", "LIST", "HASH"];
 
 type ForeignKey = {
@@ -33,12 +33,6 @@ type ForeignKey = {
 };
 
 let nextKey = 0;
-
-/** The referenced column a new foreign key column most likely points at. */
-function guessReference(column: string, target: CompletionRelation | undefined): string {
-  const names = target?.columns.map((c) => c.name) ?? [];
-  return names.find((n) => n === column) ?? names.find((n) => n === "id") ?? names[0] ?? "";
-}
 
 type Row = NewColumn & { key: number };
 
@@ -122,23 +116,11 @@ function Builder({
     default: r.generation === "none" && r.default?.trim() ? r.default : null,
   }));
   const named = columns.map((c) => c.name.trim()).filter(Boolean);
+  const fkErrors = foreignKeys.map((fk) => foreignKeyDraftError(fk, named));
+  const hasIncompleteForeignKey = fkErrors.some(Boolean);
   const spec: NewTable = {
     columns,
-    foreignKeys: foreignKeys.flatMap((fk) => {
-      const target = relations?.find((r) => `${r.schema}.${r.name}` === fk.refTable);
-      if (!target) return [];
-      const locals = fk.columns.filter((c) => named.includes(c));
-      return [
-        {
-          columns: locals,
-          refSchema: target.schema,
-          refTable: target.name,
-          refColumns: locals.map((c) => fk.refColumns[c] ?? guessReference(c, target)),
-          onUpdate: fk.onUpdate,
-          onDelete: fk.onDelete,
-        },
-      ];
-    }),
+    foreignKeys: foreignKeysForSpec(foreignKeys, relations, named),
     unlogged: !sqlite && unlogged,
     withoutRowid: sqlite && withoutRowid,
     strict: sqlite && strict,
@@ -163,6 +145,11 @@ function Builder({
   const update = (key: number, patch: Partial<NewColumn>) => setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
   async function create() {
+    const firstFkError = fkErrors.find(Boolean);
+    if (firstFkError) {
+      setError(firstFkError);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -192,7 +179,7 @@ function Builder({
           <Button variant="neutral" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" size="sm" onClick={create} disabled={!sql || busy}>
+          <Button variant="primary" size="sm" onClick={create} disabled={!sql || busy || hasIncompleteForeignKey}>
             Create table
           </Button>
         </>
@@ -259,12 +246,13 @@ function Builder({
         </div>
 
         <div className="flex flex-col gap-2">
-          {foreignKeys.map((fk) => {
+          {foreignKeys.map((fk, index) => {
+            const fkError = fkErrors[index];
             const target = relations?.find((r) => `${r.schema}.${r.name}` === fk.refTable);
             const locals = fk.columns.filter((c) => named.includes(c));
             const patch = (next: Partial<ForeignKey>) => setForeignKeys((prev) => prev.map((item) => (item.key === fk.key ? { ...item, ...next } : item)));
             return (
-              <div key={fk.key} className="flex flex-col gap-2 rounded-lg border border-border p-2.5">
+              <div key={fk.key} className={cn("flex flex-col gap-2 rounded-lg border p-2.5", fkError ? "border-destructive" : "border-border")}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[13px] font-medium">Foreign key</span>
                   <Button variant="ghost-muted" size="icon-xs" aria-label="Remove foreign key" onClick={() => setForeignKeys((prev) => prev.filter((item) => item.key !== fk.key))}>
@@ -348,6 +336,7 @@ function Builder({
                     </select>
                   </label>
                 </div>
+                {fkError && <p className="text-xs text-destructive-foreground">{fkError}</p>}
               </div>
             );
           })}
