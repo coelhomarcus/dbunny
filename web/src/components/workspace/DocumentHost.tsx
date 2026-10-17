@@ -1,3 +1,4 @@
+import { PanelsTopLeft, Plus } from "lucide-react";
 import { useDocuments } from "../../contexts/DocumentsContext";
 import { useTab } from "../../contexts/workspace";
 import QueryPane from "./QueryPane";
@@ -15,9 +16,16 @@ export default function DocumentHost() {
   const { isActive } = useTab();
   if (documents.items.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-        <p>Nothing is open.</p>
-        <Button variant="outline" size="sm" onClick={() => openDocument({ kind: "query" })}>
+      <div className="flex h-full flex-col items-center justify-center px-6 text-center select-none">
+        <span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+          <PanelsTopLeft size={22} />
+        </span>
+        <p className="mt-4 text-sm font-medium text-foreground">Nothing is open</p>
+        <p className="mt-1 max-w-xs text-[13px] leading-relaxed text-muted-foreground">
+          Open a table, view, or routine from the explorer, or start a query.
+        </p>
+        <Button variant="primary" size="sm" className="mt-5" onClick={() => openDocument({ kind: "query" })}>
+          <Plus />
           New query
         </Button>
       </div>
