@@ -1,4 +1,4 @@
-import { Outlet, useNavigate, NavLink, Navigate, useLocation } from "react-router";
+import { useNavigate } from "react-router";
 import { useConnection } from "../contexts/useConnection";
 import { useWorkspace } from "../contexts/workspace";
 import { useEffect, useState } from "react";
@@ -6,7 +6,10 @@ import SchemaTree from "../components/SchemaTree";
 import StatusBar from "../components/layout/StatusBar";
 import DatabaseSwitcher from "../components/layout/DatabaseSwitcher";
 import { cn } from "../lib/cn";
-import { Terminal, Activity, Users, GitCommitVertical } from "lucide-react";
+import { DocumentsProvider } from "../contexts/DocumentsContext";
+import DocumentTabBar from "../components/workspace/DocumentTabBar";
+import DocumentHost from "../components/workspace/DocumentHost";
+import { GitCommitVertical } from "lucide-react";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { RightPanelContext } from "../contexts/rightPanel";
 import { useCapabilities } from "../hooks/useCapabilities";
@@ -19,9 +22,6 @@ export default function DatabaseLayout() {
   const [rightPanel, setRightPanel] = useState<HTMLElement | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const capabilities = useCapabilities();
-  const { pathname } = useLocation();
-  // Server screens the engine doesn't have, reached by their route, go back to the editor
-  const unavailableRoute = !capabilities.admin && (pathname === "/db/activity" || pathname === "/db/roles");
 
   useEffect(() => {
     if (!isConnected) {
@@ -42,13 +42,8 @@ export default function DatabaseLayout() {
     else await disconnectNow();
   }
 
-  const navItemClass = ({ isActive }: { isActive: boolean }) =>
-    cn(
-      "flex h-8 items-center gap-2 rounded-lg px-2.5 text-sm transition-colors",
-      isActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
-    );
-
   return (
+    <DocumentsProvider>
     <div className="h-full flex flex-col text-foreground">
       {/* Each part is a card of its own, with a small gap between them */}
       <div className="flex flex-1 min-h-0 gap-1.5">
@@ -70,27 +65,6 @@ export default function DatabaseLayout() {
               <DatabaseSwitcher />
             </div>
 
-            <nav className="px-2 pb-2">
-              {capabilities.console && (
-                <NavLink to="/db/query" className={navItemClass}>
-                  <Terminal size={15} className="shrink-0" />
-                  Query
-                </NavLink>
-              )}
-              {capabilities.admin && (
-                <NavLink to="/db/activity" className={navItemClass}>
-                  <Activity size={15} className="shrink-0" />
-                  Activity
-                </NavLink>
-              )}
-              {capabilities.admin && (
-                <NavLink to="/db/roles" className={navItemClass}>
-                  <Users size={15} className="shrink-0" />
-                  Roles
-                </NavLink>
-              )}
-            </nav>
-
             {/* The explorer has its own header, filter and scrolling list */}
             <div className="min-h-0 flex-1">
               <SchemaTree />
@@ -99,9 +73,12 @@ export default function DatabaseLayout() {
 
         </aside>
 
-        <main className="flex-1 min-w-0 rounded-lg border border-border bg-card overflow-hidden">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card">
           <RightPanelContext.Provider value={rightPanel}>
-            {unavailableRoute ? <Navigate to="/db/query" replace /> : <Outlet />}
+            <DocumentTabBar />
+            <div className="min-h-0 flex-1">
+              <DocumentHost />
+            </div>
           </RightPanelContext.Provider>
         </main>
         {/* Filled by the page (query library, activity detail). `contents` so the
@@ -129,5 +106,6 @@ export default function DatabaseLayout() {
         confirmLabel="Roll back and disconnect"
       />
     </div>
+    </DocumentsProvider>
   );
 }

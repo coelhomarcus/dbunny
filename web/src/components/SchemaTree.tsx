@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, type ComponentType, type ReactNode } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate } from "react-router";
+import { useDocuments } from "../contexts/DocumentsContext";
+import type { DataIcon } from "../lib/documents";
 import { useApi, useConnection } from "../contexts/useConnection";
 import type { RelationKind } from "../lib/api";
 import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
@@ -84,26 +86,6 @@ const CATEGORY_CAPABILITY: Partial<Record<string, keyof Capabilities>> = {
 const RELATION_KINDS: Partial<Record<ObjectKind, RelationKind>> = { table: "table", view: "view", matview: "matview" };
 
 const relationPath = (schema: string, name: string) => `/db/${encodeURIComponent(schema)}/${encodeURIComponent(name)}`;
-
-function objectPath(schema: string, object: ExplorerObject): string {
-  const s = encodeURIComponent(schema);
-  const n = encodeURIComponent(object.name);
-  switch (object.kind) {
-    case "function":
-    case "procedure":
-      return `/db/${s}/obj/function/${n}?args=${encodeURIComponent(object.detail)}`;
-    case "sequence":
-      return `/db/${s}/obj/sequence/${n}`;
-    case "type":
-      return `/db/${s}/obj/type/${n}`;
-    case "index":
-      return `/db/${s}/obj/index/${n}`;
-    case "trigger":
-      return `/db/${s}/obj/trigger/${n}`;
-    default:
-      return relationPath(schema, object.name);
-  }
-}
 
 const objectKey = (schema: string, object: ExplorerObject) => `${schema}.${object.name}:${object.kind}:${object.detail}`;
 
@@ -197,7 +179,7 @@ function GroupRow({
 export default function SchemaTree() {
   const navigate = useNavigate();
   const location = useLocation();
-  const params = useParams();
+  const { documents, openDocument } = useDocuments();
   const api = useApi();
   const { connectionInfo } = useConnection();
   const readOnly = connectionInfo?.readOnly ?? false;
@@ -315,14 +297,30 @@ export default function SchemaTree() {
     return current === target || current.startsWith(`${target}/`);
   };
 
-  /** The open page belongs to this object (a table's structure tab counts as the table). */
+  /** The front document is this object. A structure tab counts as its table. */
   function isActive(schema: string, object: ExplorerObject) {
-    if (object.kind === "function" || object.kind === "procedure") {
-      return location.pathname.includes("/obj/function/") && params.schema === schema && params.name === object.name;
+    const front = documents.items.find((doc) => doc.id === documents.activeId);
+    if (!front || front.schema !== schema || front.name !== object.name) return false;
+    if (object.kind === "table" || object.kind === "view" || object.kind === "matview") {
+      return front.kind === "data" || front.kind === "structure";
     }
-    const current = decodeURIComponent(location.pathname);
-    const target = decodeURIComponent(objectPath(schema, object));
-    return current === target || current === `${target}/structure`;
+    if (object.kind === "function" || object.kind === "procedure") {
+      return front.kind === object.kind && (front.detail ?? "") === (object.detail ?? "");
+    }
+    return front.kind === object.kind;
+  }
+
+  function openExplorerObject(schema: string, object: ExplorerObject) {
+    if (object.kind === "table" || object.kind === "view" || object.kind === "matview") {
+      const icon: DataIcon = object.kind === "view" ? "view" : object.kind === "matview" ? "matview" : "table";
+      openDocument({ kind: "data", schema, name: object.name, icon });
+      return;
+    }
+    if (object.kind === "function" || object.kind === "procedure") {
+      openDocument({ kind: object.kind, schema, name: object.name, detail: object.detail });
+      return;
+    }
+    openDocument({ kind: object.kind, schema, name: object.name });
   }
 
   async function runAction(
@@ -394,8 +392,8 @@ export default function SchemaTree() {
     const object = { name: target.name, kind: target.kind as ObjectKind, detail: "" };
     const pinned = pins.some((p) => p.schema === target.schema && p.name === target.name && p.kind === target.kind);
     const items: ContextMenuItem[] = [
-      { label: "Open data", icon: <TableIcon />, onSelect: () => navigate(relationPath(target.schema, target.name)) },
-      { label: "Open structure", icon: <Columns3 />, onSelect: () => navigate(`${relationPath(target.schema, target.name)}/structure`) },
+      { label: "Open data", icon: <TableIcon />, onSelect: () => openDocument({ kind: "data", schema: target.schema, name: target.name, icon: target.kind === "view" ? "view" : target.kind === "matview" ? "matview" : "table" }) },
+      { label: "Open structure", icon: <Columns3 />, onSelect: () => openDocument({ kind: "structure", schema: target.schema, name: target.name }) },
       { label: pinned ? "Unpin" : "Pin to the top", icon: pinned ? <PinOff /> : <Pin />, onSelect: () => togglePin(target.schema, object) },
       "separator",
       { label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(qualified) },
@@ -483,9 +481,9 @@ export default function SchemaTree() {
           <div
             role="button"
             tabIndex={0}
-            onClick={() => navigate(objectPath(schema, object))}
+            onClick={() => openExplorerObject(schema, object)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") navigate(objectPath(schema, object));
+              if (e.key === "Enter") openExplorerObject(schema, object);
             }}
             onContextMenu={(e) => {
               if (!relation) return;
@@ -547,9 +545,8 @@ export default function SchemaTree() {
   function partitionRows(partitions: ExplorerPartition[], depth: number): ReactNode {
     const pad = INDENT[Math.min(depth, INDENT.length - 1)];
     return partitions.map((p) => {
-      const path = relationPath(p.schema, p.name);
-      const current = decodeURIComponent(location.pathname);
-      const active = current === decodeURIComponent(path) || current === `${decodeURIComponent(path)}/structure`;
+      const front = documents.items.find((doc) => doc.id === documents.activeId);
+      const active = front?.kind === "data" && front.schema === p.schema && front.name === p.name;
       // "FOR VALUES FROM (…) TO (…)" reads fine without its first two words
       const bound = p.bound.replace(/^FOR VALUES\s+/i, "");
       return (
@@ -557,9 +554,9 @@ export default function SchemaTree() {
           <div
             role="button"
             tabIndex={0}
-            onClick={() => navigate(path)}
+            onClick={() => openDocument({ kind: "data", schema: p.schema, name: p.name, icon: "partition" })}
             onKeyDown={(e) => {
-              if (e.key === "Enter") navigate(path);
+              if (e.key === "Enter") openDocument({ kind: "data", schema: p.schema, name: p.name, icon: "partition" });
             }}
             onContextMenu={(e) => {
               e.preventDefault();
@@ -835,7 +832,7 @@ export default function SchemaTree() {
           const schema = newTableIn!;
           load(false);
           setExpanded((prev) => new Set([...prev, `s:${schema}`, `c:${schema}:tables`]));
-          navigate(relationPath(schema, table));
+          openDocument({ kind: "data", schema, name: table, icon: "table" });
         }}
         onClose={() => setNewTableIn(null)}
       />

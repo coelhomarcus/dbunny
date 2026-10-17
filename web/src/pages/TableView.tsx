@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useCallback, useState, useRef } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { useNavigate } from "react-router";
 import {
   useReactTable,
   getCoreRowModel,
@@ -11,7 +11,7 @@ import { isJsonType, shortType } from "../lib/columnMeta";
 import CellEditorDialog from "../components/table/CellEditorDialog";
 import { useTableData, toSortKeys } from "../hooks/useTableData";
 import { useApi, useConnection } from "../contexts/useConnection";
-import { useTab } from "../contexts/workspace";
+import type { FilterRequest } from "../lib/documents";
 import { useCellEditing } from "../hooks/useCellEditing";
 import { useRowSelection } from "../hooks/useRowSelection";
 import { useColumnResize } from "../hooks/useColumnResize";
@@ -52,22 +52,34 @@ function foreignKeyLink(column: ColumnInfo | undefined, row: unknown[], columns:
   return { path: `/db/${encodeURIComponent(fk.schema)}/${encodeURIComponent(fk.table)}`, filters };
 }
 
-/**
- * Every navigation (sidebar, foreign key link) gets a fresh view, opened with the
- * filters it was given, so nothing from the previous table carries over.
- */
-export default function TableView() {
-  const location = useLocation();
-  const state = location.state as { filters?: TableFilter[] } | null;
-  return <TableViewContent key={location.key} initialFilters={state?.filters} />;
+export default function TableView({
+  schema,
+  name,
+  filterRequest,
+  active,
+}: {
+  schema: string;
+  name: string;
+  filterRequest?: FilterRequest;
+  active: boolean;
+}) {
+  return <TableViewContent schema={schema} table={name} filterRequest={filterRequest} active={active} />;
 }
 
-function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }) {
-  const { schema, table } = useParams<{ schema: string; table: string }>();
+function TableViewContent({
+  schema,
+  table,
+  filterRequest,
+  active,
+}: {
+  schema: string;
+  table: string;
+  filterRequest?: FilterRequest;
+  active: boolean;
+}) {
   const api = useApi();
   const navigate = useNavigate();
-  // Hidden window tabs stay mounted; only the visible one reacts to shortcuts
-  const { isActive } = useTab();
+  const initialFilters = filterRequest?.filters;
 
   const tableData = useTableData(schema, table, initialFilters);
   const { data, columnInfos, loading, error, hasNoPk } = tableData;
@@ -170,6 +182,12 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   }, [discardChanges, cancelEdit, setSelectedRows]);
   const discardGuard = useDiscardGuard(pending.dirtyRowCount + (draft ? 1 : 0), resetRowState);
   const { guard } = discardGuard;
+  const seenFilter = useRef(filterRequest?.id);
+  useEffect(() => {
+    if (!filterRequest || filterRequest.id === seenFilter.current) return;
+    seenFilter.current = filterRequest.id;
+    guard(tableData.applyFilters)(filterRequest.filters, "all");
+  }, [filterRequest, guard, tableData.applyFilters]);
 
   const openDraft = useCallback((initial: Record<string, string | null> = {}) => {
     setDraft(initial);
@@ -231,7 +249,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   }, [draftCol]);
 
   useEffect(() => {
-    if (!isActive) return;
+    if (!active) return;
     function onKeyDown(e: KeyboardEvent) {
       // The dialog editor handles its own keys
       if (editorDialogOpen || draftExpanded) return;
@@ -244,11 +262,11 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editing, isActive, editorDialogOpen, draftExpanded, draftCol]);
+  }, [editing, active, editorDialogOpen, draftExpanded, draftCol]);
 
   // Pasting rows (from a spreadsheet, say) onto the table offers to insert them
   useEffect(() => {
-    if (!isActive || readOnly || importOpen !== false) return;
+    if (!active || readOnly || importOpen !== false) return;
     function onPaste(e: ClipboardEvent) {
       if (editing.editingCell || (e.target as HTMLElement)?.closest("input, textarea, select, [contenteditable=true], [role=dialog]")) return;
       const text = e.clipboardData?.getData("text/plain") ?? "";
@@ -259,7 +277,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
     }
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [isActive, readOnly, importOpen, editing.editingCell]);
+  }, [active, readOnly, importOpen, editing.editingCell]);
 
   const fetchAllRows = useCallback(async () => {
     // An estimated total could miss rows, so count exactly before exporting everything

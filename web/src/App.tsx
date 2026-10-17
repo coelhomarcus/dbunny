@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { MemoryRouter, Routes, Route, Navigate } from "react-router";
+import { MemoryRouter, Routes, Route } from "react-router";
 import { ConnectionProvider } from "./contexts/ConnectionContext";
 import { WorkspaceProvider } from "./contexts/WorkspaceProvider";
 import { TabContext, useWorkspace, type TabSessionInfo } from "./contexts/workspace";
@@ -11,13 +11,6 @@ import UpdateNotice from "./components/UpdateNotice";
 import TitleBar from "./components/TitleBar";
 import ConnectPage from "./pages/ConnectPage";
 import DatabaseLayout from "./pages/DatabaseLayout";
-import QueryEditor from "./pages/QueryEditor";
-import TableView from "./pages/TableView";
-import TableStructure from "./pages/TableStructure";
-import FunctionView from "./pages/FunctionView";
-import ObjectView from "./pages/ObjectView";
-import ActivityView from "./pages/ActivityView";
-import RolesView from "./pages/RolesView";
 
 export default function App() {
   useEffect(() => {
@@ -87,23 +80,10 @@ function TabPane({
       >
         <ConnectionProvider onSessionChange={onSessionChange} initialSession={initialSession}>
           {/* A tab opened with a session starts on the query editor */}
-          <MemoryRouter initialEntries={[initialSession ? "/db/query" : "/"]}>
+          <MemoryRouter initialEntries={[initialSession ? "/db" : "/"]}>
             <Routes>
               <Route path="/" element={<ConnectPage />} />
-              <Route path="/db" element={<DatabaseLayout />}>
-                <Route index element={<Navigate to="query" replace />} />
-                <Route path="query" element={<QueryEditor />} />
-                <Route path="activity" element={<ActivityView />} />
-                <Route path="roles" element={<RolesView />} />
-                <Route path=":schema/:table" element={<TableView />} />
-                <Route path=":schema/:table/structure" element={<TableStructure />} />
-                {/* `obj/` so tables named index, trigger, … can use `:table/structure` */}
-                <Route path=":schema/obj/function/:name" element={<FunctionView />} />
-                <Route path=":schema/obj/sequence/:name" element={<ObjectView kind="sequence" />} />
-                <Route path=":schema/obj/type/:name" element={<ObjectView kind="type" />} />
-                <Route path=":schema/obj/index/:name" element={<ObjectView kind="index" />} />
-                <Route path=":schema/obj/trigger/:name" element={<ObjectView kind="trigger" />} />
-              </Route>
+              <Route path="/db" element={<DatabaseLayout />} />
             </Routes>
           </MemoryRouter>
         </ConnectionProvider>

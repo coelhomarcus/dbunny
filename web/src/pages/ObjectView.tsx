@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router";
 import { Check, Copy, ListOrdered, ListTree, Shapes, Zap } from "lucide-react";
 import type { ObjectDefinition } from "@/types";
 import { DetailSkeleton } from "../components/Skeleton";
@@ -9,8 +8,15 @@ import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { writeClipboardText } from "../lib/clipboard";
 
 /** A sequence, type, index or trigger: a few facts and its DDL. */
-export default function ObjectView({ kind }: { kind: "sequence" | "type" | "index" | "trigger" }) {
-  const { schema, name } = useParams<{ schema: string; name: string }>();
+export default function ObjectView({
+  schema,
+  name,
+  kind,
+}: {
+  schema: string;
+  name: string;
+  kind: "sequence" | "type" | "index" | "trigger";
+}) {
   const api = useApi();
   const key = `${kind}:${schema}.${name}`;
   const [result, setResult] = useState<{ key: string; definition?: ObjectDefinition; error?: string } | null>(null);
