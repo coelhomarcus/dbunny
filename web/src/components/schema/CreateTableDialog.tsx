@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { Plus, Table2, X } from "lucide-react";
 import type { ColumnGeneration, CompletionRelation, NewColumn, NewTable } from "@/types";
@@ -32,24 +32,7 @@ type ForeignKey = {
   onDelete: string;
 };
 
-let nextKey = 0;
-
 type Row = NewColumn & { key: number };
-
-const row = (patch: Partial<NewColumn> = {}): Row => ({
-  key: nextKey++,
-  name: "",
-  dataType: "text",
-  nullable: true,
-  primaryKey: false,
-  default: null,
-  unique: false,
-  check: null,
-  comment: null,
-  generation: "none",
-  generated: null,
-  ...patch,
-});
 
 function Builder({
   schema,
@@ -66,17 +49,32 @@ function Builder({
   const dialect = useSqlDialect();
   const capabilities = useCapabilities();
   const suggestedTypes = dialect === "sqlite" ? SQLITE_TYPES : COMMON_TYPES;
+  const nextKey = useRef(0);
+  const newRow = (patch: Partial<NewColumn> = {}): Row => ({
+    key: nextKey.current++,
+    name: "",
+    dataType: "text",
+    nullable: true,
+    primaryKey: false,
+    default: null,
+    unique: false,
+    check: null,
+    comment: null,
+    generation: "none",
+    generated: null,
+    ...patch,
+  });
   const [table, setTable] = useState("");
   const [rows, setRows] = useState<Row[]>(() =>
     dialect === "sqlite"
       ? [
           // A lone INTEGER primary key is the row id: SQLite numbers new rows by itself
-          row({ name: "id", dataType: "INTEGER", nullable: false, primaryKey: true }),
-          row({ name: "created_at", dataType: "TEXT", nullable: false, default: "CURRENT_TIMESTAMP" }),
+          newRow({ name: "id", dataType: "INTEGER", nullable: false, primaryKey: true }),
+          newRow({ name: "created_at", dataType: "TEXT", nullable: false, default: "CURRENT_TIMESTAMP" }),
         ]
       : [
-          row({ name: "id", dataType: "bigserial", nullable: false, primaryKey: true }),
-          row({ name: "created_at", dataType: "timestamptz", nullable: false, default: "now()" }),
+          newRow({ name: "id", dataType: "bigserial", nullable: false, primaryKey: true }),
+          newRow({ name: "created_at", dataType: "timestamptz", nullable: false, default: "now()" }),
         ],
   );
   const [foreignKeys, setForeignKeys] = useState<ForeignKey[]>([]);
@@ -178,7 +176,7 @@ function Builder({
           New table <span className="font-normal text-muted-foreground">in {schema}</span>
         </>
       }
-      className="max-w-2xl"
+      className="max-w-3xl"
       footer={
         <>
           {error && <p className="mr-auto min-w-0 flex-1 break-words text-xs text-destructive-foreground">{error}</p>}
@@ -246,7 +244,7 @@ function Builder({
               <option key={t} value={t} />
             ))}
           </datalist>
-          <Button variant="ghost-muted" size="xs" className="self-start" onClick={() => setRows((prev) => [...prev, row(dialect === "sqlite" ? { dataType: "TEXT" } : {})])}>
+          <Button variant="ghost-muted" size="xs" className="self-start" onClick={() => setRows((prev) => [...prev, newRow(dialect === "sqlite" ? { dataType: "TEXT" } : {})])}>
             <Plus /> Add column
           </Button>
         </div>
@@ -278,10 +276,20 @@ function Builder({
             variant="ghost-muted"
             size="xs"
             className="self-start"
-            onClick={() => setForeignKeys((prev) => [...prev, { key: nextKey++, columns: [], refTable: "", refColumns: {}, onUpdate: "NO ACTION", onDelete: "NO ACTION" }])}
+            onClick={() =>
+              setForeignKeys((prev) => [
+                ...prev,
+                { key: nextKey.current++, columns: [], refTable: "", refColumns: {}, onUpdate: "NO ACTION", onDelete: "NO ACTION" },
+              ])
+            }
           >
             <Plus /> Add foreign key
           </Button>
+          {sqlite && (
+            <p className="text-xs text-muted-foreground">
+              Referenced tables must be in schema <span className="font-mono">{schema}</span> (same database).
+            </p>
+          )}
         </div>
 
         {sqlite ? (

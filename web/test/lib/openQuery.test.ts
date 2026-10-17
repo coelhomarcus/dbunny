@@ -26,3 +26,11 @@ test("unbind stops later requests for that tab", () => {
   bindOpenQuery("tab-c", (sql) => opened.push(sql));
   assert.deepEqual(opened, ["SELECT 3"]);
 });
+
+test("bindOpenQuery drains every pending request in order", () => {
+  requestOpenQuery("tab-d", "SELECT 4");
+  requestOpenQuery("tab-d", "SELECT 5");
+  const opened: string[] = [];
+  bindOpenQuery("tab-d", (sql) => opened.push(sql));
+  assert.deepEqual(opened, ["SELECT 4", "SELECT 5"]);
+});
