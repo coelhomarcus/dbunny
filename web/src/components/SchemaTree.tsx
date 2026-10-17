@@ -41,6 +41,7 @@ import {
   Pin,
   PinOff,
   ChevronsDownUp,
+  ChevronsUpDown,
   KeyRound,
   Link2,
   Database,
@@ -612,6 +613,32 @@ export default function SchemaTree() {
         p !== null && matches(p.object.name) && CATEGORIES.some((c) => c.kinds.includes(p.object.kind) && categoryShown(c)),
     );
   const defaultSchema = tree?.defaultSchema ?? tree?.schemas[0]?.name ?? "public";
+  // Pinned uses its own flag; every other key is an open group.
+  const allClosed = ![...expanded].some((key) => key !== "pinned-closed");
+
+  function toggleAll() {
+    if (!tree) return;
+    if (!allClosed) {
+      setExpanded(new Set());
+      return;
+    }
+    const open = new Set<string>();
+    const multi = tree.schemas.length > 1;
+    for (const schema of tree.schemas) {
+      if (multi) open.add(`s:${schema.name}`);
+      for (const category of CATEGORIES) {
+        if (!categoryShown(category)) continue;
+        if (schema.objects.some((object) => category.kinds.includes(object.kind) && matches(object.name))) {
+          open.add(`c:${schema.name}:${category.id}`);
+        }
+      }
+    }
+    if (!query && capabilities.extensions) {
+      open.add("extensions");
+      if (extensions === null) api.getExtensions().then(setExtensions).catch(() => setExtensions([]));
+    }
+    setExpanded(open);
+  }
 
   return (
     <div className="flex h-full flex-col select-none">
@@ -638,9 +665,15 @@ export default function SchemaTree() {
               </Button>
             </Tooltip>
           )}
-          <Tooltip label="Collapse all" side="bottom">
-            <Button variant="ghost-muted" size="icon-xs" aria-label="Collapse all" onClick={() => setExpanded(new Set())} disabled={!tree}>
-              <ChevronsDownUp />
+          <Tooltip label={allClosed ? "Expand all" : "Collapse all"} side="bottom">
+            <Button
+              variant="ghost-muted"
+              size="icon-xs"
+              aria-label={allClosed ? "Expand all" : "Collapse all"}
+              onClick={toggleAll}
+              disabled={!tree}
+            >
+              {allClosed ? <ChevronsUpDown /> : <ChevronsDownUp />}
             </Button>
           </Tooltip>
           <Tooltip label="Refresh" side="bottom">
