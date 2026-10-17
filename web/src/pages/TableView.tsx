@@ -460,7 +460,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <div ref={gridRef} className="flex-1 overflow-auto">
             <table
-              className="text-sm w-full"
+              className="w-full text-xs"
               style={{
                 tableLayout: "fixed",
                 borderCollapse: "separate",
@@ -516,7 +516,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
               <tbody>
                 {draft && (
                   <tr className="bg-success/15">
-                    <td className="border-b border-r border-border px-3 py-1.5 text-success-foreground">
+                    <td className="border-b border-r border-border px-3 py-1 text-success-foreground">
                       <Plus size={14} aria-label="New row" />
                     </td>
                     {layout.visible.map(({ column: col }) => {
@@ -584,7 +584,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                       key={rowIndex}
                       className={`${rowBg} group/row hover:bg-accent`}
                     >
-                      <td className="border-b border-r border-border px-3 py-1.5">
+                      <td className="border-b border-r border-border px-3 py-1">
                         <Checkbox
                           checked={isSelected}
                           onChange={() => selection.toggleSelectRow(rowIndex)}

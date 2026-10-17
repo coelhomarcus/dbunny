@@ -34,7 +34,7 @@ export default function SortableColumnHeader({
       {columnInfo && <ColumnIcon column={columnInfo} />}
       <span className={`truncate font-semibold ${selected ? "text-zinc-950" : "text-foreground"}`}>{id}</span>
       {columnInfo?.typeName && (
-        <span className={`shrink-0 text-xs font-normal ${selected ? "text-zinc-800" : "text-muted-foreground"}`}>
+        <span className={`shrink-0 text-[11px] font-normal ${selected ? "text-zinc-800" : "text-muted-foreground"}`}>
           {shortType(columnInfo.typeName)}
         </span>
       )}
@@ -45,7 +45,7 @@ export default function SortableColumnHeader({
     <th
       data-grid-column={id}
       onClick={onSelect}
-      className={`relative cursor-pointer select-none border-b border-r px-3 py-2.5 text-left text-sm ${
+      className={`relative cursor-pointer select-none border-b border-r px-3 py-1.5 text-left text-xs ${
         selected
           ? "border-warning bg-warning shadow-[inset_2px_0_0_var(--warning),inset_-2px_0_0_var(--warning),inset_0_2px_0_var(--warning)]"
           : isActive

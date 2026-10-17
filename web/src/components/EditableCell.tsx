@@ -88,7 +88,7 @@ export default function EditableCell({
       }}
     >
       <div
-        className={`truncate overflow-hidden px-3 py-1.5 ${inlineEditing ? "invisible" : ""} ${
+        className={`truncate overflow-hidden px-3 py-1 ${inlineEditing ? "invisible" : ""} ${
           isDirty ? "text-warning-foreground" : editor.kind === "readonly" ? "text-muted-foreground" : "text-foreground"
         } ${editable && !isEditing ? (editor.kind === "text" ? "cursor-text" : "cursor-pointer") : ""}`}
       >
@@ -150,7 +150,7 @@ export default function EditableCell({
                 onSetNull();
               }
             }}
-            className={`absolute inset-0 bg-card px-3 text-sm text-foreground outline-none ring-1 ring-inset ring-primary/60 placeholder:text-muted-foreground/70 placeholder:italic ${
+            className={`absolute inset-0 bg-card px-3 text-xs text-foreground outline-none ring-1 ring-inset ring-primary/60 placeholder:text-muted-foreground/70 placeholder:italic ${
               nullable ? "pr-20" : "pr-9"
             }`}
           />

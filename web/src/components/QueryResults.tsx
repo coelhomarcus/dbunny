@@ -116,7 +116,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
 
       {result && result.columns.length > 0 && (
         <table
-          className="w-full text-sm"
+          className="w-full text-xs"
           style={{ minWidth: result.columns.length * 150 }}
         >
           <thead className="sticky top-0 z-10 select-none">
@@ -125,7 +125,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
                 {hg.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="text-left px-3 py-2.5 text-sm font-medium text-muted-foreground bg-card-header border-b border-border whitespace-nowrap"
+                    className="whitespace-nowrap border-b border-border bg-card-header px-3 py-1.5 text-left text-xs font-medium text-muted-foreground"
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
@@ -144,7 +144,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
                 {row.getVisibleCells().map((cell) => (
                   <td
                     key={cell.id}
-                    className="px-3 py-2 text-foreground whitespace-nowrap max-w-xs truncate font-mono text-sm"
+                    className="max-w-xs truncate whitespace-nowrap px-3 py-1 font-mono text-xs text-foreground"
                   >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
