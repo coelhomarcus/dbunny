@@ -20,6 +20,7 @@ import { formatBytes } from "../lib/format";
 import { writeClipboardText } from "../lib/clipboard";
 import { needsRebuild, notAvailableFor } from "../lib/engines";
 import { useCapabilities } from "../hooks/useCapabilities";
+import NoticeToast from "../components/ui/NoticeToast";
 
 type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "permissions" | "ddl";
 
@@ -520,16 +521,6 @@ export default function TableStructure() {
             <p className="shrink-0 border-b border-border px-4 py-2 text-[13px] text-muted-foreground">{meta!.comment}</p>
           )}
 
-          {notice && (
-            <button
-              type="button"
-              onClick={() => setNotice(null)}
-              className="shrink-0 border-b border-border bg-destructive/5 px-4 py-2 text-left text-[13px] text-destructive-foreground cursor-pointer"
-            >
-              {notice}
-            </button>
-          )}
-
           {structure.warnings.length > 0 && (
             <div className="flex shrink-0 items-start gap-2 border-b border-border bg-warning/8 px-4 py-2 text-[13px] text-warning-foreground">
               <TriangleAlert size={14} className="mt-0.5 shrink-0" />
@@ -640,6 +631,7 @@ export default function TableStructure() {
         onDone={() => setVersion((v) => v + 1)}
         onClose={() => setDraft(null)}
       />
+      <NoticeToast notice={notice ? { tone: "error", text: notice } : null} onDismiss={() => setNotice(null)} />
     </div>
   );
 }

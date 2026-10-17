@@ -37,6 +37,7 @@ import SortableColumnHeader from "../components/SortableColumnHeader";
 import EditableCell from "../components/EditableCell";
 import Pagination from "../components/Pagination";
 import { TableSkeleton } from "../components/Skeleton";
+import NoticeToast, { type Notice } from "../components/ui/NoticeToast";
 
 /** Where a foreign key cell leads: the referenced table, filtered to the matching row. */
 function foreignKeyLink(column: ColumnInfo | undefined, row: unknown[], columns: QueryColumn[]) {
@@ -115,7 +116,8 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   const [reviewSql, setReviewSql] = useState<string | null>(null);
   // Open with no text: choose a file; with text: rows pasted into the table
   const [importOpen, setImportOpen] = useState<{ text?: string } | false>(false);
-  const [importNotice, setImportNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const dismissNotice = useCallback(() => setNotice(null), []);
   const [sqlCopied, setSqlCopied] = useState(false);
 
   const editing = useCellEditing({
@@ -151,6 +153,10 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   const { guard } = discardGuard;
 
   useEffect(() => {
+    if (error) setNotice({ tone: "error", text: error });
+  }, [error]);
+
+  useEffect(() => {
     if (!isActive) return;
     function onKeyDown(e: KeyboardEvent) {
       // The dialog editor handles its own keys
@@ -158,7 +164,10 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         if (editing.editingCell) editing.confirmEdit();
-        else pending.handleSave();
+        else {
+          const err = await pending.handleSave();
+          if (pending.hasPendingChanges) setNotice(err ? { tone: "error", text: err } : { tone: "success", text: "Changes saved" });
+        }
       }
       if (e.key === "Escape" && editing.editingCell) editing.cancelEdit();
     }
@@ -335,12 +344,18 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         readOnly={connectionReadOnly}
         selectedCount={selection.selectedRows.size}
         deleting={pending.deleting}
-        onDelete={pending.handleDelete}
+        onDelete={async () => {
+          const count = selection.selectedRows.size;
+          const err = await pending.handleDelete();
+          setNotice(err ? { tone: "error", text: err } : { tone: "success", text: `Deleted ${count} row${count === 1 ? "" : "s"}` });
+        }}
         hasPendingChanges={pending.hasPendingChanges}
         dirtyRowCount={pending.dirtyRowCount}
-        saveError={pending.saveError}
         saving={pending.saving}
-        onSave={pending.handleSave}
+        onSave={async () => {
+          const err = await pending.handleSave();
+          setNotice(err ? { tone: "error", text: err } : { tone: "success", text: "Changes saved" });
+        }}
         onDiscard={() => {
           pending.discardChanges();
           editing.cancelEdit();
@@ -364,15 +379,8 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         />
       )}
 
-      {error && <div className="px-4 py-3 text-destructive-foreground text-sm border-b border-border bg-destructive/5">{error}</div>}
-      {importNotice && (
-        <button
-          type="button"
-          onClick={() => setImportNotice(null)}
-          className="px-4 py-2 text-left text-[13px] text-success-foreground border-b border-border bg-success/5 cursor-pointer"
-        >
-          {importNotice}
-        </button>
+      {error && !data && (
+        <div className="px-4 py-3 text-sm text-muted-foreground">Couldn't load this table.</div>
       )}
 
       {loading && !data && <TableSkeleton columns={6} rows={14} />}
@@ -623,7 +631,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
         onClose={() => setImportOpen(false)}
         onImport={async (columns, rows) => {
           const count = await api.importRows(schema!, table!, columns, rows);
-          setImportNotice(`Imported ${count.toLocaleString()} row${count === 1 ? "" : "s"}`);
+          setNotice({ tone: "success", text: `Imported ${count.toLocaleString()} row${count === 1 ? "" : "s"}` });
           await tableData.refresh();
           return count;
         }}
@@ -641,6 +649,8 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
           await tableData.refresh();
         }}
       />
+
+      <NoticeToast notice={notice} onDismiss={dismissNotice} />
 
       <ConfirmDialog
         open={discardGuard.isConfirming}
