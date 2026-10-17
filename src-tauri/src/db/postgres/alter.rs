@@ -9,7 +9,7 @@ use super::data::db_message;
 use super::objects::{drop_sql, duplicate, relation, rename_sql, run, truncate_sql};
 use super::PostgresDriver;
 use crate::db::sql::filter::quote_ident;
-use crate::db::model::{ColumnGeneration, NewColumn, NewForeignKey, NewPartition, NewTable, StructureChange};
+use crate::db::model::{ColumnGeneration, NewColumn, NewTable, StructureChange};
 use crate::db::{unsupported, Engine};
 use crate::db::SchemaEditor;
 
@@ -393,6 +393,7 @@ impl SchemaEditor for PostgresDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::model::{NewForeignKey, NewPartition};
 
     fn sql(change: StructureChange) -> String {
         change_sql("public", "users", &change).map(|(s, _)| s.join("; ")).unwrap_or_else(|e| format!("ERR {e}"))

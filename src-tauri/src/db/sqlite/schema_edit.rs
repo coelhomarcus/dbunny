@@ -14,7 +14,7 @@ use rusqlite::{Connection, OptionalExtension};
 use super::catalog::{is_word, tokens, Token};
 use super::data::{in_transaction, relation, Failure};
 use super::SqliteDriver;
-use crate::db::model::{ColumnGeneration, NewColumn, NewForeignKey, NewTable, StructureChange};
+use crate::db::model::{ColumnGeneration, NewColumn, NewTable, StructureChange};
 use crate::db::sql::Dialect;
 use crate::db::{unsupported, Engine, SchemaEditor};
 
@@ -493,6 +493,7 @@ mod tests {
     use super::super::tests_support::TempDb;
     use super::super::OpenOptions;
     use super::*;
+    use crate::db::model::NewForeignKey;
     use crate::db::{Catalog, Driver};
 
     const HELD: &str = "A transaction in the query editor is holding the database: commit or roll it back, then try again.";
