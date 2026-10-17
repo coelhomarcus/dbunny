@@ -14,7 +14,7 @@ use rusqlite::{Connection, OptionalExtension};
 use super::catalog::{is_word, tokens, Token};
 use super::data::{in_transaction, relation, Failure};
 use super::SqliteDriver;
-use crate::db::model::{NewColumn, StructureChange};
+use crate::db::model::{ColumnGeneration, NewColumn, StructureChange};
 use crate::db::sql::Dialect;
 use crate::db::{unsupported, Engine, SchemaEditor};
 
@@ -119,9 +119,12 @@ fn free_name(c: &Connection, schema: &str, base: &str) -> rusqlite::Result<Strin
 fn change_sql(c: &Connection, schema: &str, table: &str, change: &StructureChange) -> Result<String, Failure> {
     let alter = format!("ALTER TABLE {}", relation(schema, table));
     let sql = match change {
-        StructureChange::AddColumn { name: column, data_type, nullable, default, comment, unique, check } => {
+        StructureChange::AddColumn { name: column, data_type, nullable, default, comment, unique, check, generation, generated: _ } => {
             if comment.as_deref().is_some_and(|c| !c.trim().is_empty()) {
                 return Err(not_in_sqlite("Comments"));
+            }
+            if *generation != ColumnGeneration::None {
+                return Err(not_in_sqlite("Identity, AUTOINCREMENT and generated columns on an existing table"));
             }
             // SQLite rejects UNIQUE on ADD COLUMN. A unique index is the same rule and is allowed.
             let quoted = name("column name", column)?;
@@ -204,14 +207,38 @@ fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<
             return Err(Failure::message(format!("Column {} appears twice", column.name.trim())));
         }
         seen.push(folded);
+        let has_default = column.default.as_deref().is_some_and(|d| !d.trim().is_empty());
         let mut line = format!("{col} {}", fragment("type", &column.data_type)?);
+        match column.generation {
+            ColumnGeneration::None => {}
+            ColumnGeneration::Autoincrement => {
+                if !(column.primary_key && rowid_key) {
+                    return Err(Failure::message("AUTOINCREMENT is only for a single INTEGER primary key".into()));
+                }
+            }
+            ColumnGeneration::IdentityByDefault | ColumnGeneration::IdentityAlways => return Err(not_in_sqlite("Identity columns")),
+            ColumnGeneration::Generated => {
+                if column.primary_key {
+                    return Err(Failure::message("A generated column can't be a primary key".into()));
+                }
+                if has_default {
+                    return Err(Failure::message("A generated column can't have a default".into()));
+                }
+                let expr = column.generated.as_deref().filter(|e| !e.trim().is_empty()).ok_or_else(|| Failure::message("The generated expression can't be empty".into()))?;
+                line += &format!(" GENERATED ALWAYS AS ({}) STORED", fragment("generated expression", expr)?);
+            }
+        }
         if column.primary_key && rowid_key {
-            line += " PRIMARY KEY";
+            line += if column.generation == ColumnGeneration::Autoincrement { " PRIMARY KEY AUTOINCREMENT" } else { " PRIMARY KEY" };
         } else if !column.nullable || column.primary_key {
             line += " NOT NULL";
         }
-        if let Some(default) = column.default.as_deref().filter(|d| !d.trim().is_empty()) {
-            line += &format!(" DEFAULT {}", fragment("default", default)?);
+        if column.generation == ColumnGeneration::None {
+            if let Some(default) = column.default.as_deref().filter(|d| !d.trim().is_empty()) {
+                line += &format!(" DEFAULT {}", fragment("default", default)?);
+            }
+        } else if has_default && column.generation == ColumnGeneration::Autoincrement {
+            return Err(Failure::message("An AUTOINCREMENT column can't have a default".into()));
         }
         column_flags(&mut line, column.unique, &column.check)?;
         lines.push(line);
@@ -470,6 +497,8 @@ mod tests {
             comment: None,
             unique: false,
             check: None,
+            generation: ColumnGeneration::None,
+            generated: None,
         }
     }
 
@@ -484,7 +513,7 @@ mod tests {
     }
 
     fn new_column(name: &str, data_type: &str, nullable: bool, primary_key: bool) -> NewColumn {
-        NewColumn { name: name.into(), data_type: data_type.into(), nullable, primary_key, default: None, unique: false, check: None, comment: None }
+        NewColumn { name: name.into(), data_type: data_type.into(), nullable, primary_key, default: None, unique: false, check: None, comment: None, generation: ColumnGeneration::None, generated: None }
     }
 
     /// The preview, after checking that applying the change runs without an error.
@@ -636,7 +665,7 @@ mod tests {
             (StructureChange::DropConstraint { name: "c".into(), cascade: false }, rebuild("Dropping a constraint")),
             (StructureChange::SetComment { name: "v".into(), comment: Some("x".into()) }, "Comments isn't supported by SQLite".into()),
             (
-                StructureChange::AddColumn { name: "n".into(), data_type: "TEXT".into(), nullable: true, default: None, comment: Some("Notes".into()), unique: false, check: None },
+                StructureChange::AddColumn { name: "n".into(), data_type: "TEXT".into(), nullable: true, default: None, comment: Some("Notes".into()), unique: false, check: None, generation: ColumnGeneration::None, generated: None },
                 "Comments isn't supported by SQLite".into(),
             ),
             (StructureChange::SetTriggerEnabled { name: "tr".into(), enabled: false }, "Turning a trigger on or off isn't supported by SQLite".into()),
@@ -721,7 +750,7 @@ mod tests {
         let err = exec(&d, "INSERT INTO amounts (n) VALUES (1)").await.unwrap_err();
         assert!(err.contains("UNIQUE"), "{err}");
 
-        let added = StructureChange::AddColumn { name: "extra".into(), data_type: "INTEGER".into(), nullable: true, default: None, comment: None, unique: true, check: Some("extra >= 0".into()) };
+        let added = StructureChange::AddColumn { name: "extra".into(), data_type: "INTEGER".into(), nullable: true, default: None, comment: None, unique: true, check: Some("extra >= 0".into()), generation: ColumnGeneration::None, generated: None };
         let preview = preview_then_apply(&d, "main", "amounts", added).await;
         assert_eq!(
             preview,
@@ -751,6 +780,24 @@ mod tests {
         let columns = vec![new_column("id", "BIGINT", true, true), new_column("name", "TEXT", true, false)];
         let preview = editor(&d).preview_create_table("main", "codes", &columns).await.unwrap();
         assert_eq!(preview, "CREATE TABLE \"main\".\"codes\" (\n    \"id\" BIGINT NOT NULL,\n    \"name\" TEXT,\n    PRIMARY KEY (\"id\")\n);");
+
+        let columns = vec![NewColumn { generation: ColumnGeneration::Autoincrement, ..new_column("id", "INTEGER", false, true) }, new_column("name", "TEXT", true, false)];
+        let preview = editor(&d).preview_create_table("main", "serials", &columns).await.unwrap();
+        assert_eq!(preview, "CREATE TABLE \"main\".\"serials\" (\n    \"id\" INTEGER PRIMARY KEY AUTOINCREMENT,\n    \"name\" TEXT\n);");
+        editor(&d).create_table("main", "serials", columns).await.unwrap();
+        exec(&d, "INSERT INTO serials (name) VALUES ('ana')").await.unwrap();
+        assert_eq!(query(&d, "SELECT id FROM serials").await, vec![vec![json!(1)]]);
+
+        let columns = vec![
+            new_column("n", "INTEGER", false, false),
+            NewColumn { generation: ColumnGeneration::Generated, generated: Some("n + 1".into()), nullable: true, ..new_column("next", "INTEGER", true, false) },
+        ];
+        let preview = editor(&d).preview_create_table("main", "steps", &columns).await.unwrap();
+        assert!(preview.contains("\"next\" INTEGER GENERATED ALWAYS AS (n + 1) STORED"), "{preview}");
+        assert_eq!(
+            editor(&d).preview_create_table("main", "bad", &[NewColumn { generation: ColumnGeneration::Autoincrement, ..new_column("name", "TEXT", false, true) }]).await.unwrap_err(),
+            "AUTOINCREMENT is only for a single INTEGER primary key"
+        );
     }
 
     #[tokio::test]

@@ -352,6 +352,19 @@ pub struct ExplainResult {
 
 // Structure changes
 
+/// How a column's value is produced, instead of being stored as written.
+/// `AUTOINCREMENT` is SQLite only; identity and `GENERATED` are checked per engine.
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ColumnGeneration {
+    #[default]
+    None,
+    IdentityByDefault,
+    IdentityAlways,
+    Autoincrement,
+    Generated,
+}
+
 #[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum StructureChange {
@@ -365,6 +378,10 @@ pub enum StructureChange {
         unique: bool,
         #[serde(default)]
         check: Option<String>,
+        #[serde(default)]
+        generation: ColumnGeneration,
+        #[serde(default)]
+        generated: Option<String>,
     },
     RenameColumn { name: String, new_name: String },
     DropColumn { name: String, cascade: bool },
@@ -411,6 +428,11 @@ pub struct NewColumn {
     /// Shown after `CREATE TABLE` as `COMMENT ON COLUMN`. SQLite has no comments.
     #[serde(default)]
     pub comment: Option<String>,
+    #[serde(default)]
+    pub generation: ColumnGeneration,
+    /// The expression for [`ColumnGeneration::Generated`], without a semicolon.
+    #[serde(default)]
+    pub generated: Option<String>,
 }
 
 // Databases on the server

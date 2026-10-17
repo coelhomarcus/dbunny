@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowRight, Columns3, KeyRound, ListTree, PenLine, ShieldCheck, Trash2 } from "lucide-react";
-import type { ColumnInfo, CompletionRelation, StructureChange } from "@/types";
+import type { ColumnGeneration, ColumnInfo, CompletionRelation, StructureChange } from "@/types";
 import { useApi } from "../../contexts/useConnection";
 import { useTab } from "../../contexts/workspace";
 import { requestOpenQuery } from "../../lib/openQuery";
@@ -98,6 +98,8 @@ function ChangeForm({
   const [nullable, setNullable] = useState(true);
   const [columnUnique, setColumnUnique] = useState(false);
   const [columnCheck, setColumnCheck] = useState("");
+  const [generation, setGeneration] = useState<ColumnGeneration>("none");
+  const [generatedExpr, setGeneratedExpr] = useState("");
   const [defaultValue, setDefaultValue] = useState(column?.defaultValue ?? "");
   const [comment, setComment] = useState(column?.comment ?? "");
   const [cascade, setCascade] = useState(false);
@@ -135,7 +137,18 @@ function ChangeForm({
   const change: StructureChange = (() => {
     switch (draft.kind) {
       case "addColumn":
-        return { kind: "addColumn", name, dataType, nullable, default: defaultValue || null, comment: comment || null, unique: columnUnique, check: columnCheck.trim() || null };
+        return {
+          kind: "addColumn",
+          name,
+          dataType,
+          nullable,
+          default: generation === "none" ? defaultValue || null : null,
+          comment: comment || null,
+          unique: columnUnique,
+          check: columnCheck.trim() || null,
+          generation: suggestedTypes === SQLITE_TYPES ? "none" : generation,
+          generated: generation === "generated" ? generatedExpr.trim() || null : null,
+        };
       case "renameColumn":
         return { kind: "renameColumn", name: column!.name, newName: name };
       case "setDefault":
@@ -289,6 +302,23 @@ function ChangeForm({
             <Field label="Type">
               <Input value={dataType} onChange={(e) => setDataType(e.target.value)} spellCheck={false} className="font-mono" list="dbunny-common-types" />
             </Field>
+            {suggestedTypes !== SQLITE_TYPES && (
+              <>
+                <Field label="Generation">
+                  <select value={generation} onChange={(e) => setGeneration(e.target.value as ColumnGeneration)} className={cn(selectClass, "w-full")}>
+                    <option value="none">None</option>
+                    <option value="identityByDefault">Identity, by default</option>
+                    <option value="identityAlways">Identity, always</option>
+                    <option value="generated">Generated</option>
+                  </select>
+                </Field>
+                {generation === "generated" && (
+                  <Field label="Generated expression">
+                    <Input value={generatedExpr} onChange={(e) => setGeneratedExpr(e.target.value)} placeholder="e.g. price * 2" spellCheck={false} className="font-mono" />
+                  </Field>
+                )}
+              </>
+            )}
             <CheckOption checked={!nullable} onChange={(v) => setNullable(!v)} label="NOT NULL" hint="Existing rows need a default to satisfy it" />
             <CheckOption checked={columnUnique} onChange={setColumnUnique} label="Unique" hint="No two rows may share this value" />
             <Field label="Check (SQL expression)">
@@ -298,7 +328,7 @@ function ChangeForm({
         )}
         {(draft.kind === "addColumn" || draft.kind === "setDefault") && (
           <Field label="Default (SQL expression)">
-            <Input value={defaultValue} onChange={(e) => setDefaultValue(e.target.value)} placeholder="none, e.g. 0, now(), 'text'" spellCheck={false} className="font-mono" autoFocus={draft.kind === "setDefault"} />
+            <Input value={draft.kind === "addColumn" && generation !== "none" ? "" : defaultValue} onChange={(e) => setDefaultValue(e.target.value)} placeholder="none, e.g. 0, now(), 'text'" disabled={draft.kind === "addColumn" && generation !== "none"} spellCheck={false} className="font-mono" autoFocus={draft.kind === "setDefault"} />
           </Field>
         )}
         {((draft.kind === "addColumn" && capabilities.comments) || draft.kind === "setComment") && (

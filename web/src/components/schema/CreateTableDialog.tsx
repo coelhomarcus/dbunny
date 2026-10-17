@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { Plus, Table2, X } from "lucide-react";
-import type { NewColumn } from "@/types";
+import type { ColumnGeneration, NewColumn } from "@/types";
 import { useApi } from "../../contexts/useConnection";
 import { useTab } from "../../contexts/workspace";
 import { requestOpenQuery } from "../../lib/openQuery";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useSqlDialect } from "../../hooks/useSqlDialect";
+import { cn } from "../../lib/cn";
 import Dialog from "../ui/Dialog";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
 import CheckOption from "../ui/CheckOption";
+import { selectClass } from "../ui/styles";
 import { SqlPreviewBox } from "./SqlPreview";
 
 const COMMON_TYPES = ["bigserial", "bigint", "integer", "text", "varchar(255)", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
@@ -30,6 +32,8 @@ const row = (patch: Partial<NewColumn> = {}): Row => ({
   unique: false,
   check: null,
   comment: null,
+  generation: "none",
+  generated: null,
   ...patch,
 });
 
@@ -71,10 +75,12 @@ function Builder({
     dataType: r.dataType,
     nullable: r.nullable,
     primaryKey: r.primaryKey,
-    default: r.default?.trim() ? r.default : null,
     unique: r.unique,
     check: r.check?.trim() ? r.check : null,
     comment: capabilities.comments && r.comment?.trim() ? r.comment : null,
+    generation: r.generation,
+    generated: r.generation === "generated" && r.generated?.trim() ? r.generated : null,
+    default: r.generation === "none" && r.default?.trim() ? r.default : null,
   }));
   const columnsKey = JSON.stringify(columns);
 
@@ -146,13 +152,35 @@ function Builder({
                   <X />
                 </Button>
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  aria-label="Generation"
+                  value={r.generation}
+                  onChange={(e) => update(r.key, { generation: e.target.value as ColumnGeneration })}
+                  className={cn(selectClass, "h-8 font-mono text-xs")}
+                >
+                  <option value="none">No generation</option>
+                  {dialect === "sqlite" ? (
+                    <option value="autoincrement">Autoincrement</option>
+                  ) : (
+                    <>
+                      <option value="identityByDefault">Identity, by default</option>
+                      <option value="identityAlways">Identity, always</option>
+                    </>
+                  )}
+                  <option value="generated">Generated</option>
+                </select>
+                {r.generation === "generated" && (
+                  <Input value={r.generated ?? ""} onChange={(e) => update(r.key, { generated: e.target.value })} aria-label="Generated expression" placeholder="e.g. price * 2" spellCheck={false} className="h-8 min-w-0 flex-1 font-mono text-xs" />
+                )}
+              </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1">
                 <CheckOption checked={!r.nullable || r.primaryKey} onChange={() => !r.primaryKey && update(r.key, { nullable: !r.nullable })} label="NOT NULL" />
                 <CheckOption checked={r.primaryKey} onChange={() => update(r.key, { primaryKey: !r.primaryKey })} label="Primary key" />
                 <CheckOption checked={r.unique} onChange={() => update(r.key, { unique: !r.unique })} label="Unique" />
               </div>
               <div className={capabilities.comments ? "grid grid-cols-3 gap-2" : "grid grid-cols-2 gap-2"}>
-                <Input value={r.default ?? ""} onChange={(e) => update(r.key, { default: e.target.value })} aria-label="Default" placeholder="default" spellCheck={false} className="h-8 font-mono text-xs" />
+                <Input value={r.generation === "none" ? (r.default ?? "") : ""} onChange={(e) => update(r.key, { default: e.target.value })} aria-label="Default" placeholder="default" disabled={r.generation !== "none"} spellCheck={false} className="h-8 font-mono text-xs" />
                 <Input value={r.check ?? ""} onChange={(e) => update(r.key, { check: e.target.value })} aria-label="Check" placeholder="check, e.g. price >= 0" spellCheck={false} className="h-8 font-mono text-xs" />
                 {capabilities.comments && <Input value={r.comment ?? ""} onChange={(e) => update(r.key, { comment: e.target.value })} aria-label="Comment" placeholder="comment" className="h-8 text-xs" />}
               </div>

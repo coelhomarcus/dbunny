@@ -9,7 +9,8 @@ use super::data::db_message;
 use super::objects::{drop_sql, duplicate, relation, rename_sql, run, truncate_sql};
 use super::PostgresDriver;
 use crate::db::sql::filter::quote_ident;
-use crate::db::model::{NewColumn, StructureChange};
+use crate::db::model::{ColumnGeneration, NewColumn, StructureChange};
+use crate::db::{unsupported, Engine};
 use crate::db::SchemaEditor;
 
 /// Table privileges that can be granted (MAINTAIN only exists from PostgreSQL 17 on).
@@ -106,16 +107,22 @@ fn change_sql(schema: &str, table: &str, change: &StructureChange) -> Result<(Ve
     let target = format!("{}.{}", quote_ident(schema), quote_ident(table));
     let alter = format!("ALTER TABLE {target}");
     let stmts = match change {
-        StructureChange::AddColumn { name: column, data_type, nullable, default, comment, unique, check } => {
+        StructureChange::AddColumn { name: column, data_type, nullable, default, comment, unique, check, generation, generated } => {
             let column = name("column name", column)?;
+            let spec = NewColumn {
+                name: column.clone(),
+                data_type: data_type.clone(),
+                nullable: *nullable,
+                primary_key: false,
+                default: default.clone(),
+                unique: *unique,
+                check: check.clone(),
+                comment: None,
+                generation: *generation,
+                generated: generated.clone(),
+            };
             let mut add = format!("{alter} ADD COLUMN {column} {}", fragment("type", data_type)?);
-            if let Some(default) = default.as_deref().filter(|d| !d.trim().is_empty()) {
-                add += &format!(" DEFAULT {}", fragment("default", default)?);
-            }
-            if !nullable {
-                add += " NOT NULL";
-            }
-            column_flags(&mut add, *unique, check)?;
+            append_column_tail(&mut add, &spec, false)?;
             let mut stmts = vec![add];
             if let Some(comment) = comment.as_deref().filter(|c| !c.trim().is_empty()) {
                 stmts.push(format!("COMMENT ON COLUMN {target}.{column} IS {}", literal(comment)));
@@ -251,14 +258,7 @@ fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<
         }
         seen.push(col.clone());
         let mut line = format!("{col} {}", fragment("type", &column.data_type)?);
-        if let Some(default) = column.default.as_deref().filter(|d| !d.trim().is_empty()) {
-            line += &format!(" DEFAULT {}", fragment("default", default)?);
-        }
-        // A primary key is NOT NULL anyway
-        if !column.nullable && !column.primary_key {
-            line += " NOT NULL";
-        }
-        column_flags(&mut line, column.unique, &column.check)?;
+        append_column_tail(&mut line, column, true)?;
         lines.push(line);
     }
     let keys: Vec<String> = columns.iter().filter(|c| c.primary_key).map(|c| quote_ident(c.name.trim())).collect();
@@ -272,6 +272,38 @@ fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<
         sql += &format!(";\nCOMMENT ON COLUMN {target}.{col} IS {}", literal(comment));
     }
     Ok(sql)
+}
+
+/// Default, identity or `GENERATED`, then `NOT NULL`, `UNIQUE` and `CHECK`.
+/// A primary key of a new table is already `NOT NULL`, so that word is left off there.
+fn append_column_tail(line: &mut String, column: &NewColumn, skip_not_null_on_primary_key: bool) -> Result<(), String> {
+    let has_default = column.default.as_deref().is_some_and(|d| !d.trim().is_empty());
+    match column.generation {
+        ColumnGeneration::None => {
+            if has_default {
+                *line += &format!(" DEFAULT {}", fragment("default", column.default.as_deref().unwrap_or(""))?);
+            }
+        }
+        ColumnGeneration::IdentityByDefault | ColumnGeneration::IdentityAlways => {
+            if has_default {
+                return Err("An identity column can't have a default".into());
+            }
+            let kind = if column.generation == ColumnGeneration::IdentityAlways { "ALWAYS" } else { "BY DEFAULT" };
+            *line += &format!(" GENERATED {kind} AS IDENTITY");
+        }
+        ColumnGeneration::Autoincrement => return Err(unsupported(Engine::Postgres, "AUTOINCREMENT")),
+        ColumnGeneration::Generated => {
+            if has_default {
+                return Err("A generated column can't have a default".into());
+            }
+            let expr = column.generated.as_deref().filter(|e| !e.trim().is_empty()).ok_or("The generated expression can't be empty")?;
+            *line += &format!(" GENERATED ALWAYS AS ({}) STORED", fragment("generated expression", expr)?);
+        }
+    }
+    if !column.nullable && !(skip_not_null_on_primary_key && column.primary_key) {
+        *line += " NOT NULL";
+    }
+    column_flags(line, column.unique, &column.check)
 }
 
 /// `UNIQUE` and `CHECK (...)` on a column definition. An empty check is left off.
@@ -341,7 +373,7 @@ mod tests {
     #[test]
     fn column_changes_quote_names() {
         assert_eq!(
-            sql(StructureChange::AddColumn { name: "full name".into(), data_type: "varchar(80)".into(), nullable: false, default: Some("'x'".into()), comment: Some("it's".into()), unique: false, check: None }),
+            sql(StructureChange::AddColumn { name: "full name".into(), data_type: "varchar(80)".into(), nullable: false, default: Some("'x'".into()), comment: Some("it's".into()), unique: false, check: None, generation: ColumnGeneration::None, generated: None }),
             "ALTER TABLE \"public\".\"users\" ADD COLUMN \"full name\" varchar(80) DEFAULT 'x' NOT NULL; COMMENT ON COLUMN \"public\".\"users\".\"full name\" IS 'it''s'"
         );
         assert_eq!(
@@ -352,21 +384,46 @@ mod tests {
         assert_eq!(sql(StructureChange::SetDefault { name: "x".into(), default: Some(" ".into()) }), "ALTER TABLE \"public\".\"users\" ALTER COLUMN \"x\" DROP DEFAULT");
         assert_eq!(sql(StructureChange::SetComment { name: "x".into(), comment: None }), "COMMENT ON COLUMN \"public\".\"users\".\"x\" IS NULL");
         assert_eq!(
-            sql(StructureChange::AddColumn { name: "amount".into(), data_type: "numeric(12,2)".into(), nullable: false, default: Some("0".into()), comment: None, unique: true, check: Some("amount > 0".into()) }),
+            sql(StructureChange::AddColumn { name: "amount".into(), data_type: "numeric(12,2)".into(), nullable: false, default: Some("0".into()), comment: None, unique: true, check: Some("amount > 0".into()), generation: ColumnGeneration::None, generated: None }),
             "ALTER TABLE \"public\".\"users\" ADD COLUMN \"amount\" numeric(12,2) DEFAULT 0 NOT NULL UNIQUE CHECK (amount > 0)"
+        );
+        assert_eq!(
+            sql(StructureChange::AddColumn {
+                name: "id".into(),
+                data_type: "bigint".into(),
+                nullable: false,
+                default: None,
+                comment: None,
+                unique: false,
+                check: None,
+                generation: ColumnGeneration::IdentityAlways,
+                generated: None,
+            }),
+            "ALTER TABLE \"public\".\"users\" ADD COLUMN \"id\" bigint GENERATED ALWAYS AS IDENTITY NOT NULL"
         );
     }
 
     #[test]
     fn fragments_with_semicolons_and_empty_names_are_refused() {
-        assert!(sql(StructureChange::AddColumn { name: "x".into(), data_type: "int; DROP TABLE users".into(), nullable: true, default: None, comment: None, unique: false, check: None }).starts_with("ERR"));
-        assert!(sql(StructureChange::AddColumn { name: "x".into(), data_type: "int".into(), nullable: true, default: None, comment: None, unique: false, check: Some("x > 0; --".into()) }).starts_with("ERR"));
+        assert!(sql(StructureChange::AddColumn { name: "x".into(), data_type: "int; DROP TABLE users".into(), nullable: true, default: None, comment: None, unique: false, check: None, generation: ColumnGeneration::None, generated: None }).starts_with("ERR"));
+        assert!(sql(StructureChange::AddColumn { name: "x".into(), data_type: "int".into(), nullable: true, default: None, comment: None, unique: false, check: Some("x > 0; --".into()), generation: ColumnGeneration::None, generated: None }).starts_with("ERR"));
         assert!(sql(StructureChange::SetDefault { name: "x".into(), default: Some("1; --".into()) }).starts_with("ERR"));
         assert!(sql(StructureChange::RenameColumn { name: "x".into(), new_name: " ".into() }).starts_with("ERR"));
     }
 
     fn new_column(name: &str, data_type: &str, nullable: bool, primary_key: bool) -> NewColumn {
-        NewColumn { name: name.into(), data_type: data_type.into(), nullable, primary_key, default: None, unique: false, check: None, comment: None }
+        NewColumn {
+            name: name.into(),
+            data_type: data_type.into(),
+            nullable,
+            primary_key,
+            default: None,
+            unique: false,
+            check: None,
+            comment: None,
+            generation: ColumnGeneration::None,
+            generated: None,
+        }
     }
 
     #[test]
@@ -402,6 +459,23 @@ mod tests {
             "CREATE TABLE \"public\".\"prices\" (\n    \"amount\" numeric(12,2) NOT NULL UNIQUE CHECK (amount > 0)\n);\nCOMMENT ON COLUMN \"public\".\"prices\".\"amount\" IS 'unit price'"
         );
         assert!(create_table_sql("public", "t", &[NewColumn { check: Some("a > 0; --".into()), ..new_column("a", "int", true, false) }]).is_err());
+
+        let identity = create_table_sql("public", "people", &[NewColumn { generation: ColumnGeneration::IdentityByDefault, ..new_column("id", "bigint", false, true) }]).unwrap();
+        assert_eq!(identity, "CREATE TABLE \"public\".\"people\" (\n    \"id\" bigint GENERATED BY DEFAULT AS IDENTITY,\n    PRIMARY KEY (\"id\")\n)");
+        let always = create_table_sql("public", "people", &[NewColumn { generation: ColumnGeneration::IdentityAlways, ..new_column("id", "bigint", false, true) }]).unwrap();
+        assert!(always.contains("GENERATED ALWAYS AS IDENTITY"), "{always}");
+        let generated = create_table_sql(
+            "public",
+            "prices",
+            &[
+                new_column("amount", "numeric", false, false),
+                NewColumn { generation: ColumnGeneration::Generated, generated: Some("amount * 2".into()), ..new_column("doubled", "numeric", false, false) },
+            ],
+        )
+        .unwrap();
+        assert!(generated.contains("\"doubled\" numeric GENERATED ALWAYS AS (amount * 2) STORED NOT NULL"), "{generated}");
+        assert!(create_table_sql("public", "t", &[NewColumn { generation: ColumnGeneration::Generated, generated: Some("a; --".into()), ..new_column("a", "int", true, false) }]).is_err());
+        assert!(create_table_sql("public", "t", &[NewColumn { generation: ColumnGeneration::IdentityByDefault, default: Some("1".into()), ..new_column("id", "int", false, true) }]).is_err());
     }
 
     #[test]
@@ -504,7 +578,7 @@ mod server_tests {
             async move { apply(client, s, "t", &change).await }
         };
 
-        run(StructureChange::AddColumn { name: "score".into(), data_type: "numeric(5,2)".into(), nullable: false, default: Some("0".into()), comment: Some("Points".into()), unique: false, check: None }).await.unwrap();
+        run(StructureChange::AddColumn { name: "score".into(), data_type: "numeric(5,2)".into(), nullable: false, default: Some("0".into()), comment: Some("Points".into()), unique: false, check: None, generation: ColumnGeneration::None, generated: None }).await.unwrap();
         run(StructureChange::RenameColumn { name: "score".into(), new_name: "points".into() }).await.unwrap();
         run(StructureChange::SetDefault { name: "points".into(), default: Some("10".into()) }).await.unwrap();
         run(StructureChange::SetNullable { name: "points".into(), nullable: true }).await.unwrap();
@@ -604,9 +678,9 @@ mod server_tests {
             s,
             "people",
             &[
-                NewColumn { name: "id".into(), data_type: "bigserial".into(), nullable: false, primary_key: true, default: None, unique: false, check: None, comment: None },
-                NewColumn { name: "name".into(), data_type: "text".into(), nullable: false, primary_key: false, default: None, unique: false, check: None, comment: None },
-                NewColumn { name: "joined".into(), data_type: "date".into(), nullable: true, primary_key: false, default: Some("current_date".into()), unique: false, check: None, comment: None },
+                NewColumn { name: "id".into(), data_type: "bigserial".into(), nullable: false, primary_key: true, default: None, unique: false, check: None, comment: None, generation: ColumnGeneration::None, generated: None },
+                NewColumn { name: "name".into(), data_type: "text".into(), nullable: false, primary_key: false, default: None, unique: false, check: None, comment: None, generation: ColumnGeneration::None, generated: None },
+                NewColumn { name: "joined".into(), data_type: "date".into(), nullable: true, primary_key: false, default: Some("current_date".into()), unique: false, check: None, comment: None, generation: ColumnGeneration::None, generated: None },
             ],
         )
         .unwrap();

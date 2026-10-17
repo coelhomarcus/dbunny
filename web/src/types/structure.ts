@@ -82,7 +82,7 @@ export interface TableStructure {
 
 /** A change made from the Structure tab; the backend turns it into DDL. */
 export type StructureChange =
-  | { kind: "addColumn"; name: string; dataType: string; nullable: boolean; default: string | null; comment: string | null; unique: boolean; check: string | null }
+  | { kind: "addColumn"; name: string; dataType: string; nullable: boolean; default: string | null; comment: string | null; unique: boolean; check: string | null; generation: ColumnGeneration; generated: string | null }
   | { kind: "renameColumn"; name: string; newName: string }
   | { kind: "dropColumn"; name: string; cascade: boolean }
   | { kind: "setNullable"; name: string; nullable: boolean }
@@ -109,6 +109,9 @@ export type StructureChange =
   | { kind: "grant"; grantee: string; privileges: string[]; grantOption: boolean }
   | { kind: "revoke"; grantee: string; privileges: string[] };
 
+/** How a column value is produced. Autoincrement is SQLite; identity is PostgreSQL. */
+export type ColumnGeneration = "none" | "identityByDefault" | "identityAlways" | "autoincrement" | "generated";
+
 /** One column in the table builder. */
 export interface NewColumn {
   name: string;
@@ -121,4 +124,7 @@ export interface NewColumn {
   check: string | null;
   /** PostgreSQL only. Empty means no comment. */
   comment: string | null;
+  generation: ColumnGeneration;
+  /** Expression for `generated`, without `;`. */
+  generated: string | null;
 }
