@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback, useState } from "react";
+import { useEffect, useMemo, useCallback, useState, useRef } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
   useReactTable,
@@ -22,10 +22,9 @@ import { usePendingChanges } from "../hooks/usePendingChanges";
 import { useDiscardGuard } from "../hooks/useDiscardGuard";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import FilterBar from "../components/table/FilterBar";
-import InsertRowDialog from "../components/table/InsertRowDialog";
 import ImportCsvDialog from "../components/table/ImportCsvDialog";
 import Button from "../components/ui/Button";
-import { ArrowUpRight, Ban, Braces, Copy, CopyPlus, Database, Filter, Sheet, TriangleAlert } from "lucide-react";
+import { ArrowUpRight, Ban, Braces, Copy, CopyPlus, Database, Filter, Plus, Sheet, TriangleAlert } from "lucide-react";
 import ContextMenu, { type ContextMenuItem } from "../components/ui/ContextMenu";
 import { pendingChangesToSql, rowsToInsertSql, rowsToJson, rowsToTsv, valueText } from "../lib/copyRows";
 import SqlViewer from "../components/SqlViewer";
@@ -109,8 +108,14 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
 
   const [filtersOpen, setFiltersOpen] = useState(() => (initialFilters?.length ?? 0) > 0);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
-  // Insert dialog: open, optionally filled from a cloned row
-  const [insert, setInsert] = useState<{ initialValues?: Record<string, string | null> } | null>(null);
+  // A new row edited in the grid. Missing keys are left to the column default.
+  const [draft, setDraft] = useState<Record<string, string | null> | null>(null);
+  const [draftCol, setDraftCol] = useState<string | null>(null);
+  const [draftText, setDraftText] = useState("");
+  const [draftIsNull, setDraftIsNull] = useState(true);
+  const [draftExpanded, setDraftExpanded] = useState(false);
+  const draftInputRef = useRef<HTMLInputElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; rowIndex: number; colName: string } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const [reviewSql, setReviewSql] = useState<string | null>(null);
@@ -148,32 +153,87 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
     discardChanges();
     cancelEdit();
     setSelectedRows(new Set());
+    setDraft(null);
+    setDraftCol(null);
+    setDraftExpanded(false);
   }, [discardChanges, cancelEdit, setSelectedRows]);
-  const discardGuard = useDiscardGuard(pending.dirtyRowCount, resetRowState);
+  const discardGuard = useDiscardGuard(pending.dirtyRowCount + (draft ? 1 : 0), resetRowState);
   const { guard } = discardGuard;
+
+  const openDraft = useCallback((initial: Record<string, string | null> = {}) => {
+    setDraft(initial);
+    setDraftCol(null);
+    setDraftExpanded(false);
+    requestAnimationFrame(() => gridRef.current?.scrollTo({ top: 0, behavior: "smooth" }));
+  }, []);
+
+  const commitDraft = useCallback((name: string, isNull: boolean, text: string) => {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      if (!(name in prev) && isNull && text === "") return prev;
+      return { ...prev, [name]: isNull ? null : text };
+    });
+    setDraftCol(null);
+    setDraftExpanded(false);
+  }, []);
+
+  const saveAll = useCallback(async () => {
+    if (editing.editingCell) editing.confirmEdit();
+    let values = draft;
+    if (draft && draftCol) {
+      values = !(draftCol in draft) && draftIsNull && draftText === "" ? draft : { ...draft, [draftCol]: draftIsNull ? null : draftText };
+      setDraft(values);
+      setDraftCol(null);
+      setDraftExpanded(false);
+    }
+    const hadEdits = pending.hasPendingChanges;
+    if (hadEdits) {
+      const err = await pending.handleSave();
+      if (err) {
+        setNotice({ tone: "error", text: err });
+        return;
+      }
+    }
+    if (values) {
+      try {
+        await api.insertRow(schema!, table!, values);
+        setDraft(null);
+        await tableData.refresh();
+        setNotice({ tone: "success", text: hadEdits ? "Changes saved" : "Row inserted" });
+      } catch (err) {
+        setNotice({ tone: "error", text: typeof err === "string" ? err : "Couldn't insert the row" });
+      }
+      return;
+    }
+    if (hadEdits) setNotice({ tone: "success", text: "Changes saved" });
+  }, [api, draft, draftCol, draftIsNull, draftText, editing, pending, schema, table, tableData]);
+
+  const saveAllRef = useRef(saveAll);
+  saveAllRef.current = saveAll;
 
   useEffect(() => {
     if (error) setNotice({ tone: "error", text: error });
   }, [error]);
 
   useEffect(() => {
+    if (draftCol) draftInputRef.current?.focus();
+  }, [draftCol]);
+
+  useEffect(() => {
     if (!isActive) return;
     function onKeyDown(e: KeyboardEvent) {
       // The dialog editor handles its own keys
-      if (editorDialogOpen) return;
+      if (editorDialogOpen || draftExpanded) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
-        if (editing.editingCell) editing.confirmEdit();
-        else {
-          const err = await pending.handleSave();
-          if (pending.hasPendingChanges) setNotice(err ? { tone: "error", text: err } : { tone: "success", text: "Changes saved" });
-        }
+        void saveAllRef.current();
       }
       if (e.key === "Escape" && editing.editingCell) editing.cancelEdit();
+      if (e.key === "Escape" && draftCol) setDraftCol(null);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editing, pending, isActive, editorDialogOpen]);
+  }, [editing, isActive, editorDialogOpen, draftExpanded, draftCol]);
 
   // Pasting rows (from a spreadsheet, say) onto the table offers to insert them
   useEffect(() => {
@@ -328,7 +388,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
           if (!info || info.isGenerated || (info.isPrimaryKey && info.defaultValue !== null)) return;
           initialValues[col.name] = row[i] === null || row[i] === undefined ? null : toEditText(row[i]);
         });
-        setInsert({ initialValues });
+        openDraft(initialValues);
       }),
     });
     return items;
@@ -349,22 +409,22 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
           const err = await pending.handleDelete();
           setNotice(err ? { tone: "error", text: err } : { tone: "success", text: `Deleted ${count} row${count === 1 ? "" : "s"}` });
         }}
-        hasPendingChanges={pending.hasPendingChanges}
-        dirtyRowCount={pending.dirtyRowCount}
+        hasPendingChanges={pending.hasPendingChanges || draft !== null}
+        dirtyRowCount={pending.dirtyRowCount + (draft ? 1 : 0)}
         saving={pending.saving}
-        onSave={async () => {
-          const err = await pending.handleSave();
-          setNotice(err ? { tone: "error", text: err } : { tone: "success", text: "Changes saved" });
-        }}
+        onSave={() => void saveAll()}
         onDiscard={() => {
           pending.discardChanges();
           editing.cancelEdit();
+          setDraft(null);
+          setDraftCol(null);
+          setDraftExpanded(false);
         }}
         onReviewSql={() => {
           setSqlCopied(false);
           setReviewSql(pendingChangesToSql(schema!, table!, pending.changedRows()));
         }}
-        onInsertRow={guard(() => setInsert({}))}
+        onInsertRow={guard(() => openDraft())}
         filterCount={tableData.filters.length}
         filtersOpen={filtersOpen}
         onToggleFilters={() => setFiltersOpen((open) => !open)}
@@ -387,7 +447,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
 
       {data && (
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-auto">
+          <div ref={gridRef} className="flex-1 overflow-auto">
             <table
               className="text-sm w-full"
               style={{
@@ -443,6 +503,58 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
               </thead>
 
               <tbody>
+                {draft && (
+                  <tr className="bg-success/15">
+                    <td className="border-b border-r border-border px-3 py-1.5 text-success-foreground">
+                      <Plus size={14} aria-label="New row" />
+                    </td>
+                    {layout.visible.map(({ column: col }) => {
+                      const info = columnInfos.find((c) => c.name === col.name);
+                      const current = col.name in draft ? draft[col.name] : null;
+                      const editingThis = draftCol === col.name;
+                      const editor = editorFor(info, current);
+                      return (
+                        <EditableCell
+                          key={col.name}
+                          value={current}
+                          displayValue={current}
+                          isDirty={col.name in draft}
+                          isEditing={editingThis}
+                          hasNoPk={editor.kind === "readonly"}
+                          editor={editingThis && draftExpanded ? { kind: "long", json: isJsonType(info) } : editor}
+                          nullable={info?.isNullable ?? true}
+                          editValue={draftText}
+                          editIsNull={draftIsNull}
+                          inputRef={draftInputRef}
+                          onStartEdit={() => {
+                            if (editor.kind === "readonly") return;
+                            setDraftCol(col.name);
+                            setDraftText(current ?? "");
+                            setDraftIsNull(current === null);
+                            setDraftExpanded(editor.kind === "long");
+                          }}
+                          onEditValueChange={(value) => {
+                            setDraftText(value);
+                            setDraftIsNull(false);
+                          }}
+                          onSetNull={() => {
+                            setDraftText("");
+                            setDraftIsNull(true);
+                          }}
+                          onConfirm={() => commitDraft(col.name, draftIsNull, draftText)}
+                          onCommit={(isNull, text) => commitDraft(col.name, isNull, text)}
+                          onCancel={() => {
+                            setDraftCol(null);
+                            setDraftExpanded(false);
+                          }}
+                          onExpand={() => setDraftExpanded(true)}
+                          columnSelected={selectedColumn === col.name}
+                          onContextMenu={() => {}}
+                        />
+                      );
+                    })}
+                  </tr>
+                )}
                 {data.rows.map((row, rowIndex) => {
                   const isRowDirty = !!pending.pendingChanges[rowIndex];
                   const isSelected = selection.selectedRows.has(rowIndex);
@@ -609,15 +721,26 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
       </Dialog>
 
       <CellEditorDialog
-        open={editorDialogOpen}
-        column={editingCell?.colName ?? ""}
-        typeLabel={editingColumn ? shortType(editingColumn.typeName) : undefined}
+        open={editorDialogOpen || draftExpanded}
+        column={draftExpanded ? (draftCol ?? "") : (editingCell?.colName ?? "")}
+        typeLabel={
+          draftExpanded
+            ? shortType(columnInfos.find((c) => c.name === draftCol)?.typeName ?? "")
+            : editingColumn
+              ? shortType(editingColumn.typeName)
+              : undefined
+        }
         // Starts from the inline draft, which begins as the cell's (pending) value
-        value={editing.editIsNull ? null : editing.editValue}
-        json={editingEditor?.kind === "long" && editingEditor.json}
-        nullable={editingColumn?.isNullable ?? true}
-        onApply={editing.commitEdit}
-        onCancel={editing.cancelEdit}
+        value={draftExpanded ? (draftIsNull ? null : draftText) : editing.editIsNull ? null : editing.editValue}
+        json={draftExpanded ? isJsonType(columnInfos.find((c) => c.name === draftCol)) : editingEditor?.kind === "long" && editingEditor.json}
+        nullable={(draftExpanded ? columnInfos.find((c) => c.name === draftCol)?.isNullable : editingColumn?.isNullable) ?? true}
+        onApply={(isNull, text) => (draftExpanded && draftCol ? commitDraft(draftCol, isNull, text) : editing.commitEdit(isNull, text))}
+        onCancel={() => {
+          if (draftExpanded) {
+            setDraftExpanded(false);
+            setDraftCol(null);
+          } else editing.cancelEdit();
+        }}
       />
 
       <ImportCsvDialog
@@ -634,19 +757,6 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
           setNotice({ tone: "success", text: `Imported ${count.toLocaleString()} row${count === 1 ? "" : "s"}` });
           await tableData.refresh();
           return count;
-        }}
-      />
-
-      <InsertRowDialog
-        open={insert !== null}
-        schema={schema!}
-        table={table!}
-        columns={columnInfos}
-        initialValues={insert?.initialValues}
-        onClose={() => setInsert(null)}
-        onInsert={async (values) => {
-          await api.insertRow(schema!, table!, values);
-          await tableData.refresh();
         }}
       />
 
