@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SavedConnection } from "@/types";
-import { fileNameOf, mask, summaryOf } from "./connectionSummary.ts";
+import { fileNameOf, mask, summaryOf } from "../../src/lib/connectionSummary.ts";
 
 const saved: SavedConnection = {
   id: "c1",

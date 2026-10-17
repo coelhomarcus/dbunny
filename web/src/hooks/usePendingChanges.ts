@@ -56,8 +56,8 @@ export function usePendingChanges({
     });
   }, [data, pendingChanges, pkColumns]);
 
-  const handleSave = useCallback(async () => {
-    if (!data || !schema || !table || !hasPendingChanges) return;
+  const handleSave = useCallback(async (): Promise<string | null> => {
+    if (!data || !schema || !table || !hasPendingChanges) return null;
     setSaving(true);
     setSaveError(null);
 
@@ -78,15 +78,18 @@ export function usePendingChanges({
       const fresh = await fetchData(schema, table, page, pageSize, sorting, filters, filterMode);
       setData(fresh);
       setPendingChanges({});
+      return null;
     } catch (err) {
-      setSaveError(typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to save");
+      const message = typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to save";
+      setSaveError(message);
+      return message;
     } finally {
       setSaving(false);
     }
   }, [data, schema, table, hasPendingChanges, pendingChanges, pkColumns, fetchData, page, pageSize, sorting, filters, filterMode, setData, api]);
 
-  const handleDelete = useCallback(async () => {
-    if (!data || !schema || !table || selectedRows.size === 0 || hasNoPk) return;
+  const handleDelete = useCallback(async (): Promise<string | null> => {
+    if (!data || !schema || !table || selectedRows.size === 0 || hasNoPk) return null;
     setDeleting(true);
 
     try {
@@ -105,8 +108,11 @@ export function usePendingChanges({
       setData(fresh);
       setSelectedRows(new Set());
       setPendingChanges({});
+      return null;
     } catch (err) {
-      setSaveError(typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to delete");
+      const message = typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to delete";
+      setSaveError(message);
+      return message;
     } finally {
       setDeleting(false);
     }

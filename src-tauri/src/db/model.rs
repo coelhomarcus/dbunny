@@ -352,10 +352,37 @@ pub struct ExplainResult {
 
 // Structure changes
 
+/// How a column's value is produced, instead of being stored as written.
+/// `AUTOINCREMENT` is SQLite only; identity and `GENERATED` are checked per engine.
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ColumnGeneration {
+    #[default]
+    None,
+    IdentityByDefault,
+    IdentityAlways,
+    Autoincrement,
+    Generated,
+}
+
 #[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum StructureChange {
-    AddColumn { name: String, data_type: String, nullable: bool, default: Option<String>, comment: Option<String> },
+    AddColumn {
+        name: String,
+        data_type: String,
+        nullable: bool,
+        default: Option<String>,
+        comment: Option<String>,
+        #[serde(default)]
+        unique: bool,
+        #[serde(default)]
+        check: Option<String>,
+        #[serde(default)]
+        generation: ColumnGeneration,
+        #[serde(default)]
+        generated: Option<String>,
+    },
     RenameColumn { name: String, new_name: String },
     DropColumn { name: String, cascade: bool },
     SetNullable { name: String, nullable: bool },
@@ -392,6 +419,59 @@ pub struct NewColumn {
     pub nullable: bool,
     pub primary_key: bool,
     pub default: Option<String>,
+    /// A column-level `UNIQUE`. A primary key is unique on its own.
+    #[serde(default)]
+    pub unique: bool,
+    /// A column-level `CHECK` expression, without a trailing semicolon.
+    #[serde(default)]
+    pub check: Option<String>,
+    /// Shown after `CREATE TABLE` as `COMMENT ON COLUMN`. SQLite has no comments.
+    #[serde(default)]
+    pub comment: Option<String>,
+    #[serde(default)]
+    pub generation: ColumnGeneration,
+    /// The expression for [`ColumnGeneration::Generated`], without a semicolon.
+    #[serde(default)]
+    pub generated: Option<String>,
+}
+
+/// A foreign key written inside `CREATE TABLE`.
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NewForeignKey {
+    pub columns: Vec<String>,
+    pub ref_schema: String,
+    pub ref_table: String,
+    pub ref_columns: Vec<String>,
+    #[serde(default)]
+    pub on_update: String,
+    #[serde(default)]
+    pub on_delete: String,
+}
+
+/// `PARTITION BY method (expression)` on a new PostgreSQL table. No child partitions.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct NewPartition {
+    pub method: String,
+    pub expression: String,
+}
+
+/// Everything the table builder sends. Omitted options stay off.
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTable {
+    pub columns: Vec<NewColumn>,
+    #[serde(default)]
+    pub foreign_keys: Vec<NewForeignKey>,
+    #[serde(default)]
+    pub unlogged: bool,
+    #[serde(default)]
+    pub without_rowid: bool,
+    #[serde(default)]
+    pub strict: bool,
+    #[serde(default)]
+    pub partition: Option<NewPartition>,
 }
 
 // Databases on the server

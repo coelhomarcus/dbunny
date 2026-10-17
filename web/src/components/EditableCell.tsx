@@ -32,6 +32,12 @@ interface EditableCellProps {
   onContextMenu: (e: React.MouseEvent) => void;
   /** The context menu is open on this cell. */
   menuOpen?: boolean;
+  /** Column name, so a click on this cell counts as inside that column. */
+  columnName?: string;
+  /** The column this cell belongs to is selected. */
+  columnSelected?: boolean;
+  /** Last body cell of a selected column: closes the outline. */
+  columnSelectionEnd?: boolean;
 }
 
 const MAX_PREVIEW = 300;
@@ -54,7 +60,7 @@ export default function EditableCell({
   displayValue, isDirty, isEditing, hasNoPk, editor, nullable,
   editValue, editIsNull, inputRef,
   onStartEdit, onEditValueChange, onSetNull, onConfirm, onCommit, onCancel, onExpand,
-  onFollowLink, linkLabel, onContextMenu, menuOpen,
+  onFollowLink, linkLabel, onContextMenu, menuOpen, columnName, columnSelected, columnSelectionEnd,
 }: EditableCellProps) {
   const cellRef = useRef<HTMLTableCellElement>(null);
   const editable = !hasNoPk && editor.kind !== "readonly";
@@ -63,7 +69,14 @@ export default function EditableCell({
   return (
     <td
       ref={cellRef}
-      className={`relative p-0 overflow-hidden border-b border-r border-border ${isDirty ? "bg-warning/8" : ""} ${
+      data-grid-column={columnName}
+      className={`relative overflow-hidden border-b border-r border-border p-0 ${isDirty ? "bg-warning/8" : ""} ${
+        columnSelected
+          ? columnSelectionEnd
+            ? "shadow-[inset_2px_0_0_var(--warning),inset_-2px_0_0_var(--warning),inset_0_-2px_0_var(--warning)]"
+            : "shadow-[inset_2px_0_0_var(--warning),inset_-2px_0_0_var(--warning)]"
+          : ""
+      } ${
         (isEditing && !inlineEditing) || menuOpen ? "ring-1 ring-inset ring-primary/60" : ""
       }`}
       onClick={() => editable && !isEditing && onStartEdit()}
@@ -75,7 +88,7 @@ export default function EditableCell({
       }}
     >
       <div
-        className={`px-3 py-1.5 truncate overflow-hidden ${inlineEditing ? "invisible" : ""} ${
+        className={`truncate overflow-hidden px-3 py-1 ${inlineEditing ? "invisible" : ""} ${
           isDirty ? "text-warning-foreground" : editor.kind === "readonly" ? "text-muted-foreground" : "text-foreground"
         } ${editable && !isEditing ? (editor.kind === "text" ? "cursor-text" : "cursor-pointer") : ""}`}
       >
@@ -137,7 +150,7 @@ export default function EditableCell({
                 onSetNull();
               }
             }}
-            className={`absolute inset-0 px-3 bg-card text-foreground text-sm outline-none ring-1 ring-inset ring-primary/60 placeholder:italic placeholder:text-muted-foreground/70 ${
+            className={`absolute inset-0 bg-card px-3 text-xs text-foreground outline-none ring-1 ring-inset ring-primary/60 placeholder:text-muted-foreground/70 placeholder:italic ${
               nullable ? "pr-20" : "pr-9"
             }`}
           />

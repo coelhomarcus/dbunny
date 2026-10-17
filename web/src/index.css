@@ -281,3 +281,42 @@ body {
 .window-tab[data-active="false"]:hover + .window-tab::before {
   opacity: 0;
 }
+
+/* SQL preview (@twinkleplop/sql). Colors are the query editor's tokens. */
+.sql-preview .twinkleplop {
+  margin: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sql-preview .twinkleplop code {
+  font: inherit;
+}
+
+.sql-preview .tok.keyword {
+  color: var(--syntax-keyword);
+}
+
+.sql-preview .tok.type {
+  color: var(--syntax-type);
+}
+
+.sql-preview .tok.function {
+  color: var(--syntax-special);
+}
+
+.sql-preview .tok.string {
+  color: var(--syntax-string);
+}
+
+.sql-preview .tok.number,
+.sql-preview .tok.boolean {
+  color: var(--syntax-number);
+}
+
+.sql-preview .tok.comment {
+  color: var(--syntax-comment);
+}

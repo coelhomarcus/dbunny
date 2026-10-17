@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, Columns3, KeyRound, ListTree, PenLine, ShieldCheck, Trash2 } from "lucide-react";
-import type { ColumnInfo, CompletionRelation, StructureChange } from "@/types";
+import { useNavigate } from "react-router";
+import { Columns3, KeyRound, ListTree, PenLine, ShieldCheck, Trash2 } from "lucide-react";
+import type { ColumnGeneration, ColumnInfo, CompletionRelation, StructureChange } from "@/types";
 import { useApi } from "../../contexts/useConnection";
+import { useTab } from "../../contexts/workspace";
+import { requestOpenQuery } from "../../lib/openQuery";
 import { cn } from "../../lib/cn";
 import Dialog from "../ui/Dialog";
 import CheckOption from "../ui/CheckOption";
@@ -10,6 +13,10 @@ import Input from "../ui/Input";
 import Checkbox from "../Checkbox";
 import { selectClass } from "../ui/styles";
 import { useCapabilities } from "../../hooks/useCapabilities";
+import { useSqlDialect } from "../../hooks/useSqlDialect";
+import { SqlPreviewBox } from "../schema/SqlPreview";
+import ForeignKeyEditor from "./ForeignKeyEditor";
+import { guessReference } from "../../lib/foreignKeyForm";
 
 /** Which form to show; fields not chosen yet come from the column being changed. */
 export type ChangeDraft =
@@ -22,9 +29,8 @@ export type ChangeDraft =
   | { kind: "dropConstraint"; constraint: string };
 
 const COMMON_TYPES = ["text", "varchar(255)", "integer", "bigint", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
+const SQLITE_TYPES = ["INTEGER", "TEXT", "REAL", "NUMERIC", "BLOB"];
 const INDEX_METHODS = ["btree", "hash", "gin", "gist", "brin"];
-const REFERENTIAL_ACTIONS = ["NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"];
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1.5">
@@ -61,11 +67,6 @@ function ColumnPicker({ label, columns, value, onChange }: { label: string; colu
 /** The referenced column a new foreign key column most likely points at. */
 const quoteName = (name: string) => (/^[a-z_][a-z0-9_]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`);
 
-function guessReference(column: string, target: CompletionRelation | undefined): string {
-  const names = target?.columns.map((c) => c.name) ?? [];
-  return names.find((n) => n === column) ?? names.find((n) => n === "id") ?? names[0] ?? "";
-}
-
 function ChangeForm({
   schema,
   table,
@@ -82,11 +83,18 @@ function ChangeForm({
   onClose: () => void;
 }) {
   const api = useApi();
+  const navigate = useNavigate();
+  const { tabId } = useTab();
   const capabilities = useCapabilities();
+  const suggestedTypes = useSqlDialect() === "sqlite" ? SQLITE_TYPES : COMMON_TYPES;
   const column = "column" in draft ? draft.column : null;
   const [name, setName] = useState(column?.name ?? "");
   const [dataType, setDataType] = useState(draft.kind === "setType" ? draft.column.typeName : "text");
   const [nullable, setNullable] = useState(true);
+  const [columnUnique, setColumnUnique] = useState(false);
+  const [columnCheck, setColumnCheck] = useState("");
+  const [generation, setGeneration] = useState<ColumnGeneration>("none");
+  const [generatedExpr, setGeneratedExpr] = useState("");
   const [defaultValue, setDefaultValue] = useState(column?.defaultValue ?? "");
   const [comment, setComment] = useState(column?.comment ?? "");
   const [cascade, setCascade] = useState(false);
@@ -124,7 +132,18 @@ function ChangeForm({
   const change: StructureChange = (() => {
     switch (draft.kind) {
       case "addColumn":
-        return { kind: "addColumn", name, dataType, nullable, default: defaultValue || null, comment: comment || null };
+        return {
+          kind: "addColumn",
+          name,
+          dataType,
+          nullable,
+          default: generation === "none" ? defaultValue || null : null,
+          comment: comment || null,
+          unique: columnUnique,
+          check: columnCheck.trim() || null,
+          generation: suggestedTypes === SQLITE_TYPES ? "none" : generation,
+          generated: generation === "generated" ? generatedExpr.trim() || null : null,
+        };
       case "renameColumn":
         return { kind: "renameColumn", name: column!.name, newName: name };
       case "setDefault":
@@ -261,11 +280,6 @@ function ChangeForm({
           <>
             <Field label="New type">
               <Input value={dataType} onChange={(e) => setDataType(e.target.value)} autoFocus spellCheck={false} className="font-mono" list="dbunny-common-types" />
-              <datalist id="dbunny-common-types">
-                {COMMON_TYPES.map((t) => (
-                  <option key={t} value={t} />
-                ))}
-              </datalist>
             </Field>
             <Field label="Conversion (USING)">
               <Input
@@ -282,18 +296,34 @@ function ChangeForm({
           <>
             <Field label="Type">
               <Input value={dataType} onChange={(e) => setDataType(e.target.value)} spellCheck={false} className="font-mono" list="dbunny-common-types" />
-              <datalist id="dbunny-common-types">
-                {COMMON_TYPES.map((t) => (
-                  <option key={t} value={t} />
-                ))}
-              </datalist>
             </Field>
-            <CheckOption checked={!nullable} onChange={(v) => setNullable(!v)} label="Required (NOT NULL)" hint="Existing rows need a default to satisfy it" />
+            {suggestedTypes !== SQLITE_TYPES && (
+              <>
+                <Field label="Generation">
+                  <select value={generation} onChange={(e) => setGeneration(e.target.value as ColumnGeneration)} className={cn(selectClass, "w-full")}>
+                    <option value="none">None</option>
+                    <option value="identityByDefault">Identity, by default</option>
+                    <option value="identityAlways">Identity, always</option>
+                    <option value="generated">Generated</option>
+                  </select>
+                </Field>
+                {generation === "generated" && (
+                  <Field label="Generated expression">
+                    <Input value={generatedExpr} onChange={(e) => setGeneratedExpr(e.target.value)} placeholder="e.g. price * 2" spellCheck={false} className="font-mono" />
+                  </Field>
+                )}
+              </>
+            )}
+            <CheckOption checked={!nullable} onChange={(v) => setNullable(!v)} label="NOT NULL" hint="Existing rows need a default to satisfy it" />
+            <CheckOption checked={columnUnique} onChange={setColumnUnique} label="Unique" hint="No two rows may share this value" />
+            <Field label="Check (SQL expression)">
+              <Input value={columnCheck} onChange={(e) => setColumnCheck(e.target.value)} placeholder="none, e.g. price >= 0" spellCheck={false} className="font-mono" />
+            </Field>
           </>
         )}
         {(draft.kind === "addColumn" || draft.kind === "setDefault") && (
           <Field label="Default (SQL expression)">
-            <Input value={defaultValue} onChange={(e) => setDefaultValue(e.target.value)} placeholder="none, e.g. 0, now(), 'text'" spellCheck={false} className="font-mono" autoFocus={draft.kind === "setDefault"} />
+            <Input value={draft.kind === "addColumn" && generation !== "none" ? "" : defaultValue} onChange={(e) => setDefaultValue(e.target.value)} placeholder="none, e.g. 0, now(), 'text'" disabled={draft.kind === "addColumn" && generation !== "none"} spellCheck={false} className="font-mono" autoFocus={draft.kind === "setDefault"} />
           </Field>
         )}
         {((draft.kind === "addColumn" && capabilities.comments) || draft.kind === "setComment") && (
@@ -333,61 +363,17 @@ function ChangeForm({
           <ColumnPicker label={draft.kind === "addUnique" ? "Columns that can't repeat together" : "Columns"} columns={columns} value={keyColumns} onChange={setKeyColumns} />
         )}
         {draft.kind === "addForeignKey" && (
-          <>
-            <Field label="References table">
-              <select value={refTable} onChange={(e) => (setRefTable(e.target.value), setRefColumns({}))} className={cn(selectClass, "w-full")}>
-                <option value="">{relations === null ? "Loading…" : "Choose a table"}</option>
-                {(relations ?? []).map((r) => (
-                  <option key={`${r.schema}.${r.name}`} value={`${r.schema}.${r.name}`}>
-                    {r.schema}.{r.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            {target && keyColumns.length > 0 && (
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[13px] font-medium">Matching columns</span>
-                {keyColumns.map((c) => (
-                  <div key={c} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                    <span className="truncate font-mono text-xs">{c}</span>
-                    <ArrowRight size={13} className="text-muted-foreground" />
-                    <select
-                      value={refColumns[c] ?? guessReference(c, target)}
-                      onChange={(e) => setRefColumns((prev) => ({ ...prev, [c]: e.target.value }))}
-                      className={cn(selectClass, "w-full font-mono text-xs")}
-                      aria-label={`Column referenced by ${c}`}
-                    >
-                      {target.columns.map((rc) => (
-                        <option key={rc.name} value={rc.name}>
-                          {rc.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="On delete">
-                <select value={onDelete} onChange={(e) => setOnDelete(e.target.value)} className={cn(selectClass, "w-full")}>
-                  {REFERENTIAL_ACTIONS.map((a) => (
-                    <option key={a} value={a}>
-                      {a.toLowerCase()}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="On update">
-                <select value={onUpdate} onChange={(e) => setOnUpdate(e.target.value)} className={cn(selectClass, "w-full")}>
-                  {REFERENTIAL_ACTIONS.map((a) => (
-                    <option key={a} value={a}>
-                      {a.toLowerCase()}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-          </>
+          <ForeignKeyEditor
+            relations={relations}
+            value={{ refTable, columns: keyColumns, refColumns, onUpdate, onDelete }}
+            onChange={(patch) => {
+              if (patch.refTable !== undefined) (setRefTable(patch.refTable), setRefColumns({}));
+              if (patch.refColumns !== undefined) setRefColumns(patch.refColumns);
+              if (patch.onUpdate !== undefined) setOnUpdate(patch.onUpdate);
+              if (patch.onDelete !== undefined) setOnDelete(patch.onDelete);
+            }}
+            localColumnNames={keyColumns}
+          />
         )}
         {draft.kind === "addCheck" && (
           <Field label="Rows must satisfy">
@@ -403,12 +389,21 @@ function ChangeForm({
           <CheckOption checked={cascade} onChange={setCascade} label="Cascade" hint="Also drops views and constraints that depend on it" />
         )}
 
-        <div>
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">SQL</span>
-          <pre className={cn("mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted px-3 py-2 font-mono text-xs", previewError && "text-muted-foreground")}>
-            {sql || previewError || "…"}
-          </pre>
-        </div>
+        <datalist id="dbunny-common-types">
+          {suggestedTypes.map((t) => (
+            <option key={t} value={t} />
+          ))}
+        </datalist>
+        <SqlPreviewBox
+          source={sql}
+          error={previewError}
+          onOpen={() => {
+            if (!sql) return;
+            requestOpenQuery(tabId, sql);
+            onClose();
+            navigate("/db/query");
+          }}
+        />
       </div>
     </Dialog>
   );

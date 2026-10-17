@@ -1,6 +1,8 @@
 //! What a SQLite file holds: the explorer, columns, structure, object definitions and
 //! autocomplete. A "schema" is a database of the connection: main, temp or an attached one.
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use rusqlite::{Connection, OptionalExtension};
 
@@ -19,26 +21,48 @@ use crate::db::{unsupported, Catalog, Engine};
 #[async_trait]
 impl Catalog for SqliteDriver {
     async fn explorer(&self) -> Result<ExplorerTree, String> {
-        let editor = self.editor().transaction_state();
-        self.tables().run(move |c| explorer(c).map_err(db_error(&editor))).await
+        let editor_state = self.editor().transaction_state();
+        let mut tree = self
+            .tables()
+            .run({
+                let editor_state = editor_state.clone();
+                move |c| explorer(c).map_err(db_error(&editor_state))
+            })
+            .await?;
+        let extra = self
+            .editor()
+            .run(move |c| objects(c, "temp").map_err(|e| e.to_string()))
+            .await?;
+        merge_temp_objects(&mut tree, extra);
+        Ok(tree)
     }
 
     async fn columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, String> {
         let (schema, table) = (schema.to_owned(), table.to_owned());
         let editor = self.editor().transaction_state();
-        self.tables().run(move |c| table_columns(c, &schema, &table).map_err(db_error(&editor))).await
+        let (rs, rt) = (schema.clone(), table.clone());
+        self.with_schema_conn(&rs, Some(&rt), move |c| {
+            table_columns(c, &schema, &table).map_err(|e| map_statement_error(&e, editor.get()))
+        })
+        .await
     }
 
     async fn relation_kind(&self, schema: &str, name: &str) -> Result<Option<String>, String> {
         let (schema, name) = (schema.to_owned(), name.to_owned());
         let editor = self.editor().transaction_state();
-        self.tables().run(move |c| relation_kind(c, &schema, &name).map_err(db_error(&editor))).await
+        let (rs, rn) = (schema.clone(), name.clone());
+        self.with_schema_conn(&rs, Some(&rn), move |c| {
+            relation_kind(c, &schema, &name).map_err(|e| map_statement_error(&e, editor.get()))
+        })
+        .await
     }
 
     async fn table_structure(&self, schema: &str, table: &str) -> Result<TableStructure, String> {
         let (schema, table) = (schema.to_owned(), table.to_owned());
         let editor = self.editor().transaction_state();
-        self.tables().run(move |c| table_structure(c, &editor, &schema, &table)).await
+        let (rs, rt) = (schema.clone(), table.clone());
+        self.with_schema_conn(&rs, Some(&rt), move |c| table_structure(c, &editor, &schema, &table))
+            .await
     }
 
     async fn completion_schema(&self) -> Result<CompletionSchema, String> {
@@ -49,7 +73,9 @@ impl Catalog for SqliteDriver {
     async fn object_definition(&self, schema: &str, name: &str, kind: &str) -> Result<ObjectDefinition, String> {
         let (schema, name, kind) = (schema.to_owned(), name.to_owned(), kind.to_owned());
         let editor = self.editor().transaction_state();
-        self.tables().run(move |c| object_definition(c, &editor, &schema, &name, &kind)).await
+        let (rs, rn) = (schema.clone(), name.clone());
+        self.with_schema_conn(&rs, Some(&rn), move |c| object_definition(c, &editor, &schema, &name, &kind))
+            .await
     }
 
     async fn function_detail(&self, _: &str, _: &str, _: &str) -> Result<FunctionDetail, String> {
@@ -66,6 +92,30 @@ impl Catalog for SqliteDriver {
 /// open (`editor`), and another program's otherwise.
 fn db_error(editor: &TransactionState) -> impl Fn(rusqlite::Error) -> String + '_ {
     move |e| map_statement_error(&e, editor.get())
+}
+
+impl SqliteDriver {
+    /// Runs catalog work on the connection that can see `schema` (`temp` may live on the editor only).
+    pub(crate) async fn with_schema_conn<T>(
+        &self,
+        schema: &str,
+        object: Option<&str>,
+        f: impl FnOnce(&mut Connection) -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String>
+    where
+        T: Send + 'static,
+    {
+        if schema == "temp" {
+            if let Some(name) = object {
+                let name = name.to_owned();
+                let on_tables = self.tables().run(move |c| object_in_db(c, "temp", &name)).await?;
+                if !on_tables {
+                    return self.editor().run(f).await;
+                }
+            }
+        }
+        self.tables().run(f).await
+    }
 }
 
 fn quote(name: &str) -> String {
@@ -87,9 +137,44 @@ struct Object {
     table: String,
 }
 
+/// Names of FTS5 virtual tables in `db`.
+fn fts5_virtual_tables(c: &Connection, db: &str) -> rusqlite::Result<HashSet<String>> {
+    let sql = format!(
+        "SELECT name FROM {}.sqlite_master WHERE type = 'table' AND sql LIKE '%USING fts5%'",
+        quote(db)
+    );
+    let mut stmt = c.prepare(&sql)?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    rows.collect()
+}
+
+/// Shadow tables FTS5 creates next to a virtual table (`_data`, `_idx`, `_content`, `_docsize`, `_config`).
+fn is_fts5_internal(name: &str, fts: &HashSet<String>) -> bool {
+    fts.iter().any(|base| {
+        name == format!("{base}_data")
+            || name == format!("{base}_idx")
+            || name == format!("{base}_content")
+            || name == format!("{base}_docsize")
+            || name == format!("{base}_config")
+    })
+}
+
+/// Whether `name` is a user object in `db`.
+pub(crate) fn object_in_db(c: &Connection, db: &str, name: &str) -> Result<bool, String> {
+    let sql = format!(
+        "SELECT count(*) FROM {}.sqlite_master WHERE name = ?1 COLLATE NOCASE \
+         AND type IN ('table', 'view', 'index', 'trigger')",
+        quote(db)
+    );
+    c.query_row(&sql, [name], |r| r.get::<_, i64>(0))
+        .map(|n| n > 0)
+        .map_err(|e| e.to_string())
+}
+
 /// The user's tables, views, indexes and triggers of `db`, by kind and name: no internal
-/// `sqlite_` objects and no automatic indexes (those have no SQL).
+/// `sqlite_` objects, no FTS5 shadow tables and no automatic indexes (those have no SQL).
 fn objects(c: &Connection, db: &str) -> rusqlite::Result<Vec<Object>> {
+    let fts = fts5_virtual_tables(c, db)?;
     let sql = format!(
         "SELECT type, name, tbl_name FROM {}.sqlite_master \
          WHERE type IN ('table', 'view', 'index', 'trigger') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' \
@@ -99,7 +184,45 @@ fn objects(c: &Connection, db: &str) -> rusqlite::Result<Vec<Object>> {
     );
     let mut stmt = c.prepare(&sql)?;
     let rows = stmt.query_map([], |r| Ok(Object { kind: r.get(0)?, name: r.get(1)?, table: r.get(2)? }))?;
-    rows.collect()
+    rows.filter(|o| o.as_ref().map(|o| !is_fts5_internal(&o.name, &fts)).unwrap_or(true)).collect()
+}
+
+fn object_detail(o: &Object, without_rowid: &[String]) -> String {
+    match o.kind.as_str() {
+        "index" | "trigger" => o.table.clone(),
+        "table" if without_rowid.contains(&o.name) => "without rowid".to_string(),
+        _ => String::new(),
+    }
+}
+
+fn objects_to_explorer(found: Vec<Object>, without_rowid: &[String]) -> Vec<ExplorerObject> {
+    found
+        .into_iter()
+        .map(|o| {
+            let detail = object_detail(&o, without_rowid);
+            ExplorerObject { name: o.name, kind: o.kind, detail, partitions: Vec::new() }
+        })
+        .collect()
+}
+
+/// TEMP is per connection; merge what only the editor's connection sees into the tree.
+fn merge_temp_objects(tree: &mut ExplorerTree, extra: Vec<Object>) {
+    if extra.is_empty() {
+        return;
+    }
+    let without_rowid = Vec::new();
+    if let Some(temp) = tree.schemas.iter_mut().find(|s| s.name == "temp") {
+        for o in extra {
+            if temp.objects.iter().any(|e| e.name == o.name && e.kind == o.kind) {
+                continue;
+            }
+            let detail = object_detail(&o, &without_rowid);
+            temp.objects.push(ExplorerObject { name: o.name, kind: o.kind, detail, partitions: Vec::new() });
+        }
+        temp.objects.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.name.cmp(&b.name)));
+        return;
+    }
+    tree.schemas.push(ExplorerSchema { name: "temp".into(), objects: objects_to_explorer(extra, &without_rowid) });
 }
 
 /// What `PRAGMA table_list` says about a table or view.
@@ -132,17 +255,7 @@ fn explorer(c: &Connection) -> rusqlite::Result<ExplorerTree> {
             continue;
         }
         let without_rowid = without_rowid_tables(c, &db)?;
-        let objects = found
-            .into_iter()
-            .map(|o| {
-                let detail = match o.kind.as_str() {
-                    "index" | "trigger" => o.table,
-                    "table" if without_rowid.contains(&o.name) => "without rowid".to_string(),
-                    _ => String::new(),
-                };
-                ExplorerObject { name: o.name, kind: o.kind, detail, partitions: Vec::new() }
-            })
-            .collect();
+        let objects = objects_to_explorer(found, &without_rowid);
         schemas.push(ExplorerSchema { name: db, objects });
     }
     Ok(ExplorerTree { schemas, default_schema: Some("main".into()) })
@@ -825,6 +938,22 @@ mod tests {
         d.tables().run(|c| c.execute_batch("CREATE TEMP TABLE scratch (x)").map_err(|e| e.to_string())).await.unwrap();
         let tree = d.explorer().await.unwrap();
         assert_eq!(objects(schema(&tree, "temp")), vec![("scratch", "table", "")], "temp with objects is listed");
+    }
+
+    #[tokio::test]
+    async fn fts5_shadow_tables_stay_out_of_the_explorer() {
+        let f = TempDb::with(
+            "CREATE VIRTUAL TABLE docs USING fts5(title, body); \
+             CREATE TABLE docs_stat (id INTEGER PRIMARY KEY)",
+        );
+        let d = open(&f).await;
+        let tree = d.explorer().await.unwrap();
+        let names: Vec<&str> = schema(&tree, "main").objects.iter().map(|o| o.name.as_str()).collect();
+        assert!(names.contains(&"docs"));
+        assert!(names.contains(&"docs_stat"), "a real table is not an FTS5 shadow");
+        for suffix in ["_data", "_idx", "_content", "_docsize", "_config"] {
+            assert!(!names.contains(&format!("docs{suffix}").as_str()), "{suffix}");
+        }
     }
 
     #[tokio::test]

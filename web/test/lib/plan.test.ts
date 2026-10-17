@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sqlitePlanRows } from "./plan.ts";
+import { sqlitePlanRows } from "../../src/lib/plan.ts";
 
 test("sqlite plan rows nest by parent, in reading order", () => {
   const rows = sqlitePlanRows([

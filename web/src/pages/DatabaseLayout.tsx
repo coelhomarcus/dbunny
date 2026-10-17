@@ -104,8 +104,9 @@ export default function DatabaseLayout() {
             {unavailableRoute ? <Navigate to="/db/query" replace /> : <Outlet />}
           </RightPanelContext.Provider>
         </main>
-        {/* Filled by the page (e.g. the query library); hidden while empty */}
-        <div ref={setRightPanel} className="flex w-80 shrink-0 overflow-hidden rounded-lg border border-border bg-card empty:hidden" />
+        {/* Filled by the page (query library, activity detail). `contents` so the
+            portaled card is the flex item and can animate like the sidebar. */}
+        <div ref={setRightPanel} className="contents empty:hidden" />
       </div>
 
       <StatusBar

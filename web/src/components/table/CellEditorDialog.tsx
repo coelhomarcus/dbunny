@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Button from "../ui/Button";
 import Dialog from "../ui/Dialog";
 import { cn } from "../../lib/cn";
 import { toEditText, toJsonEditText } from "../../lib/cellEdit";
 import { isMac } from "../../lib/platform";
+import JsonValueEditor, { type JsonValueEditorHandle } from "./JsonValueEditor";
 
 function Editor({
   column,
@@ -25,6 +26,7 @@ function Editor({
   const [text, setText] = useState(() => (json ? toJsonEditText(value) : toEditText(value)));
   const [isNull, setIsNull] = useState(value === null || value === undefined);
   const [error, setError] = useState<string | null>(null);
+  const jsonEditor = useRef<JsonValueEditorHandle>(null);
 
   function apply() {
     if (isNull) return onApply(true, "");
@@ -38,12 +40,8 @@ function Editor({
   }
 
   function format() {
-    try {
-      setText(JSON.stringify(JSON.parse(text), null, 2));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid JSON");
-    }
+    const message = jsonEditor.current?.format();
+    setError(message ?? null);
   }
 
   return (
@@ -91,31 +89,44 @@ function Editor({
         </>
       }
     >
-      <textarea
-        autoFocus
-        aria-label={`Value of ${column}`}
-        value={text}
-        placeholder={isNull ? "NULL" : json ? "{}" : "empty"}
-        spellCheck={false}
-        onChange={(e) => {
-          setText(e.target.value);
-          setIsNull(false);
-          setError(null);
-        }}
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && (e.key === "Enter" || e.key === "s")) {
-            e.preventDefault();
-            // The table saves pending changes on Cmd+S; here it only applies this value
-            e.stopPropagation();
-            apply();
-          }
-        }}
-        className={cn(
-          "block h-72 w-full resize-y rounded-lg border border-input bg-card px-3 py-2 font-mono text-xs leading-relaxed text-foreground outline-none",
-          "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/20 placeholder:italic placeholder:text-muted-foreground/70 dark:bg-muted",
-          error && "border-destructive/60",
-        )}
-      />
+      {json ? (
+        <JsonValueEditor
+          initialValue={text}
+          handleRef={jsonEditor}
+          onChange={(next) => {
+            setText(next);
+            setIsNull(false);
+            setError(null);
+          }}
+          onApply={apply}
+        />
+      ) : (
+        <textarea
+          autoFocus
+          aria-label={`Value of ${column}`}
+          value={text}
+          placeholder={isNull ? "NULL" : "empty"}
+          spellCheck={false}
+          onChange={(e) => {
+            setText(e.target.value);
+            setIsNull(false);
+            setError(null);
+          }}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && (e.key === "Enter" || e.key === "s")) {
+              e.preventDefault();
+              // The table saves pending changes on Cmd+S; here it only applies this value
+              e.stopPropagation();
+              apply();
+            }
+          }}
+          className={cn(
+            "block h-72 w-full resize-y rounded-lg border border-input bg-card px-3 py-2 font-mono text-xs leading-relaxed text-foreground outline-none",
+            "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/20 placeholder:italic placeholder:text-muted-foreground/70 dark:bg-muted",
+            error && "border-destructive/60",
+          )}
+        />
+      )}
     </Dialog>
   );
 }

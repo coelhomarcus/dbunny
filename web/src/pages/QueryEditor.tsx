@@ -18,6 +18,7 @@ import Popover from "../components/ui/Popover";
 import PlanView from "../components/query/PlanView";
 import NoticeList from "../components/query/NoticeList";
 import HistoryPanel, { type LibraryView } from "../components/query/HistoryPanel";
+import SideCard from "../components/layout/SideCard";
 import Dialog from "../components/ui/Dialog";
 import Input from "../components/ui/Input";
 import { loadSaved, removeSaved, saveQuery, savedKey, type SavedQuery } from "../lib/savedQueries";
@@ -28,6 +29,7 @@ import { isMac } from "../lib/platform";
 import { getSettings } from "../lib/settings";
 import { notAvailableFor } from "../lib/engines";
 import { useCapabilities } from "../hooks/useCapabilities";
+import { bindOpenQuery } from "../lib/openQuery";
 
 const MOD = isMac ? "⌘" : "Ctrl+";
 const SHIFT = isMac ? "⇧" : "Shift+";
@@ -275,22 +277,27 @@ function QueryEditorPanel() {
     setView(payload.view ?? "results");
   }
 
-  function addTab(options: { label?: string; savedId?: string } = {}) {
+  function addTab(options: { label?: string; savedId?: string; sql?: string } = {}) {
     saveCurrentSql();
     const id = saved.nextId++;
     const label = options.label ?? `Query ${id}`;
-    saved.payloads.set(id, { sql: "", result: null, error: null });
+    const sql = options.sql ?? "";
+    saved.payloads.set(id, { sql, result: null, error: null });
     const newMetas = [...tabMetas, { id, label, savedId: options.savedId }];
     setTabMetas(newMetas);
     saved.tabMetas = newMetas;
     setActiveId(id);
     saved.activeId = id;
-    editorRef.current?.setValue("");
+    editorRef.current?.setValue(sql);
     setResult(null);
     setError(null);
     setPlan(null);
     setView("results");
   }
+
+  const openSql = useRef(addTab);
+  openSql.current = addTab;
+  useEffect(() => bindOpenQuery(tabId, (sql) => openSql.current({ sql })), [tabId]);
 
   // Read from the editor's change handler, which is created once
   const latest = useRef({ tabMetas, activeId, savedQueries });
@@ -837,30 +844,31 @@ function QueryEditorPanel() {
           />
         </div>
       </div>
-      {/* In the layout's side card, so it's a panel of its own */}
-      {historyOpen && renderSidePanel(
-        <HistoryPanel
-          view={libraryView}
-          onViewChange={setLibraryView}
-          entries={history}
-          saved={savedQueries}
-          onOpen={(sql) => openFromHistory(sql)}
-          onOpenSaved={(query) => openFromHistory(query.sql, { label: query.name, savedId: query.id })}
-          onRemoveSaved={(id) => {
-            if (!savedStorageKey) return;
-            setSavedQueries(removeSaved(savedStorageKey, id));
-            // Tabs keep their SQL, just no longer linked to the deleted query
-            const newMetas = tabMetas.map((t) => (t.savedId === id ? { ...t, savedId: undefined } : t));
-            setTabMetas(newMetas);
-            saved.tabMetas = newMetas;
-          }}
-          onRemove={(id) => historyStorageKey && setHistory(removeFromHistory(historyStorageKey, id))}
-          onClear={() => {
-            if (historyStorageKey) clearHistory(historyStorageKey);
-            setHistory([]);
-          }}
-          onClose={() => setHistoryOpen(false)}
-        />
+      {renderSidePanel(
+        <SideCard open={historyOpen} widthClass="w-80" label="Query library">
+          <HistoryPanel
+            view={libraryView}
+            onViewChange={setLibraryView}
+            entries={history}
+            saved={savedQueries}
+            onOpen={(sql) => openFromHistory(sql)}
+            onOpenSaved={(query) => openFromHistory(query.sql, { label: query.name, savedId: query.id })}
+            onRemoveSaved={(id) => {
+              if (!savedStorageKey) return;
+              setSavedQueries(removeSaved(savedStorageKey, id));
+              // Tabs keep their SQL, just no longer linked to the deleted query
+              const newMetas = tabMetas.map((t) => (t.savedId === id ? { ...t, savedId: undefined } : t));
+              setTabMetas(newMetas);
+              saved.tabMetas = newMetas;
+            }}
+            onRemove={(id) => historyStorageKey && setHistory(removeFromHistory(historyStorageKey, id))}
+            onClear={() => {
+              if (historyStorageKey) clearHistory(historyStorageKey);
+              setHistory([]);
+            }}
+            onClose={() => setHistoryOpen(false)}
+          />
+        </SideCard>,
       )}
       <Dialog
         open={saveName !== null}

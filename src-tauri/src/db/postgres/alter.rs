@@ -9,7 +9,8 @@ use super::data::db_message;
 use super::objects::{drop_sql, duplicate, relation, rename_sql, run, truncate_sql};
 use super::PostgresDriver;
 use crate::db::sql::filter::quote_ident;
-use crate::db::model::{NewColumn, StructureChange};
+use crate::db::model::{ColumnGeneration, NewColumn, NewTable, StructureChange};
+use crate::db::{unsupported, Engine};
 use crate::db::SchemaEditor;
 
 /// Table privileges that can be granted (MAINTAIN only exists from PostgreSQL 17 on).
@@ -106,15 +107,22 @@ fn change_sql(schema: &str, table: &str, change: &StructureChange) -> Result<(Ve
     let target = format!("{}.{}", quote_ident(schema), quote_ident(table));
     let alter = format!("ALTER TABLE {target}");
     let stmts = match change {
-        StructureChange::AddColumn { name: column, data_type, nullable, default, comment } => {
+        StructureChange::AddColumn { name: column, data_type, nullable, default, comment, unique, check, generation, generated } => {
             let column = name("column name", column)?;
+            let spec = NewColumn {
+                name: column.clone(),
+                data_type: data_type.clone(),
+                nullable: *nullable,
+                primary_key: false,
+                default: default.clone(),
+                unique: *unique,
+                check: check.clone(),
+                comment: None,
+                generation: *generation,
+                generated: generated.clone(),
+            };
             let mut add = format!("{alter} ADD COLUMN {column} {}", fragment("type", data_type)?);
-            if let Some(default) = default.as_deref().filter(|d| !d.trim().is_empty()) {
-                add += &format!(" DEFAULT {}", fragment("default", default)?);
-            }
-            if !nullable {
-                add += " NOT NULL";
-            }
+            append_column_tail(&mut add, &spec, false)?;
             let mut stmts = vec![add];
             if let Some(comment) = comment.as_deref().filter(|c| !c.trim().is_empty()) {
                 stmts.push(format!("COMMENT ON COLUMN {target}.{column} IS {}", literal(comment)));
@@ -236,7 +244,11 @@ async fn apply(client: &tokio_postgres::Client, schema: &str, table: &str, chang
 }
 
 /// `CREATE TABLE` from the table builder. Several primary key columns make a composite key.
-fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
+fn create_table_sql(schema: &str, table: &str, spec: &NewTable) -> Result<String, String> {
+    let columns = &spec.columns;
+    if spec.without_rowid || spec.strict {
+        return Err(unsupported(Engine::Postgres, "WITHOUT ROWID and STRICT"));
+    }
     let target = format!("{}.{}", quote_ident(schema), name("table name", table)?);
     if columns.is_empty() {
         return Err("Add at least one column".into());
@@ -250,20 +262,87 @@ fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<
         }
         seen.push(col.clone());
         let mut line = format!("{col} {}", fragment("type", &column.data_type)?);
-        if let Some(default) = column.default.as_deref().filter(|d| !d.trim().is_empty()) {
-            line += &format!(" DEFAULT {}", fragment("default", default)?);
-        }
-        // A primary key is NOT NULL anyway
-        if !column.nullable && !column.primary_key {
-            line += " NOT NULL";
-        }
+        append_column_tail(&mut line, column, true)?;
         lines.push(line);
     }
     let keys: Vec<String> = columns.iter().filter(|c| c.primary_key).map(|c| quote_ident(c.name.trim())).collect();
     if !keys.is_empty() {
         lines.push(format!("PRIMARY KEY ({})", keys.join(", ")));
     }
-    Ok(format!("CREATE TABLE {target} (\n    {}\n)", lines.join(",\n    ")))
+    for key in &spec.foreign_keys {
+        if key.columns.len() != key.ref_columns.len() {
+            return Err("Pick as many referenced columns as columns".into());
+        }
+        lines.push(format!(
+            "FOREIGN KEY ({}) REFERENCES {}.{} ({}) ON UPDATE {} ON DELETE {}",
+            column_list("column", &key.columns)?,
+            name("referenced schema", &key.ref_schema)?,
+            name("referenced table", &key.ref_table)?,
+            column_list("referenced column", &key.ref_columns)?,
+            referential_action("update", &key.on_update)?,
+            referential_action("delete", &key.on_delete)?,
+        ));
+    }
+    let logged = if spec.unlogged { "UNLOGGED " } else { "" };
+    let mut sql = format!("CREATE {logged}TABLE {target} (\n    {}\n)", lines.join(",\n    "));
+    if let Some(partition) = &spec.partition {
+        let method = match partition.method.trim().to_uppercase().as_str() {
+            "RANGE" => "RANGE",
+            "LIST" => "LIST",
+            "HASH" => "HASH",
+            other => return Err(format!("Unknown partition method \"{other}\"")),
+        };
+        sql += &format!(" PARTITION BY {method} ({})", fragment("partition key", &partition.expression)?);
+    }
+    for column in columns {
+        let Some(comment) = column.comment.as_deref().filter(|c| !c.trim().is_empty()) else { continue };
+        let col = name("column name", &column.name)?;
+        sql += &format!(";\nCOMMENT ON COLUMN {target}.{col} IS {}", literal(comment));
+    }
+    Ok(sql)
+}
+
+/// Default, identity or `GENERATED`, then `NOT NULL`, `UNIQUE` and `CHECK`.
+/// A primary key of a new table is already `NOT NULL`, so that word is left off there.
+fn append_column_tail(line: &mut String, column: &NewColumn, skip_not_null_on_primary_key: bool) -> Result<(), String> {
+    let has_default = column.default.as_deref().is_some_and(|d| !d.trim().is_empty());
+    match column.generation {
+        ColumnGeneration::None => {
+            if has_default {
+                *line += &format!(" DEFAULT {}", fragment("default", column.default.as_deref().unwrap_or(""))?);
+            }
+        }
+        ColumnGeneration::IdentityByDefault | ColumnGeneration::IdentityAlways => {
+            if has_default {
+                return Err("An identity column can't have a default".into());
+            }
+            let kind = if column.generation == ColumnGeneration::IdentityAlways { "ALWAYS" } else { "BY DEFAULT" };
+            *line += &format!(" GENERATED {kind} AS IDENTITY");
+        }
+        ColumnGeneration::Autoincrement => return Err(unsupported(Engine::Postgres, "AUTOINCREMENT")),
+        ColumnGeneration::Generated => {
+            if has_default {
+                return Err("A generated column can't have a default".into());
+            }
+            let expr = column.generated.as_deref().filter(|e| !e.trim().is_empty()).ok_or("The generated expression can't be empty")?;
+            *line += &format!(" GENERATED ALWAYS AS ({}) STORED", fragment("generated expression", expr)?);
+        }
+    }
+    if !column.nullable && !(skip_not_null_on_primary_key && column.primary_key) {
+        *line += " NOT NULL";
+    }
+    column_flags(line, column.unique, &column.check)
+}
+
+/// `UNIQUE` and `CHECK (...)` on a column definition. An empty check is left off.
+fn column_flags(line: &mut String, unique: bool, check: &Option<String>) -> Result<(), String> {
+    if unique {
+        *line += " UNIQUE";
+    }
+    if let Some(check) = check.as_deref().filter(|c| !c.trim().is_empty()) {
+        *line += &format!(" CHECK ({})", fragment("check", check)?);
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -279,12 +358,12 @@ impl SchemaEditor for PostgresDriver {
         apply(&client, schema, table, &change).await
     }
 
-    async fn preview_create_table(&self, schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
-        Ok(create_table_sql(schema, table, columns)? + ";")
+    async fn preview_create_table(&self, schema: &str, table: &str, spec: &NewTable) -> Result<String, String> {
+        Ok(create_table_sql(schema, table, spec)? + ";")
     }
 
-    async fn create_table(&self, schema: &str, table: &str, columns: Vec<NewColumn>) -> Result<(), String> {
-        let sql = create_table_sql(schema, table, &columns)?;
+    async fn create_table(&self, schema: &str, table: &str, spec: NewTable) -> Result<(), String> {
+        let sql = create_table_sql(schema, table, &spec)?;
         let client = self.client().await?;
         client.batch_execute(&sql).await.map_err(|e| db_message(&e))
     }
@@ -314,6 +393,7 @@ impl SchemaEditor for PostgresDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::model::{NewForeignKey, NewPartition};
 
     fn sql(change: StructureChange) -> String {
         change_sql("public", "users", &change).map(|(s, _)| s.join("; ")).unwrap_or_else(|e| format!("ERR {e}"))
@@ -322,7 +402,7 @@ mod tests {
     #[test]
     fn column_changes_quote_names() {
         assert_eq!(
-            sql(StructureChange::AddColumn { name: "full name".into(), data_type: "varchar(80)".into(), nullable: false, default: Some("'x'".into()), comment: Some("it's".into()) }),
+            sql(StructureChange::AddColumn { name: "full name".into(), data_type: "varchar(80)".into(), nullable: false, default: Some("'x'".into()), comment: Some("it's".into()), unique: false, check: None, generation: ColumnGeneration::None, generated: None }),
             "ALTER TABLE \"public\".\"users\" ADD COLUMN \"full name\" varchar(80) DEFAULT 'x' NOT NULL; COMMENT ON COLUMN \"public\".\"users\".\"full name\" IS 'it''s'"
         );
         assert_eq!(
@@ -332,17 +412,51 @@ mod tests {
         assert_eq!(sql(StructureChange::SetNullable { name: "x".into(), nullable: true }), "ALTER TABLE \"public\".\"users\" ALTER COLUMN \"x\" DROP NOT NULL");
         assert_eq!(sql(StructureChange::SetDefault { name: "x".into(), default: Some(" ".into()) }), "ALTER TABLE \"public\".\"users\" ALTER COLUMN \"x\" DROP DEFAULT");
         assert_eq!(sql(StructureChange::SetComment { name: "x".into(), comment: None }), "COMMENT ON COLUMN \"public\".\"users\".\"x\" IS NULL");
+        assert_eq!(
+            sql(StructureChange::AddColumn { name: "amount".into(), data_type: "numeric(12,2)".into(), nullable: false, default: Some("0".into()), comment: None, unique: true, check: Some("amount > 0".into()), generation: ColumnGeneration::None, generated: None }),
+            "ALTER TABLE \"public\".\"users\" ADD COLUMN \"amount\" numeric(12,2) DEFAULT 0 NOT NULL UNIQUE CHECK (amount > 0)"
+        );
+        assert_eq!(
+            sql(StructureChange::AddColumn {
+                name: "id".into(),
+                data_type: "bigint".into(),
+                nullable: false,
+                default: None,
+                comment: None,
+                unique: false,
+                check: None,
+                generation: ColumnGeneration::IdentityAlways,
+                generated: None,
+            }),
+            "ALTER TABLE \"public\".\"users\" ADD COLUMN \"id\" bigint GENERATED ALWAYS AS IDENTITY NOT NULL"
+        );
     }
 
     #[test]
     fn fragments_with_semicolons_and_empty_names_are_refused() {
-        assert!(sql(StructureChange::AddColumn { name: "x".into(), data_type: "int; DROP TABLE users".into(), nullable: true, default: None, comment: None }).starts_with("ERR"));
+        assert!(sql(StructureChange::AddColumn { name: "x".into(), data_type: "int; DROP TABLE users".into(), nullable: true, default: None, comment: None, unique: false, check: None, generation: ColumnGeneration::None, generated: None }).starts_with("ERR"));
+        assert!(sql(StructureChange::AddColumn { name: "x".into(), data_type: "int".into(), nullable: true, default: None, comment: None, unique: false, check: Some("x > 0; --".into()), generation: ColumnGeneration::None, generated: None }).starts_with("ERR"));
         assert!(sql(StructureChange::SetDefault { name: "x".into(), default: Some("1; --".into()) }).starts_with("ERR"));
         assert!(sql(StructureChange::RenameColumn { name: "x".into(), new_name: " ".into() }).starts_with("ERR"));
     }
 
+    fn spec(columns: Vec<NewColumn>) -> NewTable {
+        NewTable { columns, ..NewTable::default() }
+    }
+
     fn new_column(name: &str, data_type: &str, nullable: bool, primary_key: bool) -> NewColumn {
-        NewColumn { name: name.into(), data_type: data_type.into(), nullable, primary_key, default: None }
+        NewColumn {
+            name: name.into(),
+            data_type: data_type.into(),
+            nullable,
+            primary_key,
+            default: None,
+            unique: false,
+            check: None,
+            comment: None,
+            generation: ColumnGeneration::None,
+            generated: None,
+        }
     }
 
     #[test]
@@ -350,22 +464,76 @@ mod tests {
         let sql = create_table_sql(
             "public",
             "order items",
-            &[
+            &spec(vec![
                 new_column("order_id", "bigint", false, true),
                 new_column("line", "int", false, true),
                 NewColumn { default: Some("now()".into()), ..new_column("added", "timestamptz", false, false) },
                 new_column("note", "text", true, false),
-            ],
+            ]),
         )
         .unwrap();
         assert_eq!(
             sql,
             "CREATE TABLE \"public\".\"order items\" (\n    \"order_id\" bigint,\n    \"line\" int,\n    \"added\" timestamptz DEFAULT now() NOT NULL,\n    \"note\" text,\n    PRIMARY KEY (\"order_id\", \"line\")\n)"
         );
-        assert!(create_table_sql("public", "t", &[]).is_err());
-        assert!(create_table_sql("public", " ", &[new_column("a", "int", true, false)]).is_err());
-        assert!(create_table_sql("public", "t", &[new_column("a", "int", true, false), new_column("a", "text", true, false)]).unwrap_err().contains("twice"));
-        assert!(create_table_sql("public", "t", &[new_column("a", "int); DROP TABLE x; --", true, false)]).is_err());
+        assert!(create_table_sql("public", "t", &spec(vec![])).is_err());
+        assert!(create_table_sql("public", " ", &spec(vec![new_column("a", "int", true, false)])).is_err());
+        assert!(create_table_sql("public", "t", &spec(vec![new_column("a", "int", true, false), new_column("a", "text", true, false)])).unwrap_err().contains("twice"));
+        assert!(create_table_sql("public", "t", &spec(vec![new_column("a", "int); DROP TABLE x; --", true, false)])).is_err());
+
+        let flagged = create_table_sql(
+            "public",
+            "prices",
+            &spec(vec![NewColumn { unique: true, check: Some("amount > 0".into()), comment: Some("unit price".into()), ..new_column("amount", "numeric(12,2)", false, false) }]),
+        )
+        .unwrap();
+        assert_eq!(
+            flagged,
+            "CREATE TABLE \"public\".\"prices\" (\n    \"amount\" numeric(12,2) NOT NULL UNIQUE CHECK (amount > 0)\n);\nCOMMENT ON COLUMN \"public\".\"prices\".\"amount\" IS 'unit price'"
+        );
+        assert!(create_table_sql("public", "t", &spec(vec![NewColumn { check: Some("a > 0; --".into()), ..new_column("a", "int", true, false) }])).is_err());
+
+        let identity = create_table_sql("public", "people", &spec(vec![NewColumn { generation: ColumnGeneration::IdentityByDefault, ..new_column("id", "bigint", false, true) }])).unwrap();
+        assert_eq!(identity, "CREATE TABLE \"public\".\"people\" (\n    \"id\" bigint GENERATED BY DEFAULT AS IDENTITY,\n    PRIMARY KEY (\"id\")\n)");
+        let always = create_table_sql("public", "people", &spec(vec![NewColumn { generation: ColumnGeneration::IdentityAlways, ..new_column("id", "bigint", false, true) }])).unwrap();
+        assert!(always.contains("GENERATED ALWAYS AS IDENTITY"), "{always}");
+        let generated = create_table_sql(
+            "public",
+            "prices",
+            &spec(vec![
+                new_column("amount", "numeric", false, false),
+                NewColumn { generation: ColumnGeneration::Generated, generated: Some("amount * 2".into()), ..new_column("doubled", "numeric", false, false) },
+            ]),
+        )
+        .unwrap();
+        assert!(generated.contains("\"doubled\" numeric GENERATED ALWAYS AS (amount * 2) STORED NOT NULL"), "{generated}");
+        assert!(create_table_sql("public", "t", &spec(vec![NewColumn { generation: ColumnGeneration::Generated, generated: Some("a; --".into()), ..new_column("a", "int", true, false) }])).is_err());
+        assert!(create_table_sql("public", "t", &spec(vec![NewColumn { generation: ColumnGeneration::IdentityByDefault, default: Some("1".into()), ..new_column("id", "int", false, true) }])).is_err());
+    }
+
+    #[test]
+    fn create_table_writes_a_foreign_key_and_table_options() {
+        let table = NewTable {
+            columns: vec![new_column("user_id", "bigint", true, false), new_column("created_at", "timestamptz", false, false)],
+            foreign_keys: vec![NewForeignKey {
+                columns: vec!["user_id".into()],
+                ref_schema: "public".into(),
+                ref_table: "users".into(),
+                ref_columns: vec!["id".into()],
+                on_update: "cascade".into(),
+                on_delete: "set null".into(),
+            }],
+            unlogged: true,
+            partition: Some(NewPartition { method: "range".into(), expression: "created_at".into() }),
+            ..NewTable::default()
+        };
+        assert_eq!(
+            create_table_sql("public", "events", &table).unwrap(),
+            "CREATE UNLOGGED TABLE \"public\".\"events\" (\n    \"user_id\" bigint,\n    \"created_at\" timestamptz NOT NULL,\n    FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\" (\"id\") ON UPDATE CASCADE ON DELETE SET NULL\n) PARTITION BY RANGE (created_at)"
+        );
+        assert!(create_table_sql("public", "t", &NewTable { without_rowid: true, ..spec(vec![new_column("a", "int", false, true)]) }).unwrap_err().contains("WITHOUT ROWID"));
+        assert!(create_table_sql("public", "t", &NewTable { partition: Some(NewPartition { method: "tree".into(), expression: "a".into() }), ..spec(vec![new_column("a", "int", true, false)]) }).is_err());
+        assert!(create_table_sql("public", "t", &NewTable { partition: Some(NewPartition { method: "list".into(), expression: "a; --".into() }), ..spec(vec![new_column("a", "int", true, false)]) }).is_err());
     }
 
     #[test]
@@ -468,7 +636,7 @@ mod server_tests {
             async move { apply(client, s, "t", &change).await }
         };
 
-        run(StructureChange::AddColumn { name: "score".into(), data_type: "numeric(5,2)".into(), nullable: false, default: Some("0".into()), comment: Some("Points".into()) }).await.unwrap();
+        run(StructureChange::AddColumn { name: "score".into(), data_type: "numeric(5,2)".into(), nullable: false, default: Some("0".into()), comment: Some("Points".into()), unique: false, check: None, generation: ColumnGeneration::None, generated: None }).await.unwrap();
         run(StructureChange::RenameColumn { name: "score".into(), new_name: "points".into() }).await.unwrap();
         run(StructureChange::SetDefault { name: "points".into(), default: Some("10".into()) }).await.unwrap();
         run(StructureChange::SetNullable { name: "points".into(), nullable: true }).await.unwrap();
@@ -567,11 +735,14 @@ mod server_tests {
         let sql = create_table_sql(
             s,
             "people",
-            &[
-                NewColumn { name: "id".into(), data_type: "bigserial".into(), nullable: false, primary_key: true, default: None },
-                NewColumn { name: "name".into(), data_type: "text".into(), nullable: false, primary_key: false, default: None },
-                NewColumn { name: "joined".into(), data_type: "date".into(), nullable: true, primary_key: false, default: Some("current_date".into()) },
-            ],
+            &NewTable {
+                columns: vec![
+                    NewColumn { name: "id".into(), data_type: "bigserial".into(), nullable: false, primary_key: true, default: None, unique: false, check: None, comment: None, generation: ColumnGeneration::None, generated: None },
+                    NewColumn { name: "name".into(), data_type: "text".into(), nullable: false, primary_key: false, default: None, unique: false, check: None, comment: None, generation: ColumnGeneration::None, generated: None },
+                    NewColumn { name: "joined".into(), data_type: "date".into(), nullable: true, primary_key: false, default: Some("current_date".into()), unique: false, check: None, comment: None, generation: ColumnGeneration::None, generated: None },
+                ],
+                ..NewTable::default()
+            },
         )
         .unwrap();
         client.batch_execute(&sql).await.unwrap();

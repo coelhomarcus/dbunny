@@ -28,7 +28,6 @@ interface TableViewHeaderProps {
   onDelete: () => void;
   hasPendingChanges: boolean;
   dirtyRowCount: number;
-  saveError: string | null;
   saving: boolean;
   onSave: () => void;
   onDiscard: () => void;
@@ -47,7 +46,7 @@ interface TableViewHeaderProps {
 export default function TableViewHeader({
   schema, table, relationType, hasNoPk, readOnly: connectionReadOnly,
   selectedCount, deleting, onDelete,
-  hasPendingChanges, dirtyRowCount, saveError, saving, onSave, onDiscard, onReviewSql,
+  hasPendingChanges, dirtyRowCount, saving, onSave, onDiscard, onReviewSql,
   onInsertRow, filterCount, filtersOpen, onToggleFilters,
 }: TableViewHeaderProps) {
   const isView = relationType === "view" || relationType === "matview";
@@ -84,7 +83,6 @@ export default function TableViewHeader({
       <div className="flex items-center gap-1.5">
         {hasPendingChanges ? (
           <>
-            {saveError && <span className="max-w-64 truncate text-xs text-destructive-foreground">{saveError}</span>}
             <span className="mr-1 text-xs text-muted-foreground tabular-nums">
               {dirtyRowCount} row{dirtyRowCount > 1 ? "s" : ""} changed
             </span>

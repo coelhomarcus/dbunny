@@ -237,6 +237,9 @@ mod tests {
         let fks = |c: &mut rusqlite::Connection| c.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string());
         assert_eq!(d.tables().run(fks).await.unwrap(), 1);
         assert_eq!(d.editor().run(fks).await.unwrap(), 1);
+        let tree = d.catalog().explorer().await.unwrap();
+        let temp = tree.schemas.iter().find(|s| s.name == "temp").expect("temp schema");
+        assert!(temp.objects.iter().any(|o| o.name == "only_here" && o.kind == "table"));
     }
 
     #[tokio::test]

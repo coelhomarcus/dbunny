@@ -9,6 +9,9 @@ interface SortableColumnHeaderProps {
   sorted: false | "asc" | "desc";
   /** Position in a multi-column sort (0 = first), or -1 when it's the only sort key. */
   sortIndex: number;
+  /** The whole column is selected. */
+  selected: boolean;
+  onSelect: () => void;
   onToggleSort: ((event: unknown) => void);
   onResizeStart: (e: React.MouseEvent) => void;
 }
@@ -21,7 +24,7 @@ function ColumnIcon({ column }: { column: ColumnInfo }) {
 }
 
 export default function SortableColumnHeader({
-  id, columnInfo, sorted, sortIndex, onToggleSort, onResizeStart,
+  id, columnInfo, sorted, sortIndex, selected, onSelect, onToggleSort, onResizeStart,
 }: SortableColumnHeaderProps) {
   const isActive = sorted !== false;
   const facts = columnInfo ? columnFacts(columnInfo) : [];
@@ -29,9 +32,9 @@ export default function SortableColumnHeader({
   const label = (
     <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
       {columnInfo && <ColumnIcon column={columnInfo} />}
-      <span className="font-semibold truncate text-foreground">{id}</span>
+      <span className={`truncate font-semibold ${selected ? "text-zinc-950" : "text-foreground"}`}>{id}</span>
       {columnInfo?.typeName && (
-        <span className="text-muted-foreground shrink-0 font-normal text-xs">
+        <span className={`shrink-0 text-[11px] font-normal ${selected ? "text-zinc-800" : "text-muted-foreground"}`}>
           {shortType(columnInfo.typeName)}
         </span>
       )}
@@ -40,9 +43,14 @@ export default function SortableColumnHeader({
 
   return (
     <th
-      onClick={onToggleSort}
-      className={`relative text-left px-3 py-2.5 border-b border-r border-border cursor-pointer hover:bg-card-header-active select-none group text-sm ${
-        isActive ? "bg-card-header-active" : "bg-card-header"
+      data-grid-column={id}
+      onClick={onSelect}
+      className={`relative cursor-pointer select-none border-b border-r px-3 py-1.5 text-left text-xs ${
+        selected
+          ? "border-warning bg-warning shadow-[inset_2px_0_0_var(--warning),inset_-2px_0_0_var(--warning),inset_0_2px_0_var(--warning)]"
+          : isActive
+            ? "border-border bg-card-header-active"
+            : "border-border bg-card-header"
       }`}
     >
       <span className="flex items-center justify-between gap-2 overflow-hidden">
@@ -53,11 +61,17 @@ export default function SortableColumnHeader({
         ) : (
           label
         )}
-        <span className={`flex shrink-0 items-center gap-0.5 transition-colors ${
-          isActive
-            ? "text-info-foreground"
-            : "text-muted-foreground/70 group-hover:text-muted-foreground"
-        }`}>
+        <button
+          type="button"
+          aria-label={sorted ? `Sort ${id}, ${sorted === "asc" ? "ascending" : "descending"}` : `Sort by ${id}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleSort(e);
+          }}
+          className={`flex shrink-0 cursor-pointer items-center gap-0.5 rounded px-0.5 transition-colors ${
+            selected ? "text-zinc-950" : isActive ? "text-info-foreground" : "text-muted-foreground/70 hover:text-muted-foreground"
+          }`}
+        >
           {sorted === "asc" ? (
             <ChevronUp size={13} />
           ) : sorted === "desc" ? (
@@ -66,7 +80,7 @@ export default function SortableColumnHeader({
             <ChevronsUpDown size={13} />
           )}
           {sorted && sortIndex >= 0 && <span className="text-[10px] font-semibold tabular-nums">{sortIndex + 1}</span>}
-        </span>
+        </button>
       </span>
       <div
         onMouseDown={onResizeStart}
