@@ -6,6 +6,7 @@ import { useApi } from "../contexts/useConnection";
 import SqlViewer from "../components/SqlViewer";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { writeClipboardText } from "../lib/clipboard";
+import { useNotify } from "../contexts/NoticeProvider";
 
 /** A sequence, type, index or trigger: a few facts and its DDL. */
 export default function ObjectView({
@@ -18,6 +19,7 @@ export default function ObjectView({
   kind: "sequence" | "type" | "index" | "trigger";
 }) {
   const api = useApi();
+  const notify = useNotify();
   const key = `${kind}:${schema}.${name}`;
   const [result, setResult] = useState<{ key: string; definition?: ObjectDefinition; error?: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -29,11 +31,16 @@ export default function ObjectView({
     api
       .getObjectDefinition(schema, name, kind)
       .then((definition) => !stale && setResult({ key: k, definition }))
-      .catch((e) => !stale && setResult({ key: k, error: typeof e === "string" ? e : String(e) }));
+      .catch((e) => {
+        if (stale) return;
+        const text = typeof e === "string" ? e : String(e);
+        notify({ tone: "error", text });
+        setResult({ key: k, error: text });
+      });
     return () => {
       stale = true;
     };
-  }, [schema, name, kind, api]);
+  }, [schema, name, kind, api, notify]);
 
   const loading = !result || result.key !== key;
   const definition = loading ? undefined : result.definition;
@@ -61,7 +68,7 @@ export default function ObjectView({
       {loading ? (
         <DetailSkeleton />
       ) : !definition ? (
-        <div className="flex flex-1 select-text items-center justify-center p-4 text-sm text-destructive-foreground">{result.error}</div>
+        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">Couldn't read this object.</div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="shrink-0 border-b border-border px-4 py-4">

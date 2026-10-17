@@ -16,6 +16,7 @@ import { Download, LocateFixed, Minus, Plus, Search, Waypoints } from "lucide-re
 import "@xyflow/react/dist/style.css";
 import type { Diagram } from "@/types";
 import { useDocuments } from "../../contexts/DocumentsContext";
+import { useNotify } from "../../contexts/NoticeProvider";
 import { useApi } from "../../contexts/useConnection";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { buildDiagramGraph, type DiagramGraphEdge, type DiagramGraphNode } from "../../lib/diagramGraph";
@@ -83,6 +84,7 @@ function DiagramCanvas({ schema }: { schema: string }) {
   const api = useApi();
   const capabilities = useCapabilities();
   const { openDocument } = useDocuments();
+  const notify = useNotify();
   const dark = useDark();
   const positions = useRef(new Map<string, { x: number; y: number }>());
   const fittedSchema = useRef<string | null>(null);
@@ -91,7 +93,6 @@ function DiagramCanvas({ schema }: { schema: string }) {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [hideUnrelated, setHideUnrelated] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [nodes, setNodes, onNodesChangeBase] = useNodesState<Node<TableNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -120,13 +121,14 @@ function DiagramCanvas({ schema }: { schema: string }) {
       })
       .catch((e) => {
         if (stale) return;
-        setLoadError(typeof e === "string" ? e : "Couldn't read the schema");
+        notify({ tone: "error", text: typeof e === "string" ? e : "Couldn't read the schema" });
+        setLoadError("Couldn't read the schema");
         setLoading(false);
       });
     return () => {
       stale = true;
     };
-  }, [api, schema, capabilities.schemas]);
+  }, [api, schema, capabilities.schemas, notify]);
 
   useEffect(() => {
     if (!graph) return;
@@ -176,7 +178,6 @@ function DiagramCanvas({ schema }: { schema: string }) {
   async function exportPng() {
     if (nodes.length === 0) return;
     setExporting(true);
-    setExportError(null);
     try {
       const { save } = await import("@tauri-apps/plugin-dialog");
       const { writeFile } = await import("@tauri-apps/plugin-fs");
@@ -208,7 +209,7 @@ function DiagramCanvas({ schema }: { schema: string }) {
       const path = await save({ defaultPath: `${schema}.png`, filters: [{ name: "PNG", extensions: ["png"] }] });
       if (path) await writeFile(path, bytes);
     } catch (e) {
-      setExportError(failure(e));
+      notify({ tone: "error", text: failure(e) });
     } finally {
       setExporting(false);
     }
@@ -249,12 +250,11 @@ function DiagramCanvas({ schema }: { schema: string }) {
           <Download /> {exporting ? "Exporting…" : "Export"}
         </Button>
       </header>
-      {exportError && <p className="shrink-0 select-text px-3 py-1 text-xs text-destructive-foreground">{exportError}</p>}
       <div className="min-h-0 flex-1 bg-card">
         {loading ? (
           <p className="flex h-full items-center justify-center text-sm text-muted-foreground">Reading the schema…</p>
         ) : loadError ? (
-          <p className="flex h-full select-text items-center justify-center px-6 text-center text-sm text-destructive-foreground">{loadError}</p>
+          <p className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">{loadError}</p>
         ) : empty ? (
           <p className="flex h-full items-center justify-center text-sm text-muted-foreground">This schema has no tables.</p>
         ) : (

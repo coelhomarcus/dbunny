@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Columns3, KeyRound, ListTree, PenLine, ShieldCheck, Trash2 } from "lucide-react";
 import type { ColumnGeneration, ColumnInfo, CompletionRelation, StructureChange } from "@/types";
 import { useApi } from "../../contexts/useConnection";
+import { useNotify } from "../../contexts/NoticeProvider";
 import { useTab } from "../../contexts/workspace";
 import { requestOpenQuery } from "../../lib/openQuery";
 import { cn } from "../../lib/cn";
@@ -111,7 +112,7 @@ function ChangeForm({
   const [sql, setSql] = useState("");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const notify = useNotify();
 
   // The tables a foreign key can point at, with their columns
   useEffect(() => {
@@ -201,13 +202,12 @@ function ChangeForm({
 
   async function run() {
     setBusy(true);
-    setError(null);
     try {
       await api.applyStructureChange(schema, table, change);
       onDone();
       onClose();
     } catch (err) {
-      setError(typeof err === "string" ? err : "The change failed");
+      notify({ tone: "error", text: typeof err === "string" ? err : "The change failed" });
       setBusy(false);
     }
   }
@@ -258,7 +258,6 @@ function ChangeForm({
       className="max-w-lg"
       footer={
         <>
-          {error && <p className="mr-auto min-w-0 flex-1 select-text break-words text-xs text-destructive-foreground">{error}</p>}
           <Button variant="neutral" size="sm" onClick={onClose} autoFocus={destructive}>
             Cancel
           </Button>

@@ -20,7 +20,7 @@ export default function NoticeToast({ notice, onDismiss }: { notice: Notice | nu
     <div
       role="status"
       className={cn(
-        "fixed bottom-10 right-4 z-50 flex w-96 max-w-[calc(100vw-2rem)] items-start gap-2.5 rounded-xl border bg-popover p-3.5 text-popover-foreground shadow-xl animate-dialog-in",
+        "fixed bottom-10 right-4 z-[60] flex w-96 max-w-[calc(100vw-2rem)] items-start gap-2.5 rounded-xl border bg-popover p-3.5 text-popover-foreground shadow-xl animate-dialog-in",
         error ? "border-destructive/40" : "border-border",
       )}
     >

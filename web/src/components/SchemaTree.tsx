@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, type ComponentType, type ReactNode } from "react";
 import { useDocuments } from "../contexts/DocumentsContext";
+import { useNotify } from "../contexts/NoticeProvider";
 import { useTab } from "../contexts/workspace";
 import type { DataIcon } from "../lib/documents";
 import { bindSchemaRefresh } from "../lib/schemaRefresh";
@@ -195,7 +196,7 @@ export default function SchemaTree() {
   const [schemaMenu, setSchemaMenu] = useState<{ x: number; y: number; schema: string | null } | null>(null);
   const [container, setContainer] = useState<ContainerRequest | null>(null);
   const [action, setAction] = useState<{ action: RelationAction; target: RelationTarget } | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const notify = useNotify();
 
   const load = useCallback(
     async (first: boolean) => {
@@ -217,12 +218,14 @@ export default function SchemaTree() {
           setExpanded(open);
         }
       } catch (err) {
-        setError(typeof err === "string" ? err : "Couldn't read the database's objects");
+        const text = typeof err === "string" ? err : "Couldn't read the database's objects";
+        notify({ tone: "error", text });
+        setError(text);
       } finally {
         setRefreshing(false);
       }
     },
-    [api],
+    [api, notify],
   );
 
   useEffect(() => {
@@ -258,7 +261,10 @@ export default function SchemaTree() {
     api
       .getColumns(schema, name)
       .then((cols) => setColumns((prev) => ({ ...prev, [key]: cols })))
-      .catch(() => setColumns((prev) => ({ ...prev, [key]: "error" })));
+      .catch(() => {
+        setColumns((prev) => ({ ...prev, [key]: "error" }));
+        notify({ tone: "error", text: `Couldn't read the columns of ${name}` });
+      });
   }
 
   function togglePin(schema: string, object: ExplorerObject) {
@@ -416,14 +422,10 @@ export default function SchemaTree() {
         label: "Refresh data",
         icon: <RefreshCw />,
         onSelect: () => {
-          setNotice(`Refreshing ${target.name}…`);
           api
             .refreshMaterializedView(target.schema, target.name)
-            .then(() => {
-              setNotice(null);
-              refreshData(target.schema, target.name);
-            })
-            .catch((err) => setNotice(typeof err === "string" ? err : "Refresh failed"));
+            .then(() => refreshData(target.schema, target.name))
+            .catch((err) => notify({ tone: "error", text: typeof err === "string" ? err : "Refresh failed" }));
         },
       });
     }
@@ -445,7 +447,7 @@ export default function SchemaTree() {
     const value = columns[`t:${schema}.${name}`];
     const pad = INDENT[Math.min(depth, INDENT.length - 1)];
     if (value === undefined || value === "loading") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>Loading columns…</div>;
-    if (value === "error") return <div className={cn("select-text py-1 text-xs text-destructive-foreground", pad)}>Couldn't read the columns</div>;
+    if (value === "error") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>Couldn't read the columns</div>;
     if (value.length === 0) return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>No columns</div>;
     return value.map((col) => (
       <div
@@ -751,19 +753,9 @@ export default function SchemaTree() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        {notice && (
-          <button
-            type="button"
-            className="mb-1 w-full rounded-md bg-muted px-2 py-1.5 text-left text-xs text-muted-foreground cursor-pointer"
-            onClick={() => setNotice(null)}
-          >
-            {notice}
-          </button>
-        )}
-
         {error ? (
           <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-            <p className="select-text text-xs text-destructive-foreground">{error}</p>
+            <p className="text-xs text-muted-foreground">Couldn't read the database's objects.</p>
             <Button variant="outline" size="xs" onClick={() => load(true)}>
               Try again
             </Button>

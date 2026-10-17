@@ -6,11 +6,13 @@ import SqlViewer from "../components/SqlViewer";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import type { FunctionDetail } from "@/types";
 import { writeClipboardText } from "../lib/clipboard";
+import { useNotify } from "../contexts/NoticeProvider";
 
 export default function FunctionView({ schema, name, detail: args }: { schema: string; name: string; detail: string }) {
   const [detail, setDetail] = useState<FunctionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const notify = useNotify();
   const [copied, setCopied] = useState(false);
   const api = useApi();
 
@@ -28,15 +30,16 @@ export default function FunctionView({ schema, name, detail: args }: { schema: s
         }
       })
       .catch((e) => {
-        if (!stale) {
-          setError(String(e));
-          setLoading(false);
-        }
+        if (stale) return;
+        const text = typeof e === "string" ? e : String(e);
+        notify({ tone: "error", text });
+        setError(text);
+        setLoading(false);
       });
     return () => {
       stale = true;
     };
-  }, [schema, name, args, api]);
+  }, [schema, name, args, api, notify]);
 
   async function copySource() {
     if (!detail?.source) return;
@@ -57,7 +60,7 @@ export default function FunctionView({ schema, name, detail: args }: { schema: s
         <DetailSkeleton />
       ) : error ? (
         <div className="flex-1 flex items-center justify-center p-4">
-          <span className="select-text text-sm text-destructive-foreground">{error}</span>
+          <span className="text-sm text-muted-foreground">Couldn't read this function.</span>
         </div>
       ) : detail ? (
         <div className="flex-1 min-h-0 flex flex-col">

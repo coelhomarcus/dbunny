@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Plus, X } from "lucide-react";
 import type { ColumnGeneration, CompletionRelation, NewColumn, NewTable } from "@/types";
 import { useApi } from "../../contexts/useConnection";
+import { useNotify } from "../../contexts/NoticeProvider";
 import { useDocuments } from "../../contexts/DocumentsContext";
 import { useTab } from "../../contexts/workspace";
 import { foreignKeyDraftError, foreignKeysForSpec, guessReference, REFERENTIAL_ACTIONS, type ForeignKeyDraft } from "../../lib/foreignKeyForm";
@@ -77,7 +78,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
   const [sql, setSql] = useState("");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const notify = useNotify();
 
   useEffect(() => {
     updateCreateTable(documentId, { title: table, schema });
@@ -157,27 +158,18 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
       : "grid-cols-[minmax(0,1.4fr)_minmax(7rem,1fr)_4.5rem_minmax(0,1fr)_4.5rem_2rem]";
 
   async function create() {
-    const firstFkError = fkErrors.find(Boolean);
-    if (firstFkError) {
-      setError(firstFkError);
-      return;
-    }
-    if (partitionIncomplete) {
-      setError("Enter a partition key");
-      return;
-    }
+    if (fkErrors.some(Boolean) || partitionIncomplete) return;
     const name = table.trim();
     const schemaName = schema.trim();
     if (!name || !schemaName) return;
     setBusy(true);
-    setError(null);
     try {
       await api.createTable(schemaName, name, spec);
       requestSchemaRefresh(tabId, schemaName);
       openDocument({ kind: "data", schema: schemaName, name, icon: "table" });
       closeDocument(documentId);
     } catch (err) {
-      setError(typeof err === "string" ? err : "Couldn't create the table");
+      notify({ tone: "error", text: typeof err === "string" ? err : "Couldn't create the table" });
       setBusy(false);
     }
   }
@@ -498,9 +490,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
       </div>
 
       <div className="flex h-12 shrink-0 items-center gap-3 border-t border-border px-6">
-        {error ? (
-          <p className="min-w-0 flex-1 select-text break-words text-xs text-destructive-foreground">{error}</p>
-        ) : mode === "simple" && (hasIncompleteForeignKey || partitionIncomplete) ? (
+        {mode === "simple" && (hasIncompleteForeignKey || partitionIncomplete) ? (
           <p className="min-w-0 flex-1 text-xs text-muted-foreground">Finish the advanced options before creating.</p>
         ) : null}
         <Button variant="primary" size="sm" className="ml-auto" onClick={create} disabled={!sql || busy || hasIncompleteForeignKey || partitionIncomplete || !table.trim() || !schema.trim()}>

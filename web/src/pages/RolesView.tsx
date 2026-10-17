@@ -13,6 +13,7 @@ import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
 import { cn } from "../lib/cn";
+import { useNotify } from "../contexts/NoticeProvider";
 
 /** Attributes worth a badge, in the order they're shown. */
 const ATTRIBUTES: { key: keyof RoleInfo; label: string; variant: "destructive" | "warning" | "info" | "neutral" }[] = [
@@ -31,6 +32,7 @@ function rightsOf(role: RoleInfo) {
 export default function RolesView() {
   const api = useApi();
   const rightPanel = useRightPanel();
+  const notify = useNotify();
   const [roles, setRoles] = useState<RoleInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showBuiltin, setShowBuiltin] = useState(false);
@@ -43,11 +45,16 @@ export default function RolesView() {
     api
       .getRoles()
       .then((list) => !stale && setRoles(list))
-      .catch((err) => !stale && setError(typeof err === "string" ? err : "Couldn't read the roles"));
+      .catch((err) => {
+        if (stale) return;
+        const text = typeof err === "string" ? err : "Couldn't read the roles";
+        notify({ tone: "error", text });
+        setError(text);
+      });
     return () => {
       stale = true;
     };
-  }, [api]);
+  }, [api, notify]);
 
   const shown = (roles ?? []).filter((role) => showBuiltin || !role.isBuiltin);
   const builtinCount = (roles ?? []).filter((role) => role.isBuiltin).length;
@@ -78,7 +85,7 @@ export default function RolesView() {
       </PageHeader>
 
       {error ? (
-        <div className="flex flex-1 select-text items-center justify-center p-4 text-sm text-destructive-foreground">{error}</div>
+        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">Couldn't read the roles.</div>
       ) : !roles ? (
         <TableSkeleton columns={4} rows={8} />
       ) : (

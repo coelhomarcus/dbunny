@@ -19,7 +19,7 @@ import { formatBytes } from "../lib/format";
 import { writeClipboardText } from "../lib/clipboard";
 import { needsRebuild, notAvailableFor } from "../lib/engines";
 import { useCapabilities } from "../hooks/useCapabilities";
-import NoticeToast from "../components/ui/NoticeToast";
+import { useNotify } from "../contexts/NoticeProvider";
 
 type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "permissions" | "ddl";
 
@@ -506,7 +506,7 @@ export default function TableStructure({ schema, name: table }: { schema: string
   const [columnMenu, setColumnMenu] = useState<{ column: ColumnInfo; x: number; y: number } | null>(null);
   const [listMenu, setListMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const [columnFilter, setColumnFilter] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
+  const notify = useNotify();
 
   useEffect(() => {
     setColumnFilter("");
@@ -519,11 +519,16 @@ export default function TableStructure({ schema, name: table }: { schema: string
     api
       .getTableStructure(schema, table)
       .then((structure) => !stale && setResult({ key: k, structure }))
-      .catch((e) => !stale && setResult({ key: k, error: typeof e === "string" ? e : String(e) }));
+      .catch((e) => {
+        if (stale) return;
+        const text = typeof e === "string" ? e : String(e);
+        notify({ tone: "error", text });
+        setResult({ key: k, error: text });
+      });
     return () => {
       stale = true;
     };
-  }, [schema, table, api, version]);
+  }, [schema, table, api, notify, version]);
 
   const loading = !result || result.key !== key;
   const structure = loading ? undefined : result.structure;
@@ -535,11 +540,8 @@ export default function TableStructure({ schema, name: table }: { schema: string
   function applyNow(change: StructureChange) {
     api
       .applyStructureChange(schema!, table!, change)
-      .then(() => {
-        setNotice(null);
-        setVersion((v) => v + 1);
-      })
-      .catch((err) => setNotice(typeof err === "string" ? err : "The change failed"));
+      .then(() => setVersion((v) => v + 1))
+      .catch((err) => notify({ tone: "error", text: typeof err === "string" ? err : "The change failed" }));
   }
 
   function columnMenuItems(column: ColumnInfo): ContextMenuItem[] {
@@ -592,7 +594,7 @@ export default function TableStructure({ schema, name: table }: { schema: string
       {loading ? (
         <TableSkeleton columns={5} rows={10} />
       ) : !structure ? (
-        <div className="flex flex-1 select-text items-center justify-center p-4 text-sm text-destructive-foreground">{result.error}</div>
+        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">Couldn't read this table.</div>
       ) : (
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-3 pb-2 text-[13px]">
@@ -746,7 +748,7 @@ export default function TableStructure({ schema, name: table }: { schema: string
                 privileges={structure.privileges}
                 canEdit={canEdit}
                 onDone={(error) => {
-                  setNotice(error);
+                  if (error) notify({ tone: "error", text: error });
                   setVersion((v) => v + 1);
                 }}
               />
@@ -769,7 +771,6 @@ export default function TableStructure({ schema, name: table }: { schema: string
         onDone={() => setVersion((v) => v + 1)}
         onClose={() => setDraft(null)}
       />
-      <NoticeToast notice={notice ? { tone: "error", text: notice } : null} onDismiss={() => setNotice(null)} />
     </div>
   );
 }
