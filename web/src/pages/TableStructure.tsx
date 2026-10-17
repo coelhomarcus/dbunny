@@ -1,16 +1,16 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useDocuments } from "../contexts/DocumentsContext";
-import { ArrowUpRight, Ban, Check, Copy, KeyRound, Link2, MessageSquare, MoreHorizontal, PenLine, Plus, Sparkles, Trash2, TriangleAlert, Asterisk, Equal, Type } from "lucide-react";
+import { ArrowUpRight, Ban, Check, Copy, KeyRound, Link2, MessageSquare, MoreHorizontal, PenLine, Plus, Search, Sparkles, Trash2, TriangleAlert, Asterisk, Equal, Type, X } from "lucide-react";
 import ContextMenu, { type ContextMenuItem } from "../components/ui/ContextMenu";
 import StructureChangeDialog, { type ChangeDraft } from "../components/structure/StructureChangeDialog";
 import PermissionsEditor from "../components/structure/PermissionsEditor";
 import Tooltip from "../components/Tooltip";
 import type { ColumnInfo, StructureChange, TableStructure as Structure } from "@/types";
-import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { TableSkeleton } from "../components/Skeleton";
-import SegmentedTabs from "../components/ui/SegmentedTabs";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
+import Checkbox from "../components/Checkbox";
+import Input from "../components/ui/Input";
 import SqlViewer from "../components/SqlViewer";
 import { useApi, useConnection } from "../contexts/useConnection";
 import { foreignKeyTarget, shortType } from "../lib/columnMeta";
@@ -24,27 +24,31 @@ import NoticeToast from "../components/ui/NoticeToast";
 type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "permissions" | "ddl";
 
 
-const th = "sticky top-0 z-[1] bg-card-header border-b border-border px-4 py-2.5 text-left text-[13px] font-medium text-muted-foreground whitespace-nowrap";
-const td = "border-b border-border px-4 py-2 align-top";
+const th = "sticky top-0 z-[1] bg-card px-3 pb-1 text-left text-[11px] font-medium text-muted-foreground whitespace-nowrap";
+const td = "bg-foreground/[0.045] px-3 py-2 align-middle first:rounded-l-md last:rounded-r-md";
 
-function Grid({ headers, children, empty }: { headers: string[]; children: ReactNode[]; empty: string }) {
+function Grid({ headers, children, empty }: { headers: { label: string; className?: string }[]; children: ReactNode[]; empty: string }) {
   if (children.length === 0) {
     return <p className="px-4 py-10 text-center text-sm text-muted-foreground">{empty}</p>;
   }
   return (
-    <table className="w-full text-sm">
+    <table className="w-full border-separate border-spacing-y-1 px-3 text-[13px]">
       <thead>
         <tr>
           {headers.map((h) => (
-            <th key={h} className={th}>
-              {h}
+            <th key={h.label || "actions"} className={cn(th, h.className)}>
+              {h.label}
             </th>
           ))}
         </tr>
       </thead>
-      <tbody className="[&>tr:nth-child(even)]:bg-muted [&>tr]:bg-card">{children}</tbody>
+      <tbody>{children}</tbody>
     </table>
   );
+}
+
+function heads(labels: string[], centered: string[] = []): { label: string; className?: string }[] {
+  return labels.map((label) => ({ label, className: centered.includes(label) ? "text-center" : undefined }));
 }
 
 function Mono({ children, className }: { children: ReactNode; className?: string }) {
@@ -68,7 +72,7 @@ function TableLink({ schema, table, children }: { schema: string; table: string;
 
 /** Toolbar above a section's table, for its "add" action. */
 function SectionBar({ children }: { children: ReactNode }) {
-  return <div className="flex items-center justify-end gap-2 border-b border-border px-3 py-1.5">{children}</div>;
+  return <div className="flex items-center justify-end gap-2 px-3 pt-3 pb-1">{children}</div>;
 }
 
 /** A section's "add" action; disabled, saying why, when the engine can't do it. */
@@ -92,29 +96,48 @@ function SectionAction({ unavailable, onClick, children }: { unavailable?: strin
 function ColumnsSection({
   columns,
   comments,
+  nullableEditable,
+  onToggleNullable,
+  onDrop,
   onColumnMenu,
 }: {
   columns: ColumnInfo[];
   /** The engine keeps comments on columns. */
   comments: boolean;
+  /** Nullable can be switched in place. Primary stays a marker: changing it rebuilds the key. */
+  nullableEditable: boolean;
+  onToggleNullable?: (column: ColumnInfo) => void;
+  onDrop?: (column: ColumnInfo) => void;
   onColumnMenu?: (column: ColumnInfo, x: number, y: number) => void;
 }) {
   return (
-    <Grid headers={["#", "Column", "Type", "Nullable", "Default", ...(comments ? ["Comment"] : []), ...(onColumnMenu ? [""] : [])]} empty="No columns">
+    <Grid
+      headers={heads(["Name", "Type", "Nullable", "Default value", ...(comments ? ["Comment"] : []), "Primary", ...((onDrop || onColumnMenu) ? [""] : [])], ["Nullable", "Primary"])}
+      empty="No columns"
+    >
       {columns.map((col) => {
         const target = foreignKeyTarget(col);
+        const nullableLocked = !nullableEditable || col.isPrimaryKey;
         return (
-          <tr key={col.name}>
-            <td className={cn(td, "w-10 text-muted-foreground/70 tabular-nums")}>{col.ordinalPosition}</td>
+          <tr
+            key={col.name}
+            className="group"
+            onContextMenu={
+              onColumnMenu
+                ? (e) => {
+                    e.preventDefault();
+                    onColumnMenu(col, e.clientX, e.clientY);
+                  }
+                : undefined
+            }
+          >
             <td className={td}>
               <span className="flex items-center gap-1.5 font-medium">
-                {col.isPrimaryKey && <KeyRound size={12} className="shrink-0 text-warning-foreground" aria-label="Primary key" />}
                 {!col.isPrimaryKey && col.foreignKey && <Link2 size={12} className="shrink-0 text-info-foreground" aria-label="Foreign key" />}
                 {col.name}
               </span>
               {col.foreignKey && target && (
                 <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                  →
                   <TableLink schema={col.foreignKey.schema} table={col.foreignKey.table}>
                     {target}
                   </TableLink>
@@ -122,39 +145,61 @@ function ColumnsSection({
               )}
             </td>
             <td className={td}>
-              <Mono className="text-warning-foreground">{shortType(col.typeName)}</Mono>
-              {col.enumValues && (
-                <div className="mt-0.5 text-xs text-muted-foreground">{col.enumValues.join(" · ")}</div>
-              )}
+              <Mono>{shortType(col.typeName)}</Mono>
+              {col.enumValues && <div className="mt-0.5 text-xs text-muted-foreground">{col.enumValues.join(" · ")}</div>}
+            </td>
+            <td className={cn(td, "w-20 text-center")}>
+              <span className="inline-flex">
+                <Checkbox
+                  checked={col.isNullable}
+                  disabled={nullableLocked || !onToggleNullable}
+                  onChange={() => onToggleNullable?.(col)}
+                />
+              </span>
             </td>
             <td className={td}>
-              {col.isNullable ? <span className="text-muted-foreground">yes</span> : <span>no</span>}
-            </td>
-            <td className={td}>
-              {col.isGenerated ? (
+              {col.defaultValue !== null ? (
+                <Mono className="text-muted-foreground">{col.defaultValue}</Mono>
+              ) : col.isGenerated ? (
                 <Badge>
                   <Sparkles /> generated
                 </Badge>
-              ) : col.defaultValue !== null ? (
-                <Mono className="text-muted-foreground">{col.defaultValue}</Mono>
               ) : (
-                <span className="text-muted-foreground/60">—</span>
+                <span className="text-muted-foreground/70">(NULL)</span>
               )}
             </td>
-            {comments && <td className={cn(td, "max-w-80 text-muted-foreground")}>{col.comment ?? ""}</td>}
-            {onColumnMenu && (
-              <td className={cn(td, "w-px py-1.5")}>
-                <Button
-                  variant="ghost-muted"
-                  size="icon-xs"
-                  aria-label={`Change ${col.name}`}
-                  onClick={(e) => {
-                    const r = e.currentTarget.getBoundingClientRect();
-                    onColumnMenu(col, r.left, r.bottom + 4);
-                  }}
-                >
-                  <MoreHorizontal />
-                </Button>
+            {comments && (
+              <td className={cn(td, "max-w-80 text-muted-foreground")}>{col.comment?.trim() ? col.comment : <span className="text-muted-foreground/70">(NULL)</span>}</td>
+            )}
+            <td className={cn(td, "w-20 text-center")}>
+              <span className="inline-flex">
+                <Checkbox checked={col.isPrimaryKey} disabled onChange={() => {}} />
+              </span>
+              {col.isPrimaryKey && <KeyRound size={12} className="sr-only" aria-label="Primary key" />}
+            </td>
+            {(onDrop || onColumnMenu) && (
+              <td className={cn(td, "w-px whitespace-nowrap")}>
+                <span className="flex items-center justify-end gap-0.5">
+                  {onColumnMenu && (
+                    <Button
+                      variant="ghost-muted"
+                      size="icon-xs"
+                      aria-label={`Change ${col.name}`}
+                      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect();
+                        onColumnMenu(col, r.left, r.bottom + 4);
+                      }}
+                    >
+                      <MoreHorizontal />
+                    </Button>
+                  )}
+                  {onDrop && (
+                    <Button variant="ghost-muted" size="icon-xs" aria-label={`Drop ${col.name}`} onClick={() => onDrop(col)}>
+                      <X />
+                    </Button>
+                  )}
+                </span>
               </td>
             )}
           </tr>
@@ -166,7 +211,7 @@ function ColumnsSection({
 
 function IndexesSection({ structure, onDrop }: { structure: Structure; onDrop?: (index: string) => void }) {
   return (
-    <Grid headers={["Index", "Columns", "Type", "Size", ...(onDrop ? [""] : [])]} empty="No indexes">
+    <Grid headers={heads(["Index", "Columns", "Type", "Size", ...(onDrop ? [""] : [])])} empty="No indexes">
       {structure.indexes.map((index) => (
         <tr key={index.name}>
           <td className={td}>
@@ -238,7 +283,7 @@ function ConstraintsSection({
   onDrop?: (constraint: string) => void;
 }) {
   return (
-    <Grid headers={["Constraint", "Kind", "Definition", ...(onDrop ? [""] : [])]} empty="No constraints">
+    <Grid headers={heads(["Constraint", "Kind", "Definition", ...(onDrop ? [""] : [])])} empty="No constraints">
       {structure.constraints.map((c) => (
         <tr key={c.name}>
           <td className={td}>
@@ -260,7 +305,7 @@ function ConstraintsSection({
 function KeysSection({ structure, unavailable, onDrop }: { structure: Structure; unavailable?: string; onDrop?: (constraint: string) => void }) {
   return (
     <div className="pb-6">
-      <Grid headers={["Foreign key", "Columns", "References", "On update", "On delete", ...(onDrop ? [""] : [])]} empty="This table has no foreign keys">
+      <Grid headers={heads(["Foreign key", "Columns", "References", "On update", "On delete", ...(onDrop ? [""] : [])])} empty="This table has no foreign keys">
         {structure.foreignKeys.map((fk) => (
           <tr key={fk.name}>
             <td className={td}>
@@ -284,7 +329,7 @@ function KeysSection({ structure, unavailable, onDrop }: { structure: Structure;
       </Grid>
 
       <h3 className="px-4 pt-6 pb-2 text-[13px] font-medium text-muted-foreground">Referenced by</h3>
-      <Grid headers={["Table", "Columns", "Constraint"]} empty="No other table points at this one">
+      <Grid headers={heads(["Table", "Columns", "Constraint"])} empty="No other table points at this one">
         {structure.referencedBy.map((ref) => (
           <tr key={`${ref.schema}.${ref.table}.${ref.name}`}>
             <td className={td}>
@@ -316,7 +361,7 @@ function TriggersSection({
   onToggle?: (trigger: string, enabled: boolean) => void;
 }) {
   return (
-    <Grid headers={["Trigger", "When", "For each", "Function", "Status"]} empty="No triggers">
+    <Grid headers={heads(["Trigger", "When", "For each", "Function", "Status"])} empty="No triggers">
       {structure.triggers.map((t) => (
         <tr key={t.name}>
           <td className={td}>
@@ -401,7 +446,12 @@ export default function TableStructure({ schema, name: table }: { schema: string
   const [version, setVersion] = useState(0);
   const [draft, setDraft] = useState<ChangeDraft | null>(null);
   const [columnMenu, setColumnMenu] = useState<{ column: ColumnInfo; x: number; y: number } | null>(null);
+  const [columnFilter, setColumnFilter] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    setColumnFilter("");
+  }, [schema, table]);
 
   useEffect(() => {
     if (!schema || !table) return;
@@ -475,38 +525,50 @@ export default function TableStructure({ schema, name: table }: { schema: string
   // A view has fewer sections; fall back to the columns if the chosen one isn't there
   const shown = sections.some((s) => s.value === section) ? section : "columns";
 
+  const columnQuery = columnFilter.trim().toLowerCase();
+  const visibleColumns = structure?.columns.filter((col) => !columnQuery || col.name.toLowerCase().includes(columnQuery)) ?? [];
+
   return (
     <div className="h-full flex flex-col">
-      <PageHeader className="justify-between">
-        <HeaderTitle label={`Structure · ${schema}`}>{table}</HeaderTitle>
-      </PageHeader>
-
       {loading ? (
         <TableSkeleton columns={5} rows={10} />
       ) : !structure ? (
         <div className="flex flex-1 items-center justify-center p-4 text-sm text-destructive-foreground">{result.error}</div>
       ) : (
         <>
-          <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b border-border px-4 py-2.5 text-[13px]">
-            <SegmentedTabs value={shown} options={sections} onChange={setSection} />
-            <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1">
-              <Fact label="Kind">{meta!.kind}</Fact>
-              <Fact label="Owner">{meta!.owner}</Fact>
-              {meta!.rowEstimate !== null && <Fact label="Rows">~{meta!.rowEstimate.toLocaleString()}</Fact>}
-              {meta!.totalBytes !== null && (
-                <Fact label="Size">
-                  {formatBytes(meta!.totalBytes)}
-                  {meta!.indexesBytes ? (
-                    <span className="text-muted-foreground"> ({formatBytes(meta!.indexesBytes)} indexes)</span>
-                  ) : null}
-                </Fact>
-              )}
-            </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-3 pb-2 text-[13px]">
+            <Fact label="Kind">{meta!.kind}</Fact>
+            <Fact label="Owner">{meta!.owner}</Fact>
+            {meta!.rowEstimate !== null && <Fact label="Rows">~{meta!.rowEstimate.toLocaleString()}</Fact>}
+            {meta!.totalBytes !== null && (
+              <Fact label="Size">
+                {formatBytes(meta!.totalBytes)}
+                {meta!.indexesBytes ? <span className="text-muted-foreground"> ({formatBytes(meta!.indexesBytes)} indexes)</span> : null}
+              </Fact>
+            )}
+            {meta!.comment && <span className="min-w-0 truncate text-muted-foreground">{meta!.comment}</span>}
           </div>
 
-          {meta!.comment && (
-            <p className="shrink-0 border-b border-border px-4 py-2 text-[13px] text-muted-foreground">{meta!.comment}</p>
-          )}
+          <div className="flex h-10 shrink-0 items-end justify-center border-b border-border px-2">
+            <div className="flex min-w-0 max-w-full items-end gap-0.5 overflow-x-auto">
+              {sections.map((item) => {
+                const active = item.value === shown;
+                return (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => setSection(item.value)}
+                    className={cn(
+                      "-mb-px shrink-0 cursor-pointer border-b-2 px-3 pb-2 text-[13px] font-medium",
+                      active ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           {structure.warnings.length > 0 && (
             <div className="flex shrink-0 items-start gap-2 border-b border-border bg-warning/8 px-4 py-2 text-[13px] text-warning-foreground">
@@ -518,18 +580,40 @@ export default function TableStructure({ schema, name: table }: { schema: string
           <div className={cn("min-h-0 flex-1", shown === "ddl" || shown === "permissions" ? "overflow-hidden" : "overflow-auto")}>
             {shown === "columns" && (
               <>
-                {canEdit && (
-                  <SectionBar>
-                    <Button variant="ghost-muted" size="xs" onClick={() => setDraft({ kind: "addColumn" })}>
-                      <Plus /> Add column
+                <div className="flex items-center gap-2 px-3 pt-3 pb-1">
+                  <div className="relative min-w-0 max-w-sm flex-1">
+                    <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={columnFilter}
+                      onChange={(e) => setColumnFilter(e.target.value)}
+                      placeholder="Filter columns"
+                      aria-label="Filter columns"
+                      spellCheck={false}
+                      className="h-8 border-0 bg-foreground/[0.04] pl-8 shadow-none dark:bg-foreground/[0.04]"
+                    />
+                  </div>
+                  {canEdit && (
+                    <Button variant="primary" size="sm" className="ml-auto" onClick={() => setDraft({ kind: "addColumn" })}>
+                      <Plus /> Column
                     </Button>
-                  </SectionBar>
+                  )}
+                </div>
+                {structure.columns.length > 0 && visibleColumns.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-sm text-muted-foreground">No columns match “{columnFilter.trim()}”.</p>
+                ) : (
+                  <ColumnsSection
+                    columns={visibleColumns}
+                    comments={capabilities.comments}
+                    nullableEditable={capabilities.alterColumn}
+                    onToggleNullable={
+                      canEdit && capabilities.alterColumn
+                        ? (column) => applyNow({ kind: "setNullable", name: column.name, nullable: !column.isNullable })
+                        : undefined
+                    }
+                    onDrop={canEdit ? (column) => setDraft({ kind: "dropColumn", column }) : undefined}
+                    onColumnMenu={canEdit ? (column, x, y) => setColumnMenu({ column, x, y }) : undefined}
+                  />
                 )}
-                <ColumnsSection
-                  columns={structure.columns}
-                  comments={capabilities.comments}
-                  onColumnMenu={canEdit ? (column, x, y) => setColumnMenu({ column, x, y }) : undefined}
-                />
               </>
             )}
             {shown === "indexes" && (
