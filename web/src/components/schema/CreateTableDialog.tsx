@@ -118,13 +118,15 @@ function Builder({
   const named = columns.map((c) => c.name.trim()).filter(Boolean);
   const fkErrors = foreignKeys.map((fk) => foreignKeyDraftError(fk, named));
   const hasIncompleteForeignKey = fkErrors.some(Boolean);
+  const partitionKey = partitionExpr.trim();
+  const partitionIncomplete = !sqlite && !!partitionMethod && !partitionKey;
   const spec: NewTable = {
     columns,
     foreignKeys: foreignKeysForSpec(foreignKeys, relations, named),
     unlogged: !sqlite && unlogged,
     withoutRowid: sqlite && withoutRowid,
     strict: sqlite && strict,
-    partition: !sqlite && partitionMethod ? { method: partitionMethod, expression: partitionExpr } : null,
+    partition: !sqlite && partitionMethod && partitionKey ? { method: partitionMethod, expression: partitionKey } : null,
   };
   const specKey = JSON.stringify(spec);
 
@@ -148,6 +150,10 @@ function Builder({
     const firstFkError = fkErrors.find(Boolean);
     if (firstFkError) {
       setError(firstFkError);
+      return;
+    }
+    if (partitionIncomplete) {
+      setError("Enter a partition key");
       return;
     }
     setBusy(true);
@@ -179,7 +185,7 @@ function Builder({
           <Button variant="neutral" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" size="sm" onClick={create} disabled={!sql || busy || hasIncompleteForeignKey}>
+          <Button variant="primary" size="sm" onClick={create} disabled={!sql || busy || hasIncompleteForeignKey || partitionIncomplete}>
             Create table
           </Button>
         </>
@@ -358,24 +364,27 @@ function Builder({
         ) : (
           <div className="flex flex-col gap-2">
             <CheckOption checked={unlogged} onChange={setUnlogged} label="UNLOGGED" />
-            <div className="grid grid-cols-[9rem_1fr] gap-2">
-              <select aria-label="Partition method" value={partitionMethod} onChange={(e) => setPartitionMethod(e.target.value)} className={cn(selectClass, "h-8 w-full")}>
-                <option value="">No partition</option>
-                {PARTITION_METHODS.map((method) => (
-                  <option key={method} value={method}>
-                    PARTITION BY {method}
-                  </option>
-                ))}
-              </select>
-              <Input
-                value={partitionExpr}
-                onChange={(e) => setPartitionExpr(e.target.value)}
-                aria-label="Partition key"
-                placeholder="partition key, e.g. created_at"
-                disabled={!partitionMethod}
-                spellCheck={false}
-                className="h-8 font-mono text-xs"
-              />
+            <div className="flex flex-col gap-1">
+              <div className="grid grid-cols-[9rem_1fr] gap-2">
+                <select aria-label="Partition method" value={partitionMethod} onChange={(e) => setPartitionMethod(e.target.value)} className={cn(selectClass, "h-8 w-full")}>
+                  <option value="">No partition</option>
+                  {PARTITION_METHODS.map((method) => (
+                    <option key={method} value={method}>
+                      PARTITION BY {method}
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  value={partitionExpr}
+                  onChange={(e) => setPartitionExpr(e.target.value)}
+                  aria-label="Partition key"
+                  placeholder="partition key, e.g. created_at"
+                  disabled={!partitionMethod}
+                  spellCheck={false}
+                  className={cn("h-8 font-mono text-xs", partitionIncomplete && "border-destructive")}
+                />
+              </div>
+              {partitionIncomplete && <p className="text-xs text-destructive-foreground">Enter a partition key</p>}
             </div>
           </div>
         )}
