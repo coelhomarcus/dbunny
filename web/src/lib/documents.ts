@@ -14,7 +14,8 @@ export type DocumentKind =
   | "type"
   | "index"
   | "trigger"
-  | "create-table";
+  | "create-table"
+  | "diagram";
 
 export interface FilterRequest {
   id: number;
@@ -53,7 +54,8 @@ export type OpenTarget =
       name: string;
       detail?: string;
     }
-  | { kind: "create-table"; schema: string };
+  | { kind: "create-table"; schema: string }
+  | { kind: "diagram"; schema: string };
 
 export function emptyDocuments(): DocumentsState {
   return { items: [], activeId: null, nextQuery: 1, nextId: 1 };
@@ -62,6 +64,7 @@ export function emptyDocuments(): DocumentsState {
 function sameIdentity(doc: Document, target: Exclude<OpenTarget, { kind: "query" } | { kind: "create-table" }>): boolean {
   if (doc.kind !== target.kind) return false;
   if (target.kind === "activity" || target.kind === "roles") return true;
+  if (target.kind === "diagram") return doc.schema === target.schema;
   if (doc.schema !== target.schema || doc.name !== target.name) return false;
   if (target.kind === "function" || target.kind === "procedure") return (doc.detail ?? "") === (target.detail ?? "");
   return true;
@@ -96,6 +99,7 @@ export function openDocument(state: DocumentsState, target: OpenTarget): Documen
   const title =
     target.kind === "query" ? target.title ?? `Query ${state.nextQuery}`
     : target.kind === "create-table" ? "New table"
+    : target.kind === "diagram" ? target.schema
     : target.kind === "activity" ? "Activity"
     : target.kind === "roles" ? "Roles"
     : target.name;
@@ -103,7 +107,7 @@ export function openDocument(state: DocumentsState, target: OpenTarget): Documen
   if (target.kind === "query") {
     doc.sql = target.sql ?? "";
     if (target.savedId) doc.savedId = target.savedId;
-  } else if (target.kind === "create-table") {
+  } else if (target.kind === "create-table" || target.kind === "diagram") {
     doc.schema = target.schema;
   } else if (target.kind !== "activity" && target.kind !== "roles") {
     doc.schema = target.schema;
@@ -207,7 +211,12 @@ export function renameRelation(state: DocumentsState, schema: string, name: stri
 export function renameSchema(state: DocumentsState, schema: string, newName: string): DocumentsState {
   return {
     ...state,
-    items: state.items.map((doc) => (doc.schema === schema ? { ...doc, schema: newName } : doc)),
+    items: state.items.map((doc) => {
+      if (doc.schema !== schema) return doc;
+      const next = { ...doc, schema: newName };
+      if (doc.kind === "diagram") next.title = newName;
+      return next;
+    }),
   };
 }
 

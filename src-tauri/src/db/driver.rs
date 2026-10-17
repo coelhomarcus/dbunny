@@ -7,7 +7,7 @@ use async_trait::async_trait;
 
 use super::capabilities::Capabilities;
 use super::model::{
-    ColumnInfo, CompletionSchema, ConnectionInfo, DatabaseInfo, ExplainResult, ExplorerTree, ExtensionInfo,
+    ColumnInfo, CompletionSchema, ConnectionInfo, DatabaseInfo, Diagram, ExplainResult, ExplorerTree, ExtensionInfo,
     FunctionDetail, JsonMap, NewTable, ObjectDefinition, QueryResult, RoleInfo, RowChange, ServerActivity,
     StructureChange, TableDataParams, TableDataResponse, TableStructure,
 };
@@ -41,6 +41,9 @@ pub trait Driver: Send + Sync {
 #[async_trait]
 pub trait Catalog: Send + Sync {
     async fn explorer(&self) -> Result<ExplorerTree, String>;
+    /// Tables, columns and foreign keys for the diagram of `schema`, including tables
+    /// outside it that a key of this schema touches.
+    async fn diagram(&self, schema: &str) -> Result<Diagram, String>;
     async fn columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, String>;
     async fn relation_kind(&self, schema: &str, name: &str) -> Result<Option<String>, String>;
     async fn table_structure(&self, schema: &str, table: &str) -> Result<TableStructure, String>;
@@ -162,6 +165,9 @@ mod tests {
     #[async_trait]
     impl Catalog for FakeDriver {
         async fn explorer(&self) -> Result<ExplorerTree, String> {
+            unimplemented!()
+        }
+        async fn diagram(&self, _: &str) -> Result<Diagram, String> {
             unimplemented!()
         }
         async fn columns(&self, _: &str, _: &str) -> Result<Vec<ColumnInfo>, String> {

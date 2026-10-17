@@ -48,6 +48,7 @@ import {
   Database,
   FolderPlus,
   Split,
+  Waypoints,
   type LucideProps,
 } from "lucide-react";
 
@@ -136,7 +137,6 @@ function GroupRow({
   onToggle,
   icon,
   label,
-  count,
   action,
   onContextMenu,
 }: {
@@ -145,7 +145,6 @@ function GroupRow({
   onToggle: () => void;
   icon: ReactNode;
   label: string;
-  count?: number;
   action?: ReactNode;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
@@ -162,8 +161,7 @@ function GroupRow({
       >
         <Chevron open={open} />
         {icon}
-        <span className="truncate">{label}</span>
-        {count !== undefined && <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/70">{count}</span>}
+        <span className="min-w-0 truncate">{label}</span>
       </button>
       {action && <span className="absolute right-1.5 top-1/2 flex -translate-y-1/2">{action}</span>}
     </div>
@@ -171,9 +169,8 @@ function GroupRow({
 }
 
 /**
- * The database's objects: filterable, with pinned tables on top, schemas (when there
- * are several), categories that only show when they have something, and columns
- * under each table.
+ * The database's objects: filterable, with pinned tables on top, one row per schema,
+ * categories that only show when they have something, and columns under each table.
  */
 export default function SchemaTree() {
   const { documents, openDocument, renameRelation, renameSchema, dropRelation, dropSchema, refreshData } = useDocuments();
@@ -217,8 +214,6 @@ export default function SchemaTree() {
             open.add(`s:${home.name}`);
             for (const c of CATEGORIES) if (c.openByDefault) open.add(`c:${home.name}:${c.id}`);
           }
-          // With a single schema there's no schema row, so open its categories directly
-          if (next.schemas.length === 1) for (const c of CATEGORIES) if (c.openByDefault) open.add(`c:${next.schemas[0].name}:${c.id}`);
           setExpanded(open);
         }
       } catch (err) {
@@ -360,24 +355,42 @@ export default function SchemaTree() {
   }
 
   function schemaMenuItems(schema: string | null): ContextMenuItem[] {
-    // The header's "+": what can be created
+    const diagramOf = (name: string): ContextMenuItem => ({
+      label: "Diagram",
+      icon: <Waypoints />,
+      onSelect: () => openDocument({ kind: "diagram", schema: name }),
+    });
+    const newSchema: ContextMenuItem = {
+      label: "New schema…",
+      icon: <FolderPlus />,
+      onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }),
+    };
+    // The header's "+" never opens a diagram: that stays on the schema, one schema or many.
     if (schema === null) {
+      if (readOnly) return [];
+      if (multiSchema) return capabilities.schemas ? [newSchema] : [];
       return [
         { label: "New table", icon: <Table2 />, onSelect: () => openDocument({ kind: "create-table", schema: defaultSchema }) },
-        ...(capabilities.schemas
-          ? [{ label: "New schema…", icon: <FolderPlus />, onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }) }]
-          : []),
+        ...(capabilities.schemas ? [newSchema] : []),
       ];
     }
-    const items: ContextMenuItem[] = [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(schema)) }];
+    const items: ContextMenuItem[] = [
+      diagramOf(schema),
+      { label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(schema)) },
+    ];
     if (readOnly) return items;
     return [
+      diagramOf(schema),
       { label: "New table here", icon: <Table2 />, onSelect: () => openDocument({ kind: "create-table", schema }) },
-      { label: "New schema…", icon: <FolderPlus />, onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }) },
-      ...items,
-      "separator",
-      { label: "Rename…", icon: <PenLine />, onSelect: () => setContainer({ kind: "schema", action: "rename", name: schema }) },
-      { label: "Drop…", icon: <Trash2 />, destructive: true, onSelect: () => setContainer({ kind: "schema", action: "drop", name: schema }) },
+      ...(capabilities.schemas ? [newSchema] : []),
+      ...items.slice(1),
+      ...(capabilities.schemas
+        ? ([
+            "separator",
+            { label: "Rename…", icon: <PenLine />, onSelect: () => setContainer({ kind: "schema", action: "rename", name: schema }) },
+            { label: "Drop…", icon: <Trash2 />, destructive: true, onSelect: () => setContainer({ kind: "schema", action: "drop", name: schema }) },
+          ] as ContextMenuItem[])
+        : []),
     ];
   }
 
@@ -624,7 +637,6 @@ export default function SchemaTree() {
             onToggle={() => toggle(key)}
             icon={<Icon size={14} className={cn("shrink-0 opacity-70", category.color)} />}
             label={category.label}
-            count={items.length}
             action={category.id === "tables" ? newTableButton(schema) : undefined}
           />
           {isOpen(key) && items.map((object) => objectRow(schema, object, depth + 1, category))}
@@ -644,6 +656,7 @@ export default function SchemaTree() {
         p !== null && matches(p.object.name) && CATEGORIES.some((c) => c.kinds.includes(p.object.kind) && categoryShown(c)),
     );
   const defaultSchema = tree?.defaultSchema ?? tree?.schemas[0]?.name ?? "public";
+  const headerMenuLabel = multiSchema ? "New schema" : capabilities.schemas ? "New table or schema" : "New table";
   // Pinned uses its own flag; every other key is an open group.
   const allClosed = ![...expanded].some((key) => key !== "pinned-closed");
 
@@ -654,9 +667,8 @@ export default function SchemaTree() {
       return;
     }
     const open = new Set<string>();
-    const multi = tree.schemas.length > 1;
     for (const schema of tree.schemas) {
-      if (multi) open.add(`s:${schema.name}`);
+      open.add(`s:${schema.name}`);
       for (const category of CATEGORIES) {
         if (!categoryShown(category)) continue;
         if (schema.objects.some((object) => category.kinds.includes(object.kind) && matches(object.name))) {
@@ -676,16 +688,13 @@ export default function SchemaTree() {
       {/* Header: what's here, and the explorer's own actions */}
       <div className="flex h-8 shrink-0 items-center gap-1 pl-3 pr-1.5">
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">Explorer</span>
-        {tree && (
-          <span className="text-[10px] tabular-nums text-muted-foreground/70">{query ? `${shown} of ${total}` : total}</span>
-        )}
         <div className="ml-auto flex items-center">
-          {!readOnly && tree && (
-            <Tooltip label={capabilities.schemas ? "New table or schema" : "New table"} side="bottom">
+          {tree && schemaMenuItems(null).length > 0 && (
+            <Tooltip label={headerMenuLabel} side="bottom">
               <Button
                 variant="ghost-muted"
                 size="icon-xs"
-                aria-label={capabilities.schemas ? "New table or schema" : "New table"}
+                aria-label={headerMenuLabel}
                 aria-expanded={schemaMenu?.schema === null}
                 onClick={(e) => {
                   const r = e.currentTarget.getBoundingClientRect();
@@ -796,7 +805,6 @@ export default function SchemaTree() {
                   onToggle={() => toggle("pinned-closed")}
                   icon={<Pin size={13} className="shrink-0 text-primary/80" />}
                   label="Pinned"
-                  count={pinnedObjects.length}
                 />
                 {!expanded.has("pinned-closed") &&
                   pinnedObjects.map(({ schema, object }) =>
@@ -805,42 +813,34 @@ export default function SchemaTree() {
               </div>
             )}
 
-            {multiSchema
-              ? tree.schemas.map((schema) => {
-                  const key = `s:${schema.name}`;
-                  const count = schema.objects.filter((o) => matches(o.name)).length;
-                  // While filtering, schemas without a match step aside
-                  if (query && count === 0) return null;
-                  return (
-                    <div key={schema.name}>
-                      <GroupRow
-                        depth={0}
-                        open={isOpen(key)}
-                        onToggle={() => toggle(key)}
-                        icon={<Folder size={15} className="shrink-0 text-warning-foreground/80" />}
-                        label={schema.name}
-                        count={count}
-                        action={newTableButton(schema.name)}
-                        // Without schema support there's nothing to do with one
-                        onContextMenu={
-                          capabilities.schemas
-                            ? (e) => {
-                                e.preventDefault();
-                                setSchemaMenu({ x: e.clientX, y: e.clientY, schema: schema.name });
-                              }
-                            : undefined
-                        }
-                      />
-                      {isOpen(key) &&
-                        (schema.objects.length === 0 ? (
-                          <div className="py-1 pl-9 text-xs text-muted-foreground/70">Empty schema</div>
-                        ) : (
-                          categoryGroups(schema.name, schema.objects, 1)
-                        ))}
-                    </div>
-                  );
-                })
-              : tree.schemas.map((schema) => <div key={schema.name}>{categoryGroups(schema.name, schema.objects, 0)}</div>)}
+            {tree.schemas.map((schema) => {
+              const key = `s:${schema.name}`;
+              const count = schema.objects.filter((o) => matches(o.name)).length;
+              // While filtering, schemas without a match step aside
+              if (query && count === 0) return null;
+              return (
+                <div key={schema.name}>
+                  <GroupRow
+                    depth={0}
+                    open={isOpen(key)}
+                    onToggle={() => toggle(key)}
+                    icon={<Folder size={15} className="shrink-0 text-warning-foreground/80" />}
+                    label={schema.name}
+                    action={newTableButton(schema.name)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setSchemaMenu({ x: e.clientX, y: e.clientY, schema: schema.name });
+                    }}
+                  />
+                  {isOpen(key) &&
+                    (schema.objects.length === 0 ? (
+                      <div className="py-1 pl-9 text-xs text-muted-foreground/70">Empty schema</div>
+                    ) : (
+                      categoryGroups(schema.name, schema.objects, 1)
+                    ))}
+                </div>
+              );
+            })}
           </>
         )}
 
@@ -853,7 +853,6 @@ export default function SchemaTree() {
               onToggle={toggleExtensions}
               icon={<Puzzle size={14} className="shrink-0 text-orange-500/80" />}
               label="Extensions"
-              count={extensions?.length}
             />
             {expanded.has("extensions") &&
               (extensions === null ? (

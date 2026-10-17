@@ -134,6 +134,20 @@ test("each new table page is its own tab, and the title follows the name", () =>
   assert.deepEqual(dropped.items.map((d) => d.schema), ["shop"]);
 });
 
+test("a diagram opens once per schema, and renaming the schema renames the tab", () => {
+  const first = openDocument(emptyDocuments(), { kind: "diagram", schema: "public" });
+  const again = openDocument(first, { kind: "diagram", schema: "public" });
+  assert.equal(again.items.length, 1);
+  assert.equal(again.items[0].title, "public");
+  assert.equal(again.activeId, first.activeId);
+  const other = openDocument(again, { kind: "diagram", schema: "billing" });
+  assert.equal(other.items.length, 2);
+  const renamed = renameSchema(other, "public", "shop");
+  assert.equal(renamed.items[0].schema, "shop");
+  assert.equal(renamed.items[0].title, "shop");
+  assert.equal(dropSchema(renamed, "shop").items.map((doc) => doc.schema).join(","), "billing");
+});
+
 test("seedQuery opens Query 1 only when the list is empty", () => {
   const seeded = seedQuery(emptyDocuments());
   assert.equal(seeded.items[0].title, "Query 1");

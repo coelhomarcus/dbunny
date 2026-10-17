@@ -158,3 +158,36 @@ export interface ExplorerTree {
   /** First schema of the search path. */
   defaultSchema: string | null;
 }
+
+/** One column on a diagram card. */
+export interface DiagramColumn {
+  name: string;
+  typeName: string;
+  isPrimaryKey: boolean;
+  isForeignKey: boolean;
+  ordinal: number;
+}
+
+/** A table card. A table from another schema is included only because a foreign key reaches it. */
+export interface DiagramTable {
+  schema: string;
+  name: string;
+  columns: DiagramColumn[];
+}
+
+/** One foreign key. `from` is the table that holds the key; several columns are still one relation. */
+export interface DiagramRelation {
+  name: string;
+  fromSchema: string;
+  fromTable: string;
+  fromColumns: string[];
+  toSchema: string;
+  toTable: string;
+  toColumns: string[];
+}
+
+/** Tables and foreign keys for the diagram of one schema. */
+export interface Diagram {
+  tables: DiagramTable[];
+  relations: DiagramRelation[];
+}

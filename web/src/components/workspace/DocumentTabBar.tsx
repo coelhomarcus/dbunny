@@ -18,6 +18,7 @@ import {
   Terminal,
   TriangleAlert,
   Users,
+  Waypoints,
   X,
   Zap,
   type LucideProps,
@@ -62,6 +63,8 @@ function iconFor(doc: Document): ComponentType<LucideProps> {
       return Zap;
     case "create-table":
       return Table2;
+    case "diagram":
+      return Waypoints;
   }
 }
 
@@ -100,6 +103,8 @@ function iconClass(doc: Document): string {
       return "text-yellow-500";
     case "create-table":
       return "text-success-foreground";
+    case "diagram":
+      return "text-info-foreground";
   }
 }
 

@@ -4,13 +4,19 @@ use tauri::State;
 
 use super::state::AppState;
 use crate::db::model::{
-    ColumnInfo, CompletionSchema, ExplorerTree, ExtensionInfo, FunctionDetail, ObjectDefinition, TableStructure,
+    ColumnInfo, CompletionSchema, Diagram, ExplorerTree, ExtensionInfo, FunctionDetail, ObjectDefinition, TableStructure,
 };
 
 /// Every schema with its objects, in one round trip.
 #[tauri::command]
 pub async fn get_explorer(state: State<'_, AppState>, session_id: String) -> Result<ExplorerTree, String> {
     state.driver(&session_id).await?.catalog().explorer().await
+}
+
+/// Tables, columns and foreign keys for the diagram of one schema.
+#[tauri::command]
+pub async fn get_diagram(state: State<'_, AppState>, session_id: String, schema: String) -> Result<Diagram, String> {
+    state.driver(&session_id).await?.catalog().diagram(&schema).await
 }
 
 #[tauri::command]
