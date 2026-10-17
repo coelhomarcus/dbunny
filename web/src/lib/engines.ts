@@ -11,7 +11,7 @@ export const ENGINE_CARDS: { id: "postgres" | "sqlite" | "mysql"; label: string;
 export type EngineCardId = (typeof ENGINE_CARDS)[number]["id"];
 
 /** The name a database engine is shown by, e.g. "PostgreSQL". */
-export function engineLabel(engine: Engine): string {
+export function engineLabel(engine: EngineCardId): string {
   return ENGINE_CARDS.find((card) => card.id === engine)?.label ?? engine;
 }
 

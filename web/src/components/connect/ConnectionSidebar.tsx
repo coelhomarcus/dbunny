@@ -5,6 +5,7 @@ import type { SavedConnection } from "@/types";
 import { cn } from "../../lib/cn";
 import { DEFAULT_COLOR } from "../../lib/connectionDraft";
 import { fileNameOf } from "../../lib/connectionSummary";
+import EngineLogo from "./engineLogos";
 import Button from "../ui/Button";
 import Badge from "../ui/Badge";
 
@@ -78,7 +79,10 @@ function ConnectionRow({
       <ConnectionIcon color={conn.color || DEFAULT_COLOR} icon={conn.icon} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium leading-snug">{conn.name || "Unnamed"}</div>
-        <div className="truncate text-xs leading-snug text-muted-foreground">{conn.engine === "sqlite" ? fileNameOf(conn.path) : conn.database}</div>
+        <div className="flex min-w-0 items-center gap-1 text-xs leading-snug text-muted-foreground">
+          <EngineLogo engine={conn.engine} bare />
+          <span className="truncate">{conn.engine === "sqlite" ? fileNameOf(conn.path) : conn.database}</span>
+        </div>
       </div>
       <div className="absolute right-1.5 flex items-center gap-0.5 rounded-md opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
         <Button
