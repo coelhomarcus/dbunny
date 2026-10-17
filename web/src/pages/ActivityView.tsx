@@ -164,7 +164,7 @@ export default function ActivityView() {
 
       {(error || message || activity?.limitedView) && (
         <div className="flex shrink-0 flex-col gap-1 border-b border-border px-4 py-2 text-[13px]">
-          {error && <span className="text-destructive-foreground">{error}</span>}
+          {error && <span className="select-text text-destructive-foreground">{error}</span>}
           {message && (
             <button type="button" className="text-left text-muted-foreground cursor-pointer" onClick={() => setMessage(null)}>
               {message}
@@ -436,7 +436,7 @@ function Field({ label, value }: { label: string; value: string }) {
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="truncate text-foreground">
+      <dd className="select-text truncate text-foreground">
         {value}
       </dd>
     </>

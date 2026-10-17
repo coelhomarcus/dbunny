@@ -445,7 +445,7 @@ export default function SchemaTree() {
     const value = columns[`t:${schema}.${name}`];
     const pad = INDENT[Math.min(depth, INDENT.length - 1)];
     if (value === undefined || value === "loading") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>Loading columns…</div>;
-    if (value === "error") return <div className={cn("py-1 text-xs text-destructive-foreground", pad)}>Couldn't read the columns</div>;
+    if (value === "error") return <div className={cn("select-text py-1 text-xs text-destructive-foreground", pad)}>Couldn't read the columns</div>;
     if (value.length === 0) return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>No columns</div>;
     return value.map((col) => (
       <div
@@ -763,7 +763,7 @@ export default function SchemaTree() {
 
         {error ? (
           <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-            <p className="text-xs text-destructive-foreground">{error}</p>
+            <p className="select-text text-xs text-destructive-foreground">{error}</p>
             <Button variant="outline" size="xs" onClick={() => load(true)}>
               Try again
             </Button>

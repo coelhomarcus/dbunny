@@ -57,7 +57,7 @@ export default function FunctionView({ schema, name, detail: args }: { schema: s
         <DetailSkeleton />
       ) : error ? (
         <div className="flex-1 flex items-center justify-center p-4">
-          <span className="text-sm text-destructive-foreground">{error}</span>
+          <span className="select-text text-sm text-destructive-foreground">{error}</span>
         </div>
       ) : detail ? (
         <div className="flex-1 min-h-0 flex flex-col">
@@ -120,7 +120,7 @@ function Property({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-2">
       <span className="text-muted-foreground shrink-0">{label}</span>
-      <span className="text-foreground font-mono">{value}</span>
+      <span className="select-text font-mono text-foreground">{value}</span>
     </div>
   );
 }

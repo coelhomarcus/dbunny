@@ -437,7 +437,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                               ))}
                             </div>
                           )}
-                          {fkError && <p className="mt-2 text-xs text-destructive-foreground">{fkError}</p>}
+                          {fkError && <p className="mt-2 select-text text-xs text-destructive-foreground">{fkError}</p>}
                         </div>
                       );
                     })}
@@ -479,7 +479,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                         className={cn("h-8 font-mono text-xs", partitionIncomplete && "border-destructive")}
                       />
                     </div>
-                    {partitionIncomplete && <p className="text-xs text-destructive-foreground">Enter a partition key</p>}
+                    {partitionIncomplete && <p className="select-text text-xs text-destructive-foreground">Enter a partition key</p>}
                   </>
                 )}
               </section>
@@ -499,7 +499,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
 
       <div className="flex h-12 shrink-0 items-center gap-3 border-t border-border px-6">
         {error ? (
-          <p className="min-w-0 flex-1 break-words text-xs text-destructive-foreground">{error}</p>
+          <p className="min-w-0 flex-1 select-text break-words text-xs text-destructive-foreground">{error}</p>
         ) : mode === "simple" && (hasIncompleteForeignKey || partitionIncomplete) ? (
           <p className="min-w-0 flex-1 text-xs text-muted-foreground">Finish the advanced options before creating.</p>
         ) : null}

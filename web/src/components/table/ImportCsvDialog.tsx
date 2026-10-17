@@ -147,7 +147,7 @@ function ImportForm({
       footer={
         <>
           {error ? (
-            <p className="mr-auto min-w-0 flex-1 break-words text-xs text-destructive-foreground">{error}</p>
+            <p className="mr-auto min-w-0 flex-1 select-text break-words text-xs text-destructive-foreground">{error}</p>
           ) : (
             file && <p className="mr-auto text-xs text-muted-foreground tabular-nums">{dataRows.length.toLocaleString()} rows</p>
           )}
@@ -240,7 +240,7 @@ function ImportForm({
               </table>
             </div>
             {duplicates.length > 0 && (
-              <p className="text-xs text-destructive-foreground">Each table column can take only one CSV column ({[...new Set(duplicates)].join(", ")}).</p>
+              <p className="select-text text-xs text-destructive-foreground">Each table column can take only one CSV column ({[...new Set(duplicates)].join(", ")}).</p>
             )}
             {dataRows.length > PREVIEW_ROWS && (
               <p className="text-xs text-muted-foreground">Showing the first {PREVIEW_ROWS} of {dataRows.length.toLocaleString()} rows.</p>

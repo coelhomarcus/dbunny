@@ -48,7 +48,7 @@ function ErrorDisplay({ raw }: { raw: string }) {
     : "text-destructive-foreground bg-destructive/10 border-destructive/30";
 
   return (
-    <div className={`m-4 rounded-lg border p-4 text-sm ${severityColor}`}>
+    <div className={`m-4 select-text rounded-lg border p-4 text-sm ${severityColor}`}>
       <div className="flex items-start gap-2.5">
         <div className="flex-1 min-w-0 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">

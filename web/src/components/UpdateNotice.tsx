@@ -96,7 +96,7 @@ export default function UpdateNotice() {
             <TriangleAlert size={16} className="mt-0.5 shrink-0 text-destructive-foreground" />
             <div className="min-w-0 flex-1">
               <div className="text-[13px] font-semibold">The update couldn't be installed</div>
-              <p className="mt-0.5 break-words text-xs text-muted-foreground">{state.message}</p>
+              <p className="mt-0.5 select-text break-words text-xs text-muted-foreground">{state.message}</p>
             </div>
           </div>
           <div className="mt-3 flex justify-end gap-1.5">

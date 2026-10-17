@@ -258,7 +258,7 @@ function ChangeForm({
       className="max-w-lg"
       footer={
         <>
-          {error && <p className="mr-auto min-w-0 flex-1 break-words text-xs text-destructive-foreground">{error}</p>}
+          {error && <p className="mr-auto min-w-0 flex-1 select-text break-words text-xs text-destructive-foreground">{error}</p>}
           <Button variant="neutral" size="sm" onClick={onClose} autoFocus={destructive}>
             Cancel
           </Button>

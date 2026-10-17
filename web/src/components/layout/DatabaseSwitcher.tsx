@@ -160,7 +160,7 @@ export default function DatabaseSwitcher() {
             ))}
           </div>
         )}
-        {error && <p className="px-2 py-1.5 text-xs text-destructive-foreground">{error}</p>}
+        {error && <p className="select-text px-2 py-1.5 text-xs text-destructive-foreground">{error}</p>}
         <div className="mt-1 flex items-center gap-2 border-t border-border px-2 pb-0.5 pt-1.5">
           <p className="flex-1 text-[11px] text-muted-foreground">Opens in a new tab, with the same login.</p>
           {!readOnly && (

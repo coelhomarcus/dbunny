@@ -61,7 +61,7 @@ export default function ObjectView({
       {loading ? (
         <DetailSkeleton />
       ) : !definition ? (
-        <div className="flex flex-1 items-center justify-center p-4 text-sm text-destructive-foreground">{result.error}</div>
+        <div className="flex flex-1 select-text items-center justify-center p-4 text-sm text-destructive-foreground">{result.error}</div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="shrink-0 border-b border-border px-4 py-4">
@@ -69,11 +69,11 @@ export default function ObjectView({
               {definition.facts.map(([factLabel, value]) => (
                 <div key={factLabel} className="flex items-baseline gap-2">
                   <span className="shrink-0 text-muted-foreground">{factLabel}</span>
-                  <span className="truncate font-mono text-foreground">{value}</span>
+                  <span className="select-text truncate font-mono text-foreground">{value}</span>
                 </div>
               ))}
             </div>
-            {definition.comment && <p className="mt-3 text-sm text-muted-foreground">{definition.comment}</p>}
+            {definition.comment && <p className="mt-3 select-text text-sm text-muted-foreground">{definition.comment}</p>}
           </div>
           <div className="flex h-9 shrink-0 items-center justify-between border-b border-border bg-muted px-4">
             <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Definition</span>

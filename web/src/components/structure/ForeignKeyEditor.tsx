@@ -114,7 +114,7 @@ export default function ForeignKeyEditor({
           </select>
         </label>
       </div>
-      {error && <p className="text-xs text-destructive-foreground">{error}</p>}
+      {error && <p className="select-text text-xs text-destructive-foreground">{error}</p>}
     </div>
   );
 }

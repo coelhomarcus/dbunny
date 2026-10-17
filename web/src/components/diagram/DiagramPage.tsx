@@ -249,12 +249,12 @@ function DiagramCanvas({ schema }: { schema: string }) {
           <Download /> {exporting ? "Exporting…" : "Export"}
         </Button>
       </header>
-      {exportError && <p className="shrink-0 px-3 py-1 text-xs text-destructive-foreground">{exportError}</p>}
+      {exportError && <p className="shrink-0 select-text px-3 py-1 text-xs text-destructive-foreground">{exportError}</p>}
       <div className="min-h-0 flex-1 bg-card">
         {loading ? (
           <p className="flex h-full items-center justify-center text-sm text-muted-foreground">Reading the schema…</p>
         ) : loadError ? (
-          <p className="flex h-full items-center justify-center px-6 text-center text-sm text-destructive-foreground">{loadError}</p>
+          <p className="flex h-full select-text items-center justify-center px-6 text-center text-sm text-destructive-foreground">{loadError}</p>
         ) : empty ? (
           <p className="flex h-full items-center justify-center text-sm text-muted-foreground">This schema has no tables.</p>
         ) : (

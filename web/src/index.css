@@ -163,6 +163,40 @@ body {
   color: var(--foreground);
 }
 
+/* The window is a tool: labels, buttons and chrome don't select.
+   What you type, grid values, SQL and errors do. */
+html {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+select,
+option,
+[contenteditable="true"],
+[contenteditable="plaintext-only"],
+[contenteditable=""],
+td,
+pre,
+code,
+.sql-preview,
+.select-text {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+button,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+label,
+th,
+kbd {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* Custom scrollbar */
 * {
   scrollbar-width: thin;

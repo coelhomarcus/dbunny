@@ -478,7 +478,7 @@ function TableViewContent({
       )}
 
       {error && !data && (
-        <div className="px-4 py-3 text-sm text-muted-foreground">Couldn't load this table.</div>
+        <div className="select-text px-4 py-3 text-sm text-muted-foreground">Couldn't load this table.</div>
       )}
 
       {loading && !data && <TableSkeleton columns={6} rows={14} />}

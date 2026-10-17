@@ -462,7 +462,7 @@ function QueryPaneBody({
           <div className="rounded-xl border border-border bg-muted divide-y divide-border">
             {(pendingDangers ?? []).map((d, i) => (
               <div key={i} className="px-3 py-2.5">
-                <span className="font-mono text-xs font-medium text-destructive-foreground block">{d.rule}</span>
+                <span className="block select-text font-mono text-xs font-medium text-destructive-foreground">{d.rule}</span>
                 <span className="text-xs text-muted-foreground block mt-0.5">{d.detail}</span>
               </div>
             ))}
@@ -498,7 +498,7 @@ function QueryPaneBody({
                 {justSaved ? <Check /> : <Save />}
               </Button>
             </Tooltip>
-            {formatError && <span className="min-w-0 truncate text-xs text-destructive-foreground">Couldn't format: {formatError}</span>}
+            {formatError && <span className="min-w-0 select-text truncate text-xs text-destructive-foreground">Couldn't format: {formatError}</span>}
             <div className="ml-auto flex items-center gap-0.5">
               <Button
                 variant="ghost-muted"

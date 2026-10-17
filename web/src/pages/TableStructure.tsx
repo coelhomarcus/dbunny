@@ -592,7 +592,7 @@ export default function TableStructure({ schema, name: table }: { schema: string
       {loading ? (
         <TableSkeleton columns={5} rows={10} />
       ) : !structure ? (
-        <div className="flex flex-1 items-center justify-center p-4 text-sm text-destructive-foreground">{result.error}</div>
+        <div className="flex flex-1 select-text items-center justify-center p-4 text-sm text-destructive-foreground">{result.error}</div>
       ) : (
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-3 pb-2 text-[13px]">

@@ -29,7 +29,7 @@ export default function NoticeToast({ notice, onDismiss }: { notice: Notice | nu
       ) : (
         <CircleCheck size={18} className="mt-0.5 shrink-0 text-success-foreground" />
       )}
-      <p className="min-w-0 flex-1 break-words text-[13px] leading-snug">{notice.text}</p>
+      <p className="min-w-0 flex-1 select-text break-words text-[13px] leading-snug">{notice.text}</p>
       <Button variant="ghost-muted" size="icon-xs" className="-mr-1 -mt-1" aria-label="Dismiss" onClick={onDismiss}>
         <X />
       </Button>

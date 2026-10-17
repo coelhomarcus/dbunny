@@ -78,7 +78,7 @@ export default function RolesView() {
       </PageHeader>
 
       {error ? (
-        <div className="flex flex-1 items-center justify-center p-4 text-sm text-destructive-foreground">{error}</div>
+        <div className="flex flex-1 select-text items-center justify-center p-4 text-sm text-destructive-foreground">{error}</div>
       ) : !roles ? (
         <TableSkeleton columns={4} rows={8} />
       ) : (

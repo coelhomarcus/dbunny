@@ -277,7 +277,7 @@ function ModalBody({
                     className="mx-5 mb-3 flex shrink-0 items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2.5 text-sm text-destructive-foreground"
                   >
                     <TriangleAlert size={15} className="mt-0.5 shrink-0" />
-                    <span className={cn("min-w-0 break-words", !error && "font-mono text-xs leading-5")}>
+                    <span className={cn("min-w-0 select-text break-words", !error && "font-mono text-xs leading-5")}>
                       {error ?? (test.status === "error" ? test.message : null)}
                     </span>
                   </div>
