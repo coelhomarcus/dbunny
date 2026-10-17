@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowRight, Columns3, KeyRound, ListTree, PenLine, ShieldCheck, Trash2 } from "lucide-react";
+import { Columns3, KeyRound, ListTree, PenLine, ShieldCheck, Trash2 } from "lucide-react";
 import type { ColumnGeneration, ColumnInfo, CompletionRelation, StructureChange } from "@/types";
 import { useApi } from "../../contexts/useConnection";
 import { useTab } from "../../contexts/workspace";
@@ -15,6 +15,8 @@ import { selectClass } from "../ui/styles";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useSqlDialect } from "../../hooks/useSqlDialect";
 import { SqlPreviewBox } from "../schema/SqlPreview";
+import ForeignKeyEditor from "./ForeignKeyEditor";
+import { guessReference } from "../../lib/foreignKeyForm";
 
 /** Which form to show; fields not chosen yet come from the column being changed. */
 export type ChangeDraft =
@@ -29,8 +31,6 @@ export type ChangeDraft =
 const COMMON_TYPES = ["text", "varchar(255)", "integer", "bigint", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
 const SQLITE_TYPES = ["INTEGER", "TEXT", "REAL", "NUMERIC", "BLOB"];
 const INDEX_METHODS = ["btree", "hash", "gin", "gist", "brin"];
-const REFERENTIAL_ACTIONS = ["NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"];
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1.5">
@@ -66,11 +66,6 @@ function ColumnPicker({ label, columns, value, onChange }: { label: string; colu
 
 /** The referenced column a new foreign key column most likely points at. */
 const quoteName = (name: string) => (/^[a-z_][a-z0-9_]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`);
-
-function guessReference(column: string, target: CompletionRelation | undefined): string {
-  const names = target?.columns.map((c) => c.name) ?? [];
-  return names.find((n) => n === column) ?? names.find((n) => n === "id") ?? names[0] ?? "";
-}
 
 function ChangeForm({
   schema,
@@ -368,61 +363,17 @@ function ChangeForm({
           <ColumnPicker label={draft.kind === "addUnique" ? "Columns that can't repeat together" : "Columns"} columns={columns} value={keyColumns} onChange={setKeyColumns} />
         )}
         {draft.kind === "addForeignKey" && (
-          <>
-            <Field label="References table">
-              <select value={refTable} onChange={(e) => (setRefTable(e.target.value), setRefColumns({}))} className={cn(selectClass, "w-full")}>
-                <option value="">{relations === null ? "Loading…" : "Choose a table"}</option>
-                {(relations ?? []).map((r) => (
-                  <option key={`${r.schema}.${r.name}`} value={`${r.schema}.${r.name}`}>
-                    {r.schema}.{r.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            {target && keyColumns.length > 0 && (
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[13px] font-medium">Matching columns</span>
-                {keyColumns.map((c) => (
-                  <div key={c} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                    <span className="truncate font-mono text-xs">{c}</span>
-                    <ArrowRight size={13} className="text-muted-foreground" />
-                    <select
-                      value={refColumns[c] ?? guessReference(c, target)}
-                      onChange={(e) => setRefColumns((prev) => ({ ...prev, [c]: e.target.value }))}
-                      className={cn(selectClass, "w-full font-mono text-xs")}
-                      aria-label={`Column referenced by ${c}`}
-                    >
-                      {target.columns.map((rc) => (
-                        <option key={rc.name} value={rc.name}>
-                          {rc.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="On delete">
-                <select value={onDelete} onChange={(e) => setOnDelete(e.target.value)} className={cn(selectClass, "w-full")}>
-                  {REFERENTIAL_ACTIONS.map((a) => (
-                    <option key={a} value={a}>
-                      {a.toLowerCase()}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="On update">
-                <select value={onUpdate} onChange={(e) => setOnUpdate(e.target.value)} className={cn(selectClass, "w-full")}>
-                  {REFERENTIAL_ACTIONS.map((a) => (
-                    <option key={a} value={a}>
-                      {a.toLowerCase()}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-          </>
+          <ForeignKeyEditor
+            relations={relations}
+            value={{ refTable, columns: keyColumns, refColumns, onUpdate, onDelete }}
+            onChange={(patch) => {
+              if (patch.refTable !== undefined) (setRefTable(patch.refTable), setRefColumns({}));
+              if (patch.refColumns !== undefined) setRefColumns(patch.refColumns);
+              if (patch.onUpdate !== undefined) setOnUpdate(patch.onUpdate);
+              if (patch.onDelete !== undefined) setOnDelete(patch.onDelete);
+            }}
+            localColumnNames={keyColumns}
+          />
         )}
         {draft.kind === "addCheck" && (
           <Field label="Rows must satisfy">

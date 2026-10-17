@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowRight, Plus, Table2, X } from "lucide-react";
+import { Plus, Table2, X } from "lucide-react";
 import type { ColumnGeneration, CompletionRelation, NewColumn, NewTable } from "@/types";
 import { useApi } from "../../contexts/useConnection";
 import { useTab } from "../../contexts/workspace";
-import { foreignKeyDraftError, foreignKeysForSpec, guessReference, REFERENTIAL_ACTIONS } from "../../lib/foreignKeyForm";
+import { foreignKeyDraftError, foreignKeysForSpec } from "../../lib/foreignKeyForm";
+import ForeignKeyEditor from "../structure/ForeignKeyEditor";
 import { requestOpenQuery } from "../../lib/openQuery";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useSqlDialect } from "../../hooks/useSqlDialect";
@@ -13,7 +14,6 @@ import Dialog from "../ui/Dialog";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
 import CheckOption from "../ui/CheckOption";
-import Checkbox from "../Checkbox";
 import { selectClass } from "../ui/styles";
 import { SqlPreviewBox } from "./SqlPreview";
 
@@ -254,8 +254,6 @@ function Builder({
         <div className="flex flex-col gap-2">
           {foreignKeys.map((fk, index) => {
             const fkError = fkErrors[index];
-            const target = relations?.find((r) => `${r.schema}.${r.name}` === fk.refTable);
-            const locals = fk.columns.filter((c) => named.includes(c));
             const patch = (next: Partial<ForeignKey>) => setForeignKeys((prev) => prev.map((item) => (item.key === fk.key ? { ...item, ...next } : item)));
             return (
               <div key={fk.key} className={cn("flex flex-col gap-2 rounded-lg border p-2.5", fkError ? "border-destructive" : "border-border")}>
@@ -265,84 +263,14 @@ function Builder({
                     <X />
                   </Button>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[13px] font-medium">Columns</span>
-                  {named.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Name a column first.</p>
-                  ) : (
-                    <div className="flex flex-col gap-1">
-                      {named.map((name) => {
-                        const on = fk.columns.includes(name);
-                        return (
-                          <div
-                            key={name}
-                            className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-[13px] hover:bg-accent"
-                            onClick={() => patch({ columns: on ? fk.columns.filter((c) => c !== name) : [...fk.columns, name] })}
-                          >
-                            <Checkbox checked={on} onChange={() => patch({ columns: on ? fk.columns.filter((c) => c !== name) : [...fk.columns, name] })} />
-                            <span className="font-mono text-xs">{name}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-[13px] font-medium">References</span>
-                  <select value={fk.refTable} onChange={(e) => patch({ refTable: e.target.value, refColumns: {} })} className={cn(selectClass, "w-full")}>
-                    <option value="">{relations === null ? "Loading…" : "Choose a table"}</option>
-                    {(relations ?? []).map((r) => (
-                      <option key={`${r.schema}.${r.name}`} value={`${r.schema}.${r.name}`}>
-                        {r.schema}.{r.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {target && locals.length > 0 && (
-                  <div className="flex flex-col gap-1.5">
-                    {locals.map((c) => (
-                      <div key={c} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                        <span className="truncate font-mono text-xs">{c}</span>
-                        <ArrowRight size={13} className="text-muted-foreground" />
-                        <select
-                          value={fk.refColumns[c] ?? guessReference(c, target)}
-                          onChange={(e) => patch({ refColumns: { ...fk.refColumns, [c]: e.target.value } })}
-                          className={cn(selectClass, "w-full font-mono text-xs")}
-                          aria-label={`Column referenced by ${c}`}
-                        >
-                          {target.columns.map((rc) => (
-                            <option key={rc.name} value={rc.name}>
-                              {rc.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[13px] font-medium">On delete</span>
-                    <select value={fk.onDelete} onChange={(e) => patch({ onDelete: e.target.value })} className={cn(selectClass, "w-full")}>
-                      {REFERENTIAL_ACTIONS.map((a) => (
-                        <option key={a} value={a}>
-                          {a.toLowerCase()}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[13px] font-medium">On update</span>
-                    <select value={fk.onUpdate} onChange={(e) => patch({ onUpdate: e.target.value })} className={cn(selectClass, "w-full")}>
-                      {REFERENTIAL_ACTIONS.map((a) => (
-                        <option key={a} value={a}>
-                          {a.toLowerCase()}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                {fkError && <p className="text-xs text-destructive-foreground">{fkError}</p>}
+                <ForeignKeyEditor
+                  relations={relations}
+                  value={fk}
+                  onChange={patch}
+                  localColumnNames={named}
+                  selectableLocalColumns
+                  error={fkError}
+                />
               </div>
             );
           })}
