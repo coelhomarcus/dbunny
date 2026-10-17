@@ -6,29 +6,10 @@ import Input from "../ui/Input";
 import { selectClass } from "../ui/styles";
 import { cn } from "../../lib/cn";
 import { shortType } from "../../lib/columnMeta";
+import { collectInsertValues, UNTOUCHED_INSERT_FIELD, type InsertField } from "../../lib/insertRowValues";
 
-type Field = {
-  /** The user typed in it (even to clear it): an untouched field is left to the default. */
-  touched: boolean;
-  isNull: boolean;
-  text: string;
-};
-
-const UNTOUCHED: Field = { touched: false, isNull: false, text: "" };
-
-// <select> option values for "leave to the default" and NULL; neither can collide with an enum label
+// <select> option values for "leave to the default"; must not collide with an enum label
 const DEFAULT_OPTION = "\u0000default";
-
-/** Values to insert: null is SQL NULL, and columns left alone are omitted. */
-function collectValues(columns: ColumnInfo[], fields: Record<string, Field>) {
-  const values: Record<string, string | null> = {};
-  for (const column of columns) {
-    const field = fields[column.name] ?? UNTOUCHED;
-    if (field.isNull) values[column.name] = null;
-    else if (field.touched) values[column.name] = field.text;
-  }
-  return values;
-}
 
 function InsertForm({
   schema,
@@ -45,7 +26,7 @@ function InsertForm({
   onInsert: (values: Record<string, string | null>) => Promise<void>;
   onClose: () => void;
 }) {
-  const [fields, setFields] = useState<Record<string, Field>>(() =>
+  const [fields, setFields] = useState<Record<string, InsertField>>(() =>
     Object.fromEntries(
       Object.entries(initialValues ?? {}).map(([name, value]) => [
         name,
@@ -59,8 +40,8 @@ function InsertForm({
   // Generated columns are computed by the server and can't be given a value
   const ordered = columns.filter((c) => !c.isGenerated).sort((a, b) => a.ordinalPosition - b.ordinalPosition);
 
-  function update(name: string, patch: Partial<Field>) {
-    setFields((prev) => ({ ...prev, [name]: { ...(prev[name] ?? UNTOUCHED), ...patch } }));
+  function update(name: string, patch: Partial<InsertField>) {
+    setFields((prev) => ({ ...prev, [name]: { ...(prev[name] ?? UNTOUCHED_INSERT_FIELD), ...patch } }));
   }
 
   async function submit(e?: FormEvent) {
@@ -68,7 +49,7 @@ function InsertForm({
     setSaving(true);
     setError(null);
     try {
-      await onInsert(collectValues(columns, fields));
+      await onInsert(collectInsertValues(columns, fields));
       onClose();
     } catch (err) {
       setError(typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to insert the row");
@@ -106,7 +87,7 @@ function InsertForm({
     >
       <form onSubmit={submit} className="-mr-2 max-h-[55vh] space-y-2 overflow-y-auto pr-2">
         {ordered.map((column, index) => {
-          const field = fields[column.name] ?? UNTOUCHED;
+          const field = fields[column.name] ?? UNTOUCHED_INSERT_FIELD;
           const required = !column.isNullable && column.defaultValue === null;
           const choices = column.dataType === "boolean" ? ["true", "false"] : column.enumValues?.length ? column.enumValues : null;
           const placeholder = column.defaultValue !== null ? `default: ${column.defaultValue}` : column.isNullable ? "NULL" : "required";
@@ -132,7 +113,7 @@ function InsertForm({
                     value={field.isNull ? "" : field.touched ? field.text : DEFAULT_OPTION}
                     onChange={(e) => {
                       const v = e.target.value;
-                      if (v === DEFAULT_OPTION) setFields((prev) => ({ ...prev, [column.name]: UNTOUCHED }));
+                      if (v === DEFAULT_OPTION) setFields((prev) => ({ ...prev, [column.name]: UNTOUCHED_INSERT_FIELD }));
                       else update(column.name, { touched: true, isNull: false, text: v });
                     }}
                   >
