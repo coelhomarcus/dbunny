@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Plus, Table2, X } from "lucide-react";
-import type { ColumnGeneration, NewColumn } from "@/types";
+import { ArrowRight, Plus, Table2, X } from "lucide-react";
+import type { ColumnGeneration, CompletionRelation, NewColumn, NewTable } from "@/types";
 import { useApi } from "../../contexts/useConnection";
 import { useTab } from "../../contexts/workspace";
 import { requestOpenQuery } from "../../lib/openQuery";
@@ -12,16 +12,36 @@ import Dialog from "../ui/Dialog";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
 import CheckOption from "../ui/CheckOption";
+import Checkbox from "../Checkbox";
 import { selectClass } from "../ui/styles";
 import { SqlPreviewBox } from "./SqlPreview";
 
 const COMMON_TYPES = ["bigserial", "bigint", "integer", "text", "varchar(255)", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
 // SQLite stores a few kinds of value; the type decides how a column converts what is written to it
 const SQLITE_TYPES = ["INTEGER", "TEXT", "REAL", "NUMERIC", "BLOB"];
+const REFERENTIAL_ACTIONS = ["NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"];
+const PARTITION_METHODS = ["RANGE", "LIST", "HASH"];
+
+type ForeignKey = {
+  key: number;
+  columns: string[];
+  /** `schema.name` of the referenced table, or empty while it is still being chosen. */
+  refTable: string;
+  refColumns: Record<string, string>;
+  onUpdate: string;
+  onDelete: string;
+};
+
+let nextKey = 0;
+
+/** The referenced column a new foreign key column most likely points at. */
+function guessReference(column: string, target: CompletionRelation | undefined): string {
+  const names = target?.columns.map((c) => c.name) ?? [];
+  return names.find((n) => n === column) ?? names.find((n) => n === "id") ?? names[0] ?? "";
+}
 
 type Row = NewColumn & { key: number };
 
-let nextKey = 0;
 const row = (patch: Partial<NewColumn> = {}): Row => ({
   key: nextKey++,
   name: "",
@@ -65,10 +85,29 @@ function Builder({
           row({ name: "created_at", dataType: "timestamptz", nullable: false, default: "now()" }),
         ],
   );
+  const [foreignKeys, setForeignKeys] = useState<ForeignKey[]>([]);
+  const [relations, setRelations] = useState<CompletionRelation[] | null>(null);
+  const [unlogged, setUnlogged] = useState(false);
+  const [withoutRowid, setWithoutRowid] = useState(false);
+  const [strict, setStrict] = useState(false);
+  const [partitionMethod, setPartitionMethod] = useState("");
+  const [partitionExpr, setPartitionExpr] = useState("");
   const [sql, setSql] = useState("");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sqlite = dialect === "sqlite";
+
+  useEffect(() => {
+    let stale = false;
+    api
+      .getCompletionSchema()
+      .then((s) => !stale && setRelations(s.relations.filter((r) => r.type === "table")))
+      .catch(() => !stale && setRelations([]));
+    return () => {
+      stale = true;
+    };
+  }, [api]);
 
   const columns: NewColumn[] = rows.map((r) => ({
     name: r.name,
@@ -82,13 +121,36 @@ function Builder({
     generated: r.generation === "generated" && r.generated?.trim() ? r.generated : null,
     default: r.generation === "none" && r.default?.trim() ? r.default : null,
   }));
-  const columnsKey = JSON.stringify(columns);
+  const named = columns.map((c) => c.name.trim()).filter(Boolean);
+  const spec: NewTable = {
+    columns,
+    foreignKeys: foreignKeys.flatMap((fk) => {
+      const target = relations?.find((r) => `${r.schema}.${r.name}` === fk.refTable);
+      if (!target) return [];
+      const locals = fk.columns.filter((c) => named.includes(c));
+      return [
+        {
+          columns: locals,
+          refSchema: target.schema,
+          refTable: target.name,
+          refColumns: locals.map((c) => fk.refColumns[c] ?? guessReference(c, target)),
+          onUpdate: fk.onUpdate,
+          onDelete: fk.onDelete,
+        },
+      ];
+    }),
+    unlogged: !sqlite && unlogged,
+    withoutRowid: sqlite && withoutRowid,
+    strict: sqlite && strict,
+    partition: !sqlite && partitionMethod ? { method: partitionMethod, expression: partitionExpr } : null,
+  };
+  const specKey = JSON.stringify(spec);
 
   useEffect(() => {
     let stale = false;
     const timer = setTimeout(() => {
       api
-        .previewCreateTable(schema, table, JSON.parse(columnsKey))
+        .previewCreateTable(schema, table, JSON.parse(specKey))
         .then((text) => !stale && (setSql(text), setPreviewError(null)))
         .catch((err) => !stale && (setSql(""), setPreviewError(typeof err === "string" ? err : "Invalid table")));
     }, 150);
@@ -96,7 +158,7 @@ function Builder({
       stale = true;
       clearTimeout(timer);
     };
-  }, [api, schema, table, columnsKey, capabilities.comments]);
+  }, [api, schema, table, specKey, capabilities.comments]);
 
   const update = (key: number, patch: Partial<NewColumn>) => setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
@@ -104,7 +166,7 @@ function Builder({
     setBusy(true);
     setError(null);
     try {
-      await api.createTable(schema, table.trim(), columns);
+      await api.createTable(schema, table.trim(), spec);
       onCreated(table.trim());
       onClose();
     } catch (err) {
@@ -195,6 +257,139 @@ function Builder({
             <Plus /> Add column
           </Button>
         </div>
+
+        <div className="flex flex-col gap-2">
+          {foreignKeys.map((fk) => {
+            const target = relations?.find((r) => `${r.schema}.${r.name}` === fk.refTable);
+            const locals = fk.columns.filter((c) => named.includes(c));
+            const patch = (next: Partial<ForeignKey>) => setForeignKeys((prev) => prev.map((item) => (item.key === fk.key ? { ...item, ...next } : item)));
+            return (
+              <div key={fk.key} className="flex flex-col gap-2 rounded-lg border border-border p-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[13px] font-medium">Foreign key</span>
+                  <Button variant="ghost-muted" size="icon-xs" aria-label="Remove foreign key" onClick={() => setForeignKeys((prev) => prev.filter((item) => item.key !== fk.key))}>
+                    <X />
+                  </Button>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[13px] font-medium">Columns</span>
+                  {named.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Name a column first.</p>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      {named.map((name) => {
+                        const on = fk.columns.includes(name);
+                        return (
+                          <div
+                            key={name}
+                            className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-[13px] hover:bg-accent"
+                            onClick={() => patch({ columns: on ? fk.columns.filter((c) => c !== name) : [...fk.columns, name] })}
+                          >
+                            <Checkbox checked={on} onChange={() => patch({ columns: on ? fk.columns.filter((c) => c !== name) : [...fk.columns, name] })} />
+                            <span className="font-mono text-xs">{name}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[13px] font-medium">References</span>
+                  <select value={fk.refTable} onChange={(e) => patch({ refTable: e.target.value, refColumns: {} })} className={cn(selectClass, "w-full")}>
+                    <option value="">{relations === null ? "Loading…" : "Choose a table"}</option>
+                    {(relations ?? []).map((r) => (
+                      <option key={`${r.schema}.${r.name}`} value={`${r.schema}.${r.name}`}>
+                        {r.schema}.{r.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {target && locals.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    {locals.map((c) => (
+                      <div key={c} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                        <span className="truncate font-mono text-xs">{c}</span>
+                        <ArrowRight size={13} className="text-muted-foreground" />
+                        <select
+                          value={fk.refColumns[c] ?? guessReference(c, target)}
+                          onChange={(e) => patch({ refColumns: { ...fk.refColumns, [c]: e.target.value } })}
+                          className={cn(selectClass, "w-full font-mono text-xs")}
+                          aria-label={`Column referenced by ${c}`}
+                        >
+                          {target.columns.map((rc) => (
+                            <option key={rc.name} value={rc.name}>
+                              {rc.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-[13px] font-medium">On delete</span>
+                    <select value={fk.onDelete} onChange={(e) => patch({ onDelete: e.target.value })} className={cn(selectClass, "w-full")}>
+                      {REFERENTIAL_ACTIONS.map((a) => (
+                        <option key={a} value={a}>
+                          {a.toLowerCase()}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-[13px] font-medium">On update</span>
+                    <select value={fk.onUpdate} onChange={(e) => patch({ onUpdate: e.target.value })} className={cn(selectClass, "w-full")}>
+                      {REFERENTIAL_ACTIONS.map((a) => (
+                        <option key={a} value={a}>
+                          {a.toLowerCase()}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            );
+          })}
+          <Button
+            variant="ghost-muted"
+            size="xs"
+            className="self-start"
+            onClick={() => setForeignKeys((prev) => [...prev, { key: nextKey++, columns: [], refTable: "", refColumns: {}, onUpdate: "NO ACTION", onDelete: "NO ACTION" }])}
+          >
+            <Plus /> Add foreign key
+          </Button>
+        </div>
+
+        {sqlite ? (
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <CheckOption checked={withoutRowid} onChange={setWithoutRowid} label="WITHOUT ROWID" />
+            <CheckOption checked={strict} onChange={setStrict} label="STRICT" />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <CheckOption checked={unlogged} onChange={setUnlogged} label="UNLOGGED" />
+            <div className="grid grid-cols-[9rem_1fr] gap-2">
+              <select aria-label="Partition method" value={partitionMethod} onChange={(e) => setPartitionMethod(e.target.value)} className={cn(selectClass, "h-8 w-full")}>
+                <option value="">No partition</option>
+                {PARTITION_METHODS.map((method) => (
+                  <option key={method} value={method}>
+                    PARTITION BY {method}
+                  </option>
+                ))}
+              </select>
+              <Input
+                value={partitionExpr}
+                onChange={(e) => setPartitionExpr(e.target.value)}
+                aria-label="Partition key"
+                placeholder="partition key, e.g. created_at"
+                disabled={!partitionMethod}
+                spellCheck={false}
+                className="h-8 font-mono text-xs"
+              />
+            </div>
+          </div>
+        )}
 
         <SqlPreviewBox
           source={sql}

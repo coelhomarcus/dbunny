@@ -128,3 +128,29 @@ export interface NewColumn {
   /** Expression for `generated`, without `;`. */
   generated: string | null;
 }
+
+/** A foreign key written inside `CREATE TABLE`. */
+export interface NewForeignKey {
+  columns: string[];
+  refSchema: string;
+  refTable: string;
+  refColumns: string[];
+  onUpdate: string;
+  onDelete: string;
+}
+
+/** `PARTITION BY` on a new PostgreSQL table. No child partitions. */
+export interface NewPartition {
+  method: string;
+  expression: string;
+}
+
+/** The table builder: columns, foreign keys and engine options. */
+export interface NewTable {
+  columns: NewColumn[];
+  foreignKeys: NewForeignKey[];
+  unlogged: boolean;
+  withoutRowid: boolean;
+  strict: boolean;
+  partition: NewPartition | null;
+}

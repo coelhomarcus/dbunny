@@ -14,7 +14,7 @@ import type {
   SavedConnectionInput,
   TableStructure,
   StructureChange,
-  NewColumn,
+  NewTable,
   ExplainResult,
   ExtensionInfo,
   ObjectDefinition,
@@ -166,12 +166,12 @@ export function createSessionApi(sessionId: string | null) {
       return invoke<void>("apply_structure_change", { sessionId, schema, table, change });
     },
 
-    async previewCreateTable(schema: string, table: string, columns: NewColumn[]) {
-      return invoke<string>("preview_create_table", { sessionId, schema, table, columns });
+    async previewCreateTable(schema: string, table: string, spec: NewTable) {
+      return invoke<string>("preview_create_table", { sessionId, schema, table, spec });
     },
 
-    async createTable(schema: string, table: string, columns: NewColumn[]) {
-      return invoke<void>("create_table", { sessionId, schema, table, columns });
+    async createTable(schema: string, table: string, spec: NewTable) {
+      return invoke<void>("create_table", { sessionId, schema, table, spec });
     },
 
     async getCompletionSchema() {

@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use super::capabilities::Capabilities;
 use super::model::{
     ColumnInfo, CompletionSchema, ConnectionInfo, DatabaseInfo, ExplainResult, ExplorerTree, ExtensionInfo,
-    FunctionDetail, JsonMap, NewColumn, ObjectDefinition, QueryResult, RoleInfo, RowChange, ServerActivity,
+    FunctionDetail, JsonMap, NewTable, ObjectDefinition, QueryResult, RoleInfo, RowChange, ServerActivity,
     StructureChange, TableDataParams, TableDataResponse, TableStructure,
 };
 use super::Engine;
@@ -92,8 +92,8 @@ pub trait Transactions: Send + Sync {
 pub trait SchemaEditor: Send + Sync {
     async fn preview_change(&self, schema: &str, table: &str, change: &StructureChange) -> Result<String, String>;
     async fn apply_change(&self, schema: &str, table: &str, change: StructureChange) -> Result<(), String>;
-    async fn preview_create_table(&self, schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String>;
-    async fn create_table(&self, schema: &str, table: &str, columns: Vec<NewColumn>) -> Result<(), String>;
+    async fn preview_create_table(&self, schema: &str, table: &str, spec: &NewTable) -> Result<String, String>;
+    async fn create_table(&self, schema: &str, table: &str, spec: NewTable) -> Result<(), String>;
     async fn rename_relation(&self, schema: &str, name: &str, kind: &str, new_name: &str) -> Result<(), String>;
     async fn drop_relation(&self, schema: &str, name: &str, kind: &str, cascade: bool) -> Result<(), String>;
     async fn truncate_table(&self, schema: &str, name: &str, restart_identity: bool, cascade: bool) -> Result<(), String>;
@@ -221,11 +221,11 @@ mod tests {
         async fn apply_change(&self, _: &str, _: &str, _: StructureChange) -> Result<(), String> {
             unimplemented!()
         }
-        async fn preview_create_table(&self, schema: &str, table: &str, _: &[NewColumn]) -> Result<String, String> {
+        async fn preview_create_table(&self, schema: &str, table: &str, _: &NewTable) -> Result<String, String> {
             tokio::task::yield_now().await;
             Ok(format!("-- create {schema}.{table}"))
         }
-        async fn create_table(&self, _: &str, _: &str, _: Vec<NewColumn>) -> Result<(), String> {
+        async fn create_table(&self, _: &str, _: &str, _: NewTable) -> Result<(), String> {
             unimplemented!()
         }
         async fn rename_relation(&self, _: &str, _: &str, _: &str, _: &str) -> Result<(), String> {
@@ -250,7 +250,7 @@ mod tests {
         let editor: &dyn SchemaEditor = &AwaitingEditor;
         let change = StructureChange::DropColumn { name: "a".into(), cascade: false };
         assert_eq!(editor.preview_change("s", "t", &change).await.unwrap(), "-- change s.t");
-        assert_eq!(editor.preview_create_table("s", "t", &[]).await.unwrap(), "-- create s.t");
+        assert_eq!(editor.preview_create_table("s", "t", &NewTable::default()).await.unwrap(), "-- create s.t");
     }
 
     #[tokio::test]

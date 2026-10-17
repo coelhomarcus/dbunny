@@ -435,6 +435,45 @@ pub struct NewColumn {
     pub generated: Option<String>,
 }
 
+/// A foreign key written inside `CREATE TABLE`.
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NewForeignKey {
+    pub columns: Vec<String>,
+    pub ref_schema: String,
+    pub ref_table: String,
+    pub ref_columns: Vec<String>,
+    #[serde(default)]
+    pub on_update: String,
+    #[serde(default)]
+    pub on_delete: String,
+}
+
+/// `PARTITION BY method (expression)` on a new PostgreSQL table. No child partitions.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct NewPartition {
+    pub method: String,
+    pub expression: String,
+}
+
+/// Everything the table builder sends. Omitted options stay off.
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTable {
+    pub columns: Vec<NewColumn>,
+    #[serde(default)]
+    pub foreign_keys: Vec<NewForeignKey>,
+    #[serde(default)]
+    pub unlogged: bool,
+    #[serde(default)]
+    pub without_rowid: bool,
+    #[serde(default)]
+    pub strict: bool,
+    #[serde(default)]
+    pub partition: Option<NewPartition>,
+}
+
 // Databases on the server
 
 #[derive(Serialize)]

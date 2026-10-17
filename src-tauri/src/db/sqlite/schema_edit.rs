@@ -14,7 +14,7 @@ use rusqlite::{Connection, OptionalExtension};
 use super::catalog::{is_word, tokens, Token};
 use super::data::{in_transaction, relation, Failure};
 use super::SqliteDriver;
-use crate::db::model::{ColumnGeneration, NewColumn, StructureChange};
+use crate::db::model::{ColumnGeneration, NewColumn, NewForeignKey, NewTable, StructureChange};
 use crate::db::sql::Dialect;
 use crate::db::{unsupported, Engine, SchemaEditor};
 
@@ -190,7 +190,11 @@ fn change_sql(c: &Connection, schema: &str, table: &str, change: &StructureChang
 /// (`"id" INTEGER PRIMARY KEY`); any other key is a table-level `PRIMARY KEY (…)`, composite
 /// when several columns are marked, and its columns are NOT NULL, since SQLite would
 /// otherwise let them hold NULL.
-fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, Failure> {
+fn create_table_sql(schema: &str, table: &str, spec: &NewTable) -> Result<String, Failure> {
+    let columns = &spec.columns;
+    if spec.unlogged || spec.partition.is_some() {
+        return Err(not_in_sqlite("Unlogged tables and partitions"));
+    }
     let target = format!("{}.{}", quote(schema), name("table name", table)?);
     if columns.is_empty() {
         return Err(Failure::message("Add at least one column".into()));
@@ -250,7 +254,51 @@ fn create_table_sql(schema: &str, table: &str, columns: &[NewColumn]) -> Result<
     if columns.iter().any(|c| c.comment.as_deref().is_some_and(|comment| !comment.trim().is_empty())) {
         return Err(not_in_sqlite("Comments"));
     }
-    Ok(format!("CREATE TABLE {target} (\n    {}\n)", lines.join(",\n    ")))
+    if spec.without_rowid && keys.is_empty() {
+        return Err(Failure::message(format!("PRIMARY KEY missing on table {}", table.trim())));
+    }
+    if spec.without_rowid && columns.iter().any(|c| c.generation == ColumnGeneration::Autoincrement) {
+        return Err(Failure::message("AUTOINCREMENT not allowed on WITHOUT ROWID tables".into()));
+    }
+    for key in &spec.foreign_keys {
+        if key.columns.is_empty() {
+            return Err(Failure::message("Choose at least one column".into()));
+        }
+        if key.columns.len() != key.ref_columns.len() {
+            return Err(Failure::message("Pick as many referenced columns as columns".into()));
+        }
+        if key.ref_schema.trim() != schema.trim() {
+            return Err(Failure::message("A foreign key has to reference a table in the same database".into()));
+        }
+        let locals = key.columns.iter().map(|c| name("column", c)).collect::<Result<Vec<_>, _>>()?.join(", ");
+        let refs = key.ref_columns.iter().map(|c| name("referenced column", c)).collect::<Result<Vec<_>, _>>()?.join(", ");
+        lines.push(format!(
+            "FOREIGN KEY ({locals}) REFERENCES {} ({refs}) ON UPDATE {} ON DELETE {}",
+            name("referenced table", &key.ref_table)?,
+            referential_action("update", &key.on_update)?,
+            referential_action("delete", &key.on_delete)?,
+        ));
+    }
+    let mut options = Vec::new();
+    if spec.without_rowid {
+        options.push("WITHOUT ROWID");
+    }
+    if spec.strict {
+        options.push("STRICT");
+    }
+    let tail = if options.is_empty() { String::new() } else { format!(" {}", options.join(", ")) };
+    Ok(format!("CREATE TABLE {target} (\n    {}\n){tail}", lines.join(",\n    ")))
+}
+
+fn referential_action(label: &str, action: &str) -> Result<&'static str, Failure> {
+    match action.trim().to_uppercase().as_str() {
+        "" | "NO ACTION" => Ok("NO ACTION"),
+        "RESTRICT" => Ok("RESTRICT"),
+        "CASCADE" => Ok("CASCADE"),
+        "SET NULL" => Ok("SET NULL"),
+        "SET DEFAULT" => Ok("SET DEFAULT"),
+        other => Err(Failure::message(format!("Unknown {label} action \"{other}\""))),
+    }
 }
 
 /// `UNIQUE` and `CHECK (...)` on a column definition. An empty check is left off.
@@ -401,13 +449,13 @@ impl SchemaEditor for SqliteDriver {
         .await
     }
 
-    async fn preview_create_table(&self, schema: &str, table: &str, columns: &[NewColumn]) -> Result<String, String> {
-        let sql = create_table_sql(schema, table, columns).map_err(|f| self.describe(f))?;
+    async fn preview_create_table(&self, schema: &str, table: &str, spec: &NewTable) -> Result<String, String> {
+        let sql = create_table_sql(schema, table, spec).map_err(|f| self.describe(f))?;
         Ok(format!("{sql};"))
     }
 
-    async fn create_table(&self, schema: &str, table: &str, columns: Vec<NewColumn>) -> Result<(), String> {
-        let sql = create_table_sql(schema, table, &columns).map_err(|f| self.describe(f))?;
+    async fn create_table(&self, schema: &str, table: &str, spec: NewTable) -> Result<(), String> {
+        let sql = create_table_sql(schema, table, &spec).map_err(|f| self.describe(f))?;
         self.write(sql).await
     }
 
@@ -510,6 +558,10 @@ mod tests {
             method: String::new(),
             concurrently: false,
         }
+    }
+
+    fn spec(columns: Vec<NewColumn>) -> NewTable {
+        NewTable { columns, ..NewTable::default() }
     }
 
     fn new_column(name: &str, data_type: &str, nullable: bool, primary_key: bool) -> NewColumn {
@@ -705,12 +757,12 @@ mod tests {
             NewColumn { default: Some("CURRENT_TIMESTAMP".into()), ..new_column("added", "TEXT", false, false) },
             new_column("note", "TEXT", true, false),
         ];
-        let preview = editor(&d).preview_create_table("main", "order items", &columns).await.unwrap();
+        let preview = editor(&d).preview_create_table("main", "order items", &spec(columns.clone())).await.unwrap();
         assert_eq!(
             preview,
             "CREATE TABLE \"main\".\"order items\" (\n    \"order_id\" INTEGER NOT NULL,\n    \"line\" INT NOT NULL,\n    \"added\" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    \"note\" TEXT,\n    PRIMARY KEY (\"order_id\", \"line\")\n);"
         );
-        editor(&d).create_table("main", "order items", columns).await.unwrap();
+        editor(&d).create_table("main", "order items", spec(columns)).await.unwrap();
         assert_eq!(stored(&d, "main", "order items").await.unwrap(), as_kept(&preview, "main"));
 
         let keys: Vec<(String, bool)> = d.columns("main", "order items").await.unwrap().into_iter().map(|c| (c.name, c.is_primary_key)).collect();
@@ -734,16 +786,16 @@ mod tests {
             ("t", vec![NewColumn { check: Some("a > 0; --".into()), ..new_column("a", "INT", true, false) }], "The check must be a single expression, without ';'"),
         ];
         for (table, columns, message) in bad {
-            assert_eq!(editor(&d).preview_create_table("main", table, &columns).await.unwrap_err(), message);
-            assert_eq!(editor(&d).create_table("main", table, columns).await.unwrap_err(), message);
+            assert_eq!(editor(&d).preview_create_table("main", table, &spec(columns.clone())).await.unwrap_err(), message);
+            assert_eq!(editor(&d).create_table("main", table, spec(columns)).await.unwrap_err(), message);
         }
-        let err = editor(&d).create_table("main", "order items", vec![new_column("a", "INT", true, false)]).await.unwrap_err();
+        let err = editor(&d).create_table("main", "order items", spec(vec![new_column("a", "INT", true, false)])).await.unwrap_err();
         assert!(err.contains("already exists"), "{err}");
 
         let flagged = vec![NewColumn { unique: true, check: Some("n > 0".into()), ..new_column("n", "INTEGER", false, false) }];
-        let preview = editor(&d).preview_create_table("main", "amounts", &flagged).await.unwrap();
+        let preview = editor(&d).preview_create_table("main", "amounts", &spec(flagged.clone())).await.unwrap();
         assert_eq!(preview, "CREATE TABLE \"main\".\"amounts\" (\n    \"n\" INTEGER NOT NULL UNIQUE CHECK (n > 0)\n);");
-        editor(&d).create_table("main", "amounts", flagged).await.unwrap();
+        editor(&d).create_table("main", "amounts", spec(flagged)).await.unwrap();
         exec(&d, "INSERT INTO amounts (n) VALUES (1)").await.unwrap();
         let err = exec(&d, "INSERT INTO amounts (n) VALUES (0)").await.unwrap_err();
         assert!(err.contains("CHECK"), "{err}");
@@ -768,9 +820,9 @@ mod tests {
         let f = TempDb::with("");
         let d = open(&f).await;
         let columns = vec![new_column("id", "integer", false, true), new_column("name", "TEXT", false, false)];
-        let preview = editor(&d).preview_create_table("main", "people", &columns).await.unwrap();
+        let preview = editor(&d).preview_create_table("main", "people", &spec(columns.clone())).await.unwrap();
         assert_eq!(preview, "CREATE TABLE \"main\".\"people\" (\n    \"id\" integer PRIMARY KEY,\n    \"name\" TEXT NOT NULL\n);");
-        editor(&d).create_table("main", "people", columns).await.unwrap();
+        editor(&d).create_table("main", "people", spec(columns)).await.unwrap();
         exec(&d, "INSERT INTO people (name) VALUES ('ana'), ('bia')").await.unwrap();
         assert_eq!(query(&d, "SELECT id, rowid FROM people ORDER BY id").await, vec![vec![json!(1), json!(1)], vec![json!(2), json!(2)]]);
         let columns = d.columns("main", "people").await.unwrap();
@@ -778,13 +830,13 @@ mod tests {
 
         // Any other type, or several key columns, makes a table-level key
         let columns = vec![new_column("id", "BIGINT", true, true), new_column("name", "TEXT", true, false)];
-        let preview = editor(&d).preview_create_table("main", "codes", &columns).await.unwrap();
+        let preview = editor(&d).preview_create_table("main", "codes", &spec(columns)).await.unwrap();
         assert_eq!(preview, "CREATE TABLE \"main\".\"codes\" (\n    \"id\" BIGINT NOT NULL,\n    \"name\" TEXT,\n    PRIMARY KEY (\"id\")\n);");
 
         let columns = vec![NewColumn { generation: ColumnGeneration::Autoincrement, ..new_column("id", "INTEGER", false, true) }, new_column("name", "TEXT", true, false)];
-        let preview = editor(&d).preview_create_table("main", "serials", &columns).await.unwrap();
+        let preview = editor(&d).preview_create_table("main", "serials", &spec(columns.clone())).await.unwrap();
         assert_eq!(preview, "CREATE TABLE \"main\".\"serials\" (\n    \"id\" INTEGER PRIMARY KEY AUTOINCREMENT,\n    \"name\" TEXT\n);");
-        editor(&d).create_table("main", "serials", columns).await.unwrap();
+        editor(&d).create_table("main", "serials", spec(columns)).await.unwrap();
         exec(&d, "INSERT INTO serials (name) VALUES ('ana')").await.unwrap();
         assert_eq!(query(&d, "SELECT id FROM serials").await, vec![vec![json!(1)]]);
 
@@ -792,12 +844,59 @@ mod tests {
             new_column("n", "INTEGER", false, false),
             NewColumn { generation: ColumnGeneration::Generated, generated: Some("n + 1".into()), nullable: true, ..new_column("next", "INTEGER", true, false) },
         ];
-        let preview = editor(&d).preview_create_table("main", "steps", &columns).await.unwrap();
+        let preview = editor(&d).preview_create_table("main", "steps", &spec(columns)).await.unwrap();
         assert!(preview.contains("\"next\" INTEGER GENERATED ALWAYS AS (n + 1) STORED"), "{preview}");
         assert_eq!(
-            editor(&d).preview_create_table("main", "bad", &[NewColumn { generation: ColumnGeneration::Autoincrement, ..new_column("name", "TEXT", false, true) }]).await.unwrap_err(),
+            editor(&d).preview_create_table("main", "bad", &spec(vec![NewColumn { generation: ColumnGeneration::Autoincrement, ..new_column("name", "TEXT", false, true) }])).await.unwrap_err(),
             "AUTOINCREMENT is only for a single INTEGER primary key"
         );
+    }
+
+    #[tokio::test]
+    async fn create_table_writes_a_foreign_key_and_options() {
+        let f = TempDb::with("");
+        let d = open(&f).await;
+        editor(&d).create_table("main", "parents", spec(vec![new_column("id", "INTEGER", false, true)])).await.unwrap();
+        let kids = NewTable {
+            columns: vec![new_column("id", "INTEGER", false, true), new_column("parent_id", "INTEGER", true, false)],
+            foreign_keys: vec![NewForeignKey {
+                columns: vec!["parent_id".into()],
+                ref_schema: "main".into(),
+                ref_table: "parents".into(),
+                ref_columns: vec!["id".into()],
+                on_update: "NO ACTION".into(),
+                on_delete: "CASCADE".into(),
+            }],
+            without_rowid: true,
+            strict: true,
+            ..NewTable::default()
+        };
+        let preview = editor(&d).preview_create_table("main", "kids", &kids).await.unwrap();
+        assert_eq!(
+            preview,
+            "CREATE TABLE \"main\".\"kids\" (\n    \"id\" INTEGER PRIMARY KEY,\n    \"parent_id\" INTEGER,\n    FOREIGN KEY (\"parent_id\") REFERENCES \"parents\" (\"id\") ON UPDATE NO ACTION ON DELETE CASCADE\n) WITHOUT ROWID, STRICT;"
+        );
+        editor(&d).create_table("main", "kids", kids).await.unwrap();
+        exec(&d, "INSERT INTO parents (id) VALUES (1)").await.unwrap();
+        exec(&d, "INSERT INTO kids (id, parent_id) VALUES (1, 1)").await.unwrap();
+        let err = exec(&d, "INSERT INTO kids (id, parent_id) VALUES (2, 9)").await.unwrap_err();
+        assert!(err.contains("FOREIGN KEY"), "{err}");
+
+        let bare = spec(vec![new_column("name", "TEXT", true, false)]);
+        assert_eq!(
+            editor(&d).preview_create_table("main", "loose", &NewTable { without_rowid: true, ..bare }).await.unwrap_err(),
+            "PRIMARY KEY missing on table loose"
+        );
+        let serial = NewTable {
+            columns: vec![NewColumn { generation: ColumnGeneration::Autoincrement, ..new_column("id", "INTEGER", false, true) }],
+            without_rowid: true,
+            ..NewTable::default()
+        };
+        assert_eq!(
+            editor(&d).preview_create_table("main", "serials", &serial).await.unwrap_err(),
+            "AUTOINCREMENT not allowed on WITHOUT ROWID tables"
+        );
+        assert!(editor(&d).preview_create_table("main", "log", &NewTable { unlogged: true, ..spec(vec![new_column("a", "INT", true, false)]) }).await.unwrap_err().contains("Unlogged"));
     }
 
     #[tokio::test]
@@ -1020,7 +1119,7 @@ mod tests {
 
         let err = editor(&d).apply_change("main", "t", add_column("n", "INTEGER", true, None)).await.unwrap_err();
         assert_eq!(err, HELD);
-        let err = editor(&d).create_table("main", "made", vec![new_column("a", "INT", true, false)]).await.unwrap_err();
+        let err = editor(&d).create_table("main", "made", spec(vec![new_column("a", "INT", true, false)])).await.unwrap_err();
         assert_eq!(err, HELD);
         let err = editor(&d).duplicate_table("main", "t", "t2", true).await.unwrap_err();
         assert_eq!(err, HELD);
@@ -1048,7 +1147,7 @@ mod tests {
         assert_eq!(preview, "CREATE INDEX \"other\".\"t_v_idx\" ON \"t\" (\"v\");");
         assert_eq!(stored(&d, "other", "t_v_idx").await.unwrap(), as_kept(&preview, "other"));
 
-        editor(&d).create_table("other", "made", vec![new_column("a", "INTEGER", false, true)]).await.unwrap();
+        editor(&d).create_table("other", "made", spec(vec![new_column("a", "INTEGER", false, true)])).await.unwrap();
         editor(&d).duplicate_table("other", "t", "t2", true).await.unwrap();
         editor(&d).rename_relation("other", "t2", "table", "t3").await.unwrap();
         assert_eq!(query(&d, "SELECT id, v, n FROM other.t3").await, vec![vec![json!(1), json!("x"), json!(7)]]);
@@ -1081,7 +1180,7 @@ mod tests {
 
         editor(&d).duplicate_table("main", t, "copy \"odd\"", true).await.unwrap();
         editor(&d).rename_relation("main", t, "table", "new; DROP TABLE x").await.unwrap();
-        editor(&d).create_table("main", "t \"q\"", vec![new_column("c \"q\"", "TEXT", true, true)]).await.unwrap();
+        editor(&d).create_table("main", "t \"q\"", spec(vec![new_column("c \"q\"", "TEXT", true, true)])).await.unwrap();
         assert_eq!(query(&d, "SELECT \"full \"\"name\"\"\" FROM \"copy \"\"odd\"\"\"").await, vec![vec![json!("ana")]]);
         assert_eq!(query(&d, "SELECT count(*) FROM \"new; DROP TABLE x\"").await, vec![vec![json!(1)]]);
         assert_eq!(column_names(&d, "main", "t \"q\"").await, vec!["c \"q\""]);
