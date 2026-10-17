@@ -13,7 +13,8 @@ export type DocumentKind =
   | "sequence"
   | "type"
   | "index"
-  | "trigger";
+  | "trigger"
+  | "create-table";
 
 export interface FilterRequest {
   id: number;
@@ -51,13 +52,14 @@ export type OpenTarget =
       schema: string;
       name: string;
       detail?: string;
-    };
+    }
+  | { kind: "create-table"; schema: string };
 
 export function emptyDocuments(): DocumentsState {
   return { items: [], activeId: null, nextQuery: 1, nextId: 1 };
 }
 
-function sameIdentity(doc: Document, target: Exclude<OpenTarget, { kind: "query" }>): boolean {
+function sameIdentity(doc: Document, target: Exclude<OpenTarget, { kind: "query" } | { kind: "create-table" }>): boolean {
   if (doc.kind !== target.kind) return false;
   if (target.kind === "activity" || target.kind === "roles") return true;
   if (doc.schema !== target.schema || doc.name !== target.name) return false;
@@ -74,7 +76,7 @@ export function openDocument(state: DocumentsState, target: OpenTarget): Documen
     const existing = state.items.find((doc) => doc.kind === "query" && doc.savedId === target.savedId);
     if (existing) return { ...state, activeId: existing.id };
   }
-  if (target.kind !== "query") {
+  if (target.kind !== "query" && target.kind !== "create-table") {
     const existing = state.items.find((doc) => sameIdentity(doc, target));
     if (existing) {
       if (target.kind === "data" && target.filters) {
@@ -93,6 +95,7 @@ export function openDocument(state: DocumentsState, target: OpenTarget): Documen
   const titled = target.kind === "query" && target.title !== undefined;
   const title =
     target.kind === "query" ? target.title ?? `Query ${state.nextQuery}`
+    : target.kind === "create-table" ? "New table"
     : target.kind === "activity" ? "Activity"
     : target.kind === "roles" ? "Roles"
     : target.name;
@@ -100,6 +103,8 @@ export function openDocument(state: DocumentsState, target: OpenTarget): Documen
   if (target.kind === "query") {
     doc.sql = target.sql ?? "";
     if (target.savedId) doc.savedId = target.savedId;
+  } else if (target.kind === "create-table") {
+    doc.schema = target.schema;
   } else if (target.kind !== "activity" && target.kind !== "roles") {
     doc.schema = target.schema;
     doc.name = target.name;
@@ -136,6 +141,26 @@ export function setQuerySaved(state: DocumentsState, id: string, savedId: string
   return {
     ...state,
     items: state.items.map((doc) => (doc.id === id && doc.kind === "query" ? { ...doc, savedId, title } : doc)),
+  };
+}
+
+export function updateCreateTable(
+  state: DocumentsState,
+  id: string,
+  patch: { title?: string; schema?: string },
+): DocumentsState {
+  return {
+    ...state,
+    items: state.items.map((doc) => {
+      if (doc.id !== id || doc.kind !== "create-table") return doc;
+      const next = { ...doc };
+      if (patch.title !== undefined) {
+        const trimmed = patch.title.trim();
+        next.title = trimmed || "New table";
+      }
+      if (patch.schema !== undefined && patch.schema.trim()) next.schema = patch.schema.trim();
+      return next;
+    }),
   };
 }
 

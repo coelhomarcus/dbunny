@@ -8,6 +8,7 @@ import FunctionView from "../../pages/FunctionView";
 import ObjectView from "../../pages/ObjectView";
 import ActivityView from "../../pages/ActivityView";
 import RolesView from "../../pages/RolesView";
+import CreateTablePage from "./CreateTablePage";
 import Button from "../ui/Button";
 
 /** Mounts every open document and shows only the one in front. */
@@ -52,6 +53,7 @@ export default function DocumentHost() {
             )}
             {doc.kind === "activity" && <ActivityView />}
             {doc.kind === "roles" && <RolesView />}
+            {doc.kind === "create-table" && doc.schema && <CreateTablePage documentId={doc.id} schema={doc.schema} />}
           </div>
         );
       })}

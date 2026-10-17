@@ -9,6 +9,7 @@ import {
   openDocument as openIn,
   renameQuery as renameQueryIn,
   setQuerySaved as setQuerySavedIn,
+  updateCreateTable as updateCreateTableIn,
   renameRelation as renameRelationIn,
   renameSchema as renameSchemaIn,
   seedQuery,
@@ -23,6 +24,7 @@ interface DocumentsValue {
   focusDocument: (id: string) => void;
   closeDocument: (id: string) => void;
   renameQuery: (id: string, title: string) => void;
+  updateCreateTable: (id: string, patch: { title?: string; schema?: string }) => void;
   setQuerySaved: (id: string, savedId: string, title: string) => void;
   renameRelation: (schema: string, name: string, newName: string) => void;
   renameSchema: (schema: string, newName: string) => void;
@@ -55,6 +57,10 @@ export function DocumentsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   const renameQuery = useCallback((id: string, title: string) => setDocuments((state) => renameQueryIn(state, id, title)), []);
+  const updateCreateTable = useCallback(
+    (id: string, patch: { title?: string; schema?: string }) => setDocuments((state) => updateCreateTableIn(state, id, patch)),
+    [],
+  );
   const setQuerySaved = useCallback(
     (id: string, savedId: string, title: string) => setDocuments((state) => setQuerySavedIn(state, id, savedId, title)),
     [],
@@ -90,10 +96,10 @@ export function DocumentsProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
-      documents, openDocument, focusDocument, closeDocument, renameQuery, setQuerySaved, renameRelation, renameSchema,
+      documents, openDocument, focusDocument, closeDocument, renameQuery, updateCreateTable, setQuerySaved, renameRelation, renameSchema,
       dropRelation, dropSchema, refreshData, registerDataRefresh, dirtyIds, setQueryDirty,
     }),
-    [documents, openDocument, focusDocument, closeDocument, renameQuery, setQuerySaved, renameRelation, renameSchema, dropRelation, dropSchema, refreshData, registerDataRefresh, dirtyIds, setQueryDirty],
+    [documents, openDocument, focusDocument, closeDocument, renameQuery, updateCreateTable, setQuerySaved, renameRelation, renameSchema, dropRelation, dropSchema, refreshData, registerDataRefresh, dirtyIds, setQueryDirty],
   );
 
   return <DocumentsContext.Provider value={value}>{children}</DocumentsContext.Provider>;

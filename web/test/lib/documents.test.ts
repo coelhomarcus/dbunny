@@ -7,8 +7,10 @@ import {
   emptyDocuments,
   openDocument,
   renameRelation,
+  renameSchema,
   seedQuery,
   setQuerySaved,
+  updateCreateTable,
 } from "../../src/lib/documents.ts";
 
 const filter = { column: "id", operator: "=", value: "1" };
@@ -95,6 +97,22 @@ test("setQuerySaved stores the id used to focus that query later", () => {
   const again = openDocument(saved, { kind: "query", sql: "other", savedId: "s1", title: "Daily" });
   assert.equal(again.items.length, 1);
   assert.equal(again.activeId, opened.activeId);
+});
+
+test("each new table page is its own tab, and the title follows the name", () => {
+  const first = openDocument(emptyDocuments(), { kind: "create-table", schema: "public" });
+  const second = openDocument(first, { kind: "create-table", schema: "public" });
+  assert.equal(second.items.length, 2);
+  assert.deepEqual(second.items.map((d) => d.title), ["New table", "New table"]);
+  const titled = updateCreateTable(second, second.items[0].id, { title: "invoices", schema: "shop" });
+  assert.equal(titled.items[0].title, "invoices");
+  assert.equal(titled.items[0].schema, "shop");
+  assert.equal(updateCreateTable(titled, titled.items[0].id, { title: "  " }).items[0].title, "New table");
+  const renamed = renameSchema(titled, "public", "billing");
+  assert.equal(renamed.items[1].schema, "billing");
+  assert.equal(renamed.items[0].schema, "shop");
+  const dropped = dropSchema(renamed, "billing");
+  assert.deepEqual(dropped.items.map((d) => d.schema), ["shop"]);
 });
 
 test("seedQuery opens Query 1 only when the list is empty", () => {

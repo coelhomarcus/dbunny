@@ -55,6 +55,8 @@ function iconFor(doc: Document): ComponentType<LucideProps> {
       return ListTree;
     case "trigger":
       return Zap;
+    case "create-table":
+      return Table2;
   }
 }
 
@@ -91,6 +93,8 @@ function iconClass(doc: Document): string {
       return "text-orange-500";
     case "trigger":
       return "text-yellow-500";
+    case "create-table":
+      return "text-success-foreground";
   }
 }
 

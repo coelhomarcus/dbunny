@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, type ComponentType, type ReactNode } from "react";
 import { useDocuments } from "../contexts/DocumentsContext";
+import { useTab } from "../contexts/workspace";
 import type { DataIcon } from "../lib/documents";
+import { bindSchemaRefresh } from "../lib/schemaRefresh";
 import { useApi, useConnection } from "../contexts/useConnection";
 import type { RelationKind } from "../lib/api";
 import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
 import RelationActionDialog, { type RelationAction, type RelationTarget } from "./schema/RelationActionDialog";
-import CreateTableDialog from "./schema/CreateTableDialog";
 import { writeClipboardText } from "../lib/clipboard";
 import ContainerDialog, { type ContainerOptions, type ContainerRequest } from "./schema/ContainerDialog";
 import { quoteIdent } from "../lib/copyRows";
@@ -176,6 +177,7 @@ function GroupRow({
  */
 export default function SchemaTree() {
   const { documents, openDocument, renameRelation, renameSchema, dropRelation, dropSchema, refreshData } = useDocuments();
+  const { tabId } = useTab();
   const api = useApi();
   const { connectionInfo } = useConnection();
   const readOnly = connectionInfo?.readOnly ?? false;
@@ -196,8 +198,6 @@ export default function SchemaTree() {
   const [container, setContainer] = useState<ContainerRequest | null>(null);
   const [action, setAction] = useState<{ action: RelationAction; target: RelationTarget } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // Schema the table builder is open for
-  const [newTableIn, setNewTableIn] = useState<string | null>(null);
 
   const load = useCallback(
     async (first: boolean) => {
@@ -234,6 +234,15 @@ export default function SchemaTree() {
     const timer = setTimeout(() => load(true), 0);
     return () => clearTimeout(timer);
   }, [load]);
+
+  useEffect(
+    () =>
+      bindSchemaRefresh(tabId, (schema) => {
+        void load(false);
+        setExpanded((prev) => new Set([...prev, `s:${schema}`, `c:${schema}:tables`]));
+      }),
+    [tabId, load],
+  );
 
 
   const toggle = useCallback((key: string) => {
@@ -353,7 +362,7 @@ export default function SchemaTree() {
     // The header's "+": what can be created
     if (schema === null) {
       return [
-        { label: "New table…", icon: <Table2 />, onSelect: () => setNewTableIn(defaultSchema) },
+        { label: "New table", icon: <Table2 />, onSelect: () => openDocument({ kind: "create-table", schema: defaultSchema }) },
         ...(capabilities.schemas
           ? [{ label: "New schema…", icon: <FolderPlus />, onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }) }]
           : []),
@@ -362,7 +371,7 @@ export default function SchemaTree() {
     const items: ContextMenuItem[] = [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(schema)) }];
     if (readOnly) return items;
     return [
-      { label: "New table here…", icon: <Table2 />, onSelect: () => setNewTableIn(schema) },
+      { label: "New table here", icon: <Table2 />, onSelect: () => openDocument({ kind: "create-table", schema }) },
       { label: "New schema…", icon: <FolderPlus />, onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }) },
       ...items,
       "separator",
@@ -569,7 +578,7 @@ export default function SchemaTree() {
       <button
         type="button"
         aria-label={`New table in ${schema}`}
-        onClick={() => setNewTableIn(schema)}
+        onClick={() => openDocument({ kind: "create-table", schema })}
         className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer"
       >
         <Plus size={12} />
@@ -743,7 +752,7 @@ export default function SchemaTree() {
             <p className="text-[13px] font-medium">No tables yet</p>
             <p className="text-xs text-muted-foreground">This database has no tables, views or functions of its own.</p>
             {!readOnly && (
-              <Button variant="outline" size="xs" className="mt-1" onClick={() => setNewTableIn(defaultSchema)}>
+              <Button variant="outline" size="xs" className="mt-1" onClick={() => openDocument({ kind: "create-table", schema: defaultSchema })}>
                 <Plus /> Create a table
               </Button>
             )}
@@ -842,16 +851,6 @@ export default function SchemaTree() {
         )}
       </div>
 
-      <CreateTableDialog
-        schema={newTableIn}
-        onCreated={(table) => {
-          const schema = newTableIn!;
-          load(false);
-          setExpanded((prev) => new Set([...prev, `s:${schema}`, `c:${schema}:tables`]));
-          openDocument({ kind: "data", schema, name: table, icon: "table" });
-        }}
-        onClose={() => setNewTableIn(null)}
-      />
       <ContextMenu position={menu} items={menu ? menuItems(menu.target) : []} onClose={() => setMenu(null)} />
       <ContextMenu position={schemaMenu} items={schemaMenu ? schemaMenuItems(schemaMenu.schema) : []} onClose={() => setSchemaMenu(null)} />
       <ContainerDialog request={container} onRun={(options) => runContainer(container!, options)} onClose={() => setContainer(null)} />
