@@ -32,6 +32,8 @@ interface EditableCellProps {
   onContextMenu: (e: React.MouseEvent) => void;
   /** The context menu is open on this cell. */
   menuOpen?: boolean;
+  /** The column this cell belongs to is selected. */
+  columnSelected?: boolean;
 }
 
 const MAX_PREVIEW = 300;
@@ -54,7 +56,7 @@ export default function EditableCell({
   displayValue, isDirty, isEditing, hasNoPk, editor, nullable,
   editValue, editIsNull, inputRef,
   onStartEdit, onEditValueChange, onSetNull, onConfirm, onCommit, onCancel, onExpand,
-  onFollowLink, linkLabel, onContextMenu, menuOpen,
+  onFollowLink, linkLabel, onContextMenu, menuOpen, columnSelected,
 }: EditableCellProps) {
   const cellRef = useRef<HTMLTableCellElement>(null);
   const editable = !hasNoPk && editor.kind !== "readonly";
@@ -63,7 +65,7 @@ export default function EditableCell({
   return (
     <td
       ref={cellRef}
-      className={`relative p-0 overflow-hidden border-b border-r border-border ${isDirty ? "bg-warning/8" : ""} ${
+      className={`relative p-0 overflow-hidden border-b border-r border-border ${columnSelected ? "bg-warning/20" : isDirty ? "bg-warning/8" : ""} ${
         (isEditing && !inlineEditing) || menuOpen ? "ring-1 ring-inset ring-primary/60" : ""
       }`}
       onClick={() => editable && !isEditing && onStartEdit()}

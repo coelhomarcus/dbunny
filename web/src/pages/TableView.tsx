@@ -107,6 +107,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
   });
 
   const [filtersOpen, setFiltersOpen] = useState(() => (initialFilters?.length ?? 0) > 0);
+  const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
   // Insert dialog: open, optionally filled from a cloned row
   const [insert, setInsert] = useState<{ initialValues?: Record<string, string | null> } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; rowIndex: number; colName: string } | null>(null);
@@ -423,6 +424,8 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                         columnInfo={columnInfos.find((c) => c.name === header.id)}
                         sorted={header.column.getIsSorted()}
                         sortIndex={tableData.sorting.length > 1 ? header.column.getSortIndex() : -1}
+                        selected={selectedColumn === header.id}
+                        onSelect={() => setSelectedColumn((current) => (current === header.id ? null : header.id))}
                         onToggleSort={header.column.getToggleSortingHandler()!}
                         onResizeStart={(e) => resize.onResizeStart(e, header.id)}
                       />
@@ -493,6 +496,7 @@ function TableViewContent({ initialFilters }: { initialFilters?: TableFilter[] }
                             onExpand={() => setExpandedCell(editing.editingCell)}
                             linkLabel={link ? `Open the referenced row in ${columnInfo!.foreignKey!.table}` : undefined}
                             menuOpen={menu?.rowIndex === rowIndex && menu.colName === col.name}
+                            columnSelected={selectedColumn === col.name}
                             onContextMenu={(e) => setMenu({ x: e.clientX, y: e.clientY, rowIndex, colName: col.name })}
                             onFollowLink={
                               link ? guard(() => navigate(link.path, { state: { filters: link.filters } })) : undefined
