@@ -706,6 +706,7 @@ function TableViewContent({
                 loading={loading}
                 spinKey={tableData.spinKey}
                 onRefresh={guard(tableData.refresh)}
+                onOpenStructure={() => openDocument({ kind: "structure", schema: schema!, name: table! })}
                 columnsMenu={<ColumnsMenu layout={layout} />}
                 readOnly={readOnly}
                 onImportCsv={guard(() => setImportOpen({}))}
