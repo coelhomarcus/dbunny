@@ -8,18 +8,23 @@ import {
   Layers,
   ListOrdered,
   ListTree,
+  ArrowRightToLine,
+  PenLine,
   Plus,
   Server,
   Shapes,
   Split,
   Table2,
   Terminal,
+  TriangleAlert,
   Users,
   X,
   Zap,
   type LucideProps,
 } from "lucide-react";
 import Popover from "../ui/Popover";
+import ContextMenu, { type ContextMenuItem } from "../ui/ContextMenu";
+import ConfirmDialog from "../ui/ConfirmDialog";
 import { useDocuments } from "../../contexts/DocumentsContext";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { cn } from "../../lib/cn";
@@ -100,9 +105,11 @@ function iconClass(doc: Document): string {
 
 /** The connection's document tabs: icon, name, and close. */
 export default function DocumentTabBar() {
-  const { documents, openDocument, focusDocument, closeDocument, renameQuery, dirtyIds } = useDocuments();
+  const { documents, openDocument, focusDocument, closeDocuments, renameQuery, dirtyIds } = useDocuments();
   const capabilities = useCapabilities();
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [pendingClose, setPendingClose] = useState<string[] | null>(null);
   const [serverOpen, setServerOpen] = useState(false);
   const [listOpen, setListOpen] = useState(false);
   const serverRef = useRef<HTMLButtonElement>(null);
@@ -118,6 +125,38 @@ export default function DocumentTabBar() {
     if (tabRect.left < barRect.left) bar.scrollLeft -= barRect.left - tabRect.left;
     else if (tabRect.right > barRect.right) bar.scrollLeft += tabRect.right - barRect.right;
   }, [documents.activeId]);
+
+  function askClose(ids: string[]) {
+    const unique = [...new Set(ids)].filter((id) => documents.items.some((doc) => doc.id === id));
+    if (unique.length === 0) return;
+    if (unique.some((id) => dirtyIds.has(id))) setPendingClose(unique);
+    else closeDocuments(unique);
+  }
+
+  const menuDoc = menu ? documents.items.find((doc) => doc.id === menu.id) : undefined;
+  const menuIndex = menuDoc ? documents.items.findIndex((doc) => doc.id === menuDoc.id) : -1;
+  const menuItems: ContextMenuItem[] = menuDoc
+    ? [
+        { label: "Close", icon: <X />, onSelect: () => askClose([menuDoc.id]) },
+        {
+          label: "Close others",
+          icon: <X />,
+          disabled: documents.items.length < 2,
+          onSelect: () => askClose(documents.items.filter((doc) => doc.id !== menuDoc.id).map((doc) => doc.id)),
+        },
+        {
+          label: "Close tabs to the right",
+          icon: <ArrowRightToLine />,
+          disabled: menuIndex < 0 || menuIndex === documents.items.length - 1,
+          onSelect: () => askClose(documents.items.slice(menuIndex + 1).map((doc) => doc.id)),
+        },
+        { label: "Close all", icon: <X />, onSelect: () => askClose(documents.items.map((doc) => doc.id)) },
+        ...(menuDoc.kind === "query"
+          ? (["separator", { label: "Rename", icon: <PenLine />, onSelect: () => setRenamingId(menuDoc.id) }] as ContextMenuItem[])
+          : []),
+      ]
+    : [];
+  const pendingTitles = (pendingClose ?? []).filter((id) => dirtyIds.has(id)).map((id) => documents.items.find((doc) => doc.id === id)?.title).filter(Boolean);
 
   function onTabsWheel(e: WheelEvent<HTMLDivElement>) {
     const bar = e.currentTarget;
@@ -173,8 +212,12 @@ export default function DocumentTabBar() {
               onAuxClick={(e) => {
                 if (e.button === 1) {
                   e.preventDefault();
-                  closeDocument(doc.id);
+                  askClose([doc.id]);
                 }
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenu({ x: e.clientX, y: e.clientY, id: doc.id });
               }}
               className={cn(
                 "joined-tab group flex h-[34px] shrink-0 cursor-pointer items-center pb-1.5 text-[13px] whitespace-nowrap outline-none",
@@ -195,7 +238,7 @@ export default function DocumentTabBar() {
                 aria-label={`Close ${doc.title}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  closeDocument(doc.id);
+                  askClose([doc.id]);
                 }}
                 className={cn(
                   "mr-0.5 flex size-5 shrink-0 items-center justify-center rounded hover:bg-foreground/10 hover:text-foreground",
@@ -295,6 +338,24 @@ export default function DocumentTabBar() {
           })
         )}
       </Popover>
+      <ContextMenu position={menu} items={menuItems} onClose={() => setMenu(null)} />
+      <ConfirmDialog
+        open={pendingClose !== null}
+        onClose={() => setPendingClose(null)}
+        onConfirm={() => {
+          if (pendingClose) closeDocuments(pendingClose);
+          setPendingClose(null);
+        }}
+        icon={<TriangleAlert />}
+        tone="warning"
+        title={pendingTitles.length > 1 ? `Close ${pendingTitles.length} tabs without saving?` : "Close without saving?"}
+        description={
+          pendingTitles.length > 1
+            ? `${pendingTitles.join(", ")} have unsaved changes.`
+            : `${pendingTitles[0] ?? "This tab"} has unsaved changes.`
+        }
+        confirmLabel="Discard and close"
+      />
     </div>
   );
 }

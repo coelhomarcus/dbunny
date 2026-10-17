@@ -193,6 +193,7 @@ export default function SchemaTree() {
   const [columns, setColumns] = useState<Record<string, ColumnInfo[] | "loading" | "error">>({});
   const [extensions, setExtensions] = useState<ExtensionInfo[] | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; target: RelationTarget } | null>(null);
+  const [plainMenu, setPlainMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   // Right click on a schema, or the header's "+" (schema null)
   const [schemaMenu, setSchemaMenu] = useState<{ x: number; y: number; schema: string | null } | null>(null);
   const [container, setContainer] = useState<ContainerRequest | null>(null);
@@ -434,7 +435,18 @@ export default function SchemaTree() {
     if (value === "error") return <div className={cn("py-1 text-xs text-destructive-foreground", pad)}>Couldn't read the columns</div>;
     if (value.length === 0) return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>No columns</div>;
     return value.map((col) => (
-      <div key={col.name} className={cn("flex h-6 items-center gap-1.5 pr-2 text-xs text-muted-foreground", pad)}>
+      <div
+        key={col.name}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setPlainMenu({
+            x: e.clientX,
+            y: e.clientY,
+            items: [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(col.name)) }],
+          });
+        }}
+        className={cn("flex h-6 items-center gap-1.5 pr-2 text-xs text-muted-foreground", pad)}
+      >
         {col.isPrimaryKey ? (
           <KeyRound size={11} className="shrink-0 text-warning-foreground" aria-label="Primary key" />
         ) : col.foreignKey ? (
@@ -479,9 +491,19 @@ export default function SchemaTree() {
               if (e.key === "Enter") openExplorerObject(schema, object);
             }}
             onContextMenu={(e) => {
-              if (!relation) return;
               e.preventDefault();
-              setMenu({ x: e.clientX, y: e.clientY, target: { schema, name: object.name, kind: relation } });
+              if (relation) {
+                setMenu({ x: e.clientX, y: e.clientY, target: { schema, name: object.name, kind: relation } });
+                return;
+              }
+              setPlainMenu({
+                x: e.clientX,
+                y: e.clientY,
+                items: [
+                  { label: "Open", onSelect: () => openExplorerObject(schema, object) },
+                  { label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(object.name)) },
+                ],
+              });
             }}
             className={cn(
               "flex h-7 w-full items-center gap-1.5 rounded-md pr-8 text-sm transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -852,6 +874,7 @@ export default function SchemaTree() {
       </div>
 
       <ContextMenu position={menu} items={menu ? menuItems(menu.target) : []} onClose={() => setMenu(null)} />
+      <ContextMenu position={plainMenu} items={plainMenu?.items ?? []} onClose={() => setPlainMenu(null)} />
       <ContextMenu position={schemaMenu} items={schemaMenu ? schemaMenuItems(schemaMenu.schema) : []} onClose={() => setSchemaMenu(null)} />
       <ContainerDialog request={container} onRun={(options) => runContainer(container!, options)} onClose={() => setContainer(null)} />
       <RelationActionDialog

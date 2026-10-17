@@ -33,7 +33,7 @@ const cellClass =
 export default function CreateTablePage({ documentId, schema: initialSchema }: { documentId: string; schema: string }) {
   const api = useApi();
   const { tabId } = useTab();
-  const { openDocument, closeDocument, updateCreateTable } = useDocuments();
+  const { openDocument, closeDocument, updateCreateTable, setQueryDirty } = useDocuments();
   const dialect = useSqlDialect();
   const capabilities = useCapabilities();
   const sqlite = dialect === "sqlite";
@@ -82,6 +82,16 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
   useEffect(() => {
     updateCreateTable(documentId, { title: table, schema });
   }, [documentId, table, schema, updateCreateTable]);
+
+  const initialForm = useRef<string | null>(null);
+  useEffect(() => {
+    const key = JSON.stringify({ schema, table, rows, foreignKeys, unlogged, withoutRowid, strict, partitionMethod, partitionExpr });
+    if (initialForm.current === null) {
+      initialForm.current = key;
+      return;
+    }
+    setQueryDirty(documentId, key !== initialForm.current);
+  }, [documentId, schema, table, rows, foreignKeys, unlogged, withoutRowid, strict, partitionMethod, partitionExpr, setQueryDirty]);
 
   useEffect(() => {
     let stale = false;

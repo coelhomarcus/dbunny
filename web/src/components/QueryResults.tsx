@@ -1,4 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Copy } from "lucide-react";
+import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
+import { writeClipboardText } from "../lib/clipboard";
+import { rowsToJson, rowsToTsv, valueText } from "../lib/copyRows";
 import {
   useReactTable,
   getCoreRowModel,
@@ -86,6 +90,7 @@ function ErrorDisplay({ raw }: { raw: string }) {
 }
 
 export default function QueryResults({ result, error, running }: QueryResultsProps) {
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const columns = useMemo<ColumnDef<unknown[], unknown>[]>(() => {
     if (!result) return [];
     return result.columns.map((col: QueryColumn, index: number) => {
@@ -145,6 +150,22 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
                   <td
                     key={cell.id}
                     className="max-w-xs truncate whitespace-nowrap px-3 py-1 font-mono text-xs text-foreground"
+                    onContextMenu={(e) => {
+                      if (!result) return;
+                      e.preventDefault();
+                      const value = cell.getValue();
+                      const values = row.original as unknown[];
+                      setMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        items: [
+                          { label: "Copy value", icon: <Copy />, onSelect: () => writeClipboardText(valueText(value)) },
+                          "separator",
+                          { label: "Copy row as JSON", onSelect: () => writeClipboardText(rowsToJson(result.columns, [values])) },
+                          { label: "Copy row as TSV", onSelect: () => writeClipboardText(rowsToTsv(result.columns, [values])) },
+                        ],
+                      });
+                    }}
                   >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
@@ -160,6 +181,8 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
           Query executed successfully. {result.rowsAffected ?? result.rowCount} rows affected.
         </div>
       )}
+
+      <ContextMenu position={menu} items={menu?.items ?? []} onClose={() => setMenu(null)} />
 
       {running && !result && <QueryResultsSkeleton />}
 

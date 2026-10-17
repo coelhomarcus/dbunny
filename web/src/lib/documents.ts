@@ -129,11 +129,31 @@ export function focusDocument(state: DocumentsState, id: string): DocumentsState
 }
 
 export function closeDocument(state: DocumentsState, id: string): DocumentsState {
-  const index = state.items.findIndex((doc) => doc.id === id);
-  if (index < 0) return state;
-  const items = state.items.filter((doc) => doc.id !== id);
-  if (state.activeId !== id) return { ...state, items };
-  const neighbor = items[index] ?? items[index - 1] ?? null;
+  return closeDocuments(state, [id]);
+}
+
+/** Closes every listed tab. The front tab moves to the nearest one that stays open. */
+export function closeDocuments(state: DocumentsState, ids: string[]): DocumentsState {
+  const drop = new Set(ids);
+  if (!state.items.some((doc) => drop.has(doc.id))) return state;
+  const items = state.items.filter((doc) => !drop.has(doc.id));
+  if (!state.activeId || !drop.has(state.activeId)) return { ...state, items };
+  const index = state.items.findIndex((doc) => doc.id === state.activeId);
+  let neighbor: Document | undefined;
+  for (let i = index + 1; i < state.items.length; i++) {
+    if (!drop.has(state.items[i].id)) {
+      neighbor = state.items[i];
+      break;
+    }
+  }
+  if (!neighbor) {
+    for (let i = index - 1; i >= 0; i--) {
+      if (!drop.has(state.items[i].id)) {
+        neighbor = state.items[i];
+        break;
+      }
+    }
+  }
   return { ...state, items, activeId: neighbor?.id ?? null };
 }
 

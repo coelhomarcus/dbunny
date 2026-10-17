@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, X } from "lucide-react";
+import { Copy, Users, X } from "lucide-react";
+import ContextMenu from "../components/ui/ContextMenu";
+import { writeClipboardText } from "../lib/clipboard";
 import type { RoleInfo } from "@/types";
 import { useApi } from "../contexts/useConnection";
 import { useRightPanel } from "../contexts/rightPanel";
@@ -33,6 +35,7 @@ export default function RolesView() {
   const [error, setError] = useState<string | null>(null);
   const [showBuiltin, setShowBuiltin] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; name: string } | null>(null);
   const [shownRole, setShownRole] = useState<RoleInfo | null>(null);
 
   useEffect(() => {
@@ -104,6 +107,10 @@ export default function RolesView() {
                     <tr
                       key={role.name}
                       onClick={() => setSelected(active ? null : role.name)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setMenu({ x: e.clientX, y: e.clientY, name: role.name });
+                      }}
                       className={cn(
                         "cursor-pointer border-b border-border align-middle transition-colors hover:bg-accent",
                         active ? "bg-accent" : index % 2 ? "bg-muted/50" : "bg-card",
@@ -147,6 +154,11 @@ export default function RolesView() {
         </>
       )}
 
+      <ContextMenu
+        position={menu}
+        items={menu ? [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(menu.name) }] : []}
+        onClose={() => setMenu(null)}
+      />
       {rightPanel && createPortal(
         <SideCard open={selected !== null && shownRole !== null} widthClass="w-80" label={shownRole ? shownRole.name : "Role"}>
           {shownRole && <RolePanel role={shownRole} onClose={() => setSelected(null)} />}

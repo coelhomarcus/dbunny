@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Activity, Pause, Play, RefreshCw, Square, TriangleAlert, X, XCircle } from "lucide-react";
+import { Activity, Copy, Pause, Play, RefreshCw, Square, TriangleAlert, X, XCircle } from "lucide-react";
+import ContextMenu, { type ContextMenuItem } from "../components/ui/ContextMenu";
+import { writeClipboardText } from "../lib/clipboard";
 import type { ServerActivity, ServerSession } from "@/types";
 import { useConnection } from "../contexts/useConnection";
 import { useTab } from "../contexts/workspace";
@@ -70,6 +72,7 @@ export default function ActivityView() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [confirm, setConfirm] = useState<{ session: ServerSession; terminate: boolean } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -211,6 +214,19 @@ export default function ActivityView() {
                       <tr
                         key={s.pid}
                         onClick={() => setSelected(activeRow ? null : s.pid)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          const items: ContextMenuItem[] = [];
+                          if (s.query) items.push({ label: "Copy query", icon: <Copy />, onSelect: () => writeClipboardText(s.query ?? "") });
+                          if (!s.isSelf && !readOnly) {
+                            if (items.length) items.push("separator");
+                            items.push(
+                              { label: "Cancel query", icon: <Square />, disabled: s.state !== "active", onSelect: () => setConfirm({ session: s, terminate: false }) },
+                              { label: "End session", icon: <XCircle />, destructive: true, onSelect: () => setConfirm({ session: s, terminate: true }) },
+                            );
+                          }
+                          if (items.length) setMenu({ x: e.clientX, y: e.clientY, items });
+                        }}
                         className={cn(
                           "cursor-pointer border-b border-border align-middle transition-colors hover:bg-accent",
                           activeRow ? "bg-accent" : i % 2 ? "bg-muted/50" : "bg-card",
@@ -312,6 +328,7 @@ export default function ActivityView() {
         </>
       )}
 
+      <ContextMenu position={menu} items={menu?.items ?? []} onClose={() => setMenu(null)} />
       <ConfirmDialog
         open={confirm !== null}
         onClose={() => setConfirm(null)}

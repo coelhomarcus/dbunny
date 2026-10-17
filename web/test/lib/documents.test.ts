@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   closeDocument,
+  closeDocuments,
   dropRelation,
   dropSchema,
   emptyDocuments,
@@ -42,6 +43,24 @@ test("activity and roles open at most once", () => {
   const activity = openDocument(openDocument(emptyDocuments(), { kind: "activity" }), { kind: "activity" });
   const roles = openDocument(openDocument(activity, { kind: "roles" }), { kind: "roles" });
   assert.deepEqual(roles.items.map((d) => d.kind), ["activity", "roles"]);
+});
+
+test("closing several tabs keeps the nearest one that stays open", () => {
+  let state = emptyDocuments();
+  state = openDocument(state, { kind: "query", title: "A" });
+  state = openDocument(state, { kind: "query", title: "B" });
+  state = openDocument(state, { kind: "query", title: "C" });
+  state = openDocument(state, { kind: "query", title: "D" });
+  const [a, b, c, d] = state.items;
+  const closedRight = closeDocuments({ ...state, activeId: b.id }, [c.id, d.id]);
+  assert.deepEqual(closedRight.items.map((doc) => doc.id), [a.id, b.id]);
+  assert.equal(closedRight.activeId, b.id);
+  const closedActive = closeDocuments({ ...state, activeId: c.id }, [c.id, d.id]);
+  assert.deepEqual(closedActive.items.map((doc) => doc.id), [a.id, b.id]);
+  assert.equal(closedActive.activeId, b.id);
+  const closedAll = closeDocuments(state, state.items.map((doc) => doc.id));
+  assert.deepEqual(closedAll.items, []);
+  assert.equal(closedAll.activeId, null);
 });
 
 test("closing the front tab focuses the right neighbor, and the last tab leaves the list empty", () => {

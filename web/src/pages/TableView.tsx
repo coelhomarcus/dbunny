@@ -53,32 +53,36 @@ function foreignKeyLink(column: ColumnInfo | undefined, row: unknown[], columns:
 }
 
 export default function TableView({
+  documentId,
   schema,
   name,
   filterRequest,
   active,
 }: {
+  documentId: string;
   schema: string;
   name: string;
   filterRequest?: FilterRequest;
   active: boolean;
 }) {
-  return <TableViewContent schema={schema} table={name} filterRequest={filterRequest} active={active} />;
+  return <TableViewContent documentId={documentId} schema={schema} table={name} filterRequest={filterRequest} active={active} />;
 }
 
 function TableViewContent({
+  documentId,
   schema,
   table,
   filterRequest,
   active,
 }: {
+  documentId: string;
   schema: string;
   table: string;
   filterRequest?: FilterRequest;
   active: boolean;
 }) {
   const api = useApi();
-  const { openDocument, registerDataRefresh } = useDocuments();
+  const { openDocument, registerDataRefresh, setQueryDirty } = useDocuments();
   const initialFilters = filterRequest?.filters;
 
   const tableData = useTableData(schema, table, initialFilters);
@@ -137,6 +141,10 @@ function TableViewContent({
   const [draftText, setDraftText] = useState("");
   const [draftIsNull, setDraftIsNull] = useState(true);
   const [draftExpanded, setDraftExpanded] = useState(false);
+
+  useEffect(() => {
+    setQueryDirty(documentId, pending.dirtyRowCount > 0 || draft !== null);
+  }, [documentId, pending.dirtyRowCount, draft, setQueryDirty]);
   const draftInputRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; rowIndex: number; colName: string } | null>(null);

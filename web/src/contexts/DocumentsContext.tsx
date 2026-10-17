@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { bindOpenQuery } from "../lib/openQuery";
 import {
   closeDocument as closeIn,
+  closeDocuments as closeManyIn,
   dropRelation as dropRelationIn,
   dropSchema as dropSchemaIn,
   emptyDocuments,
@@ -23,6 +24,7 @@ interface DocumentsValue {
   openDocument: (target: OpenTarget) => void;
   focusDocument: (id: string) => void;
   closeDocument: (id: string) => void;
+  closeDocuments: (ids: string[]) => void;
   renameQuery: (id: string, title: string) => void;
   updateCreateTable: (id: string, patch: { title?: string; schema?: string }) => void;
   setQuerySaved: (id: string, savedId: string, title: string) => void;
@@ -47,15 +49,28 @@ export function DocumentsProvider({ children }: { children: ReactNode }) {
 
   const openDocument = useCallback((target: OpenTarget) => setDocuments((state) => openIn(state, target)), []);
   const focusDocument = useCallback((id: string) => setDocuments((state) => focusIn(state, id)), []);
-  const closeDocument = useCallback((id: string) => {
-    setDocuments((state) => closeIn(state, id));
+  const forgetDirty = useCallback((ids: string[]) => {
     setDirtyIds((prev) => {
-      if (!prev.has(id)) return prev;
+      if (!ids.some((id) => prev.has(id))) return prev;
       const next = new Set(prev);
-      next.delete(id);
+      for (const id of ids) next.delete(id);
       return next;
     });
   }, []);
+  const closeDocument = useCallback(
+    (id: string) => {
+      setDocuments((state) => closeIn(state, id));
+      forgetDirty([id]);
+    },
+    [forgetDirty],
+  );
+  const closeDocuments = useCallback(
+    (ids: string[]) => {
+      setDocuments((state) => closeManyIn(state, ids));
+      forgetDirty(ids);
+    },
+    [forgetDirty],
+  );
   const renameQuery = useCallback((id: string, title: string) => setDocuments((state) => renameQueryIn(state, id, title)), []);
   const updateCreateTable = useCallback(
     (id: string, patch: { title?: string; schema?: string }) => setDocuments((state) => updateCreateTableIn(state, id, patch)),
@@ -96,10 +111,10 @@ export function DocumentsProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
-      documents, openDocument, focusDocument, closeDocument, renameQuery, updateCreateTable, setQuerySaved, renameRelation, renameSchema,
+      documents, openDocument, focusDocument, closeDocument, closeDocuments, renameQuery, updateCreateTable, setQuerySaved, renameRelation, renameSchema,
       dropRelation, dropSchema, refreshData, registerDataRefresh, dirtyIds, setQueryDirty,
     }),
-    [documents, openDocument, focusDocument, closeDocument, renameQuery, updateCreateTable, setQuerySaved, renameRelation, renameSchema, dropRelation, dropSchema, refreshData, registerDataRefresh, dirtyIds, setQueryDirty],
+    [documents, openDocument, focusDocument, closeDocument, closeDocuments, renameQuery, updateCreateTable, setQuerySaved, renameRelation, renameSchema, dropRelation, dropSchema, refreshData, registerDataRefresh, dirtyIds, setQueryDirty],
   );
 
   return <DocumentsContext.Provider value={value}>{children}</DocumentsContext.Provider>;

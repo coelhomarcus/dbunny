@@ -42,7 +42,7 @@ export default function DocumentHost() {
               <QueryPane documentId={doc.id} initialSql={doc.sql ?? ""} savedId={doc.savedId} title={doc.title} active={front && isActive} />
             )}
             {doc.kind === "data" && doc.schema && doc.name && (
-              <TableView schema={doc.schema} name={doc.name} filterRequest={doc.filterRequest} active={front && isActive} />
+              <TableView documentId={doc.id} schema={doc.schema} name={doc.name} filterRequest={doc.filterRequest} active={front && isActive} />
             )}
             {doc.kind === "structure" && doc.schema && doc.name && <TableStructure schema={doc.schema} name={doc.name} />}
             {(doc.kind === "function" || doc.kind === "procedure") && doc.schema && doc.name && (

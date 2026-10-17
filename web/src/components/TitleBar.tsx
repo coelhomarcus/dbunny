@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Database, Minus, PanelLeft, Plus, X, Settings } from "lucide-react";
+import { ArrowRightToLine, Database, Minus, PanelLeft, Plus, X, Settings } from "lucide-react";
 import { isMac } from "../lib/platform";
 import { cn } from "../lib/cn";
 import { useWorkspace, type WorkspaceTab } from "../contexts/workspace";
@@ -9,6 +9,7 @@ import { useSettingsDialog } from "../contexts/settingsDialog";
 import ConnectionGlyph from "./ConnectionGlyph";
 import Button from "./ui/Button";
 import Tooltip from "./Tooltip";
+import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
 
 function RestoreIcon() {
   return (
@@ -82,11 +83,13 @@ function WindowTab({
   active,
   onActivate,
   onClose,
+  onMenu,
 }: {
   tab: WorkspaceTab;
   active: boolean;
   onActivate: () => void;
   onClose: () => void;
+  onMenu: (x: number, y: number) => void;
 }) {
   const title = tab.title ?? "New Connection";
   return (
@@ -104,6 +107,10 @@ function WindowTab({
           e.preventDefault();
           onClose();
         }
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu(e.clientX, e.clientY);
       }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -156,7 +163,8 @@ function WindowTab({
  * the window has no native frame, so the controls are drawn here, on the right.
  */
 export default function TitleBar() {
-  const { tabs, activeTabId, activateTab, closeTab, openTab, cycleTab, sidebarOpen, toggleSidebar } = useWorkspace();
+  const { tabs, activeTabId, activateTab, closeTab, closeTabs, openTab, cycleTab, sidebarOpen, toggleSidebar } = useWorkspace();
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const { maximized, fullscreen } = useWindowState();
   const { openSettings } = useSettingsDialog();
   const trafficLights = isMac && !fullscreen;
@@ -231,6 +239,7 @@ export default function TitleBar() {
             active={tab.id === activeTabId}
             onActivate={() => activateTab(tab.id)}
             onClose={() => closeTab(tab.id)}
+            onMenu={(x, y) => setMenu({ x, y, id: tab.id })}
           />
         ))}
         <Button variant="ghost-muted" size="icon-xs" className="self-center ml-0.5" onClick={() => openTab()} aria-label="New tab">
@@ -238,6 +247,33 @@ export default function TitleBar() {
         </Button>
       </div>
       {!isMac && <WindowControls maximized={maximized} />}
+      <ContextMenu position={menu} items={connectionMenuItems(tabs, menu?.id ?? null, closeTabs)} onClose={() => setMenu(null)} />
     </div>
   );
+}
+
+function connectionMenuItems(
+  tabs: WorkspaceTab[],
+  id: string | null,
+  closeTabs: (ids: string[]) => void,
+): ContextMenuItem[] {
+  const index = id ? tabs.findIndex((tab) => tab.id === id) : -1;
+  if (index < 0) return [];
+  const tab = tabs[index];
+  return [
+    { label: "Close", icon: <X />, onSelect: () => closeTabs([tab.id]) },
+    {
+      label: "Close others",
+      icon: <X />,
+      disabled: tabs.length < 2,
+      onSelect: () => closeTabs(tabs.filter((item) => item.id !== tab.id).map((item) => item.id)),
+    },
+    {
+      label: "Close tabs to the right",
+      icon: <ArrowRightToLine />,
+      disabled: index === tabs.length - 1,
+      onSelect: () => closeTabs(tabs.slice(index + 1).map((item) => item.id)),
+    },
+    { label: "Close all", icon: <X />, onSelect: () => closeTabs(tabs.map((item) => item.id)) },
+  ];
 }
