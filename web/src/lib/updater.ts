@@ -22,7 +22,6 @@ const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 const FIRST_CHECK_AFTER_MS = 5_000;
 
 export const RELEASES_URL = "https://github.com/coelhomarcus/dbunny/releases";
-export const releaseUrl = (version: string) => `${RELEASES_URL}/tag/v${version}`;
 
 let state: UpdateState = { status: "idle" };
 // The version whose notice the person closed this session; it comes back for a newer one

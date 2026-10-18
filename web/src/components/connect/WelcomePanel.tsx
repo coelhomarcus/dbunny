@@ -15,12 +15,10 @@ function Shortcut({ keys, label }: { keys: string; label: string }) {
 
 /** What the home page shows when no saved connection is picked. */
 export default function WelcomePanel({
-  version,
   hasConnections,
   onNew,
   onOpenUrl,
 }: {
-  version: string | null;
   hasConnections: boolean;
   onNew: () => void;
   onOpenUrl: () => void;
@@ -29,7 +27,6 @@ export default function WelcomePanel({
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center select-none">
       <img src="/icon.svg" className="size-14 invert dark:invert-0" alt="" />
       <h1 className="mt-4 text-xl font-semibold leading-tight">DBunny</h1>
-      {version && <p className="mt-0.5 text-xs text-muted-foreground">Version {version}</p>}
       <p className="mt-3 max-w-sm text-sm text-muted-foreground">
         {hasConnections ? "Pick a connection on the left, or create a new one." : "Create your first connection to get started."}
       </p>

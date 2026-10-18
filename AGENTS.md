@@ -75,13 +75,7 @@ fix: the sqlite statement splitter closes a trigger the way sqlite does
 
 ### Version commits
 
-When preparing a release on `develop` (before merging to `main`), bump the app version in:
-
-- `src-tauri/Cargo.toml`
-- `src-tauri/Cargo.lock`
-- `src-tauri/tauri.conf.json`
-
-Use a dedicated commit:
+The number is chosen in **Versioning**. The commit itself is only:
 
 ```
 chore: version X.Y.Z
@@ -124,11 +118,43 @@ Use bullets under sections for scanability. Match the tone of existing PRs: fact
 - Prefer a **merge commit** (not squash-only) when the user asks to merge `develop` into `main`, so history on `develop` stays intact on `main`.
 - After merge, `main` carries the merge commit; tags for releases are created on `main`.
 
+## Versioning
+
+DBunny is on **0.Y.Z**, the initial-development series of [Semantic Versioning](https://semver.org). In that series the spec lets anything change, so the rules below are the project's until **1.0.0**. The app version is the number in `src-tauri/tauri.conf.json` (kept in sync with `Cargo.toml` and `Cargo.lock`). The examples are the rule, not the current number.
+
+A release moves one step, by the largest change since the previous tag:
+
+| Change | Current | Next |
+| --- | --- | --- |
+| Bug fix | 0.5.0 | 0.5.1 |
+| Another bug fix | 0.5.1 | 0.5.2 |
+| Small improvement | 0.5.2 | 0.5.3 |
+| New functionality | 0.5.3 | 0.6.0 |
+| Later bug fix | 0.6.0 | 0.6.1 |
+| New functionality | 0.6.1 | 0.7.0 |
+
+- **Patch** — a bug fix (`fix`) or a small improvement (`improve`). No new capability.
+- **Minor** — new functionality (`feat`). The patch goes back to 0.
+- A release that mixes kinds takes the highest bump. Fixes and small improvements together stay on the patch. One new capability makes the next minor.
+- `refactor`, `chore`, `docs`, `test` and `ci` do not bump the version by themselves.
+
+**Incompatible changes before 1.0.0** (saved connections, the update path, or something a person already relies on stops working) are still a **minor** bump, not 1.0.0. That version's notes say what broke and what to do once. Do not repeat the note on later releases.
+
+**1.0.0** is a deliberate release, not the next feature and not where an incompatible change lands on its own. Ship it when the user says the app should start keeping compatibility. From then on, follow SemVer as specified: patch for a compatible fix, minor for compatible new behavior, major for an incompatible change.
+
+When preparing a release on `develop` (before merging to `main`), bump:
+
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock` (the `dbunny` package only)
+- `src-tauri/tauri.conf.json`
+
+The tag is `vX.Y.Z` and must match that number.
+
 ## Releases
 
 Typical flow used on this project:
 
-1. Finish work on **`develop`** (including `chore: version X.Y.Z` when appropriate).
+1. Finish work on **`develop`**, then `chore: version X.Y.Z` using the next number from **Versioning**.
 2. Open and merge PR **`develop`** → **`main`**.
 3. On **`main`**, create and push tag **`vX.Y.Z`** (must match `tauri.conf.json`).
 4. Tag push runs **`.github/workflows/build.yml`**: multi-platform Tauri build, draft GitHub Release, `latest.json` for the in-app updater. A follow-up job removes standalone `.sig` assets from the release.
@@ -140,7 +166,7 @@ Typical flow used on this project:
 
 6. **Publish** the release when assets are ready.
 
-Patch release notes and README in English. Release text follows **No co-authorship** (no agent or tool credits). User-facing docs describe DBunny as a **multi-database** client; list supported engines accurately (see `README.md` and `web/src/lib/engines.ts`).
+Write release notes and the README in English. Release text follows **No co-authorship** (no agent or tool credits). User-facing docs describe DBunny as a **multi-database** client; list supported engines accurately (see `README.md` and `web/src/lib/engines.ts`).
 
 ## CI
 

@@ -25,6 +25,7 @@ export default function Dialog({
   children,
   footer,
   className,
+  overlayClassName,
 }: {
   open: boolean;
   onClose: () => void;
@@ -36,6 +37,8 @@ export default function Dialog({
   children?: ReactNode;
   footer?: ReactNode;
   className?: string;
+  /** Extra classes on the backdrop, for example to sit above another dialog. */
+  overlayClassName?: string;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -49,7 +52,7 @@ export default function Dialog({
   if (!open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className={cn("fixed inset-0 z-50 flex items-center justify-center p-4", overlayClassName)}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] animate-fade-in" onMouseDown={onClose} />
       <div
         role="dialog"
