@@ -220,14 +220,12 @@ pub(super) async fn read_columns(conn: &mut Conn, database: &str, table: &str) -
 }
 
 /// The columns of `database`.`table` in order, as MySQL stores them.
-#[allow(dead_code)] // used by the structure editor and the data (Tasks 7 and 11)
 pub(crate) async fn column_definitions(conn: &mut Conn, database: &str, table: &str) -> Result<Vec<ColumnDefinition>, String> {
     let stored = read_columns(conn, database, table).await.map_err(|e| detached(&e))?;
     Ok(stored.into_iter().map(|c| c.definition).collect())
 }
 
 /// The storage engine of a table (`InnoDB`, `MyISAM`...); None for a view or a table that isn't there.
-#[allow(dead_code)] // used by saving and importing rows (Task 7)
 pub(crate) async fn table_engine(conn: &mut Conn, database: &str, table: &str) -> Result<Option<String>, String> {
     let row: Option<Row> = conn
         .exec_first(

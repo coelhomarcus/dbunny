@@ -2,6 +2,7 @@
 //! table views, structure and administration, and the query editor's own connection.
 
 mod catalog;
+mod data;
 mod editor;
 #[cfg(test)]
 pub(crate) mod tests_support;
@@ -199,7 +200,7 @@ impl Driver for MysqlDriver {
     }
 
     fn data(&self) -> &dyn Data {
-        unimplemented!("MySQL table data comes with Task 7")
+        self
     }
 }
 
