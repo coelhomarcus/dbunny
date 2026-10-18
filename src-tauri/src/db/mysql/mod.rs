@@ -1,9 +1,11 @@
 //! The MySQL driver: a session on one database of a server, with a pool for the explorer,
 //! table views, structure and administration, and the query editor's own connection.
 
+mod catalog;
 mod editor;
 #[cfg(test)]
 pub(crate) mod tests_support;
+mod structure;
 pub mod version;
 
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -126,7 +128,6 @@ impl MysqlDriver {
     }
 
     /// A connection from the pool; it goes back when dropped.
-    #[allow(dead_code)] // used by the catalog and the data (Tasks 6 and 7)
     pub(crate) async fn conn(&self) -> Result<mysql_async::Conn, String> {
         let pool = lock(&self.pool).clone().ok_or_else(|| "Session not found".to_string())?;
         pool.get_conn().await.map_err(|e| error_message(&e, &self.endpoint))
@@ -139,19 +140,16 @@ impl MysqlDriver {
     }
 
     /// The database the session opened, or "" when the server had none to open.
-    #[allow(dead_code)] // used by the catalog (Task 6)
     pub(crate) fn database(&self) -> &str {
         self.endpoint.database.as_deref().unwrap_or("")
     }
 
     /// Where the session connects, with the database it opened.
-    #[allow(dead_code)] // used to open the other databases (Task 13)
     pub fn endpoint(&self) -> &MysqlEndpoint {
         &self.endpoint
     }
 
     /// The server's version, for what changes with it (CHECK constraints, EXPLAIN ANALYZE).
-    #[allow(dead_code)] // used by the console and the structure (Tasks 9 and 11)
     pub fn version(&self) -> MysqlVersion {
         self.version
     }
@@ -197,7 +195,7 @@ impl Driver for MysqlDriver {
     }
 
     fn catalog(&self) -> &dyn Catalog {
-        unimplemented!("the MySQL catalog comes with Task 6")
+        self
     }
 
     fn data(&self) -> &dyn Data {

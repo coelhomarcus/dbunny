@@ -85,6 +85,7 @@ async fn table_meta(client: &Client, oid: u32) -> Result<TableMeta, tokio_postgr
         table_bytes: row.get("table_bytes"),
         indexes_bytes: row.get("indexes_bytes"),
         total_bytes: row.get("total_bytes"),
+        ..TableMeta::default()
     })
 }
 

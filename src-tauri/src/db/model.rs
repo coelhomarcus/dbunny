@@ -221,6 +221,12 @@ pub struct TableMeta {
     pub table_bytes: Option<i64>,
     pub indexes_bytes: Option<i64>,
     pub total_bytes: Option<i64>,
+    /// The storage engine (MySQL); None for the engines that have only one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    /// The default collation of the table's text columns (MySQL).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collation: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
