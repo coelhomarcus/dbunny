@@ -36,6 +36,8 @@ pub(crate) struct EditorConn {
     opts: Mutex<Opts>,
     /// For the messages of connection errors.
     endpoint: MysqlEndpoint,
+    #[cfg(test)]
+    test_pause: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
 impl EditorConn {
@@ -49,6 +51,8 @@ impl EditorConn {
             cancelled: Arc::default(),
             opts: Mutex::new(opts),
             endpoint,
+            #[cfg(test)]
+            test_pause: Mutex::new(None),
         })
     }
 
@@ -68,19 +72,31 @@ impl EditorConn {
         if lock(&self.slot).is_none() {
             return Err(session_not_found());
         }
+        #[cfg(test)]
+        self.pause_for_test().await;
         if let Some(conn) = held.as_mut() {
             if !alive(conn).await {
                 *held = None;
             }
         }
+        let mut reconnected = false;
         if held.is_none() {
             let opts = lock(&self.opts).clone();
             let conn = Conn::new(opts).await.map_err(|e| error_message(&e, &self.endpoint))?;
             self.id.store(conn.id(), Ordering::SeqCst);
             *held = Some(conn);
-            if self.in_transaction.swap(false, Ordering::SeqCst) {
-                return Err(ROLLED_BACK.into());
-            }
+            reconnected = true;
+        }
+        // Checked again with the connection `f` will use already in `id`: `close()` takes the
+        // slot first and reads `id` after, so either this sees the session closed (and drops
+        // a connection `close()` may never have seen), or `close()` kills this very connection.
+        // Without it, a connection opened while `close()` ran would run `f` after the close.
+        if lock(&self.slot).is_none() {
+            *held = None;
+            return Err(session_not_found());
+        }
+        if reconnected && self.in_transaction.swap(false, Ordering::SeqCst) {
+            return Err(ROLLED_BACK.into());
         }
         let conn = held.as_mut().expect("connected above");
         let result = f(conn).await;
@@ -106,7 +122,9 @@ impl EditorConn {
         *lock(&self.opts) = opts;
     }
 
-    /// Lets go of the connection; it closes once no running task holds it.
+    /// Lets go of the connection; it closes once no running task holds it. A command that
+    /// already holds it doesn't start `f` after this (see `run`), and `connection_id()` read
+    /// after this returns names the connection such a command may still be running on.
     pub(crate) fn close(&self) {
         let closed = lock(&self.slot).take();
         drop(closed);
@@ -115,6 +133,22 @@ impl EditorConn {
     #[cfg(test)]
     pub(crate) fn set_in_transaction_for_test(&self, open: bool) {
         self.in_transaction.store(open, Ordering::SeqCst);
+    }
+
+    /// Makes the next `run` stop once it holds the connection, before checking it: it
+    /// signals `reached` and goes on when `proceed` is signalled.
+    #[cfg(test)]
+    pub(crate) fn pause_next_run_for_test(&self, reached: Arc<tokio::sync::Notify>, proceed: Arc<tokio::sync::Notify>) {
+        *lock(&self.test_pause) = Some((reached, proceed));
+    }
+
+    #[cfg(test)]
+    async fn pause_for_test(&self) {
+        let pause = lock(&self.test_pause).take();
+        if let Some((reached, proceed)) = pause {
+            reached.notify_one();
+            proceed.notified().await;
+        }
     }
 }
 

@@ -172,8 +172,10 @@ impl Driver for MysqlDriver {
     /// running stops there too (waiting at most 2 s for that), then shuts the pool down and
     /// closes the tunnel. Anything the session is asked afterwards answers "Session not found".
     async fn close(&self) {
-        let editor_id = self.editor.connection_id();
+        // In this order: a command that holds the editor's connection either sees the session
+        // closed before it starts, or runs on the connection this id names
         self.editor.close();
+        let editor_id = self.editor.connection_id();
         let pool = lock(&self.pool).take();
         if let Some(pool) = pool {
             let kill = async {
@@ -436,6 +438,47 @@ mod server_tests {
         let err = driver.editor().run(|_| Box::pin(async { Ok(()) })).await.err().unwrap();
         assert_eq!(err, "Session not found");
         assert_eq!(driver.conn().await.err().unwrap(), "Session not found");
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn a_command_that_reconnects_while_the_session_closes_does_not_run() {
+        let db = TestDb::new().await;
+        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        // The next command finds the connection lost and opens another
+        let before = driver.editor().connection_id();
+        exec(&test_endpoint(), &format!("KILL CONNECTION {before}")).await;
+        let (reached, proceed) = (Arc::new(tokio::sync::Notify::new()), Arc::new(tokio::sync::Notify::new()));
+        driver.editor().pause_next_run_for_test(Arc::clone(&reached), Arc::clone(&proceed));
+        let marker = uuid::Uuid::new_v4().simple().to_string();
+        let running = {
+            let (driver, sql) = (Arc::clone(&driver), format!("SELECT SLEEP(30), '{marker}'"));
+            tokio::spawn(async move {
+                driver.editor().run(move |c| Box::pin(async move { c.query_drop(sql).await.map_err(|e| e.to_string()) })).await
+            })
+        };
+        // close() lands after the command took the connection and before it reconnected
+        reached.notified().await;
+        tokio::time::timeout(Duration::from_secs(5), driver.close()).await.expect("close() must not hang");
+        proceed.notify_one();
+
+        let result = tokio::time::timeout(Duration::from_secs(5), running).await.expect("the command must not run its query");
+        assert_eq!(result.unwrap().err().unwrap(), "Session not found");
+        let sql = format!("SELECT COUNT(*) FROM information_schema.processlist WHERE info LIKE '%{marker}%' AND info NOT LIKE '%processlist%'");
+        assert_eq!(query_one::<i64>(&test_endpoint(), &sql).await.unwrap(), 0, "the query must never reach the server");
+        // The connection opened for it doesn't stay behind
+        let reopened = driver.editor().connection_id();
+        assert_ne!(reopened, before);
+        let mut gone = false;
+        for _ in 0..20 {
+            if !connection_listed(reopened).await {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(gone, "the connection {reopened} opened during close() is still on the server");
         db.drop_now().await;
     }
 
