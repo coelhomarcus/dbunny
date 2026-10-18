@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
-use crate::db::postgres::ssh::SshConfig;
+use crate::db::net::ssh::SshConfig;
 use crate::db::Engine;
 
 const PBKDF2_SALT: &[u8] = b"dbunny-connection-salt-v1";
@@ -38,19 +38,7 @@ struct SqliteData {
     path: String,
 }
 
-/// SSL settings beyond on/off, saved with a connection.
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct TlsSettings {
-    /// "require", "verify-ca" or "verify-full".
-    pub mode: String,
-    #[serde(default)]
-    pub root_cert: String,
-    #[serde(default)]
-    pub cert: String,
-    #[serde(default)]
-    pub key: String,
-}
+pub use crate::db::net::tls::TlsSettings;
 
 fn default_engine() -> String {
     Engine::default().as_str().to_string()

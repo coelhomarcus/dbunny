@@ -6,9 +6,10 @@ use std::sync::Arc;
 use tokio_postgres::config::SslMode;
 
 use super::session::{Endpoint, Link, Notices, PgState};
-use super::ssh::{open_tunnel, KnownHosts, Tunnel};
 use super::PostgresDriver;
 use crate::db::model::Notice;
+use crate::db::net::ssh::{open_tunnel, KnownHosts, Tunnel};
+use crate::db::net::tls::read_file;
 use crate::db::{Capabilities, ConnectionInfo};
 
 /// How the TLS handshake should behave, derived from the URL's `sslmode`.
@@ -40,10 +41,6 @@ fn tls_plan(sslmode: Option<&str>) -> Result<TlsPlan, String> {
 /// URL parameters DBunny applies itself instead of passing them to the driver
 /// (which only knows a few sslmodes and no certificate files).
 const TLS_PARAMS: [&str; 4] = ["sslmode", "sslrootcert", "sslcert", "sslkey"];
-
-fn read_file(label: &str, path: &str) -> Result<Vec<u8>, String> {
-    std::fs::read(super::ssh::expand_home(path)).map_err(|e| format!("Couldn't read the {label} {path}: {e}"))
-}
 
 /// Builds the driver config and TLS connector from a postgres:// URL.
 pub(crate) fn connection_config(url: &url::Url) -> Result<(tokio_postgres::Config, MakeTlsConnector), String> {
@@ -460,7 +457,7 @@ mod server_tests {
 /// Opening sessions against a real server, see `console::server_tests`.
 #[cfg(test)]
 mod database_server_tests {
-    use super::super::ssh::SshConfig;
+    use crate::db::net::ssh::SshConfig;
     use super::*;
     use crate::commands::connect::{open_session, ConnectResponse};
     use crate::commands::state::AppState;

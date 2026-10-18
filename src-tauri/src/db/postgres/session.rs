@@ -21,14 +21,14 @@ pub struct PgState {
     pub editor: Option<Arc<Client>>,
     /// SSH tunnel the connections go through; held only to keep it open, and closed
     /// when the session is dropped.
-    pub tunnel: Option<Arc<super::ssh::Tunnel>>,
+    pub tunnel: Option<Arc<crate::db::net::ssh::Tunnel>>,
 }
 
 /// The connection URL and SSH settings a session was opened with.
 #[derive(Clone)]
 pub struct Endpoint {
     pub url: url::Url,
-    pub ssh: Option<super::ssh::SshConfig>,
+    pub ssh: Option<crate::db::net::ssh::SshConfig>,
     /// The app's SSH known hosts file, when connecting through SSH.
     pub known_hosts: Option<std::path::PathBuf>,
 }

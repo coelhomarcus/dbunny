@@ -5,6 +5,7 @@
 pub mod capabilities;
 pub mod driver;
 pub mod model;
+pub mod net;
 pub mod postgres;
 pub mod sql;
 pub mod sqlite;

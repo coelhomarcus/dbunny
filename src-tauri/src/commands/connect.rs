@@ -2,7 +2,7 @@ use serde::Serialize;
 use tauri::State;
 
 use super::state::AppState;
-use crate::db::postgres::ssh::SshConfig;
+use crate::db::net::ssh::SshConfig;
 use crate::db::postgres::{Endpoint, PostgresDriver};
 use crate::db::sqlite::{OpenOptions, SqliteDriver};
 use crate::db::{Capabilities, Driver, Engine};
