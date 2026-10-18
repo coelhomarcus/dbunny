@@ -1,0 +1,91 @@
+//! What the MySQL server tests share: where the test server is, a throwaway database per
+//! test, and a way to prepare fixtures. Start the servers with `src-tauri/tests/mysql-docker.sh up`.
+
+use mysql_async::prelude::Queryable;
+
+use crate::db::mysql_common::connect::{opts_for, ConnRole, MysqlEndpoint};
+
+/// Tests that change a global setting of the server (like `read_only`) hold this for
+/// writing; tests whose checks depend on those settings hold it for reading.
+pub static SERVER_SETTINGS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
+/// The server in `DBUNNY_TEST_MYSQL_URL` (`mysql://user:password@host:port`), without a database.
+pub fn test_endpoint() -> MysqlEndpoint {
+    endpoint_from("DBUNNY_TEST_MYSQL_URL")
+}
+
+/// The server in the environment variable `var`, read like `test_endpoint`.
+pub fn endpoint_from(var: &str) -> MysqlEndpoint {
+    let text = std::env::var(var).unwrap_or_else(|_| panic!("set {var} to run the MySQL server tests"));
+    let url = url::Url::parse(&text).unwrap_or_else(|e| panic!("{var} isn't a URL: {e}"));
+    let decode = |text: &str| url::form_urlencoded::parse(format!("x={text}").as_bytes()).next().unwrap().1.into_owned();
+    let database = url.path().trim_start_matches('/');
+    MysqlEndpoint {
+        host: url.host_str().unwrap_or("127.0.0.1").to_string(),
+        port: url.port().unwrap_or(3306),
+        database: (!database.is_empty()).then(|| decode(database)),
+        user: decode(url.username()),
+        password: url.password().map(decode).unwrap_or_default(),
+        ..Default::default()
+    }
+}
+
+/// A connection for fixtures: never read-only, whatever the endpoint asks.
+pub async fn raw_conn(endpoint: &MysqlEndpoint) -> mysql_async::Conn {
+    let endpoint = MysqlEndpoint { read_only: false, ..endpoint.clone() };
+    mysql_async::Conn::new(opts_for(&endpoint, None, ConnRole::Editor).unwrap()).await.unwrap()
+}
+
+/// Runs `sql` (one statement or several) for a fixture; panics when it fails.
+pub async fn exec(endpoint: &MysqlEndpoint, sql: &str) {
+    let mut conn = raw_conn(endpoint).await;
+    conn.query_drop(sql).await.unwrap_or_else(|e| panic!("{sql}: {e}"));
+    let _ = conn.disconnect().await;
+}
+
+/// The first column of the first row of `sql`, for checks.
+pub async fn query_one<T: mysql_async::prelude::FromRow + Send + 'static>(endpoint: &MysqlEndpoint, sql: &str) -> Option<T> {
+    let mut conn = raw_conn(endpoint).await;
+    let value = conn.query_first::<T, _>(sql).await.unwrap_or_else(|e| panic!("{sql}: {e}"));
+    let _ = conn.disconnect().await;
+    value
+}
+
+/// A database `dbunny_t_<8 hex>` made for one test. `drop_now` deletes it; a test that
+/// fails before that still deletes it when the value is dropped.
+pub struct TestDb {
+    pub name: String,
+    /// The test server with this database open.
+    pub endpoint: MysqlEndpoint,
+    dropped: bool,
+}
+
+impl TestDb {
+    pub async fn new() -> TestDb {
+        let name = format!("dbunny_t_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        let server = test_endpoint();
+        exec(&server, &format!("CREATE DATABASE `{name}`")).await;
+        let endpoint = MysqlEndpoint { database: Some(name.clone()), ..server };
+        TestDb { name, endpoint, dropped: false }
+    }
+
+    pub async fn drop_now(mut self) {
+        exec(&test_endpoint(), &format!("DROP DATABASE IF EXISTS `{}`", self.name)).await;
+        self.dropped = true;
+    }
+}
+
+impl Drop for TestDb {
+    fn drop(&mut self) {
+        if self.dropped {
+            return;
+        }
+        // Not inside the test's runtime, which may be the one unwinding
+        let sql = format!("DROP DATABASE IF EXISTS `{}`", self.name);
+        let _ = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            runtime.block_on(exec(&test_endpoint(), &sql));
+        })
+        .join();
+    }
+}

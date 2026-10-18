@@ -1,8 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use super::state::AppState;
+use crate::db::mysql::MysqlDriver;
+use crate::db::mysql_common::connect::MysqlEndpoint;
 use crate::db::net::ssh::SshConfig;
+use crate::db::net::tls::TlsSettings;
 use crate::db::postgres::{Endpoint, PostgresDriver};
 use crate::db::sqlite::{OpenOptions, SqliteDriver};
 use crate::db::{Capabilities, Driver, Engine};
@@ -58,19 +61,24 @@ pub async fn connect(
 
     let url = url::Url::parse(&connection_url).map_err(|e| format!("Invalid URL: {}", e))?;
 
-    let known_hosts = match ssh {
+    let known_hosts = known_hosts_for(&app_handle, &ssh)?;
+    let endpoint = Endpoint { url, ssh, known_hosts };
+    open_session(&state, endpoint, trust_host_key).await
+}
+
+/// The app's SSH known hosts file, when the connection goes through SSH.
+fn known_hosts_for(app_handle: &tauri::AppHandle, ssh: &Option<SshConfig>) -> Result<Option<std::path::PathBuf>, String> {
+    match ssh {
         Some(_) => {
             use tauri::Manager;
             let dir = app_handle
                 .path()
                 .app_data_dir()
                 .map_err(|e| format!("Failed to get app data dir: {e}"))?;
-            Some(dir.join("ssh_known_hosts.json"))
+            Ok(Some(dir.join("ssh_known_hosts.json")))
         }
-        None => None,
-    };
-    let endpoint = Endpoint { url, ssh, known_hosts };
-    open_session(&state, endpoint, trust_host_key).await
+        None => Ok(None),
+    }
 }
 
 /// Connects to `endpoint` and registers the new session.
@@ -98,6 +106,50 @@ pub async fn connect_sqlite(
     }
     let opts = OpenOptions { read_only, create, ..Default::default() };
     let driver = SqliteDriver::open(path.into(), opts).await?;
+    let session_id = state.register(driver.clone()).await?;
+    Ok(ConnectResponse::new(session_id, driver.as_ref()))
+}
+
+/// The connection form of a MySQL server. An empty database opens the first one the user can see.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MysqlConnectParams {
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub user: String,
+    pub password: String,
+    pub read_only: bool,
+    pub tls: Option<TlsSettings>,
+}
+
+/// Connects to a MySQL server, optionally through SSH. `trust_host_key` is an SSH host
+/// key fingerprint the user confirmed.
+#[tauri::command]
+pub async fn connect_mysql(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+    params: MysqlConnectParams,
+    ssh: Option<SshConfig>,
+    trust_host_key: Option<String>,
+) -> Result<ConnectResponse, String> {
+    if params.host.trim().is_empty() {
+        return Err("host is required".into());
+    }
+    let known_hosts = known_hosts_for(&app_handle, &ssh)?;
+    let database = params.database.trim();
+    let endpoint = MysqlEndpoint {
+        host: params.host.trim().to_string(),
+        port: params.port,
+        database: (!database.is_empty()).then(|| database.to_string()),
+        user: params.user,
+        password: params.password,
+        tls: params.tls,
+        ssh,
+        known_hosts,
+        read_only: params.read_only,
+    };
+    let driver = MysqlDriver::open(endpoint, trust_host_key).await?;
     let session_id = state.register(driver.clone()).await?;
     Ok(ConnectResponse::new(session_id, driver.as_ref()))
 }

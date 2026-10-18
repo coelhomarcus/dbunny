@@ -51,7 +51,6 @@ pub enum ExplainFormat {
     /// The rows of `EXPLAIN QUERY PLAN`.
     SqliteQueryPlan,
     /// `EXPLAIN FORMAT=TREE` (or `EXPLAIN ANALYZE`): indented text.
-    #[allow(dead_code)]
     MysqlTree,
 }
 
@@ -130,7 +129,6 @@ impl Capabilities {
     /// MySQL 8.0+: the console, transactions, schema editing and administration of
     /// databases, users and sessions, but no schemas, sequences or RETURNING. What
     /// changes with the version is EXPLAIN ANALYZE (8.0.18).
-    #[allow(dead_code)]
     pub fn mysql(version: MysqlVersion) -> Self {
         Self {
             console: true,

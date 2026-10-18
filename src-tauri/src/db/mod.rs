@@ -5,9 +5,8 @@
 pub mod capabilities;
 pub mod driver;
 pub mod model;
-// Not wired to a driver yet
-#[allow(dead_code)]
 pub mod mysql;
+pub mod mysql_common;
 pub mod net;
 pub mod postgres;
 pub mod sql;
