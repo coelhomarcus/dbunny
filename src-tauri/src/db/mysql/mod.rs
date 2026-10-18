@@ -3,7 +3,7 @@
 
 mod editor;
 #[cfg(test)]
-mod tests_support;
+pub(crate) mod tests_support;
 pub mod version;
 
 use std::sync::{Arc, Mutex, MutexGuard};
