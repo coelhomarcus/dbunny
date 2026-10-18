@@ -104,8 +104,8 @@ pub fn split_statements_in(dialect: Dialect, sql: &str) -> Vec<Statement> {
     match dialect {
         Dialect::Postgres => split_postgres(sql),
         Dialect::Sqlite => crate::db::sqlite::split::split_sqlite(sql),
-        // The MySQL splitter arrives with its driver; until then it reads like PostgreSQL's
-        Dialect::Mysql => split_postgres(sql),
+        // A DELIMITER line comes back as a statement of its own; `split_mysql` makes it an error
+        Dialect::Mysql => crate::db::mysql_common::split::split_mysql_lenient(sql),
     }
 }
 
@@ -278,6 +278,13 @@ mod tests {
         let sql = "CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END; SELECT 2";
         let texts: Vec<String> = split_statements_in(Dialect::Sqlite, sql).into_iter().map(|s| s.text).collect();
         assert_eq!(texts, ["CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END", "SELECT 2"]);
+    }
+
+    #[test]
+    fn the_mysql_dialect_uses_mysqls_own_rules() {
+        let sql = "CREATE PROCEDURE p() BEGIN SELECT 1; END; SELECT `a;b` # c;\n";
+        let texts: Vec<String> = split_statements_in(Dialect::Mysql, sql).into_iter().map(|s| s.text).collect();
+        assert_eq!(texts, ["CREATE PROCEDURE p() BEGIN SELECT 1; END", "SELECT `a;b` # c;"]);
     }
 
     #[test]

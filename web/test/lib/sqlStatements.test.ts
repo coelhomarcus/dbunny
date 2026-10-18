@@ -1,8 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { splitStatements } from "../../src/lib/sqlStatements.ts";
+import { readFileSync } from "node:fs";
+import { splitStatements, type SqlDialectName } from "../../src/lib/sqlStatements.ts";
 
-const texts = (sql: string, dialect?: "postgres" | "sqlite") => splitStatements(sql, dialect).map((r) => sql.slice(r.from, r.to));
+const texts = (sql: string, dialect?: SqlDialectName) => splitStatements(sql, dialect).map((r) => sql.slice(r.from, r.to));
+
+/** The cases the Rust splitter (db/mysql_common/split.rs) runs too. */
+const mysqlCases: { name: string; sql: string; statements: string[]; error?: string }[] = JSON.parse(
+  readFileSync(new URL("../../../src-tauri/src/db/mysql_common/split_cases.json", import.meta.url), "utf8"),
+);
+
+test("mysql split matches the shared cases", () => {
+  assert.ok(mysqlCases.length >= 11);
+  for (const { name, sql, statements } of mysqlCases) {
+    // A DELIMITER line is a statement of its own here; the backend answers it with the error
+    assert.deepEqual(texts(sql, "mysql"), statements, name);
+  }
+});
 
 test("postgres splitting is unchanged", () => {
   assert.deepEqual(texts("select 1; select 2;"), ["select 1", "select 2"]);

@@ -1,0 +1,330 @@
+[
+  {
+    "name": "two_selects",
+    "sql": "SELECT 1; SELECT 2;",
+    "statements": [
+      "SELECT 1",
+      "SELECT 2"
+    ]
+  },
+  {
+    "name": "semicolon_in_strings_and_backticks",
+    "sql": "SELECT 'a;b', \"a;b\", `a;b`; SELECT 'it\\'s;'; SELECT 'it''s;', \"say \\\";\\\"\", `a``;b`; SELECT 2",
+    "statements": [
+      "SELECT 'a;b', \"a;b\", `a;b`",
+      "SELECT 'it\\'s;'",
+      "SELECT 'it''s;', \"say \\\";\\\"\", `a``;b`",
+      "SELECT 2"
+    ]
+  },
+  {
+    "name": "hash_and_dash_comments",
+    "sql": "SELECT 1 # ;\n; SELECT 2 -- ;\n; SELECT 3 --\t;\n; SELECT 4 --;\nSELECT 5",
+    "statements": [
+      "SELECT 1 # ;",
+      "SELECT 2 -- ;",
+      "SELECT 3 --\t;",
+      "SELECT 4 --",
+      "SELECT 5"
+    ]
+  },
+  {
+    "name": "dashes_without_a_space_are_minus_signs",
+    "sql": "SELECT 1--1; SELECT 2 --",
+    "statements": [
+      "SELECT 1--1",
+      "SELECT 2 --"
+    ]
+  },
+  {
+    "name": "block_and_versioned_comments",
+    "sql": "SELECT 1 /* ; */; /*!40101 SET x=1 */; /* only a comment */; /*!50003 SET a=1; SET b=2 */; SELECT 2",
+    "statements": [
+      "SELECT 1 /* ; */",
+      "/*!40101 SET x=1 */",
+      "/*!50003 SET a=1; SET b=2 */",
+      "SELECT 2"
+    ]
+  },
+  {
+    "name": "block_comments_do_not_nest",
+    "sql": "SELECT 1 /* a /* b */; SELECT 2",
+    "statements": [
+      "SELECT 1 /* a /* b */",
+      "SELECT 2"
+    ]
+  },
+  {
+    "name": "comment_only_chunks_are_dropped",
+    "sql": "SELECT 1; # note\n; -- note\n; /* note */ ; -- last note",
+    "statements": [
+      "SELECT 1"
+    ]
+  },
+  {
+    "name": "a_comment_before_a_statement_stays_with_it",
+    "sql": "-- first\nSELECT 1; # second\nSELECT 2",
+    "statements": [
+      "-- first\nSELECT 1",
+      "# second\nSELECT 2"
+    ]
+  },
+  {
+    "name": "procedure_with_nested_blocks",
+    "sql": "CREATE PROCEDURE p(IN n INT)\nBEGIN\n  DECLARE i INT DEFAULT 0;\n  IF n > 1 THEN\n    SELECT 'many';\n  ELSEIF (n = 1) THEN\n    SELECT 'one';\n  ELSE\n    SELECT 'none';\n  END IF;\n  WHILE i < n DO\n    SET i = i + 1;\n  END WHILE;\n  BEGIN\n    SELECT i;\n  END;\nEND;\nCALL p(3);\n",
+    "statements": [
+      "CREATE PROCEDURE p(IN n INT)\nBEGIN\n  DECLARE i INT DEFAULT 0;\n  IF n > 1 THEN\n    SELECT 'many';\n  ELSEIF (n = 1) THEN\n    SELECT 'one';\n  ELSE\n    SELECT 'none';\n  END IF;\n  WHILE i < n DO\n    SET i = i + 1;\n  END WHILE;\n  BEGIN\n    SELECT i;\n  END;\nEND",
+      "CALL p(3)"
+    ]
+  },
+  {
+    "name": "case_expression_inside_a_body",
+    "sql": "CREATE PROCEDURE q(x INT)\nBEGIN\n  SELECT CASE WHEN x THEN 1 END;\n  SELECT CASE WHEN x > 1 THEN 'big' ELSE CASE x WHEN 1 THEN 'one' ELSE 'small' END END AS size;\n  IF CASE WHEN x THEN 1 END = 1 THEN\n    SELECT 'yes';\n  END IF;\n  CASE x\n    WHEN 1 THEN SELECT 'one';\n    WHEN 2 THEN IF x > 0 THEN SELECT 'two'; END IF;\n    ELSE BEGIN SELECT 'other'; END;\n  END CASE;\nEND;\nSELECT 2;\n",
+    "statements": [
+      "CREATE PROCEDURE q(x INT)\nBEGIN\n  SELECT CASE WHEN x THEN 1 END;\n  SELECT CASE WHEN x > 1 THEN 'big' ELSE CASE x WHEN 1 THEN 'one' ELSE 'small' END END AS size;\n  IF CASE WHEN x THEN 1 END = 1 THEN\n    SELECT 'yes';\n  END IF;\n  CASE x\n    WHEN 1 THEN SELECT 'one';\n    WHEN 2 THEN IF x > 0 THEN SELECT 'two'; END IF;\n    ELSE BEGIN SELECT 'other'; END;\n  END CASE;\nEND",
+      "SELECT 2"
+    ]
+  },
+  {
+    "name": "trigger_with_definer",
+    "sql": "CREATE DEFINER=root@localhost TRIGGER t_bi BEFORE INSERT ON t FOR EACH ROW BEGIN SET NEW.a = 1; SET NEW.b = 2; END;\nINSERT INTO t VALUES (1);\n",
+    "statements": [
+      "CREATE DEFINER=root@localhost TRIGGER t_bi BEFORE INSERT ON t FOR EACH ROW BEGIN SET NEW.a = 1; SET NEW.b = 2; END",
+      "INSERT INTO t VALUES (1)"
+    ]
+  },
+  {
+    "name": "definer_forms",
+    "sql": "CREATE DEFINER = 'root'@'%' PROCEDURE a() BEGIN SELECT 1; END;\nCREATE DEFINER=`app`@`localhost` FUNCTION b() RETURNS INT DETERMINISTIC BEGIN RETURN 1; END;\nCREATE DEFINER = CURRENT_USER() EVENT c ON SCHEDULE EVERY 1 HOUR DO BEGIN SELECT 1; END;\nCREATE DEFINER=CURRENT_USER TRIGGER d AFTER DELETE ON t FOR EACH ROW BEGIN SELECT 1; END;\nCREATE AGGREGATE FUNCTION e RETURNS STRING SONAME 'e.so';\nSELECT 1;\n",
+    "statements": [
+      "CREATE DEFINER = 'root'@'%' PROCEDURE a() BEGIN SELECT 1; END",
+      "CREATE DEFINER=`app`@`localhost` FUNCTION b() RETURNS INT DETERMINISTIC BEGIN RETURN 1; END",
+      "CREATE DEFINER = CURRENT_USER() EVENT c ON SCHEDULE EVERY 1 HOUR DO BEGIN SELECT 1; END",
+      "CREATE DEFINER=CURRENT_USER TRIGGER d AFTER DELETE ON t FOR EACH ROW BEGIN SELECT 1; END",
+      "CREATE AGGREGATE FUNCTION e RETURNS STRING SONAME 'e.so'",
+      "SELECT 1"
+    ]
+  },
+  {
+    "name": "begin_at_top_level_is_a_transaction",
+    "sql": "BEGIN; UPDATE t SET a=1; COMMIT; BEGIN WORK; ROLLBACK;",
+    "statements": [
+      "BEGIN",
+      "UPDATE t SET a=1",
+      "COMMIT",
+      "BEGIN WORK",
+      "ROLLBACK"
+    ]
+  },
+  {
+    "name": "if_function_is_not_a_block",
+    "sql": "SELECT IF(a>1, 'x', 'y'); CREATE PROCEDURE r() BEGIN SELECT IF(a>1, 'x', 'y'); SET @v = IF(1, 2, 3); END; SELECT 3;",
+    "statements": [
+      "SELECT IF(a>1, 'x', 'y')",
+      "CREATE PROCEDURE r() BEGIN SELECT IF(a>1, 'x', 'y'); SET @v = IF(1, 2, 3); END",
+      "SELECT 3"
+    ]
+  },
+  {
+    "name": "repeat_and_if_functions_are_not_blocks",
+    "sql": "CREATE PROCEDURE f2()\nBEGIN\n  SELECT REPEAT('ab', 2), IF(1, 'a', 'b');\n  SET @s = REPEAT('x', 3);\n  SELECT CASE WHEN 1 THEN IF(1, 2, 3) ELSE IF(0, 4, 5) END;\n  SELECT CASE WHEN 1 THEN REPEAT('a', 2) ELSE REPEAT('b', 2) END;\n  IF REPEAT('a', 2) = 'aa' THEN SELECT 1; END IF;\nEND;\nSELECT REPEAT('c', 2);\n",
+    "statements": [
+      "CREATE PROCEDURE f2()\nBEGIN\n  SELECT REPEAT('ab', 2), IF(1, 'a', 'b');\n  SET @s = REPEAT('x', 3);\n  SELECT CASE WHEN 1 THEN IF(1, 2, 3) ELSE IF(0, 4, 5) END;\n  SELECT CASE WHEN 1 THEN REPEAT('a', 2) ELSE REPEAT('b', 2) END;\n  IF REPEAT('a', 2) = 'aa' THEN SELECT 1; END IF;\nEND",
+      "SELECT REPEAT('c', 2)"
+    ]
+  },
+  {
+    "name": "labels_and_loops",
+    "sql": "CREATE PROCEDURE l()\nBEGIN\n  DECLARE i INT DEFAULT 0;\n  l1: LOOP\n    SET i = i + 1;\n    IF i > 3 THEN LEAVE l1; END IF;\n  END LOOP l1;\n  r1: REPEAT\n    SET i = i - 1;\n  UNTIL i = 0 END REPEAT r1;\n  w1 : WHILE i < 2 DO\n    SET i = i + 1;\n  END WHILE w1;\n  REPEAT SET i = i + 1; UNTIL i > 5 END REPEAT;\n  LOOP LEAVE l1; END LOOP;\nEND;\nSELECT 4;\n",
+    "statements": [
+      "CREATE PROCEDURE l()\nBEGIN\n  DECLARE i INT DEFAULT 0;\n  l1: LOOP\n    SET i = i + 1;\n    IF i > 3 THEN LEAVE l1; END IF;\n  END LOOP l1;\n  r1: REPEAT\n    SET i = i - 1;\n  UNTIL i = 0 END REPEAT r1;\n  w1 : WHILE i < 2 DO\n    SET i = i + 1;\n  END WHILE w1;\n  REPEAT SET i = i + 1; UNTIL i > 5 END REPEAT;\n  LOOP LEAVE l1; END LOOP;\nEND",
+      "SELECT 4"
+    ]
+  },
+  {
+    "name": "a_label_on_the_body",
+    "sql": "CREATE PROCEDURE lb() main: BEGIN SELECT 1; LEAVE main; END main; SELECT 2;",
+    "statements": [
+      "CREATE PROCEDURE lb() main: BEGIN SELECT 1; LEAVE main; END main",
+      "SELECT 2"
+    ]
+  },
+  {
+    "name": "begin_and_end_as_names_inside_a_body",
+    "sql": "CREATE PROCEDURE c()\nBEGIN\n  SELECT begin, end FROM t;\n  SELECT t.begin, t.end FROM t ORDER BY end;\n  UPDATE t SET end = 1 WHERE begin = 0;\n  INSERT INTO t (begin, end) VALUES (1, 2);\n  SET @end = 1, @begin = 2;\n  SELECT CASE WHEN end > 1 THEN end ELSE begin END FROM t;\nEND;\nSELECT 5;\n",
+    "statements": [
+      "CREATE PROCEDURE c()\nBEGIN\n  SELECT begin, end FROM t;\n  SELECT t.begin, t.end FROM t ORDER BY end;\n  UPDATE t SET end = 1 WHERE begin = 0;\n  INSERT INTO t (begin, end) VALUES (1, 2);\n  SET @end = 1, @begin = 2;\n  SELECT CASE WHEN end > 1 THEN end ELSE begin END FROM t;\nEND",
+      "SELECT 5"
+    ]
+  },
+  {
+    "name": "a_handler_with_a_block",
+    "sql": "CREATE PROCEDURE h()\nBEGIN\n  DECLARE EXIT HANDLER FOR SQLEXCEPTION\n  BEGIN\n    ROLLBACK;\n    RESIGNAL;\n  END;\n  DECLARE CONTINUE HANDLER FOR 1062, SQLSTATE '23000' BEGIN SELECT 'dup'; END;\n  START TRANSACTION;\n  INSERT INTO t VALUES (1);\n  COMMIT;\nEND;\nSELECT 6;\n",
+    "statements": [
+      "CREATE PROCEDURE h()\nBEGIN\n  DECLARE EXIT HANDLER FOR SQLEXCEPTION\n  BEGIN\n    ROLLBACK;\n    RESIGNAL;\n  END;\n  DECLARE CONTINUE HANDLER FOR 1062, SQLSTATE '23000' BEGIN SELECT 'dup'; END;\n  START TRANSACTION;\n  INSERT INTO t VALUES (1);\n  COMMIT;\nEND",
+      "SELECT 6"
+    ]
+  },
+  {
+    "name": "functions_with_and_without_a_body",
+    "sql": "CREATE FUNCTION f(x INT) RETURNS INT DETERMINISTIC BEGIN DECLARE y INT; SET y = x * 2; RETURN y; END;\nCREATE FUNCTION g(x INT) RETURNS INT DETERMINISTIC RETURN x + 1;\nCREATE FUNCTION h(x INT) RETURNS INT DETERMINISTIC RETURN CASE WHEN x > 0 THEN 1 ELSE 0 END;\nCREATE PROCEDURE IF NOT EXISTS p2() BEGIN SELECT 1; END;\nCREATE PROCEDURE p3() SELECT 1;\nSELECT f(1), g(1);\n",
+    "statements": [
+      "CREATE FUNCTION f(x INT) RETURNS INT DETERMINISTIC BEGIN DECLARE y INT; SET y = x * 2; RETURN y; END",
+      "CREATE FUNCTION g(x INT) RETURNS INT DETERMINISTIC RETURN x + 1",
+      "CREATE FUNCTION h(x INT) RETURNS INT DETERMINISTIC RETURN CASE WHEN x > 0 THEN 1 ELSE 0 END",
+      "CREATE PROCEDURE IF NOT EXISTS p2() BEGIN SELECT 1; END",
+      "CREATE PROCEDURE p3() SELECT 1",
+      "SELECT f(1), g(1)"
+    ]
+  },
+  {
+    "name": "events_with_a_body",
+    "sql": "CREATE EVENT e ON SCHEDULE EVERY 1 DAY DO BEGIN DELETE FROM log WHERE at < NOW() - INTERVAL 7 DAY; SELECT 1; END;\nCREATE EVENT e2 ON SCHEDULE AT CURRENT_TIMESTAMP DO IF 1 THEN SELECT 1; END IF;\nSELECT 7;\n",
+    "statements": [
+      "CREATE EVENT e ON SCHEDULE EVERY 1 DAY DO BEGIN DELETE FROM log WHERE at < NOW() - INTERVAL 7 DAY; SELECT 1; END",
+      "CREATE EVENT e2 ON SCHEDULE AT CURRENT_TIMESTAMP DO IF 1 THEN SELECT 1; END IF",
+      "SELECT 7"
+    ]
+  },
+  {
+    "name": "trigger_bodies_without_begin",
+    "sql": "CREATE TRIGGER tb BEFORE INSERT ON t FOR EACH ROW IF NEW.a < 0 THEN SET NEW.a = 0; END IF;\nCREATE TRIGGER tc BEFORE INSERT ON t FOR EACH ROW FOLLOWS tb IF NEW.a > 9 THEN SET NEW.a = 9; END IF;\nCREATE TRIGGER td BEFORE INSERT ON t FOR EACH ROW SET NEW.a = 1;\nSELECT 8;\n",
+    "statements": [
+      "CREATE TRIGGER tb BEFORE INSERT ON t FOR EACH ROW IF NEW.a < 0 THEN SET NEW.a = 0; END IF",
+      "CREATE TRIGGER tc BEFORE INSERT ON t FOR EACH ROW FOLLOWS tb IF NEW.a > 9 THEN SET NEW.a = 9; END IF",
+      "CREATE TRIGGER td BEFORE INSERT ON t FOR EACH ROW SET NEW.a = 1",
+      "SELECT 8"
+    ]
+  },
+  {
+    "name": "other_statements_have_no_blocks",
+    "sql": "CREATE DEFINER=root@localhost SQL SECURITY INVOKER VIEW v AS SELECT CASE WHEN 1 THEN 2 END AS x; CREATE TABLE ev (begin INT, end INT, `case` INT); SELECT CASE WHEN 1 THEN 2 END; SELECT 9;",
+    "statements": [
+      "CREATE DEFINER=root@localhost SQL SECURITY INVOKER VIEW v AS SELECT CASE WHEN 1 THEN 2 END AS x",
+      "CREATE TABLE ev (begin INT, end INT, `case` INT)",
+      "SELECT CASE WHEN 1 THEN 2 END",
+      "SELECT 9"
+    ]
+  },
+  {
+    "name": "lowercase_keywords",
+    "sql": "create procedure p() begin if 1 then select 1; end if; end; select 2",
+    "statements": [
+      "create procedure p() begin if 1 then select 1; end if; end",
+      "select 2"
+    ]
+  },
+  {
+    "name": "comments_before_create_and_inside_the_body",
+    "sql": "/* setup */ CREATE PROCEDURE p() BEGIN -- end;\n SELECT 1; # end;\n /* END; */ SELECT ';'; END; SELECT 2",
+    "statements": [
+      "/* setup */ CREATE PROCEDURE p() BEGIN -- end;\n SELECT 1; # end;\n /* END; */ SELECT ';'; END",
+      "SELECT 2"
+    ]
+  },
+  {
+    "name": "unterminated_string_runs_to_the_end",
+    "sql": "SELECT 1; SELECT 'oops; SELECT 2",
+    "statements": [
+      "SELECT 1",
+      "SELECT 'oops; SELECT 2"
+    ]
+  },
+  {
+    "name": "unterminated_comment_and_name_run_to_the_end",
+    "sql": "SELECT 1; SELECT 2 /* oops; SELECT 3",
+    "statements": [
+      "SELECT 1",
+      "SELECT 2 /* oops; SELECT 3"
+    ]
+  },
+  {
+    "name": "unterminated_backtick_runs_to_the_end",
+    "sql": "SELECT `a; SELECT 2",
+    "statements": [
+      "SELECT `a; SELECT 2"
+    ]
+  },
+  {
+    "name": "a_backslash_before_the_closing_quote",
+    "sql": "SELECT 'a\\\\'; SELECT 'b\\\\\\''; SELECT 2",
+    "statements": [
+      "SELECT 'a\\\\'",
+      "SELECT 'b\\\\\\''",
+      "SELECT 2"
+    ]
+  },
+  {
+    "name": "an_unclosed_body_runs_to_the_end",
+    "sql": "CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2;",
+    "statements": [
+      "CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2;"
+    ]
+  },
+  {
+    "name": "empty_statements_and_trailing_whitespace",
+    "sql": "  ;; SELECT 1 ;  ;\n\t\n",
+    "statements": [
+      "SELECT 1"
+    ]
+  },
+  {
+    "name": "empty_script",
+    "sql": "",
+    "statements": []
+  },
+  {
+    "name": "only_whitespace",
+    "sql": " \n\t\r\n ",
+    "statements": []
+  },
+  {
+    "name": "windows_line_endings",
+    "sql": "SELECT 1; -- note\r\nSELECT 2;\r\nCREATE PROCEDURE w()\r\nBEGIN\r\n  SELECT 1;\r\nEND;\r\n# done\r\n",
+    "statements": [
+      "SELECT 1",
+      "-- note\r\nSELECT 2",
+      "CREATE PROCEDURE w()\r\nBEGIN\r\n  SELECT 1;\r\nEND"
+    ]
+  },
+  {
+    "name": "unicode_before_a_statement",
+    "sql": "SELECT 'ação ☕ 😀'; SELECT `ñ😀`; CREATE PROCEDURE p() BEGIN SELECT 'é'; END; SELECT 2",
+    "statements": [
+      "SELECT 'ação ☕ 😀'",
+      "SELECT `ñ😀`",
+      "CREATE PROCEDURE p() BEGIN SELECT 'é'; END",
+      "SELECT 2"
+    ]
+  },
+  {
+    "name": "delimiter_line",
+    "sql": "DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\nDELIMITER ;\nCALL p();",
+    "statements": [
+      "DELIMITER $$",
+      "CREATE PROCEDURE p() BEGIN SELECT 1; END$$",
+      "DELIMITER ;",
+      "CALL p()"
+    ],
+    "error": "DELIMITER is a command of the mysql client, not SQL; DBunny already knows where a procedure body ends."
+  },
+  {
+    "name": "delimiter_after_a_statement",
+    "sql": "SELECT 1; delimiter //\r\nSELECT 2 //",
+    "statements": [
+      "SELECT 1",
+      "delimiter //",
+      "SELECT 2 //"
+    ],
+    "error": "DELIMITER is a command of the mysql client, not SQL; DBunny already knows where a procedure body ends."
+  },
+  {
+    "name": "delimiter_as_a_name_is_not_the_command",
+    "sql": "SELECT delimiter FROM t; SELECT 1 AS\ndelimiter; SELECT 2",
+    "statements": [
+      "SELECT delimiter FROM t",
+      "SELECT 1 AS\ndelimiter",
+      "SELECT 2"
+    ]
+  }
+]
