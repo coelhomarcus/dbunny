@@ -21,11 +21,12 @@ import {
 import { cn } from "../../lib/cn";
 import { useSettings } from "../../lib/settings";
 import { useTheme, type ThemePreference } from "../../lib/theme";
-import { checkForUpdates, installUpdate, RELEASES_URL, releaseUrl, restartApp, useUpdate } from "../../lib/updater";
+import { checkForUpdates, installUpdate, RELEASES_URL, restartApp, useUpdate } from "../../lib/updater";
 import { openExternal } from "../../lib/openExternal";
 import { isWindows } from "../../lib/platform";
 import type { SettingsSection } from "../../contexts/settingsDialog";
 import Button from "../ui/Button";
+import ReleaseNotesDialog from "../ReleaseNotesDialog";
 import Switch from "../ui/Switch";
 import SegmentedTabs from "../ui/SegmentedTabs";
 
@@ -102,6 +103,7 @@ function UpdatesSection() {
   const [settings, update] = useSettings();
   const { state } = useUpdate();
   const version = useAppVersion();
+  const [notesVersion, setNotesVersion] = useState<string | null>(null);
 
   const status = (() => {
     switch (state.status) {
@@ -132,8 +134,8 @@ function UpdatesSection() {
     <>
       <SectionTitle>Updates</SectionTitle>
       <Row title="Current version" hint={version ? `DBunny ${version}` : "Unknown in the browser preview"}>
-        <Button variant="ghost-muted" size="sm" onClick={() => openExternal(RELEASES_URL)}>
-          Release notes <ArrowUpRight />
+        <Button variant="ghost-muted" size="sm" disabled={!version} onClick={() => version && setNotesVersion(version)}>
+          Release notes
         </Button>
       </Row>
       <Row title="Check for updates automatically" hint="When the app opens and every few hours. Updates are downloaded only when you choose to.">
@@ -154,7 +156,7 @@ function UpdatesSection() {
           </div>
           {state.status === "available" ? (
             <div className="flex shrink-0 gap-1.5">
-              <Button variant="ghost-muted" size="sm" onClick={() => openExternal(releaseUrl(state.version))}>
+              <Button variant="ghost-muted" size="sm" onClick={() => setNotesVersion(state.version)}>
                 What's new
               </Button>
               <Button variant="primary" size="sm" onClick={installUpdate}>
@@ -188,6 +190,7 @@ function UpdatesSection() {
           <p className="mt-2 text-xs text-muted-foreground">DBunny closes while the update installs, then opens again.</p>
         )}
       </div>
+      <ReleaseNotesDialog open={notesVersion !== null} version={notesVersion ?? ""} onClose={() => setNotesVersion(null)} />
     </>
   );
 }

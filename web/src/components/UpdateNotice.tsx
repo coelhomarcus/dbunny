@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { CircleCheck, Download, Loader, RotateCw, TriangleAlert, X } from "lucide-react";
-import { dismissUpdate, installUpdate, RELEASES_URL, releaseUrl, restartApp, useUpdate } from "../lib/updater";
+import { dismissUpdate, installUpdate, RELEASES_URL, restartApp, useUpdate } from "../lib/updater";
 import { openExternal } from "../lib/openExternal";
 import { isWindows } from "../lib/platform";
 import { cn } from "../lib/cn";
 import Button from "./ui/Button";
+import ReleaseNotesDialog from "./ReleaseNotesDialog";
 
 /**
  * Card in the bottom-right corner while an update needs the person: one is available,
@@ -12,6 +14,7 @@ import Button from "./ui/Button";
  */
 export default function UpdateNotice() {
   const { state, dismissed } = useUpdate();
+  const [notesOpen, setNotesOpen] = useState(false);
   const visible =
     (state.status === "available" && !dismissed) ||
     state.status === "downloading" ||
@@ -41,7 +44,7 @@ export default function UpdateNotice() {
             </Button>
           </div>
           <div className="mt-3 flex items-center justify-end gap-1.5">
-            <Button variant="ghost-muted" size="sm" onClick={() => openExternal(releaseUrl(state.version))}>
+            <Button variant="ghost-muted" size="sm" onClick={() => setNotesOpen(true)}>
               What's new
             </Button>
             <Button variant="outline" size="sm" onClick={dismissUpdate}>
@@ -108,6 +111,9 @@ export default function UpdateNotice() {
             </Button>
           </div>
         </>
+      )}
+      {(state.status === "available" || state.status === "downloading" || state.status === "ready") && (
+        <ReleaseNotesDialog open={notesOpen} version={state.version} onClose={() => setNotesOpen(false)} />
       )}
     </div>
   );
