@@ -113,7 +113,6 @@ export default function ConnectPage() {
             />
           ) : (
             <WelcomePanel
-              version={version}
               hasConnections={(connections?.length ?? 0) > 0}
               onNew={() => openModal(null)}
               onOpenUrl={() => setImportOpen(true)}
