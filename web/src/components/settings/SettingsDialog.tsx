@@ -205,7 +205,7 @@ function AboutSection() {
   return (
     <>
       <div className="flex items-center gap-4 pb-5">
-        <img src="/icon.svg" alt="" className="size-14" />
+        <img src="/icon.svg" alt="" className="size-14 invert dark:invert-0" />
         <div>
           <h2 className="text-lg font-semibold leading-tight">DBunny</h2>
           <p className="text-[13px] text-muted-foreground">{version ? `Version ${version}` : "A fast, lightweight desktop client for PostgreSQL."}</p>
