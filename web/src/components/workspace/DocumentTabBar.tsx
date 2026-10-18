@@ -268,7 +268,7 @@ export default function DocumentTabBar() {
         <Plus size={15} />
       </button>
 
-      {capabilities.admin && (
+      {(capabilities.activity || capabilities.roles) && (
         <>
           <button
             ref={serverRef}
@@ -284,24 +284,28 @@ export default function DocumentTabBar() {
             <Server size={15} />
           </button>
           <Popover open={serverOpen} onClose={() => setServerOpen(false)} anchorRef={serverRef}>
-            <MenuItem
-              icon={Activity}
-              iconClass="text-emerald-500"
-              label="Activity"
-              onSelect={() => {
-                openDocument({ kind: "activity" });
-                setServerOpen(false);
-              }}
-            />
-            <MenuItem
-              icon={Users}
-              iconClass="text-indigo-500"
-              label="Roles"
-              onSelect={() => {
-                openDocument({ kind: "roles" });
-                setServerOpen(false);
-              }}
-            />
+            {capabilities.activity && (
+              <MenuItem
+                icon={Activity}
+                iconClass="text-emerald-500"
+                label="Activity"
+                onSelect={() => {
+                  openDocument({ kind: "activity" });
+                  setServerOpen(false);
+                }}
+              />
+            )}
+            {capabilities.roles && (
+              <MenuItem
+                icon={Users}
+                iconClass="text-indigo-500"
+                label="Roles"
+                onSelect={() => {
+                  openDocument({ kind: "roles" });
+                  setServerOpen(false);
+                }}
+              />
+            )}
           </Popover>
         </>
       )}

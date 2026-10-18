@@ -104,6 +104,8 @@ pub fn split_statements_in(dialect: Dialect, sql: &str) -> Vec<Statement> {
     match dialect {
         Dialect::Postgres => split_postgres(sql),
         Dialect::Sqlite => crate::db::sqlite::split::split_sqlite(sql),
+        // The MySQL splitter arrives with its driver; until then it reads like PostgreSQL's
+        Dialect::Mysql => split_postgres(sql),
     }
 }
 

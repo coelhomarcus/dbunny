@@ -1,5 +1,5 @@
 /** How the plan from EXPLAIN is shaped, so it's drawn the right way. */
-export type ExplainFormat = "postgresJson" | "sqliteQueryPlan";
+export type ExplainFormat = "postgresJson" | "sqliteQueryPlan" | "mysqlTree";
 
 /** What the connected engine supports: screens and actions it lacks are hidden. */
 export interface Capabilities {
@@ -8,6 +8,9 @@ export interface Capabilities {
   transactions: boolean;
   schemaEditing: boolean;
   admin: boolean;
+  // Server screens
+  roles: boolean;
+  activity: boolean;
   // Details
   schemas: boolean;
   databases: boolean;

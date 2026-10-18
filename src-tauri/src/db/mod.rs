@@ -5,6 +5,9 @@
 pub mod capabilities;
 pub mod driver;
 pub mod model;
+// Not wired to a driver yet
+#[allow(dead_code)]
+pub mod mysql;
 pub mod net;
 pub mod postgres;
 pub mod sql;
@@ -28,6 +31,7 @@ pub enum Engine {
     #[default]
     Postgres,
     Sqlite,
+    Mysql,
 }
 
 impl Engine {
@@ -36,6 +40,7 @@ impl Engine {
         match self {
             Engine::Postgres => "postgres",
             Engine::Sqlite => "sqlite",
+            Engine::Mysql => "mysql",
         }
     }
 
@@ -44,6 +49,7 @@ impl Engine {
         match name {
             "postgres" => Some(Engine::Postgres),
             "sqlite" => Some(Engine::Sqlite),
+            "mysql" => Some(Engine::Mysql),
             _ => None,
         }
     }
@@ -53,6 +59,7 @@ impl Engine {
         match self {
             Engine::Postgres => "PostgreSQL",
             Engine::Sqlite => "SQLite",
+            Engine::Mysql => "MySQL",
         }
     }
 }
@@ -68,5 +75,12 @@ mod tests {
         assert_eq!(Engine::Sqlite.as_str(), "sqlite");
         assert_eq!(Engine::from_name("sqlite"), Some(Engine::Sqlite));
         assert_eq!(Engine::Sqlite.label(), "SQLite");
+    }
+
+    #[test]
+    fn mysql_engine_has_its_names() {
+        assert_eq!(serde_json::to_value(Engine::Mysql).unwrap(), "mysql");
+        assert_eq!(Engine::from_name("mysql"), Some(Engine::Mysql));
+        assert_eq!(Engine::Mysql.label(), "MySQL");
     }
 }

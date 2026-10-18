@@ -67,6 +67,8 @@ impl SavedConnectionInput {
                 }
                 Ok(ConnectionDetails::Sqlite { path: self.path })
             }
+            // Saved MySQL connections arrive with the driver
+            Engine::Mysql => Err("This version doesn't support mysql connections".into()),
         }
     }
 }

@@ -3,6 +3,8 @@
 
 use serde::Serialize;
 
+use super::mysql::version::MysqlVersion;
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
@@ -11,6 +13,9 @@ pub struct Capabilities {
     pub transactions: bool,
     pub schema_editing: bool,
     pub admin: bool,
+    // Server screens, separate from `admin` so each engine picks the ones it has
+    pub roles: bool,
+    pub activity: bool,
     // Details
     pub schemas: bool,
     pub databases: bool,
@@ -45,6 +50,9 @@ pub enum ExplainFormat {
     PostgresJson,
     /// The rows of `EXPLAIN QUERY PLAN`.
     SqliteQueryPlan,
+    /// `EXPLAIN FORMAT=TREE` (or `EXPLAIN ANALYZE`): indented text.
+    #[allow(dead_code)]
+    MysqlTree,
 }
 
 impl Capabilities {
@@ -55,6 +63,8 @@ impl Capabilities {
             transactions: true,
             schema_editing: true,
             admin: true,
+            roles: true,
+            activity: true,
             schemas: true,
             databases: true,
             materialized_views: true,
@@ -89,6 +99,8 @@ impl Capabilities {
             transactions: true,
             schema_editing: true,
             admin: false,
+            roles: false,
+            activity: false,
             schemas: false,
             databases: false,
             materialized_views: false,
@@ -114,11 +126,50 @@ impl Capabilities {
             ssl: false,
         }
     }
+
+    /// MySQL 8.0+: the console, transactions, schema editing and administration of
+    /// databases, users and sessions, but no schemas, sequences or RETURNING. What
+    /// changes with the version is EXPLAIN ANALYZE (8.0.18).
+    #[allow(dead_code)]
+    pub fn mysql(version: MysqlVersion) -> Self {
+        Self {
+            console: true,
+            transactions: true,
+            schema_editing: true,
+            admin: true,
+            roles: true,
+            activity: true,
+            schemas: false,
+            databases: true,
+            materialized_views: false,
+            partitions: false,
+            functions: true,
+            sequences: false,
+            types: false,
+            extensions: false,
+            comments: true,
+            alter_column: true,
+            constraints: true,
+            trigger_toggle: false,
+            permissions: true,
+            index_methods: true,
+            concurrent_index: false,
+            cascade: false,
+            truncate_options: false,
+            duplicate_table: true,
+            explain_analyze: version.at_least(8, 0, 18),
+            explain_format: ExplainFormat::MysqlTree,
+            returning: false,
+            ssh: true,
+            ssl: true,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::mysql::version::MysqlVersion;
 
     #[test]
     fn capabilities_serialize_in_camel_case() {
@@ -139,6 +190,25 @@ mod tests {
         let c = Capabilities::sqlite();
         assert!(c.console && c.transactions && c.schema_editing && !c.admin && !c.schemas && !c.permissions);
         assert_eq!(c.explain_format, ExplainFormat::SqliteQueryPlan);
+    }
+
+    #[test]
+    fn mysql_capabilities_follow_the_version() {
+        let v = |major, minor, patch| MysqlVersion { major, minor, patch };
+        let c = Capabilities::mysql(v(8, 4, 0));
+        assert!(c.console && c.transactions && c.schema_editing && c.admin && c.databases && c.roles && c.activity);
+        assert!(!c.schemas && !c.returning && !c.trigger_toggle && !c.cascade && !c.sequences);
+        assert!(c.explain_analyze && c.constraints);
+        assert_eq!(c.explain_format, ExplainFormat::MysqlTree);
+        assert!(!Capabilities::mysql(v(8, 0, 17)).explain_analyze);
+        assert!(Capabilities::mysql(v(8, 0, 18)).explain_analyze);
+        assert_eq!(serde_json::to_value(&c).unwrap()["explainFormat"], "mysqlTree");
+    }
+
+    #[test]
+    fn postgres_keeps_roles_and_activity_and_sqlite_has_neither() {
+        assert!(Capabilities::postgres().roles && Capabilities::postgres().activity);
+        assert!(!Capabilities::sqlite().roles && !Capabilities::sqlite().activity);
     }
 
     #[test]
