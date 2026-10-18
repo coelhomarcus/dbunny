@@ -9,6 +9,10 @@ use crate::db::mysql_common::connect::{opts_for, ConnRole, MysqlEndpoint};
 /// writing; tests whose checks depend on those settings hold it for reading.
 pub static SERVER_SETTINGS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
+/// Every `TestDb` holds this for reading while it exists; a test that depends on which
+/// databases the server has (the first one a session opens) holds it for writing.
+static DATABASES: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 /// The server in `DBUNNY_TEST_MYSQL_URL` (`mysql://user:password@host:port`), without a database.
 pub fn test_endpoint() -> MysqlEndpoint {
     endpoint_from("DBUNNY_TEST_MYSQL_URL")
@@ -58,15 +62,26 @@ pub struct TestDb {
     /// The test server with this database open.
     pub endpoint: MysqlEndpoint,
     dropped: bool,
+    /// Released after the database is dropped.
+    _guard: Box<dyn std::any::Any + Send>,
 }
 
 impl TestDb {
     pub async fn new() -> TestDb {
+        Self::with_guard(Box::new(DATABASES.read().await)).await
+    }
+
+    /// Like `new`, with no other `TestDb` existing while this one does.
+    pub async fn alone() -> TestDb {
+        Self::with_guard(Box::new(DATABASES.write().await)).await
+    }
+
+    async fn with_guard(guard: Box<dyn std::any::Any + Send>) -> TestDb {
         let name = format!("dbunny_t_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         let server = test_endpoint();
         exec(&server, &format!("CREATE DATABASE `{name}`")).await;
         let endpoint = MysqlEndpoint { database: Some(name.clone()), ..server };
-        TestDb { name, endpoint, dropped: false }
+        TestDb { name, endpoint, dropped: false, _guard: guard }
     }
 
     pub async fn drop_now(mut self) {

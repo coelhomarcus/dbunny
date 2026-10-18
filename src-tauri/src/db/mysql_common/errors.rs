@@ -20,7 +20,8 @@ pub fn error_message(e: &Error, endpoint: &MysqlEndpoint) -> String {
     match e {
         Error::Server(server) => server_message(server.code, &server.message, endpoint),
         Error::Io(IoError::Io(io)) => io_message(io, endpoint),
-        Error::Io(IoError::Tls(tls)) => format!("TLS error with {}: {tls}", place(endpoint)),
+        Error::Io(IoError::Tls(tls)) => tls_message(&tls.to_string(), endpoint)
+            .unwrap_or_else(|| format!("TLS error with {}: {tls}", place(endpoint))),
         Error::Driver(DriverError::ConnectionClosed) => LOST.into(),
         other => other.to_string(),
     }
@@ -51,7 +52,34 @@ fn server_message(code: u16, message: &str, endpoint: &MysqlEndpoint) -> String 
     }
 }
 
+/// What rustls says when the certificate is fine but doesn't name the host
+/// ("invalid peer certificate: certificate not valid for name ...").
+const NAME_MISMATCH: &str = "certificate not valid for name";
+
+/// The message for a TLS failure of the certificate's name, or None for any other failure.
+///
+/// With `verify-ca` the name should not matter, but `mysql_async` 0.37.1 only skips the name
+/// error when rustls' text contains "NotValidForName", and current rustls reports
+/// `NotValidForNameContext` with a readable text instead. Until that is fixed `verify-ca`
+/// refuses what `verify-full` refuses, and says why.
+fn tls_message(text: &str, endpoint: &MysqlEndpoint) -> Option<String> {
+    if !text.contains(NAME_MISMATCH) {
+        return None;
+    }
+    let host = &endpoint.host;
+    Some(match endpoint.tls.as_ref().map(|tls| tls.mode.as_str()) {
+        Some("verify-ca") => format!(
+            "The server's certificate doesn't name {host}, and verifying only the CA isn't possible yet. \
+             Use Required, or issue a certificate that names the host."
+        ),
+        _ => format!("The server's certificate doesn't name {host}."),
+    })
+}
+
 fn io_message(io: &std::io::Error, endpoint: &MysqlEndpoint) -> String {
+    if let Some(message) = tls_message(&io.to_string(), endpoint) {
+        return message;
+    }
     if LOST_KINDS.contains(&io.kind()) {
         LOST.into()
     } else {
@@ -119,5 +147,24 @@ mod tests {
         assert_eq!(error_message(&eof, &endpoint()), LOST);
         assert_eq!(error_message(&Error::Driver(DriverError::ConnectionClosed), &endpoint()), LOST);
         assert_eq!(error_message(&server(4031, "The client was disconnected by the server because of inactivity."), &endpoint()), LOST);
+    }
+
+    #[test]
+    fn a_certificate_that_does_not_name_the_host_says_so() {
+        let text = "invalid peer certificate: certificate not valid for name \"127.0.0.1\"; certificate is not valid for any names (according to its subjectAltName extension)";
+        let error = || Error::Io(IoError::Io(std::io::Error::new(ErrorKind::InvalidData, text)));
+        let with = |mode: &str| MysqlEndpoint {
+            tls: Some(crate::db::net::tls::TlsSettings { mode: mode.into(), ..Default::default() }),
+            ..endpoint()
+        };
+        assert_eq!(
+            error_message(&error(), &with("verify-ca")),
+            "The server's certificate doesn't name db.example.com, and verifying only the CA isn't possible yet. \
+             Use Required, or issue a certificate that names the host."
+        );
+        assert_eq!(error_message(&error(), &with("verify-full")), "The server's certificate doesn't name db.example.com.");
+        // Other certificate problems keep the generic text
+        let other = Error::Io(IoError::Io(std::io::Error::new(ErrorKind::InvalidData, "invalid peer certificate: UnknownIssuer")));
+        assert_eq!(error_message(&other, &with("verify-ca")), "Couldn't reach db.example.com:3307: invalid peer certificate: UnknownIssuer");
     }
 }
