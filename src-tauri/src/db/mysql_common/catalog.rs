@@ -53,7 +53,7 @@ impl Catalog for ServerDriver {
         let row: Option<Row> = conn
             .exec_first(
                 "SELECT TABLE_TYPE AS table_type FROM information_schema.TABLES \
-                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')",
+                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED', 'VIEW')",
                 (schema, name),
             )
             .await
@@ -386,10 +386,11 @@ pub(crate) async fn read_signatures(conn: &mut Conn, database: &str) -> mysql_as
 }
 
 async fn explorer_objects(conn: &mut Conn, database: &str) -> mysql_async::Result<Vec<ExplorerObject>> {
+    // MariaDB lists a table WITH SYSTEM VERSIONING as 'SYSTEM VERSIONED'; it is a table all the same
     let relations: Vec<Row> = conn
         .exec(
             "SELECT TABLE_NAME AS name, TABLE_TYPE AS table_type FROM information_schema.TABLES \
-             WHERE TABLE_SCHEMA = ? AND TABLE_TYPE IN ('BASE TABLE', 'VIEW') ORDER BY TABLE_NAME",
+             WHERE TABLE_SCHEMA = ? AND TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED', 'VIEW') ORDER BY TABLE_NAME",
             (database,),
         )
         .await?;
@@ -433,7 +434,7 @@ async fn completion_schema(conn: &mut Conn, database: &str) -> mysql_async::Resu
             "SELECT t.TABLE_NAME AS table_name, t.TABLE_TYPE AS table_type, c.COLUMN_NAME AS column_name, c.COLUMN_TYPE AS column_type \
              FROM information_schema.TABLES t \
              LEFT JOIN information_schema.COLUMNS c ON c.TABLE_SCHEMA = t.TABLE_SCHEMA AND c.TABLE_NAME = t.TABLE_NAME \
-             WHERE t.TABLE_SCHEMA = ? AND t.TABLE_TYPE IN ('BASE TABLE', 'VIEW') \
+             WHERE t.TABLE_SCHEMA = ? AND t.TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED', 'VIEW') \
              ORDER BY t.TABLE_NAME, c.ORDINAL_POSITION",
             (database,),
         )
@@ -501,7 +502,7 @@ async fn diagram(conn: &mut Conn, schema: &str) -> mysql_async::Result<Diagram> 
     // The tables of the schema, and the ones on the other end of a key
     let home: Vec<Row> = conn
         .exec(
-            "SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'",
+            "SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED')",
             (schema,),
         )
         .await?;
@@ -593,7 +594,7 @@ async fn object_definition(conn: &mut Conn, endpoint: &MysqlEndpoint, schema: &s
             let row: Option<Row> = conn
                 .exec_first(
                     "SELECT ENGINE AS engine, TABLE_COLLATION AS collation_name, TABLE_COMMENT AS table_comment \
-                     FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND TABLE_TYPE = 'BASE TABLE'",
+                     FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED')",
                     (schema, name),
                 )
                 .await

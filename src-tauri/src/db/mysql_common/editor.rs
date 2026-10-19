@@ -33,6 +33,9 @@ pub(crate) struct EditorConn {
     /// Set by a cancel, for a script to stop before its next statement. A script clears it
     /// when it starts, so a cancel that came with nothing running is forgotten.
     cancelled: Arc<AtomicBool>,
+    /// The database the connection was in after the console's last script, when it isn't the
+    /// session's own (a `USE`); a connection opened again goes back to it.
+    database: Mutex<Option<String>>,
     /// How to open the connection again.
     opts: Mutex<Opts>,
     /// For the messages of connection errors.
@@ -50,6 +53,7 @@ impl EditorConn {
             slot: Mutex::new(Some(Arc::new(tokio::sync::Mutex::new(Some(conn))))),
             in_transaction: AtomicBool::new(false),
             cancelled: Arc::default(),
+            database: Mutex::new(None),
             opts: Mutex::new(opts),
             endpoint,
             #[cfg(test)]
@@ -96,8 +100,25 @@ impl EditorConn {
             *held = None;
             return Err(session_not_found());
         }
-        if reconnected && self.in_transaction.swap(false, Ordering::SeqCst) {
-            return Err(ROLLED_BACK.into());
+        if reconnected {
+            // A new connection starts in the session's database; the editor goes back to the
+            // one a `USE` picked, or nothing runs, so no statement lands in the wrong database
+            let picked = lock(&self.database).clone();
+            if let Some(name) = picked {
+                let conn = held.as_mut().expect("connected above");
+                if let Err(e) = conn.query_drop(format!("USE `{}`", name.replace('`', "``"))).await {
+                    *lock(&self.database) = None;
+                    self.in_transaction.store(false, Ordering::SeqCst);
+                    let back = lock(&self.opts).db_name().map(str::to_string).unwrap_or_default();
+                    return Err(format!(
+                        "The connection was lost and reopened, but the database {name} can't be opened again ({}). Nothing ran; the editor is back in {back}.",
+                        error_message(&e, &self.endpoint).trim_end_matches('.')
+                    ));
+                }
+            }
+            if self.in_transaction.swap(false, Ordering::SeqCst) {
+                return Err(ROLLED_BACK.into());
+            }
         }
         let conn = held.as_mut().expect("connected above");
         let result = f(conn).await;
@@ -125,6 +146,13 @@ impl EditorConn {
     /// Whether a transaction is open, as last noted. Never waits.
     pub(crate) fn in_transaction(&self) -> bool {
         self.in_transaction.load(Ordering::SeqCst)
+    }
+
+    /// Notes the database the connection is in now (`DATABASE()`), so a connection opened
+    /// again goes back to it. The session's own database needs no note.
+    pub(crate) fn note_database(&self, current: Option<String>) {
+        let default = lock(&self.opts).db_name().map(str::to_string);
+        *lock(&self.database) = current.filter(|name| Some(name) != default.as_ref());
     }
 
     /// The options to reconnect with, once the session picked its database.

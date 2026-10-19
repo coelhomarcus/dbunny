@@ -310,4 +310,70 @@ mod server_tests {
         driver.close().await;
         db.drop_now().await;
     }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn table_privileges_are_granted_to_and_revoked_from_a_role() {
+        use crate::db::model::StructureChange;
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        let role = format!("dbunny_t_r{}", &db.name[9..]);
+        exec(&db.endpoint, &format!("CREATE TABLE t (id INT); CREATE ROLE {role}")).await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let editor = driver.schema_editor().unwrap();
+        let select = vec!["SELECT".to_string()];
+
+        let granted = editor.apply_change(&db.name, "t", StructureChange::Grant { grantee: role.clone(), privileges: select.clone(), grant_option: false }).await;
+        let listed = driver.catalog().table_structure(&db.name, "t").await.map(|s| s.privileges);
+        let revoked = match &listed {
+            // Revoked by the name the Permissions tab shows for it
+            Ok(privileges) => match privileges.iter().find(|p| p.grantee.starts_with(&role)) {
+                Some(entry) => editor.apply_change(&db.name, "t", StructureChange::Revoke { grantee: entry.grantee.clone(), privileges: select.clone() }).await,
+                None => Err("the role isn't listed".to_string()),
+            },
+            Err(e) => Err(e.clone()),
+        };
+        exec(&db.endpoint, &format!("DROP ROLE {role}")).await;
+        granted.unwrap();
+        revoked.unwrap();
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn a_system_versioned_table_is_a_table_like_any_other() {
+        use crate::db::model::TableDataParams;
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(
+            &db.endpoint,
+            "CREATE TABLE parent (id INT PRIMARY KEY); \
+             CREATE TABLE hist (id INT PRIMARY KEY, parent_id INT, v INT, FOREIGN KEY (parent_id) REFERENCES parent (id)) WITH SYSTEM VERSIONING; \
+             INSERT INTO parent VALUES (1); INSERT INTO hist (id, parent_id, v) VALUES (1, 1, 10)",
+        )
+        .await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let catalog = driver.catalog();
+        let tree = catalog.explorer().await.unwrap();
+        assert!(tree.schemas[0].objects.iter().any(|o| o.name == "hist" && o.kind == "table"), "the explorer lists it");
+        assert_eq!(catalog.relation_kind(&db.name, "hist").await.unwrap().as_deref(), Some("table"));
+        let structure = catalog.table_structure(&db.name, "hist").await.unwrap();
+        assert_eq!(structure.meta.kind, "table");
+        assert!(structure.ddl.contains("WITH SYSTEM VERSIONING"), "{}", structure.ddl);
+        let definition = catalog.object_definition(&db.name, "hist", "table").await.unwrap();
+        assert!(definition.ddl.contains("WITH SYSTEM VERSIONING"));
+        let completion = catalog.completion_schema().await.unwrap();
+        assert!(completion.relations.iter().any(|r| r.name == "hist"));
+        let diagram = catalog.diagram(&db.name).await.unwrap();
+        assert!(diagram.tables.iter().any(|t| t.name == "hist"));
+        let page = driver.data().table_page(&db.name, "hist", TableDataParams::default()).await.unwrap();
+        assert_eq!(page.total_rows, 1);
+        driver.close().await;
+        db.drop_now().await;
+    }
 }

@@ -118,7 +118,7 @@ impl ServerDriver {
         let row: Option<Row> = conn
             .exec_first(
                 "SELECT TABLE_ROWS AS table_rows FROM information_schema.TABLES \
-                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND TABLE_TYPE = 'BASE TABLE'",
+                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED')",
                 (schema, table),
             )
             .await

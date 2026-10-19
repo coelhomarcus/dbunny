@@ -132,14 +132,43 @@ fn take_group(text: &mut String, marker: &str) -> Option<String> {
 ///
 /// A query starts with SELECT, TABLE, VALUES or a parenthesis. WITH starts either a query or
 /// a statement that writes (`WITH … DELETE`): the verb is the first word outside parentheses
-/// that is neither a CTE's name nor `AS`.
+/// that is neither a CTE's name nor `AS`. A query that writes a file or a variable (`INTO`)
+/// or locks rows (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`) does more than read. A
+/// function the query calls may still write: that can't be told from the text.
 pub(crate) fn is_reading_statement(sql: &str) -> bool {
     let chars: Vec<char> = sql.chars().collect();
+    starts_as_query(&chars) && !writes_or_locks(&chars)
+}
+
+/// Whether a word of the statement (not in a string, a name or a comment) makes a query write
+/// or lock.
+fn writes_or_locks(chars: &[char]) -> bool {
+    let mut words = Vec::new();
+    let mut i = 0;
+    while let Some(token) = next_token(chars, i) {
+        i = token.end;
+        if let Kind::Word(word) = token.kind {
+            words.push(word);
+        }
+    }
+    words.iter().enumerate().any(|(at, word)| {
+        let next = words.get(at + 1).map(String::as_str);
+        match word.as_str() {
+            "INTO" => true,
+            "FOR" => matches!(next, Some("UPDATE" | "SHARE")),
+            "LOCK" => next == Some("IN"),
+            _ => false,
+        }
+    })
+}
+
+/// Whether the statement is a query (see `is_reading_statement`).
+fn starts_as_query(chars: &[char]) -> bool {
     let mut i = 0;
     let mut first = true;
     let mut with = false;
     let mut depth = 0usize;
-    while let Some(token) = next_token(&chars, i) {
+    while let Some(token) = next_token(chars, i) {
         i = token.end;
         match &token.kind {
             Kind::Punct('(') => {
@@ -256,6 +285,27 @@ mod tests {
     fn text_with_no_node_is_an_error() {
         assert!(parse_tree("").is_err());
         assert!(parse_tree("   \n").is_err());
+    }
+
+    #[test]
+    fn a_query_that_writes_a_file_a_variable_or_takes_locks_is_not_only_reading() {
+        for sql in [
+            "SELECT * FROM t INTO OUTFILE '/tmp/rows.csv'",
+            "SELECT * FROM t INTO DUMPFILE '/tmp/row'",
+            "SELECT a INTO @x FROM t",
+            "SELECT a FROM t WHERE id = 1 INTO @x",
+            "WITH c AS (SELECT 1 AS a) SELECT a FROM c INTO @v",
+            "SELECT * FROM t FOR UPDATE",
+            "SELECT * FROM t WHERE id = 1 FOR SHARE NOWAIT",
+            "SELECT * FROM t LOCK IN SHARE MODE",
+            "(SELECT * FROM t) FOR UPDATE",
+        ] {
+            assert!(!is_reading_statement(sql), "{sql} isn't only reading");
+        }
+        // The words in a string, a name or a comment don't count
+        for sql in ["SELECT 'into outfile', 'for update'", "SELECT `into` FROM t", "SELECT 1 -- FOR UPDATE"] {
+            assert!(is_reading_statement(sql), "{sql} reads");
+        }
     }
 
     #[test]
