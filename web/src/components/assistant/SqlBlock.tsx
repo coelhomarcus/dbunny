@@ -4,9 +4,8 @@ import { useAssistant } from "../../contexts/assistant";
 import { useDocuments } from "../../contexts/DocumentsContext";
 import { writeClipboardText } from "../../lib/clipboard";
 import { useActiveEditor } from "../../lib/editorBridge";
-import SqlViewer from "../SqlViewer";
 import Button from "../ui/Button";
-import { sqlHeight } from "./sqlHeight";
+import SqlSnippet from "./SqlSnippet";
 
 /** A statement the assistant wrote, and what to do with it: into the editor, a new tab, the clipboard. */
 export default function SqlBlock({ sql }: { sql: string }) {
@@ -25,9 +24,7 @@ export default function SqlBlock({ sql }: { sql: string }) {
 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card" onMouseEnter={() => look((n) => n + 1)}>
-      <div style={{ height: sqlHeight(sql) }}>
-        <SqlViewer value={sql} />
-      </div>
+      <SqlSnippet sql={sql} />
       <div className="flex flex-wrap gap-1 border-t border-border bg-muted px-1.5 py-1">
         {editor && (
           <Button variant="ghost-muted" size="xs" onClick={() => editor.insert(sql)}>

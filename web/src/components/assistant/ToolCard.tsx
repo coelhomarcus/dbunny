@@ -2,9 +2,9 @@ import { useState } from "react";
 import { Ban, Check, Database, Loader2, Network, Table2, TriangleAlert } from "lucide-react";
 import { parseToolOutput, toolLabel, type ToolItem } from "../../lib/assistantConversation";
 import type { Decision } from "../../types/assistant";
-import SqlViewer from "../SqlViewer";
 import ApprovalButtons from "./ApprovalButtons";
-import { sqlHeight } from "./sqlHeight";
+import ResultTable from "./ResultTable";
+import SqlSnippet from "./SqlSnippet";
 
 /** The text the assistant is given when the person turns a query down. */
 const DECLINED = "The user declined to run this query. Ask them how to continue.";
@@ -51,8 +51,8 @@ function QueryCard({ item, onDecide }: { item: ToolItem; onDecide: (approvalId: 
         <span className="text-muted-foreground">{state}</span>
       </div>
       {sql && (
-        <div className="border-t border-border" style={{ height: sqlHeight(sql) }}>
-          <SqlViewer value={sql} />
+        <div className="border-t border-border">
+          <SqlSnippet sql={sql} />
         </div>
       )}
       {item.approval && (
@@ -64,31 +64,13 @@ function QueryCard({ item, onDecide }: { item: ToolItem; onDecide: (approvalId: 
         <p className="border-t border-border px-2.5 py-1.5 whitespace-pre-wrap text-destructive-foreground">{item.output}</p>
       )}
       {rows && shown.length > 0 && (
-        <div className="max-h-56 overflow-auto border-t border-border">
-          <table className="w-full border-collapse text-left">
-            <thead className="sticky top-0 bg-card-header">
-              <tr>
-                {rows.columns.map((column, index) => (
-                  <th key={index} className="px-2 py-1 font-medium whitespace-nowrap">
-                    {column.name}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((row, rowIndex) => (
-                <tr key={rowIndex} className="border-t border-border">
-                  {row.map((value, cellIndex) => (
-                    <td key={cellIndex} className="max-w-48 truncate px-2 py-1 font-mono">
-                      {value === null ? <span className="text-muted-foreground">NULL</span> : typeof value === "string" ? value : JSON.stringify(value)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="border-t border-border">
+          <ResultTable
+            columns={rows.columns.map((column) => column.name)}
+            rows={shown.map((row) => row.map((value) => (value === null ? <span className="text-muted-foreground">NULL</span> : typeof value === "string" ? value : JSON.stringify(value))))}
+          />
           {rows.rows.length > PREVIEW_ROWS && !showAll && (
-            <button type="button" className="w-full cursor-pointer border-t border-border px-2 py-1 text-muted-foreground hover:bg-accent" onClick={() => setShowAll(true)}>
+            <button type="button" className="w-full cursor-pointer border-t border-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent" onClick={() => setShowAll(true)}>
               Show all {rows.rows.length} rows
             </button>
           )}

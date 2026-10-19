@@ -3,9 +3,8 @@ import type { Conversation } from "../../lib/assistantConversation";
 import type { Decision } from "../../types/assistant";
 import MarkdownView from "./MarkdownView";
 import ToolCard from "./ToolCard";
-import { sqlHeight } from "./sqlHeight";
+import SqlSnippet from "./SqlSnippet";
 import ApprovalButtons from "./ApprovalButtons";
-import SqlViewer from "../SqlViewer";
 
 /** What was said in the conversation, and what the assistant did meanwhile. Follows the end while the person stays there. */
 export default function MessageList({
@@ -64,8 +63,8 @@ export default function MessageList({
             return (
               <div key={item.approval.id} className="overflow-hidden rounded-lg border border-border bg-card text-xs">
                 <div className="px-2.5 py-1.5 font-medium">{item.approval.analyze ? "Run a query to explain it" : "Run a query"}</div>
-                <div className="border-t border-border" style={{ height: sqlHeight(item.approval.sql) }}>
-                  <SqlViewer value={item.approval.sql} />
+                <div className="border-t border-border">
+                  <SqlSnippet sql={item.approval.sql} />
                 </div>
                 <div className="border-t border-border px-2.5 py-2">
                   <ApprovalButtons onDecide={(decision) => onDecide(item.approval.id, decision)} />
