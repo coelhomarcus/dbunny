@@ -310,4 +310,35 @@ mod server_tests {
         driver.close().await;
         db.drop_now().await;
     }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn table_privileges_are_granted_to_and_revoked_from_a_role() {
+        use crate::db::model::StructureChange;
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        let role = format!("dbunny_t_r{}", &db.name[9..]);
+        exec(&db.endpoint, &format!("CREATE TABLE t (id INT); CREATE ROLE {role}")).await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let editor = driver.schema_editor().unwrap();
+        let select = vec!["SELECT".to_string()];
+
+        let granted = editor.apply_change(&db.name, "t", StructureChange::Grant { grantee: role.clone(), privileges: select.clone(), grant_option: false }).await;
+        let listed = driver.catalog().table_structure(&db.name, "t").await.map(|s| s.privileges);
+        let revoked = match &listed {
+            // Revoked by the name the Permissions tab shows for it
+            Ok(privileges) => match privileges.iter().find(|p| p.grantee.starts_with(&role)) {
+                Some(entry) => editor.apply_change(&db.name, "t", StructureChange::Revoke { grantee: entry.grantee.clone(), privileges: select.clone() }).await,
+                None => Err("the role isn't listed".to_string()),
+            },
+            Err(e) => Err(e.clone()),
+        };
+        exec(&db.endpoint, &format!("DROP ROLE {role}")).await;
+        granted.unwrap();
+        revoked.unwrap();
+        driver.close().await;
+        db.drop_now().await;
+    }
 }

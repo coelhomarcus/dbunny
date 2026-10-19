@@ -238,17 +238,25 @@ fn index_key_part(column: &str) -> Result<String, String> {
     }
 }
 
-/// An account as `user@host` (the host `%` when none): `'user'@'host'`.
-fn account(value: &str) -> Result<String, String> {
+/// An account as `user@host` (the host `%` when none): `'user'@'host'`. On MariaDB a role
+/// has no host, and a name without one (or with an empty one, as the table's privileges list
+/// a role) is written bare: the server takes it for the role, or for `user@%`.
+fn account(value: &str, engine: Engine) -> Result<String, String> {
     let value = value.trim();
     if value.is_empty() {
         return Err("The account can't be empty".into());
     }
-    let (user, host) = value.rsplit_once('@').unwrap_or((value, "%"));
+    let (user, host) = match value.rsplit_once('@') {
+        Some((user, host)) => (user, Some(host)),
+        None => (value, None),
+    };
     if user.is_empty() {
         return Err("The account can't be empty".into());
     }
-    Ok(format!("{}@{}", literal(user), literal(if host.is_empty() { "%" } else { host })))
+    match host.filter(|h| !h.is_empty()) {
+        None if engine == Engine::Mariadb => Ok(literal(user)),
+        host => Ok(format!("{}@{}", literal(user), literal(host.unwrap_or("%")))),
+    }
 }
 
 fn privileges(list: &[String]) -> Result<String, String> {
@@ -460,9 +468,9 @@ pub(crate) fn change_sql(
         StructureChange::SetTriggerEnabled { .. } => return Err(unsupported(engine, "Turning triggers on and off")),
         StructureChange::Grant { grantee, privileges: list, grant_option } => {
             let option = if *grant_option { " WITH GRANT OPTION" } else { "" };
-            format!("GRANT {} ON {table} TO {}{option}", privileges(list)?, account(grantee)?)
+            format!("GRANT {} ON {table} TO {}{option}", privileges(list)?, account(grantee, engine)?)
         }
-        StructureChange::Revoke { grantee, privileges: list } => format!("REVOKE {} ON {table} FROM {}", privileges(list)?, account(grantee)?),
+        StructureChange::Revoke { grantee, privileges: list } => format!("REVOKE {} ON {table} FROM {}", privileges(list)?, account(grantee, engine)?),
     })
 }
 
@@ -616,6 +624,17 @@ mod tests {
 
     fn text_column(name: &str, column_type: &str, nullable: bool) -> ColumnDefinition {
         ColumnDefinition { charset: Some("utf8mb4".into()), collation: Some("utf8mb4_0900_ai_ci".into()), nullable, ..column(name, column_type) }
+    }
+
+    #[test]
+    fn a_mariadb_role_is_granted_by_its_bare_name() {
+        let maria = |change: StructureChange| change_sql(TABLE, &change, &[], &Default::default(), V84, Engine::Mariadb).unwrap();
+        let select = || vec!["SELECT".to_string()];
+        assert_eq!(maria(StructureChange::Grant { grantee: "readers".into(), privileges: select(), grant_option: false }), format!("GRANT SELECT ON {TABLE} TO 'readers'"));
+        // A role as the table's privileges list it: no host
+        assert_eq!(maria(StructureChange::Revoke { grantee: "readers@".into(), privileges: select() }), format!("REVOKE SELECT ON {TABLE} FROM 'readers'"));
+        // An account with a host keeps it
+        assert_eq!(maria(StructureChange::Grant { grantee: "ana@%".into(), privileges: select(), grant_option: false }), format!("GRANT SELECT ON {TABLE} TO 'ana'@'%'"));
     }
 
     fn sql_with(change: StructureChange, columns: &[ColumnDefinition], constraints: &[(&str, &str)], version: ServerVersion) -> String {
