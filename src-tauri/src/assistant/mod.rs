@@ -19,6 +19,7 @@ pub mod tools;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
@@ -30,7 +31,7 @@ use approvals::{Approvals, Decision};
 use context::{system_prompt, PromptInput};
 use conversation::{Conversation, ConversationOptions, Conversations, Workspace};
 use events::{AgentStatus, AssistantEvent, EventSink};
-use launch::{default_command, parse_custom, AgentCommand};
+use launch::{default_command, login_command, parse_custom, AgentCommand};
 use mcp::McpServer;
 use tools::Tools;
 
@@ -134,6 +135,8 @@ pub struct Assistant {
     approvals: Arc<Approvals>,
     tools: Arc<Tools>,
     running: Mutex<Option<Running>>,
+    /// The agent is one the person chose, so how to sign in to it is not for DBunny to say.
+    custom_command: AtomicBool,
 }
 
 impl Assistant {
@@ -145,7 +148,7 @@ impl Assistant {
         let tap = Arc::new(StatusTap { inner: events, status: StdMutex::new(AgentStatus::Idle) });
         let approvals = Arc::new(Approvals::default());
         let tools = Arc::new(Tools { sessions: Arc::clone(&sessions), approvals: Arc::clone(&approvals), events: tap.clone() });
-        Assistant { data_dir, sessions, tap, host, conversations: Arc::new(Conversations::default()), approvals, tools, running: Mutex::new(None) }
+        Assistant { data_dir, sessions, tap, host, conversations: Arc::new(Conversations::default()), approvals, tools, running: Mutex::new(None), custom_command: AtomicBool::new(false) }
     }
 
     pub fn status(&self) -> AgentStatus {
@@ -172,7 +175,9 @@ impl Assistant {
         if let Err(found) = self.host.check_node(path.as_deref()).await {
             return self.fail(AgentStatus::NeedsNode { found });
         }
-        let command = match command.as_deref().map(str::trim).filter(|text| !text.is_empty()) {
+        let own_command = command.as_deref().map(str::trim).filter(|text| !text.is_empty());
+        self.custom_command.store(own_command.is_some(), Ordering::SeqCst);
+        let command = match own_command {
             Some(text) => match parse_custom(text) {
                 Ok(command) => command,
                 Err(message) => return self.fail(AgentStatus::Failed { message }),
@@ -273,7 +278,8 @@ impl Assistant {
     /// The agent's failure as a message; one that asks for a sign-in also changes the status.
     fn explain(&self, error: AgentError) -> String {
         if let AgentError::AuthRequired(methods) = &error {
-            self.set_status(AgentStatus::NeedsSignIn { methods: methods.clone() });
+            let command = (!self.custom_command.load(Ordering::SeqCst)).then(login_command);
+            self.set_status(AgentStatus::NeedsSignIn { methods: methods.clone(), command });
         }
         error.to_string()
     }
@@ -553,8 +559,19 @@ mod tests {
         let r = started(FakeConfig { auth_required: true, ..Default::default() }).await;
         let err = r.assistant.new_conversation("s1", Some("saved-1"), options()).await.err().unwrap();
         assert!(err.contains("Sign in"), "{err}");
-        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec!["Log in with Claude".into()] });
+        assert_eq!(
+            r.assistant.status(),
+            AgentStatus::NeedsSignIn { methods: vec!["Log in with Claude".into()], command: Some(launch::login_command()) }
+        );
         assert!(r.assistant.conversations.all().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_agent_of_the_persons_own_gets_no_login_command() {
+        let r = rig(FakeConfig { auth_required: true, ..Default::default() }).await;
+        assert_eq!(r.assistant.start(Some("/opt/agent".into())).await, AgentStatus::Ready);
+        r.assistant.new_conversation("s1", Some("saved-1"), options()).await.err().unwrap();
+        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec!["Log in with Claude".into()], command: None });
     }
 
     #[tokio::test]

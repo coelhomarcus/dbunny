@@ -18,6 +18,12 @@ pub fn default_command(windows: bool) -> AgentCommand {
     AgentCommand { program: if windows { "npx.cmd" } else { "npx" }.into(), args: vec!["-y".into(), ADAPTER_PACKAGE.into()] }
 }
 
+/// What to type in a terminal to sign in to Claude with the Claude Code that comes with the adapter, for
+/// someone who never installed `claude` themselves.
+pub fn login_command() -> String {
+    format!("npx -y {ADAPTER_PACKAGE} --cli auth login")
+}
+
 /// A command the person typed, split the way a shell would: spaces separate, quotes group,
 /// a backslash escapes the next character.
 pub fn parse_custom(text: &str) -> Result<AgentCommand, String> {
@@ -128,6 +134,11 @@ mod tests {
         assert_eq!(default_command(false), AgentCommand { program: "npx".into(), args: vec!["-y".into(), ADAPTER_PACKAGE.into()] });
         assert_eq!(default_command(true).program, "npx.cmd");
         assert!(ADAPTER_PACKAGE.starts_with("@agentclientprotocol/claude-agent-acp@"));
+    }
+
+    #[test]
+    fn the_login_command_runs_the_claude_that_comes_with_the_adapter() {
+        assert_eq!(login_command(), format!("npx -y {ADAPTER_PACKAGE} --cli auth login"));
     }
 
     #[test]

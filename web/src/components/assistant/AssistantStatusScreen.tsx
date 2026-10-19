@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Loader2, TriangleAlert } from "lucide-react";
+import { Check, Copy, Loader2, TriangleAlert } from "lucide-react";
 import { assistantApi } from "../../lib/api";
+import { writeClipboardText } from "../../lib/clipboard";
 import { openExternal } from "../../lib/openExternal";
 import type { AgentStatus } from "../../types/assistant";
 import Button from "../ui/Button";
@@ -9,6 +10,7 @@ import Dialog from "../ui/Dialog";
 /** The assistant's agent is not ready: what is missing, and what to do about it. */
 export default function AssistantStatusScreen({ status, onRetry }: { status: AgentStatus; onRetry: () => void }) {
   const [log, setLog] = useState<string[] | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function showLog() {
     setLog(await assistantApi.log().catch(() => []));
@@ -25,6 +27,7 @@ export default function AssistantStatusScreen({ status, onRetry }: { status: Age
 
   let title: string;
   let detail: string | null = null;
+  let command: string | null = null;
   const actions: { label: string; run: () => void; primary?: boolean }[] = [];
   switch (status.state) {
     case "needsNode":
@@ -34,7 +37,8 @@ export default function AssistantStatusScreen({ status, onRetry }: { status: Age
       break;
     case "needsSignIn":
       title = "Sign in to Claude";
-      detail = "Run claude in a terminal, use /login, then try again.";
+      command = status.command;
+      detail = command ? "Run this in a terminal and follow the steps, then try again." : "Sign in with your agent, then try again.";
       actions.push({ label: "Retry", run: onRetry, primary: true });
       break;
     case "unsupported":
@@ -57,6 +61,26 @@ export default function AssistantStatusScreen({ status, onRetry }: { status: Age
       </span>
       <p className="mt-4 max-w-xs text-sm font-medium">{title}</p>
       {detail && <p className="mt-1 max-w-xs text-[13px] leading-relaxed text-muted-foreground">{detail}</p>}
+      {command && (
+        <>
+          <div className="mt-3 flex max-w-xs items-start gap-1 rounded-lg bg-muted py-1.5 pl-3 pr-1.5 text-left">
+            <code className="min-w-0 flex-1 select-text break-all font-mono text-xs leading-relaxed">{command}</code>
+            <Button
+              variant="ghost-muted"
+              size="icon-xs"
+              aria-label="Copy the command"
+              onClick={async () => {
+                await writeClipboardText(command);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+            >
+              {copied ? <Check /> : <Copy />}
+            </Button>
+          </div>
+          <p className="mt-2 max-w-xs text-xs leading-relaxed text-muted-foreground">Already use Claude Code? Run claude and use /login instead.</p>
+        </>
+      )}
       {actions.length > 0 && (
         <div className="mt-5 flex gap-2">
           {actions.map((action) => (

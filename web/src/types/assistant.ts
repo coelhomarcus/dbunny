@@ -4,7 +4,8 @@ export type AgentStatus =
   | { state: "starting" }
   | { state: "ready" }
   | { state: "needsNode"; found: string | null }
-  | { state: "needsSignIn"; methods: string[] }
+  /** `command` is what to type in a terminal to sign in, when the agent is the usual one. */
+  | { state: "needsSignIn"; methods: string[]; command: string | null }
   | { state: "unsupported"; message: string }
   | { state: "failed"; message: string }
   | { state: "stopped" };

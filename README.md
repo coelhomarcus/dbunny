@@ -45,7 +45,7 @@ Screens and actions adapt to what the connected engine supports (for example, sc
 
 An assistant for the connected database, in a side panel (or a tab of its own) next to your queries. Ask about your data in plain language and it explores the schema, runs queries and checks its answers against the real rows. From the query editor, ask it to explain a statement, find why one failed, or look at a statement's plan and suggest an index or a rewrite.
 
-- **It runs Claude Code on your computer, with your Claude account.** DBunny keeps no API key. You need [Node.js](https://nodejs.org) 20 or newer and to be signed in to Claude Code (run `claude`, then `/login`).
+- **It runs Claude Code on your computer, with your Claude account.** DBunny keeps no API key. You need [Node.js](https://nodejs.org) 20 or newer and a Claude account. Claude Code itself doesn't have to be installed: when you aren't signed in, the panel shows a command to sign in with the one that comes with the adapter (or, if you already use Claude Code, `claude` then `/login` works too).
 - **It only reads.** Each query runs in a read-only transaction that is rolled back, and waits for your approval (once, or for the rest of the conversation). SQL that changes data is shown for you to open in the editor and run yourself.
 - **You decide what it sees.** It is told the engine, version and schema, never the host or the password. It sees the rows of the queries you allow, cut to a limit you set; for a saved connection you can turn on *Schema only* so it never sees a value.
 - **Conversations are kept per saved connection** by Claude Code, in `~/.claude/projects`, and can be reopened from the panel.
