@@ -3,8 +3,6 @@
 
 use serde_json::Value as JsonValue;
 
-use crate::db::mysql_common::split::{next_token, Kind};
-
 /// What one line of the plan says about its node.
 #[derive(Debug, Default)]
 pub(crate) struct Node {
