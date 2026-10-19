@@ -7,6 +7,7 @@ pub mod edit;
 pub mod filter;
 pub mod json;
 pub mod order;
+pub mod reading;
 pub mod split;
 
 pub use dialect::Dialect;

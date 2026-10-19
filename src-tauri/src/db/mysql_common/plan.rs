@@ -130,70 +130,12 @@ fn take_group(text: &mut String, marker: &str) -> Option<String> {
 
 /// Whether `sql` only reads, so that `EXPLAIN ANALYZE`, which runs it, changes nothing.
 ///
-/// A query starts with SELECT, TABLE, VALUES or a parenthesis. WITH starts either a query or
-/// a statement that writes (`WITH … DELETE`): the verb is the first word outside parentheses
-/// that is neither a CTE's name nor `AS`. A query that writes a file or a variable (`INTO`)
-/// or locks rows (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`) does more than read. A
-/// function the query calls may still write: that can't be told from the text.
+/// A query starts with SELECT, TABLE, VALUES or a parenthesis, or with WITH and one of those. A
+/// query that writes a file or a variable (`INTO`) or locks rows (`FOR UPDATE`, `FOR SHARE`,
+/// `LOCK IN SHARE MODE`) does more than read. A function the query calls may still write: that
+/// can't be told from the text.
 pub(crate) fn is_reading_statement(sql: &str) -> bool {
-    let chars: Vec<char> = sql.chars().collect();
-    starts_as_query(&chars) && !writes_or_locks(&chars)
-}
-
-/// Whether a word of the statement (not in a string, a name or a comment) makes a query write
-/// or lock.
-fn writes_or_locks(chars: &[char]) -> bool {
-    let mut words = Vec::new();
-    let mut i = 0;
-    while let Some(token) = next_token(chars, i) {
-        i = token.end;
-        if let Kind::Word(word) = token.kind {
-            words.push(word);
-        }
-    }
-    words.iter().enumerate().any(|(at, word)| {
-        let next = words.get(at + 1).map(String::as_str);
-        match word.as_str() {
-            "INTO" => true,
-            "FOR" => matches!(next, Some("UPDATE" | "SHARE")),
-            "LOCK" => next == Some("IN"),
-            _ => false,
-        }
-    })
-}
-
-/// Whether the statement is a query (see `is_reading_statement`).
-fn starts_as_query(chars: &[char]) -> bool {
-    let mut i = 0;
-    let mut first = true;
-    let mut with = false;
-    let mut depth = 0usize;
-    while let Some(token) = next_token(chars, i) {
-        i = token.end;
-        match &token.kind {
-            Kind::Punct('(') => {
-                if first {
-                    return true;
-                }
-                depth += 1;
-            }
-            Kind::Punct(')') => depth = depth.saturating_sub(1),
-            Kind::Word(word) if first => match word.as_str() {
-                "SELECT" | "TABLE" | "VALUES" => return true,
-                "WITH" => with = true,
-                _ => return false,
-            },
-            Kind::Word(word) if with && depth == 0 => match word.as_str() {
-                "SELECT" | "TABLE" | "VALUES" => return true,
-                "UPDATE" | "DELETE" | "INSERT" | "REPLACE" => return false,
-                _ => {}
-            },
-            _ if first => return false,
-            _ => {}
-        }
-        first = false;
-    }
-    false
+    crate::db::sql::reading::is_query(crate::db::sql::Dialect::Mysql, sql)
 }
 
 #[cfg(test)]
