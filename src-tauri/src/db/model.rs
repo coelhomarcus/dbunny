@@ -221,6 +221,12 @@ pub struct TableMeta {
     pub table_bytes: Option<i64>,
     pub indexes_bytes: Option<i64>,
     pub total_bytes: Option<i64>,
+    /// The storage engine (MySQL); None for the engines that have only one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    /// The default collation of the table's text columns (MySQL).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collation: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -383,7 +389,9 @@ pub struct RowChange {
 #[serde(rename_all = "camelCase")]
 pub struct ExplainResult {
     /// Postgres' JSON plan: `[{ "Plan": {...}, "Planning Time": .., "Execution Time": .. }]`,
-    /// or SQLite's query plan rows: `[{ "id": .., "parent": .., "detail": ".." }]`.
+    /// SQLite's query plan rows: `[{ "id": .., "parent": .., "detail": ".." }]`, or MySQL's plan
+    /// tree: `[{ "label", "cost", "rows", "actualTimeFirst", "actualTimeLast", "actualRows",
+    /// "loops", "children": [..] }]`.
     pub plan: JsonValue,
     /// The statement was actually run (ANALYZE), then rolled back.
     pub analyzed: bool,
@@ -533,12 +541,16 @@ pub struct DatabaseInfo {
 #[serde(rename_all = "camelCase")]
 pub struct RoleInfo {
     pub name: String,
+    /// The host an account is for (MySQL names accounts `user@host`); None where roles have no host.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
     pub can_login: bool,
     pub superuser: bool,
     pub create_db: bool,
     pub create_role: bool,
     pub replication: bool,
-    pub bypass_rls: bool,
+    /// None where the engine has no row-level security to bypass.
+    pub bypass_rls: Option<bool>,
     /// -1 when unlimited.
     pub connection_limit: i32,
     pub valid_until: Option<String>,
@@ -549,12 +561,21 @@ pub struct RoleInfo {
     pub is_builtin: bool,
 }
 
+/// The roles of a server. `limited_view` is set when the account may read only its own.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleList {
+    pub roles: Vec<RoleInfo>,
+    pub limited_view: bool,
+}
+
 // Server activity
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerSession {
-    pub pid: i32,
+    /// The server's id of the session; MySQL's grow without end, so it is wide.
+    pub pid: i64,
     pub user: Option<String>,
     pub database: Option<String>,
     pub application: Option<String>,
@@ -569,7 +590,7 @@ pub struct ServerSession {
     pub transaction_seconds: Option<f64>,
     pub query: Option<String>,
     /// Sessions holding locks this one waits on.
-    pub blocked_by: Vec<i32>,
+    pub blocked_by: Vec<i64>,
     /// The connection DBunny itself uses for this query.
     pub is_self: bool,
 }

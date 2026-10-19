@@ -28,7 +28,7 @@ import EnginePicker from "./EnginePicker";
 import IdentityEditor from "./IdentityEditor";
 import ImportUrlDialog from "./ImportUrlDialog";
 import OptionsTab from "./OptionsTab";
-import PostgresTabs from "./postgres/PostgresTabs";
+import ServerTabs from "./server/ServerTabs";
 import SqliteFileTab from "./sqlite/SqliteFileTab";
 
 const TAB_LABELS: Record<ConnectionTab, string> = {
@@ -130,7 +130,9 @@ function ModalBody({
         const res =
           args.kind === "sqlite"
             ? await api.connectSqlite(args.path, args.readOnly, args.create)
-            : await api.connect(args.url, args.ssh, trustHostKey);
+            : args.kind === "mysql"
+              ? await api.connectMysql(args.params, args.ssh, trustHostKey)
+              : await api.connect(args.url, args.ssh, trustHostKey);
         api.disconnect(res.sessionId).catch(() => {});
         setTest({ status: "ok", version: res.serverVersion.split(" ")[0] });
       } catch (err) {
@@ -176,7 +178,7 @@ function ModalBody({
 
   const configured = configuredTabs(draft);
   const errorTabs = new Set(showErrors ? missingFields(draft, "connect").map((m) => m.tab) : []);
-  const socket = draft.engine === "postgres" && isSocketHost(draft.fields.host);
+  const socket = draft.engine !== "sqlite" && isSocketHost(draft.fields.host);
   const engineLabel = ENGINE_CARDS.find((c) => c.id === draft.engine)?.label;
   const nameMissing = showErrors === "save" && !draft.identity.name.trim();
 
@@ -217,7 +219,7 @@ function ModalBody({
             <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-2 pb-5">
               <EnginePicker
                 onPick={(engine) => {
-                  if (engine !== "postgres" && engine !== "sqlite") return;
+                  if (engine !== "postgres" && engine !== "sqlite" && engine !== "mysql") return;
                   // A different database starts its own details; who the connection is stays
                   setDraft((d) => (d.engine === engine ? d : { ...newDraft(engine), identity: d.identity }));
                   setTab(tabsFor(engine)[0]);
@@ -267,7 +269,7 @@ function ModalBody({
                   ) : tab === "file" ? (
                     <SqliteFileTab draft={draft} onChange={change} showErrors={showErrors !== false} />
                   ) : (
-                    <PostgresTabs tab={tab} draft={draft} onChange={change} showErrors={showErrors !== false} onOpenImport={() => setImportOpen(true)} />
+                    <ServerTabs tab={tab} draft={draft} onChange={change} showErrors={showErrors !== false} onOpenImport={() => setImportOpen(true)} />
                   )}
                 </div>
 
@@ -333,6 +335,7 @@ function ModalBody({
 
       {hostKeyPrompt}
       <ImportUrlDialog
+        engine={draft.engine}
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onImport={(url) => {

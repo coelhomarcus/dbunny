@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ConnectResponse,
+  MysqlConnectParams,
   SshConfig,
   FunctionDetail,
   ColumnInfo,
@@ -22,7 +23,7 @@ import type {
   ExplorerTree,
   Diagram,
   DatabaseInfo,
-  RoleInfo,
+  RoleList,
 } from "@/types";
 
 /** Relation kinds as the explorer names them. */
@@ -35,6 +36,11 @@ export const api = {
   /** Connects, optionally through SSH. `trustHostKey` is an SSH host key fingerprint the user confirmed. */
   async connect(connectionUrl: string, ssh?: SshConfig | null, trustHostKey?: string) {
     return invoke<ConnectResponse>("connect", { connectionUrl, ssh: ssh ?? null, trustHostKey: trustHostKey ?? null });
+  },
+
+  /** Connects to a MySQL server, optionally through SSH. `trustHostKey` is an SSH host key fingerprint the user confirmed. */
+  async connectMysql(params: MysqlConnectParams, ssh?: SshConfig | null, trustHostKey?: string) {
+    return invoke<ConnectResponse>("connect_mysql", { params, ssh: ssh ?? null, trustHostKey: trustHostKey ?? null });
   },
 
   /** Opens a SQLite file; `create` makes it when it doesn't exist. */
@@ -106,7 +112,7 @@ export function createSessionApi(sessionId: string | null) {
     },
 
     async getRoles() {
-      return invoke<RoleInfo[]>("get_roles", { sessionId });
+      return invoke<RoleList>("get_roles", { sessionId });
     },
 
     async getDatabases() {

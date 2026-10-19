@@ -10,7 +10,6 @@ pub mod data;
 mod objects;
 mod params;
 pub mod session;
-pub mod ssh;
 pub mod structure;
 pub mod text;
 mod transactions;

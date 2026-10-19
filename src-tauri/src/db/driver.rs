@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use super::capabilities::Capabilities;
 use super::model::{
     ColumnInfo, CompletionSchema, ConnectionInfo, DatabaseInfo, Diagram, ExplainResult, ExplorerTree, ExtensionInfo,
-    FunctionDetail, JsonMap, NewTable, ObjectDefinition, QueryResult, RoleInfo, RowChange, ServerActivity,
+    FunctionDetail, JsonMap, NewTable, ObjectDefinition, QueryResult, RoleList, RowChange, ServerActivity,
     StructureChange, TableDataParams, TableDataResponse, TableStructure,
 };
 use super::Engine;
@@ -114,9 +114,9 @@ pub trait ServerAdmin: Send + Sync {
     async fn create_schema(&self, name: &str) -> Result<(), String>;
     async fn rename_schema(&self, name: &str, new_name: &str) -> Result<(), String>;
     async fn drop_schema(&self, name: &str, cascade: bool) -> Result<(), String>;
-    async fn roles(&self) -> Result<Vec<RoleInfo>, String>;
+    async fn roles(&self) -> Result<RoleList, String>;
     async fn activity(&self, all_databases: bool) -> Result<ServerActivity, String>;
-    async fn signal_backend(&self, pid: i32, terminate: bool) -> Result<bool, String>;
+    async fn signal_backend(&self, pid: i64, terminate: bool) -> Result<bool, String>;
 }
 
 #[cfg(test)]

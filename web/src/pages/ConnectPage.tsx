@@ -4,7 +4,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import type { SavedConnection } from "@/types";
 import { useConnection } from "../contexts/useConnection";
 import { useWorkspace } from "../contexts/workspace";
-import { applyUrl, connectArgsOf, draftFromSaved, newDraft, savedTagOf, type ConnectionDraft } from "../lib/connectionDraft";
+import { connectArgsOf, draftFromSaved, draftFromUrl, savedTagOf, type ConnectionDraft } from "../lib/connectionDraft";
 import { hostKeyProblem } from "../lib/sshHostKey";
 import { api } from "../lib/api";
 import { useHostKeyCheck } from "../hooks/useHostKeyCheck";
@@ -128,7 +128,7 @@ export default function ConnectPage() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onImport={(url) => {
-          const draft = applyUrl(newDraft("postgres"), url);
+          const draft = draftFromUrl(url);
           if (!draft) return false;
           setImportOpen(false);
           openModal(draft);

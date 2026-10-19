@@ -97,8 +97,14 @@ pub fn build_where_in<B: OperandBinder>(
                     Dialect::Postgres => op.to_uppercase(),
                     // SQLite's LIKE already ignores ASCII case, and it has no ILIKE
                     Dialect::Sqlite => if op.starts_with("not") { "NOT LIKE" } else { "LIKE" }.to_string(),
+                    // LIKE follows the column's collation, so ILIKE lowers both sides
+                    Dialect::Mysql => if op.starts_with("not") { "NOT LIKE" } else { "LIKE" }.to_string(),
                 };
-                format!("{} {keyword} {next}", dialect.as_text(&column))
+                if dialect == Dialect::Mysql && op.ends_with("ilike") {
+                    format!("LOWER({}) {keyword} LOWER({next})", dialect.as_text(&column))
+                } else {
+                    format!("{} {keyword} {next}", dialect.as_text(&column))
+                }
             }
             op @ ("in" | "not in") => match dialect {
                 Dialect::Postgres => {
@@ -112,7 +118,7 @@ pub fn build_where_in<B: OperandBinder>(
                     }
                 }
                 // No arrays: one parameter per value (and per form of it)
-                Dialect::Sqlite => {
+                Dialect::Sqlite | Dialect::Mysql => {
                     let items = list_items(&filter.value);
                     if items.is_empty() {
                         return Err(format!("Enter at least one value for {}", filter.column));
@@ -265,5 +271,14 @@ mod tests {
         assert_eq!(sql, " WHERE (CAST(\"name\" AS TEXT) NOT LIKE ?1)");
         let (sql, _) = build_where_in(Dialect::Sqlite, &[filter("name", "ilike", "a%"), filter("name", "like", "b%"), filter("name", "not like", "c%")], false, &columns(), &AsText).unwrap();
         assert_eq!(sql, " WHERE (CAST(\"name\" AS TEXT) LIKE ?1 AND CAST(\"name\" AS TEXT) LIKE ?2 AND CAST(\"name\" AS TEXT) NOT LIKE ?3)");
+    }
+
+    #[test]
+    fn mysql_filters_list_one_parameter_per_value_and_lower_case_ilike() {
+        let cols: Vec<String> = vec!["id".into(), "name".into()];
+        let f = |c: &str, o: &str, v: &str| TableFilter { column: c.into(), operator: o.into(), value: v.into() };
+        let (sql, params) = build_where_in(Dialect::Mysql, &[f("id", "in", "1, 2"), f("name", "ilike", "A%")], false, &cols, &AsText).unwrap();
+        assert_eq!(sql, " WHERE (`id` IN (?, ?) AND LOWER(CAST(`name` AS CHAR)) LIKE LOWER(?))");
+        assert_eq!(params.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(), vec!["1", "2", "A%"]);
     }
 }

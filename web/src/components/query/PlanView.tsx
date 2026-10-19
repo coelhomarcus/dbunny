@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 import type { ExplainResult } from "@/types";
-import { flattenPlan, formatMs, sqlitePlanRows, type PlanRow } from "../../lib/plan";
+import { flattenPlan, formatMs, mysqlPlanRows, sqlitePlanRows, type DisplayRow } from "../../lib/plan";
 import { cn } from "../../lib/cn";
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
 import { writeClipboardText } from "../../lib/clipboard";
+
+/** A row estimate: whole rows, except that a fraction of a row (MySQL estimates 0.667) isn't rounded to none. */
+function formatEstimate(rows: number): string {
+  return (rows < 10 && rows % 1 !== 0 ? rows : Math.round(rows)).toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
 
 /** Share of the execution time a node took by itself, as a colour. */
 function heat(share: number) {
@@ -14,7 +19,7 @@ function heat(share: number) {
   return "bg-primary/45";
 }
 
-function Row({ row, executionMs }: { row: PlanRow; executionMs: number | null }) {
+function Row({ row, executionMs }: { row: DisplayRow; executionMs: number | null }) {
   const share = row.selfMs !== null && executionMs ? row.selfMs / executionMs : null;
   return (
     <tr className="border-b border-border align-top hover:bg-accent/50">
@@ -39,10 +44,10 @@ function Row({ row, executionMs }: { row: PlanRow; executionMs: number | null })
         {row.actualRows !== null ? (
           <>
             {row.actualRows.toLocaleString()}
-            <div className="text-xs text-muted-foreground">est. {Math.round(row.estimatedRows).toLocaleString()}</div>
+            {row.estimatedRows !== null && <div className="text-xs text-muted-foreground">est. {formatEstimate(row.estimatedRows)}</div>}
           </>
         ) : (
-          <span className="text-muted-foreground">{Math.round(row.estimatedRows).toLocaleString()}</span>
+          <span className="text-muted-foreground">{row.estimatedRows === null ? "—" : formatEstimate(row.estimatedRows)}</span>
         )}
       </td>
       {executionMs !== null && (
@@ -59,7 +64,7 @@ function Row({ row, executionMs }: { row: PlanRow; executionMs: number | null })
         </td>
       )}
       <td className="whitespace-nowrap px-4 py-2 text-right text-xs tabular-nums text-muted-foreground">
-        {row.node["Total Cost"].toLocaleString(undefined, { maximumFractionDigits: 2 })}
+        {row.cost === null ? "—" : row.cost.toLocaleString(undefined, { maximumFractionDigits: 2 })}
       </td>
     </tr>
   );
@@ -106,7 +111,73 @@ function SqlitePlanView({ plan }: { plan: Extract<ExplainResult, { format: "sqli
 
 /** EXPLAIN output, in the shape the database gave it. */
 export default function PlanView({ explain }: { explain: ExplainResult }) {
-  return explain.format === "sqliteQueryPlan" ? <SqlitePlanView plan={explain.plan} /> : <PostgresPlanView explain={explain} />;
+  switch (explain.format) {
+    case "sqliteQueryPlan":
+      return <SqlitePlanView plan={explain.plan} />;
+    case "mysqlTree":
+      return <MysqlPlanView explain={explain} />;
+    default:
+      return <PostgresPlanView explain={explain} />;
+  }
+}
+
+/** MySQL's EXPLAIN as a tree: costs and row estimates, and the real times and rows when it was analyzed. */
+function MysqlPlanView({ explain }: { explain: Extract<ExplainResult, { format: "mysqlTree" }> }) {
+  const [copied, setCopied] = useState(false);
+  const rows = mysqlPlanRows(explain.plan);
+  const executionMs = explain.analyzed ? (rows[0]?.totalMs ?? null) : null;
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-2 text-[13px]">
+        {explain.analyzed ? (
+          <>
+            <Badge variant="info">Executed</Badge>
+            {executionMs !== null && (
+              <span>
+                <span className="text-muted-foreground">Execution</span> {formatMs(executionMs)}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="text-muted-foreground">Estimated plan. Use Explain analyze to run it and see real times.</span>
+        )}
+        <Button
+          variant="ghost-muted"
+          size="xs"
+          className="ml-auto"
+          onClick={async () => {
+            await writeClipboardText(JSON.stringify(explain.plan, null, 2));
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }}
+        >
+          {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy JSON"}
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        {rows.length === 0 ? (
+          <p className="px-4 py-3 text-sm text-muted-foreground">This statement has no plan.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 z-[1] select-none">
+              <tr className="text-[13px] text-muted-foreground [&>th]:bg-card-header [&>th]:border-b [&>th]:border-border [&>th]:py-2.5 [&>th]:font-medium">
+                <th className="px-4 text-left">Step</th>
+                <th className="px-4 text-right">{explain.analyzed ? "Rows" : "Est. rows"}</th>
+                {executionMs !== null && <th className="px-4 text-left">Own time</th>}
+                <th className="px-4 text-right">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <Row key={i} row={row} executionMs={executionMs} />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /** PostgreSQL's EXPLAIN as a tree, with the slowest nodes highlighted when it was analyzed. */

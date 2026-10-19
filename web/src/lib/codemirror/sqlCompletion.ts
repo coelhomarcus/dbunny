@@ -7,6 +7,7 @@ import {
   type CompletionSource,
 } from "@codemirror/autocomplete";
 import {
+  MySQL,
   PostgreSQL,
   SQLite,
   keywordCompletionSource,
@@ -21,7 +22,8 @@ export const sqlDialect = PostgreSQL;
 
 /** The editor's language for a database's SQL. */
 export function dialectFor(name: SqlDialectName) {
-  return name === "sqlite" ? SQLite : PostgreSQL;
+  if (name === "sqlite") return SQLite;
+  return name === "mysql" ? MySQL : PostgreSQL;
 }
 
 // No completions inside strings, quoted identifiers or comments
@@ -60,6 +62,8 @@ export function quoteIdentForDialect(name: string, dialect: SqlDialectName) {
   const reserved = reservedWords(dialect);
   const word = name.toLowerCase();
   if (/^[a-z_][a-z0-9_$]*$/.test(name) && !reserved.has(word)) return name;
+  // MySQL reads double quotes as strings: its names go in backticks
+  if (dialect === "mysql") return `\`${name.replace(/`/g, "``")}\``;
   return `"${name.replace(/"/g, '""')}"`;
 }
 

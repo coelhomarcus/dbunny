@@ -7,12 +7,14 @@ import {
   configuredTabs,
   connectionUrlOf,
   draftFromSaved,
+  draftFromUrl,
   missingFields,
   newDraft,
   saveInputOf,
   savedTagOf,
   sshConfigOf,
   tabsFor,
+  urlHints,
 } from "../../src/lib/connectionDraft.ts";
 
 const saved: SavedConnection = {
@@ -185,4 +187,119 @@ test("saving a postgres draft sends no path", () => {
 
 test("applying a postgres url never changes a sqlite draft", () => {
   assert.equal(applyUrl(newDraft("sqlite"), "postgresql://u:p@h:5432/db"), null);
+});
+
+const savedMysql: SavedConnection = {
+  ...saved,
+  id: "m1",
+  name: "Shop",
+  engine: "mysql",
+  host: "db.local",
+  port: 3307,
+  database: "",
+  user: "ana",
+  password: "pw",
+  tls: { mode: "verify-ca", rootCert: "/ca.pem", cert: "", key: "" },
+  ssl: true,
+  readOnly: true,
+};
+
+test("a mysql draft starts on port 3306 and doesn't require a database", () => {
+  const d = newDraft("mysql");
+  assert.equal(d.fields.port, "3306");
+  assert.deepEqual(missingFields({ ...d, fields: { ...d.fields, host: "db.local" } }, "connect"), []);
+  assert.deepEqual(missingFields(d, "connect"), [{ tab: "connection", fieldId: "conn-host" }]);
+  // PostgreSQL still wants the database
+  const pg = newDraft("postgres");
+  assert.deepEqual(missingFields({ ...pg, fields: { ...pg.fields, host: "h" } }, "connect"), [{ tab: "connection", fieldId: "conn-db" }]);
+});
+
+test("a mysql url fills the form", () => {
+  const d = applyUrl(newDraft("mysql"), "mysql://ana:s%40l@db.local:3307/shop?ssl-mode=VERIFY_CA&ssl-ca=%2Fca.pem")!;
+  const { host, port, user, password, database, ssl, sslMode, sslRootCert } = d.fields;
+  assert.deepEqual({ host, port, user, password, database, ssl, sslMode, sslRootCert }, {
+    host: "db.local",
+    port: "3307",
+    user: "ana",
+    password: "s@l",
+    database: "shop",
+    ssl: true,
+    sslMode: "verify-ca",
+    sslRootCert: "/ca.pem",
+  });
+  assert.equal(applyUrl(newDraft("mysql"), "mysql://db.local/shop?ssl-mode=VERIFY_IDENTITY")!.fields.sslMode, "verify-full");
+  assert.equal(applyUrl(newDraft("mysql"), "mysql://db.local/shop?ssl-mode=REQUIRED")!.fields.sslMode, "require");
+  const plain = applyUrl(newDraft("mysql"), "mysql://db.local")!.fields;
+  assert.deepEqual([plain.port, plain.database, plain.ssl, plain.user], ["3306", "", false, ""]);
+  assert.equal(applyUrl(newDraft("mysql"), "mysql://db.local/shop?ssl-mode=DISABLED")!.fields.ssl, false);
+  assert.equal(applyUrl(newDraft("mysql"), "mysql://db.local/shop?ssl-mode=PREFERRED")!.fields.ssl, false);
+});
+
+test("a url only fills the form of its own database", () => {
+  assert.equal(applyUrl(newDraft("mysql"), "postgresql://me@db.local/app"), null);
+  assert.equal(applyUrl(newDraft("postgres"), "mysql://me@db.local/app"), null);
+  assert.equal(applyUrl(newDraft("mysql"), "not a url"), null);
+});
+
+test("mysql connects with its fields, not with a url", () => {
+  assert.deepEqual(connectArgsOf(draftFromSaved(savedMysql)), {
+    kind: "mysql",
+    params: {
+      host: "db.local",
+      port: 3307,
+      database: "",
+      user: "ana",
+      password: "pw",
+      readOnly: true,
+      tls: { mode: "verify-ca", rootCert: "/ca.pem", cert: "", key: "" },
+    },
+    ssh: null,
+  });
+  const noTls = connectArgsOf(draftFromSaved({ ...savedMysql, ssl: false, tls: null, readOnly: false }));
+  assert.equal(noTls.kind === "mysql" && noTls.params.tls, null);
+  const tunnelled = connectArgsOf({ ...draftFromSaved(savedMysql), sshEnabled: true, ssh: { host: "bastion", port: "2200", user: "u", authMethod: "agent", password: "", keyPath: "", passphrase: "" } });
+  assert.equal(tunnelled.kind === "mysql" && tunnelled.ssh?.port, 2200);
+});
+
+test("a saved mysql connection reads back as a mysql draft and saves as one", () => {
+  const d = draftFromSaved(savedMysql);
+  assert.equal(d.engine, "mysql");
+  assert.equal(d.fields.port, "3307");
+  const input = saveInputOf(d);
+  assert.deepEqual([input.engine, input.id, input.port, input.database, input.ssl, input.readOnly, input.tls?.mode], ["mysql", "m1", 3307, "", true, true, "verify-ca"]);
+  // No port typed means MySQL's own
+  assert.equal(saveInputOf({ ...d, fields: { ...d.fields, port: "" } }).port, 3306);
+});
+
+test("mysql has the server tabs, and ssh follows the draft", () => {
+  assert.deepEqual(tabsFor("mysql"), ["connection", "ssl", "ssh", "options"]);
+  const d = { ...newDraft("mysql"), sshEnabled: true, ssh: { host: "b", port: "", user: "u", authMethod: "agent" as const, password: "", keyPath: "", passphrase: "" } };
+  assert.deepEqual([...configuredTabs({ ...d, fields: { ...d.fields, host: "db" } })], ["ssh"]);
+  assert.equal(sshConfigOf({ ...d, fields: { ...d.fields, host: "db" } })?.host, "b");
+  assert.equal(sshConfigOf({ ...d, fields: { ...d.fields, host: "/var/run/mysqld" } }), null);
+});
+
+test("a url opens the draft of the database it names", () => {
+  const mysql = draftFromUrl("mysql://ana:pw@db.local:3307/shop?ssl-mode=REQUIRED")!;
+  assert.deepEqual([mysql.engine, mysql.fields.host, mysql.fields.port, mysql.fields.database, mysql.fields.ssl], ["mysql", "db.local", "3307", "shop", true]);
+  const pg = draftFromUrl("postgresql://me:pw@db.example.com/app")!;
+  assert.deepEqual([pg.engine, pg.fields.host, pg.fields.port, pg.fields.database], ["postgres", "db.example.com", "5432", "app"]);
+  assert.equal(draftFromUrl("postgres://me@h/app")?.engine, "postgres");
+  assert.equal(draftFromUrl("  mysql://h  ")?.engine, "mysql");
+  assert.equal(draftFromUrl("sqlite:///x.db"), null);
+  assert.equal(draftFromUrl("not a url"), null);
+  assert.equal(draftFromUrl(""), null);
+});
+
+test("the url dialog speaks of the database it is for", () => {
+  assert.deepEqual(urlHints("mysql"), {
+    description: "Paste a MySQL connection string to fill in the form.",
+    placeholder: "mysql://user:password@host:3306/database",
+    invalid: "That doesn't look like a mysql:// connection URL.",
+  });
+  assert.equal(urlHints("postgres").placeholder, "postgresql://user:password@host:5432/database");
+  assert.equal(urlHints("postgres").invalid, "That doesn't look like a postgres:// connection URL.");
+  // From the home page any server database will do
+  assert.equal(urlHints(undefined).description, "Paste a PostgreSQL or MySQL connection string to fill in the form.");
+  assert.equal(urlHints(undefined).invalid, "That doesn't look like a postgres:// or mysql:// connection URL.");
 });

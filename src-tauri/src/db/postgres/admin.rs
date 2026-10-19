@@ -12,7 +12,7 @@ use super::objects::{
 };
 use super::session::Endpoint;
 use super::PostgresDriver;
-use crate::db::model::{DatabaseInfo, RoleInfo, ServerActivity, ServerSession};
+use crate::db::model::{DatabaseInfo, RoleInfo, RoleList, ServerActivity, ServerSession};
 use crate::db::{Driver, ServerAdmin};
 
 #[async_trait]
@@ -52,9 +52,10 @@ impl ServerAdmin for PostgresDriver {
         run(self, &drop_schema_sql(name, cascade)).await
     }
 
-    async fn roles(&self) -> Result<Vec<RoleInfo>, String> {
+    async fn roles(&self) -> Result<RoleList, String> {
         let client = self.client().await?;
-        roles(&client).await.map_err(|e| db_message(&e))
+        let roles = roles(&client).await.map_err(|e| db_message(&e))?;
+        Ok(RoleList { roles, limited_view: false })
     }
 
     async fn activity(&self, all_databases: bool) -> Result<ServerActivity, String> {
@@ -62,7 +63,8 @@ impl ServerAdmin for PostgresDriver {
         server_activity(&client, all_databases).await.map_err(|e| db_message(&e))
     }
 
-    async fn signal_backend(&self, pid: i32, terminate: bool) -> Result<bool, String> {
+    async fn signal_backend(&self, pid: i64, terminate: bool) -> Result<bool, String> {
+        let pid = i32::try_from(pid).map_err(|_| format!("Invalid process id {pid}"))?;
         let client = self.client().await?;
         signal(&client, pid, terminate).await
     }
@@ -135,7 +137,7 @@ async fn server_activity(client: &Client, all_databases: bool) -> Result<ServerA
         sessions: rows
             .iter()
             .map(|r| ServerSession {
-                pid: r.get("pid"),
+                pid: i64::from(r.get::<_, i32>("pid")),
                 user: r.get("user_name"),
                 database: r.get("database"),
                 application: r.get("application"),
@@ -145,7 +147,7 @@ async fn server_activity(client: &Client, all_databases: bool) -> Result<ServerA
                 query_seconds: r.get("query_seconds"),
                 transaction_seconds: r.get("transaction_seconds"),
                 query: r.get("query"),
-                blocked_by: r.get("blocked_by"),
+                blocked_by: r.get::<_, Vec<i32>>("blocked_by").into_iter().map(i64::from).collect(),
                 is_self: r.get("is_self"),
             })
             .collect(),
@@ -182,12 +184,13 @@ async fn roles(client: &Client) -> Result<Vec<RoleInfo>, tokio_postgres::Error> 
         .iter()
         .map(|r| RoleInfo {
             name: r.get("name"),
+            host: None,
             can_login: r.get("can_login"),
             superuser: r.get("superuser"),
             create_db: r.get("create_db"),
             create_role: r.get("create_role"),
             replication: r.get("replication"),
-            bypass_rls: r.get("bypass_rls"),
+            bypass_rls: Some(r.get("bypass_rls")),
             connection_limit: r.get("connection_limit"),
             valid_until: r.get("valid_until"),
             member_of: r.get("member_of"),
@@ -231,11 +234,11 @@ mod activity_server_tests {
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 
         let activity = server_activity(&watcher, false).await.unwrap();
-        let find = |p: i32| activity.sessions.iter().find(|s| s.pid == p).unwrap_or_else(|| panic!("no session {p}"));
+        let find = |p: i32| activity.sessions.iter().find(|s| s.pid == i64::from(p)).unwrap_or_else(|| panic!("no session {p}"));
         assert!(find(pid(&watcher).await).is_self);
         assert_eq!(find(holder_pid).state.as_deref(), Some("idle in transaction"));
         let waiting = find(waiter_pid);
-        assert_eq!(waiting.blocked_by, vec![holder_pid]);
+        assert_eq!(waiting.blocked_by, vec![i64::from(holder_pid)]);
         assert!(waiting.waiting_for.as_deref().unwrap_or("").starts_with("Lock"), "{:?}", waiting.waiting_for);
         assert!(waiting.query.as_deref().unwrap_or("").contains("SET v = 3"));
 
@@ -294,7 +297,7 @@ mod roles_server_tests {
 /// Switching databases against a real server, see `console::server_tests`.
 #[cfg(test)]
 mod database_server_tests {
-    use super::super::ssh::SshConfig;
+    use crate::db::net::ssh::SshConfig;
     use super::*;
     use crate::commands::admin::open_database_session;
     use crate::commands::connect::{open_session, ConnectResponse};

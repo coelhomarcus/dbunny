@@ -4,6 +4,7 @@ import Switch from "../ui/Switch";
 const READ_ONLY_HINT: Record<ConnectionDraft["engine"], string> = {
   postgres: "The server refuses inserts, updates, deletes and schema changes",
   sqlite: "The database file is opened read-only: edits are refused",
+  mysql: "The server refuses inserts, updates, deletes and schema changes",
 };
 
 /** Settings every database has: for now, read-only. */

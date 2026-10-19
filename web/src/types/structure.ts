@@ -9,6 +9,10 @@ export interface TableMeta {
   tableBytes: number | null;
   indexesBytes: number | null;
   totalBytes: number | null;
+  /** The storage engine, for MySQL. */
+  engine?: string;
+  /** The default collation of the text columns, for MySQL. */
+  collation?: string;
 }
 
 export interface IndexInfo {

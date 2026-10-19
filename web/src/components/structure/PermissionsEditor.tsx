@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileCode, Plus, Save, X } from "lucide-react";
 import type { RoleInfo, StructureChange, TablePrivilege } from "@/types";
+import { accountOf } from "../../lib/roles";
 import { useApi, useConnection } from "../../contexts/useConnection";
 import { cn } from "../../lib/cn";
 import Button from "../ui/Button";
@@ -94,7 +95,7 @@ export default function PermissionsEditor({
 
   function openAdd() {
     setAddOpen(true);
-    if (!roles) api.getRoles().then(setRoles).catch(() => setRoles([]));
+    if (!roles) api.getRoles().then((list) => setRoles(list.roles)).catch(() => setRoles([]));
   }
 
   function addGrantee(grantee: string) {
@@ -120,7 +121,7 @@ export default function PermissionsEditor({
   const grantable = Object.fromEntries(privileges.map((p) => [p.grantee, p.grantable]));
   const candidates = [
     ...(!grantees.includes("PUBLIC") ? ["PUBLIC"] : []),
-    ...(roles ?? []).filter((r) => !r.isBuiltin && !grantees.includes(r.name)).map((r) => r.name),
+    ...(roles ?? []).filter((r) => !r.isBuiltin && !grantees.includes(accountOf(r))).map(accountOf),
   ];
 
   return (

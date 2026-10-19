@@ -27,7 +27,7 @@ import Button from "../ui/Button";
 import ConfirmDialog from "../ui/ConfirmDialog";
 import { isMac } from "../../lib/platform";
 import { getSettings } from "../../lib/settings";
-import { notAvailableFor } from "../../lib/engines";
+import { explainAnalyzeHint, notAvailableFor } from "../../lib/engines";
 import { useCapabilities } from "../../hooks/useCapabilities";
 
 const MOD = isMac ? "⌘" : "Ctrl+";
@@ -479,7 +479,7 @@ function QueryPaneBody({
 
           {/* Actions: run and save on the left, the rest quieter on the right */}
           <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-2.5 select-none">
-            <RunButton disabled={running} explainAnalyze={capabilities.explainAnalyze} onRun={runQuery} onExplain={explain} />
+            <RunButton disabled={running} explainAnalyze={capabilities.explainAnalyze} analyzeHint={explainAnalyzeHint(capabilities.explainFormat)} onRun={runQuery} onExplain={explain} />
             <Tooltip label={justSaved ? "Saved" : `Save the query (${MOD}S)`} side="top">
               <Button
                 variant="ghost-muted"

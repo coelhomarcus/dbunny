@@ -1,7 +1,8 @@
 import type { Capabilities } from "./capabilities";
+import type { TlsSettings } from "./saved";
 
 /** The database a connection talks to. */
-export type Engine = "postgres" | "sqlite";
+export type Engine = "postgres" | "sqlite" | "mysql";
 
 export interface ConnectRequest {
   connectionUrl: string;
@@ -28,6 +29,19 @@ export interface ConnectionInfo {
   readOnly: boolean;
   engine: Engine;
   capabilities: Capabilities;
+}
+
+/** The connection form of a MySQL server, as `connect_mysql` takes it. */
+export interface MysqlConnectParams {
+  host: string;
+  port: number;
+  /** Empty opens the first database the user can see. */
+  database: string;
+  user: string;
+  password: string;
+  readOnly: boolean;
+  /** Null: no TLS. */
+  tls: TlsSettings | null;
 }
 
 export type SshAuthMethod = "password" | "key" | "agent";

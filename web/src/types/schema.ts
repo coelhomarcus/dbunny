@@ -114,12 +114,15 @@ export interface ServerActivity {
 
 export interface RoleInfo {
   name: string;
+  /** The host of an account (MySQL accounts are `user@host`); missing where roles have none. */
+  host?: string;
   canLogin: boolean;
   superuser: boolean;
   createDb: boolean;
   createRole: boolean;
   replication: boolean;
-  bypassRls: boolean;
+  /** Null where the engine has no row-level security to bypass. */
+  bypassRls: boolean | null;
   /** -1 when unlimited. */
   connectionLimit: number;
   validUntil: string | null;
@@ -127,6 +130,12 @@ export interface RoleInfo {
   isCurrent: boolean;
   /** Built in (pg_*). */
   isBuiltin: boolean;
+}
+
+/** The roles of the server; the view is limited when the account may read only its own. */
+export interface RoleList {
+  roles: RoleInfo[];
+  limitedView: boolean;
 }
 
 /** One object in the explorer. */

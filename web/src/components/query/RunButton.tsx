@@ -33,10 +33,13 @@ function MenuItem({ icon, label, hint, shortcut, onClick }: { icon: React.ReactN
 export default function RunButton({
   disabled,
   explainAnalyze,
+  analyzeHint = "Runs it for real times, then rolls it back",
   onRun,
   onExplain,
 }: {
   disabled: boolean;
+  /** What Explain analyze does to the statement. */
+  analyzeHint?: string;
   /** The engine can run a statement to time it (EXPLAIN ANALYZE). */
   explainAnalyze: boolean;
   onRun: (scope: RunScope) => void;
@@ -75,7 +78,7 @@ export default function RunButton({
           <div className="mx-1 my-1 h-px bg-border" />
           <MenuItem icon={<Workflow />} label="Explain" hint="The planner's estimate; nothing runs" onClick={pick(() => onExplain(false))} />
           {explainAnalyze && (
-            <MenuItem icon={<Gauge />} label="Explain analyze" hint="Runs it for real times, then rolls it back" onClick={pick(() => onExplain(true))} />
+            <MenuItem icon={<Gauge />} label="Explain analyze" hint={analyzeHint} onClick={pick(() => onExplain(true))} />
           )}
         </div>
       </Popover>

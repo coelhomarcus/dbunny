@@ -27,9 +27,13 @@ export function summaryOf(conn: SavedConnection): ConnectionSummary {
   }
   const socket = isSocketHost(conn.host);
   const ssh = conn.ssh;
+  const mysql = conn.engine === "mysql";
+  const where = socket ? `${conn.host} (socket)` : `${conn.host}:${conn.port}`;
+  // A MySQL connection may name no database
+  const address = mysql && !conn.database ? where : socket ? `${where} / ${conn.database}` : `${where}/${conn.database}`;
   return {
-    engineLabel: "PostgreSQL",
-    address: socket ? `${conn.host} (socket) / ${conn.database}` : `${conn.host}:${conn.port}/${conn.database}`,
+    engineLabel: mysql ? "MySQL" : "PostgreSQL",
+    address,
     user: conn.user,
     ssl: conn.ssl && !socket,
     sshVia: ssh && !socket ? `${ssh.user}@${ssh.host}${ssh.port && ssh.port !== 22 ? `:${ssh.port}` : ""}` : null,

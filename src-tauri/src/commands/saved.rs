@@ -2,7 +2,7 @@ use serde::Deserialize;
 use tauri::State;
 use uuid::Uuid;
 
-use crate::db::postgres::ssh::SshConfig;
+use crate::db::net::ssh::SshConfig;
 use crate::db::Engine;
 use super::state::AppState;
 use super::storage::{save_connections_to_file, ConnectionDetails, SavedConnection, SavedConnectionInfo, TlsSettings};
@@ -52,6 +52,16 @@ impl SavedConnectionInput {
     fn into_details(self) -> Result<ConnectionDetails, String> {
         match self.engine {
             Engine::Postgres => Ok(ConnectionDetails::Postgres {
+                host: self.host,
+                port: self.port,
+                database: self.database,
+                user: self.user,
+                password: self.password,
+                ssh: self.ssh,
+                tls: self.tls,
+                ssl: self.ssl,
+            }),
+            Engine::Mysql => Ok(ConnectionDetails::Mysql {
                 host: self.host,
                 port: self.port,
                 database: self.database,
@@ -162,6 +172,18 @@ mod tests {
             "readOnly": true, "color": "#22c55e", "icon": "box"
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_mysql_connection_saves_its_server_fields() {
+        let mut connections = Vec::new();
+        let saved = upsert(&mut connections, &KEY, input("mysql", None, "/ignored.sqlite"), "t1".into()).unwrap();
+        assert_eq!(saved.engine, "mysql");
+        assert!(!saved.encrypted_data.contains("db.example.com") && saved.ssl && saved.read_only);
+        let info = saved.to_info(&KEY).unwrap();
+        assert_eq!((info.engine, info.host.as_str(), info.port, info.database.as_str()), (Engine::Mysql, "db.example.com", 5432, "shop"));
+        assert_eq!(info.path, "", "a server has no file");
+        assert_eq!(info.tls.unwrap().mode, "require");
     }
 
     #[test]

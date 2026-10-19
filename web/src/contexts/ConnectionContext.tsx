@@ -65,7 +65,9 @@ export function ConnectionProvider({
         const response =
           args.kind === "sqlite"
             ? await api.connectSqlite(args.path, args.readOnly, args.create)
-            : await api.connect(args.url, args.ssh, trustHostKey);
+            : args.kind === "mysql"
+              ? await api.connectMysql(args.params, args.ssh, trustHostKey)
+              : await api.connect(args.url, args.ssh, trustHostKey);
         setSessionId(response.sessionId);
         setConnectionInfo(infoOf(response));
         setSavedConnectionName(saved?.name || null);

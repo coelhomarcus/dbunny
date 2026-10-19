@@ -57,8 +57,8 @@ async function pickFile(title: string) {
   return typeof path === "string" ? path : null;
 }
 
-/** The body of one tab of a PostgreSQL connection: server, SSL, SSH tunnel. */
-export default function PostgresTabs({
+/** The body of one tab of a server connection (PostgreSQL or MySQL): server, SSL, SSH tunnel. */
+export default function ServerTabs({
   tab,
   draft,
   onChange,
@@ -73,6 +73,7 @@ export default function PostgresTabs({
   onOpenImport: () => void;
 }) {
   const { fields, ssh } = draft;
+  const mysql = draft.engine === "mysql";
   const socket = isSocketHost(fields.host);
   const missing = showErrors ? new Set(missingFields(draft, "connect").map((m) => m.fieldId)) : new Set<string>();
   const invalid = (id: string) => missing.has(id) || undefined;
@@ -109,22 +110,22 @@ export default function PostgresTabs({
             />
           </Field>
           <Field label="Port" htmlFor="conn-port">
-            <Input id="conn-port" inputMode="numeric" value={fields.port} onChange={(e) => setField("port", e.target.value)} placeholder="5432" className="font-mono" />
+            <Input id="conn-port" inputMode="numeric" value={fields.port} onChange={(e) => setField("port", e.target.value)} placeholder={mysql ? "3306" : "5432"} className="font-mono" />
           </Field>
         </div>
-        <Field label="Database" htmlFor="conn-db">
+        <Field label={mysql ? "Database (optional)" : "Database"} htmlFor="conn-db">
           <Input
             id="conn-db"
             value={fields.database}
             onChange={(e) => setField("database", e.target.value)}
-            placeholder="my_database"
+            placeholder={mysql ? "Leave empty to open the first one" : "my_database"}
             spellCheck={false}
             aria-invalid={invalid("conn-db")}
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="User" htmlFor="conn-user">
-            <Input id="conn-user" value={fields.user} onChange={(e) => setField("user", e.target.value)} placeholder="postgres" spellCheck={false} autoComplete="off" />
+            <Input id="conn-user" value={fields.user} onChange={(e) => setField("user", e.target.value)} placeholder={mysql ? "root" : "postgres"} spellCheck={false} autoComplete="off" />
           </Field>
           <Field label="Password" htmlFor="conn-password">
             <PasswordInput id="conn-password" value={fields.password} onChange={(v) => setField("password", v)} placeholder="••••••••" />
@@ -150,11 +151,19 @@ export default function PostgresTabs({
               <SegmentedTabs<SslMode>
                 value={fields.sslMode}
                 onChange={(v) => setField("sslMode", v)}
-                options={[
-                  { value: "require", label: "Encrypt only" },
-                  { value: "verify-ca", label: "Certificate" },
-                  { value: "verify-full", label: "Certificate + name" },
-                ]}
+                options={
+                  mysql
+                    ? [
+                        { value: "require", label: "Required" },
+                        { value: "verify-ca", label: "Verify CA" },
+                        { value: "verify-full", label: "Verify identity" },
+                      ]
+                    : [
+                        { value: "require", label: "Encrypt only" },
+                        { value: "verify-ca", label: "Certificate" },
+                        { value: "verify-full", label: "Certificate + name" },
+                      ]
+                }
               />
               <span className="text-xs text-muted-foreground">
                 {fields.sslMode === "require"
@@ -162,7 +171,9 @@ export default function PostgresTabs({
                     ? "With a CA certificate the server's certificate is checked against it."
                     : "The server's certificate isn't checked (common for managed databases)."
                   : fields.sslMode === "verify-ca"
-                    ? "The server's certificate must be signed by a trusted CA."
+                    ? mysql
+                      ? "The server's certificate must be signed by a trusted CA, and for now it must also name the host."
+                      : "The server's certificate must be signed by a trusted CA."
                     : "The certificate must be trusted and issued for this host name."}
               </span>
             </div>
@@ -170,7 +181,7 @@ export default function PostgresTabs({
               [
                 ["sslRootCert", "CA certificate", "Optional: the CA that signed the server's certificate"],
                 ["sslCert", "Client certificate", "Optional: for servers that log in by certificate"],
-                ["sslKey", "Client key", "Unencrypted PKCS#8 PEM"],
+                ["sslKey", "Client key", mysql ? "Unencrypted PEM private key" : "Unencrypted PKCS#8 PEM"],
               ] as const
             ).map(([key, label, hint]) => (
               <Field key={key} label={label} htmlFor={`conn-${key}`}>

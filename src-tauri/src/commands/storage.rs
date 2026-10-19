@@ -9,13 +9,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
-use crate::db::postgres::ssh::SshConfig;
+use crate::db::net::ssh::SshConfig;
 use crate::db::Engine;
 
 const PBKDF2_SALT: &[u8] = b"dbunny-connection-salt-v1";
 const PBKDF2_ITERATIONS: u32 = 100_000;
 
-/// Sensitive data of a PostgreSQL connection — encrypted at rest as a JSON blob.
+/// Sensitive data of a server connection (PostgreSQL or MySQL) — encrypted at rest as a JSON blob.
 #[derive(Serialize, Deserialize)]
 struct SensitiveData {
     host: String,
@@ -38,19 +38,7 @@ struct SqliteData {
     path: String,
 }
 
-/// SSL settings beyond on/off, saved with a connection.
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct TlsSettings {
-    /// "require", "verify-ca" or "verify-full".
-    pub mode: String,
-    #[serde(default)]
-    pub root_cert: String,
-    #[serde(default)]
-    pub cert: String,
-    #[serde(default)]
-    pub key: String,
-}
+pub use crate::db::net::tls::TlsSettings;
 
 fn default_engine() -> String {
     Engine::default().as_str().to_string()
@@ -312,6 +300,17 @@ pub enum ConnectionDetails {
         tls: Option<TlsSettings>,
         ssl: bool,
     },
+    Mysql {
+        host: String,
+        port: u16,
+        /// May be empty: the session opens the first database it finds.
+        database: String,
+        user: String,
+        password: String,
+        ssh: Option<SshConfig>,
+        tls: Option<TlsSettings>,
+        ssl: bool,
+    },
     Sqlite {
         path: String,
     },
@@ -321,6 +320,7 @@ impl ConnectionDetails {
     pub fn engine(&self) -> Engine {
         match self {
             ConnectionDetails::Postgres { .. } => Engine::Postgres,
+            ConnectionDetails::Mysql { .. } => Engine::Mysql,
             ConnectionDetails::Sqlite { .. } => Engine::Sqlite,
         }
     }
@@ -339,7 +339,9 @@ impl SavedConnection {
         let engine = details.engine();
         // What gets encrypted depends on the engine
         let (json, ssl) = match details {
-            ConnectionDetails::Postgres { host, port, database, user, password, ssh, tls, ssl } => {
+            // A MySQL connection keeps the same details under its own engine
+            ConnectionDetails::Postgres { host, port, database, user, password, ssh, tls, ssl }
+            | ConnectionDetails::Mysql { host, port, database, user, password, ssh, tls, ssl } => {
                 let json = serde_json::to_string(&SensitiveData { host, port, database, user, password, ssh, tls })
                     .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?;
                 (json, ssl)
@@ -388,7 +390,7 @@ impl SavedConnection {
         };
         // A SQLite connection has only its path; the PostgreSQL fields are left empty
         let (sensitive, path) = match engine {
-            Engine::Postgres => (serde_json::from_str::<SensitiveData>(&json).map_err(deserialize_error)?, String::new()),
+            Engine::Postgres | Engine::Mysql => (serde_json::from_str::<SensitiveData>(&json).map_err(deserialize_error)?, String::new()),
             Engine::Sqlite => {
                 let SqliteData { path } = serde_json::from_str(&json).map_err(deserialize_error)?;
                 let empty = SensitiveData {
@@ -551,12 +553,12 @@ mod tests {
     /// A connections file with a PostgreSQL entry and one a newer version wrote for an engine
     /// this build doesn't know.
     fn file_with_an_unknown_engine(key: &[u8; 32]) -> (String, String) {
-        let mysql_payload = encrypt(key, r#"{"host":"my.example.com","port":3306,"user":"root","password":"pw"}"#).unwrap();
+        let mariadb_payload = encrypt(key, r#"{"host":"my.example.com","port":3306,"user":"root","password":"pw"}"#).unwrap();
         let json = format!(
-            r##"{{"version":2,"connections":[{{"id":"pg","name":"Prod","engine":"postgres","encryptedData":"{}","ssl":true,"color":"#ef4444","createdAt":"t1","updatedAt":"t2"}},{{"id":"my","name":"Shop","engine":"mysql","encryptedData":"{mysql_payload}","ssl":false,"readOnly":true,"color":"#3b82f6","icon":"cart","createdAt":"t3","updatedAt":"t4"}}]}}"##,
+            r##"{{"version":2,"connections":[{{"id":"pg","name":"Prod","engine":"postgres","encryptedData":"{}","ssl":true,"color":"#ef4444","createdAt":"t1","updatedAt":"t2"}},{{"id":"my","name":"Shop","engine":"mariadb","encryptedData":"{mariadb_payload}","ssl":false,"readOnly":true,"color":"#3b82f6","icon":"cart","createdAt":"t3","updatedAt":"t4"}}]}}"##,
             legacy_payload(key)
         );
-        (json, mysql_payload)
+        (json, mariadb_payload)
     }
 
     #[test]
@@ -581,16 +583,16 @@ mod tests {
         let key = [5u8; 32];
         let dir = temp_dir();
         let path = dir.join("db_connections.json");
-        let (json, mysql_payload) = file_with_an_unknown_engine(&key);
+        let (json, mariadb_payload) = file_with_an_unknown_engine(&key);
         fs::write(&path, json).unwrap();
         let unknown = |path: &Path| {
             let written: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
             let entries = written["connections"].as_array().unwrap().clone();
-            entries.into_iter().find(|c| c["id"] == "my").expect("the mysql connection")
+            entries.into_iter().find(|c| c["id"] == "my").expect("the mariadb connection")
         };
         let check = |entry: serde_json::Value| {
-            assert_eq!(entry["engine"], "mysql");
-            assert_eq!(entry["encryptedData"].as_str().unwrap(), mysql_payload);
+            assert_eq!(entry["engine"], "mariadb");
+            assert_eq!(entry["encryptedData"].as_str().unwrap(), mariadb_payload);
             assert_eq!((entry["name"].as_str(), entry["icon"].as_str(), entry["readOnly"].as_bool()), (Some("Shop"), Some("cart"), Some(true)));
             assert_eq!((entry["createdAt"].as_str(), entry["updatedAt"].as_str()), (Some("t3"), Some("t4")));
         };
@@ -624,6 +626,53 @@ mod tests {
             tls: None,
             ssl,
         }
+    }
+
+    fn mysql(host: &str, port: u16, database: &str, user: &str, password: &str, ssl: bool) -> ConnectionDetails {
+        ConnectionDetails::Mysql {
+            host: host.into(),
+            port,
+            database: database.into(),
+            user: user.into(),
+            password: password.into(),
+            ssh: None,
+            tls: None,
+            ssl,
+        }
+    }
+
+    #[test]
+    fn a_mysql_connection_is_saved_and_read_back() {
+        let key = [8u8; 32];
+        let details = ConnectionDetails::Mysql {
+            host: "db.example.com".into(),
+            port: 3307,
+            database: "shop".into(),
+            user: "me".into(),
+            password: "secret".into(),
+            ssh: Some(SshConfig { host: "bastion".into(), port: 22, user: "ubuntu".into(), auth_method: "password".into(), password: "tunnelpw".into(), ..Default::default() }),
+            tls: Some(TlsSettings { mode: "verify-ca".into(), root_cert: "/ca.pem".into(), ..Default::default() }),
+            ssl: true,
+        };
+        let conn = SavedConnection::new(&key, "m1".into(), "Shop".into(), details, "#3b82f6".into(), "a".into(), "b".into()).unwrap();
+        let stored = serde_json::to_string(&conn).unwrap();
+        assert!(stored.contains(r#""engine":"mysql""#), "{stored}");
+        for private in ["db.example.com", "secret", "bastion", "tunnelpw", "/ca.pem"] {
+            assert!(!stored.contains(private), "{private} is in the clear: {stored}");
+        }
+
+        let info = serde_json::from_str::<SavedConnection>(&stored).unwrap().to_info(&key).unwrap();
+        assert_eq!(info.engine, Engine::Mysql);
+        assert_eq!((info.host.as_str(), info.port, info.database.as_str(), info.user.as_str(), info.password.as_str()), ("db.example.com", 3307, "shop", "me", "secret"));
+        assert_eq!((info.ssh.unwrap().host.as_str(), info.tls.unwrap().mode.as_str(), info.ssl, info.path.as_str()), ("bastion", "verify-ca", true, ""));
+    }
+
+    #[test]
+    fn a_mysql_connection_may_have_no_database() {
+        let key = [8u8; 32];
+        let conn = SavedConnection::new(&key, "m2".into(), "Server".into(), mysql("db.local", 3306, "", "root", "", false), "#000".into(), "a".into(), "b".into()).unwrap();
+        let info = conn.to_info(&key).unwrap();
+        assert_eq!((info.engine, info.database.as_str(), info.ssl), (Engine::Mysql, "", false));
     }
 
     fn temp_dir() -> PathBuf {
@@ -824,7 +873,7 @@ mod tests {
             }),
         );
         let original_unknown = file["connections"][2].clone();
-        assert_eq!(original_unknown["engine"], "mysql");
+        assert_eq!(original_unknown["engine"], "mariadb");
         fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
         let loaded = load_connections_from_path(&path);
