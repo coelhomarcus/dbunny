@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Row, Value};
 
+use super::flavor::Flavor;
 use super::structure;
 use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{
@@ -20,7 +21,7 @@ use crate::db::model::{
 use crate::db::mysql_common::connect::MysqlEndpoint;
 use crate::db::mysql_common::errors::error_message;
 use crate::db::sql::Dialect;
-use crate::db::{unsupported, Catalog, Engine};
+use crate::db::{unsupported, Catalog};
 
 #[async_trait]
 impl Catalog for ServerDriver {
@@ -44,7 +45,7 @@ impl Catalog for ServerDriver {
 
     async fn columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>, String> {
         let mut conn = self.conn().await?;
-        table_columns(&mut conn, schema, table).await.map_err(|e| self.message(&e))
+        table_columns(&mut conn, self.flavor(), schema, table).await.map_err(|e| self.message(&e))
     }
 
     async fn relation_kind(&self, schema: &str, name: &str) -> Result<Option<String>, String> {
@@ -62,7 +63,7 @@ impl Catalog for ServerDriver {
 
     async fn table_structure(&self, schema: &str, table: &str) -> Result<TableStructure, String> {
         let mut conn = self.conn().await?;
-        structure::table_structure(&mut conn, self.endpoint(), self.version(), schema, table).await
+        structure::table_structure(&mut conn, self.endpoint(), self.flavor(), self.version(), schema, table).await
     }
 
     async fn completion_schema(&self) -> Result<CompletionSchema, String> {
@@ -85,7 +86,7 @@ impl Catalog for ServerDriver {
     }
 
     async fn extensions(&self) -> Result<Vec<ExtensionInfo>, String> {
-        Err(unsupported(Engine::Mysql, "Extensions"))
+        Err(unsupported(self.flavor().engine(), "Extensions"))
     }
 }
 
@@ -191,7 +192,7 @@ pub(crate) struct StoredColumn {
     pub key: String,
 }
 
-pub(crate) async fn read_columns(conn: &mut Conn, database: &str, table: &str) -> mysql_async::Result<Vec<StoredColumn>> {
+pub(crate) async fn read_columns(conn: &mut Conn, flavor: &dyn Flavor, database: &str, table: &str) -> mysql_async::Result<Vec<StoredColumn>> {
     let rows: Vec<Row> = conn
         .exec(
             "SELECT COLUMN_NAME AS column_name, COLUMN_DEFAULT AS column_default, IS_NULLABLE AS is_nullable, \
@@ -204,10 +205,11 @@ pub(crate) async fn read_columns(conn: &mut Conn, database: &str, table: &str) -
             (database, table),
         )
         .await?;
-    Ok(rows
+    let mut columns: Vec<StoredColumn> = rows
         .iter()
         .map(|row| StoredColumn {
-            definition: ColumnDefinition {
+            definition: {
+                let mut definition = ColumnDefinition {
                 name: string(row, "column_name"),
                 column_type: string(row, "column_type"),
                 data_type: string(row, "data_type"),
@@ -219,15 +221,20 @@ pub(crate) async fn read_columns(conn: &mut Conn, database: &str, table: &str) -
                 generation_expression: text(row, "generation_expression").and_then(non_empty),
                 comment: string(row, "column_comment"),
                 inherits_collation: text(row, "collation_name").is_some() && text(row, "collation_name") == text(row, "table_collation"),
+                };
+                flavor.normalize_column(&mut definition);
+                definition
             },
             key: string(row, "column_key"),
         })
-        .collect())
+        .collect();
+    flavor.refine_columns(conn, database, table, &mut columns).await?;
+    Ok(columns)
 }
 
 /// The columns of `database`.`table` in order, as MySQL stores them.
-pub(crate) async fn column_definitions(conn: &mut Conn, database: &str, table: &str) -> Result<Vec<ColumnDefinition>, String> {
-    let stored = read_columns(conn, database, table).await.map_err(|e| detached(&e))?;
+pub(crate) async fn column_definitions(conn: &mut Conn, flavor: &dyn Flavor, database: &str, table: &str) -> Result<Vec<ColumnDefinition>, String> {
+    let stored = read_columns(conn, flavor, database, table).await.map_err(|e| detached(&e))?;
     Ok(stored.into_iter().map(|c| c.definition).collect())
 }
 
@@ -299,8 +306,8 @@ pub(crate) fn enum_values(column_type: &str) -> Option<Vec<String>> {
     Some(values)
 }
 
-pub(crate) async fn table_columns(conn: &mut Conn, database: &str, table: &str) -> mysql_async::Result<Vec<ColumnInfo>> {
-    let stored = read_columns(conn, database, table).await?;
+pub(crate) async fn table_columns(conn: &mut Conn, flavor: &dyn Flavor, database: &str, table: &str) -> mysql_async::Result<Vec<ColumnInfo>> {
+    let stored = read_columns(conn, flavor, database, table).await?;
     let keys = structure::read_foreign_keys(conn, "k.TABLE_SCHEMA = ? AND k.TABLE_NAME = ?", (database, table)).await?;
     Ok(stored
         .into_iter()
@@ -758,7 +765,7 @@ mod tests {
 mod server_tests {
     use std::sync::Arc;
 
-    use crate::db::mysql_common::tests_support::{exec, TestDb};
+    use crate::db::mysql_common::tests_support::{exec, on_mariadb, ty, TestDb, label};
     use super::*;
     use crate::db::model::{ColumnInfo, ExplorerTree};
     use crate::db::Driver;
@@ -804,8 +811,8 @@ mod server_tests {
             ])
         );
         let detail = |name: &str| tree.schemas[0].objects.iter().find(|o| o.name == name).unwrap().detail.clone();
-        assert_eq!(detail("touch_customer"), "IN id int");
-        assert_eq!(detail("order_total"), "o int");
+        assert_eq!(detail("touch_customer"), format!("IN id {}", ty("int")));
+        assert_eq!(detail("order_total"), format!("o {}", ty("int")));
         assert_eq!(detail("customers"), "");
         driver.close().await;
         other.drop_now().await;
@@ -843,7 +850,7 @@ mod server_tests {
         assert_eq!(key.columns, vec!["customer_id".to_string()]);
         assert_eq!(key.ref_columns, vec!["id".to_string()]);
         assert!(column(&orders, "id").foreign_key.is_none());
-        assert_eq!(customer_id.type_name, "int");
+        assert_eq!(customer_id.type_name, ty("int"));
         assert_eq!(customer_id.data_type, "int");
         assert!(!customer_id.is_nullable);
         assert_eq!(column(&orders, "total").type_name, "decimal(10,2)");
@@ -942,7 +949,7 @@ mod server_tests {
         assert_eq!((fk.ref_schema.as_str(), fk.ref_table.as_str()), (db.name.as_str(), "customers"));
         assert_eq!(fk.ref_columns, vec!["id".to_string()]);
         assert_eq!(fk.on_delete, "CASCADE");
-        assert_eq!(fk.on_update, "NO ACTION");
+        assert_eq!(fk.on_update, if on_mariadb() { "RESTRICT" } else { "NO ACTION" });
         let fk_constraint = orders.constraints.iter().find(|c| c.name == "orders_customer_fk").unwrap();
         assert_eq!(fk_constraint.kind, "foreign key");
         assert!(fk_constraint.definition.starts_with("FOREIGN KEY (`customer_id`) REFERENCES `"), "{}", fk_constraint.definition);
@@ -958,8 +965,8 @@ mod server_tests {
         assert_eq!(trigger.level, "ROW");
         assert!(trigger.enabled);
         assert!(trigger.definition.starts_with("CREATE"), "{}", trigger.definition);
-        assert!(trigger.definition.contains("TRIGGER `orders_bi`"), "{}", trigger.definition);
-        assert!(orders.ddl.contains("ON UPDATE CURRENT_TIMESTAMP"), "{}", orders.ddl);
+        assert!(trigger.definition.contains(if on_mariadb() { "TRIGGER orders_bi" } else { "TRIGGER `orders_bi`" }), "{}", trigger.definition);
+        assert!(orders.ddl.to_lowercase().contains("on update current_timestamp"), "{}", orders.ddl);
 
         // A view: no keys or indexes, its own DDL
         let view = catalog.table_structure(&db.name, "big_orders").await.unwrap();
@@ -1028,7 +1035,7 @@ mod server_tests {
         assert!(function.ddl.contains("RETURN IFNULL(t, 0)"), "{}", function.ddl);
 
         let trigger = catalog.object_definition(&db.name, "orders_bi", "trigger").await.unwrap();
-        assert!(trigger.ddl.contains("TRIGGER `orders_bi`"), "{}", trigger.ddl);
+        assert!(trigger.ddl.contains(if on_mariadb() { "TRIGGER orders_bi" } else { "TRIGGER `orders_bi`" }), "{}", trigger.ddl);
         assert!(trigger.facts.contains(&("Table".to_string(), "orders".to_string())));
 
         let table = catalog.object_definition(&db.name, "customers", "table").await.unwrap();
@@ -1047,10 +1054,10 @@ mod server_tests {
     async fn routine_detail_lists_its_parameters() {
         let (db, driver) = shop().await;
         let catalog = driver.catalog();
-        let function = catalog.function_detail(&db.name, "order_total", "o int").await.unwrap();
+        let function = catalog.function_detail(&db.name, "order_total", &format!("o {}", ty("int"))).await.unwrap();
         assert_eq!(function.name, "order_total");
         assert_eq!(function.schema, db.name);
-        assert_eq!(function.argument_types, "o int");
+        assert_eq!(function.argument_types, format!("o {}", ty("int")));
         assert_eq!(function.return_type, "decimal(10,2)");
         assert_eq!(function.kind, "function");
         assert_eq!(function.language, "SQL");
@@ -1058,9 +1065,9 @@ mod server_tests {
         assert!(function.owner.starts_with("root@"), "{}", function.owner);
         assert!(!function.is_strict);
 
-        let procedure = catalog.function_detail(&db.name, "touch_customer", "IN id int").await.unwrap();
+        let procedure = catalog.function_detail(&db.name, "touch_customer", &format!("IN id {}", ty("int"))).await.unwrap();
         assert_eq!(procedure.kind, "procedure");
-        assert_eq!(procedure.argument_types, "IN id int");
+        assert_eq!(procedure.argument_types, format!("IN id {}", ty("int")));
         assert_eq!(procedure.return_type, "");
 
         let missing = catalog.function_detail(&db.name, "nope", "").await.err().unwrap();
@@ -1090,11 +1097,11 @@ mod server_tests {
         assert_eq!(relation("customers").relation_type, "table");
         assert_eq!(relation("big_orders").relation_type, "view");
         let customers: Vec<(&str, &str)> = relation("customers").columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str())).collect();
-        assert_eq!(customers, [("id", "int"), ("email", "varchar(120)"), ("name", "varchar(80)"), ("age", "int"), ("bio", "text")]);
+        assert_eq!(customers, [("id", ty("int").as_str()), ("email", "varchar(120)"), ("name", "varchar(80)"), ("age", ty("int").as_str()), ("bio", "text")]);
         assert_eq!(relation("orders").columns.len(), 8);
         let functions: Vec<(&str, &str, &str)> =
             completion.functions.iter().map(|f| (f.name.as_str(), f.argument_types.as_str(), f.return_type.as_str())).collect();
-        assert_eq!(functions, [("order_total", "o int", "decimal(10,2)"), ("touch_customer", "IN id int", "")]);
+        assert_eq!(functions, [("order_total", format!("o {}", ty("int")).as_str(), "decimal(10,2)"), ("touch_customer", format!("IN id {}", ty("int")).as_str(), "")]);
 
         let diagram = catalog.diagram(&db.name).await.unwrap();
         let table = |schema: &str, name: &str| diagram.tables.iter().find(|t| t.schema == schema && t.name == name);
@@ -1110,7 +1117,7 @@ mod server_tests {
         let diagram_column = |name: &str| orders.columns.iter().find(|c| c.name == name).unwrap();
         assert!(diagram_column("id").is_primary_key && !diagram_column("id").is_foreign_key);
         assert!(diagram_column("customer_id").is_foreign_key);
-        assert_eq!(diagram_column("customer_id").type_name, "int");
+        assert_eq!(diagram_column("customer_id").type_name, ty("int"));
         assert_eq!(diagram_column("customer_id").ordinal, 2);
         let customers = table(&db.name, "customers").unwrap();
         assert!(customers.columns.iter().find(|c| c.name == "id").unwrap().is_foreign_key, "the referenced end counts too");
@@ -1135,11 +1142,11 @@ mod server_tests {
         exec(&db.endpoint, "CREATE TABLE logs (id INT) ENGINE = MyISAM").await;
         let mut conn = driver.conn().await.unwrap();
 
-        let columns = column_definitions(&mut conn, &db.name, "orders").await.unwrap();
+        let columns = column_definitions(&mut conn, driver.flavor(), &db.name, "orders").await.unwrap();
         let named = |name: &str| columns.iter().find(|c| c.name == name).unwrap();
         assert_eq!(columns.len(), 8);
         assert_eq!(named("id").extra, "auto_increment");
-        assert_eq!(named("id").column_type, "int");
+        assert_eq!(named("id").column_type, ty("int"));
         assert!(!named("id").nullable && named("total_with_tax").nullable);
         assert_eq!(named("status").charset.as_deref(), Some("utf8mb4"));
         assert!(named("status").collation.as_deref().unwrap().starts_with("utf8mb4"));
@@ -1148,12 +1155,12 @@ mod server_tests {
         assert!(named("total_with_tax").extra.contains("STORED GENERATED"), "{}", named("total_with_tax").extra);
         assert!(named("total_with_tax").generation_expression.as_deref().unwrap().contains("tax_rate"));
         assert_eq!(named("total").generation_expression, None);
-        assert!(named("updated_at").extra.contains("on update CURRENT_TIMESTAMP"), "{}", named("updated_at").extra);
+        assert!(named("updated_at").extra.to_lowercase().contains("on update current_timestamp"), "{}", named("updated_at").extra);
         assert!(named("placed_at").extra.contains("DEFAULT_GENERATED"), "{}", named("placed_at").extra);
-        assert_eq!(named("placed_at").default.as_deref(), Some("CURRENT_TIMESTAMP"));
-        let customers = column_definitions(&mut conn, &db.name, "customers").await.unwrap();
+        assert_eq!(named("placed_at").default.as_deref().map(|d| d.to_uppercase()).as_deref().map(|d| d.trim_end_matches("()")), Some("CURRENT_TIMESTAMP"));
+        let customers = column_definitions(&mut conn, driver.flavor(), &db.name, "customers").await.unwrap();
         assert_eq!(customers.iter().find(|c| c.name == "bio").unwrap().comment, "");
-        assert!(column_definitions(&mut conn, &db.name, "nope").await.unwrap().is_empty());
+        assert!(column_definitions(&mut conn, driver.flavor(), &db.name, "nope").await.unwrap().is_empty());
 
         assert_eq!(table_engine(&mut conn, &db.name, "orders").await.unwrap().as_deref(), Some("InnoDB"));
         assert_eq!(table_engine(&mut conn, &db.name, "logs").await.unwrap().as_deref(), Some("MyISAM"));
@@ -1175,7 +1182,7 @@ mod server_tests {
     async fn extensions_are_unsupported() {
         let db = TestDb::new().await;
         let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
-        assert_eq!(driver.catalog().extensions().await.err().unwrap(), "Extensions isn't supported by MySQL");
+        assert_eq!(driver.catalog().extensions().await.err().unwrap(), format!("Extensions isn\'t supported by {}", label()));
         driver.close().await;
         db.drop_now().await;
     }

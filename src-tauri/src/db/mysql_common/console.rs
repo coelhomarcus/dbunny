@@ -26,7 +26,9 @@ use crate::db::{unsupported, Console, Driver};
 const CANCELLED_STATE: &str = "70100";
 
 /// What a statement that ended the open transaction on its own (a DDL) is told.
-const IMPLICIT_COMMIT: &str = "This statement committed the open transaction: MySQL commits before DDL.";
+fn implicit_commit(label: &str) -> String {
+    format!("This statement committed the open transaction: {label} commits before DDL.")
+}
 
 /// The server answers a `KILL` for a connection that is already gone with this error.
 const UNKNOWN_THREAD: u16 = 1094;
@@ -41,7 +43,7 @@ struct StatementOutput {
 }
 
 /// Runs one statement. A `CALL` may give several result sets; the last one with columns is kept.
-async fn run_statement(conn: &mut Conn, sql: &str) -> Result<StatementOutput, MysqlError> {
+async fn run_statement(conn: &mut Conn, label: &str, sql: &str) -> Result<StatementOutput, MysqlError> {
     let mut shown = None;
     let mut affected = 0;
     {
@@ -66,16 +68,16 @@ async fn run_statement(conn: &mut Conn, sql: &str) -> Result<StatementOutput, My
             }
         }
     }
-    let notices = if conn.get_warnings() > 0 { warnings(conn).await? } else { vec![] };
+    let notices = if conn.get_warnings() > 0 { warnings(conn, label).await? } else { vec![] };
     Ok(StatementOutput { shown, affected, notices })
 }
 
 /// What `SHOW WARNINGS` says about the statement that just ran.
-async fn warnings(conn: &mut Conn) -> Result<Vec<Notice>, MysqlError> {
+async fn warnings(conn: &mut Conn, label: &str) -> Result<Vec<Notice>, MysqlError> {
     let rows: Vec<(String, u32, String)> = conn.query("SHOW WARNINGS").await?;
     Ok(rows
         .into_iter()
-        .map(|(level, code, message)| Notice { severity: level, message, detail: Some(format!("MySQL warning {code}")), hint: None })
+        .map(|(level, code, message)| Notice { severity: level, message, detail: Some(format!("{label} warning {code}")), hint: None })
         .collect())
 }
 
@@ -157,10 +159,10 @@ async fn run_script(conn: &mut Conn, statements: &[Statement], endpoint: &MysqlE
             return Err(cancelled_error(position));
         }
         let was_open = in_transaction_status(conn);
-        let output = run_statement(conn, &statement.text).await.map_err(|e| script_error(&e, endpoint, statement, position))?;
+        let output = run_statement(conn, endpoint.engine_label(), &statement.text).await.map_err(|e| script_error(&e, endpoint, statement, position))?;
         // A DDL commits the transaction before it runs; saying so beats a silent surprise
         if was_open && !in_transaction_status(conn) && !ends_the_transaction(&statement.text) {
-            notices.push(Notice { severity: "Warning".into(), message: IMPLICIT_COMMIT.into(), detail: None, hint: None });
+            notices.push(Notice { severity: "Warning".into(), message: implicit_commit(endpoint.engine_label()), detail: None, hint: None });
         }
         // `KILL QUERY` ends some statements without an error (SLEEP gives 1)
         if cancelled.load(Ordering::SeqCst) {

@@ -30,18 +30,18 @@ pub(crate) fn rename_sql(schema: &str, name: &str, kind: &str, new_name: &str) -
     Ok(format!("RENAME TABLE {} TO {}", qualified(schema, name), qualified(schema, new_name.trim())))
 }
 
-pub(crate) fn drop_sql(schema: &str, name: &str, kind: &str, cascade: bool) -> Result<String, String> {
+pub(crate) fn drop_sql(engine: Engine, schema: &str, name: &str, kind: &str, cascade: bool) -> Result<String, String> {
     let keyword = keyword(kind)?;
     if cascade {
-        return Err(unsupported(Engine::Mysql, "CASCADE"));
+        return Err(unsupported(engine, "CASCADE"));
     }
     Ok(format!("DROP {keyword} {}", qualified(schema, name)))
 }
 
 /// `TRUNCATE TABLE` always starts the numbering again, so there is no option for it.
-pub(crate) fn truncate_sql(schema: &str, name: &str, cascade: bool) -> Result<String, String> {
+pub(crate) fn truncate_sql(engine: Engine, schema: &str, name: &str, cascade: bool) -> Result<String, String> {
     if cascade {
-        return Err(unsupported(Engine::Mysql, "CASCADE"));
+        return Err(unsupported(engine, "CASCADE"));
     }
     Ok(format!("TRUNCATE TABLE {}", qualified(schema, name)))
 }
@@ -64,7 +64,7 @@ pub(crate) async fn duplicate(driver: &ServerDriver, schema: &str, name: &str, n
     let mut conn = driver.conn().await?;
     let columns = if with_data {
         // Computed columns can't be written
-        let all = column_definitions(&mut conn, schema, name).await?;
+        let all = column_definitions(&mut conn, driver.flavor(), schema, name).await?;
         Some(all.into_iter().filter(|c| c.generation_expression.is_none()).map(|c| c.name).collect::<Vec<_>>())
     } else {
         None
@@ -92,13 +92,13 @@ mod tests {
         assert_eq!(rename_sql("shop", "t", "function", "u").err().unwrap(), "Unknown kind \"function\"");
         assert_eq!(rename_sql("shop", "t", "table", "  ").err().unwrap(), "The new name can't be empty");
 
-        assert_eq!(drop_sql("shop", "t`x", "table", false).unwrap(), "DROP TABLE `shop`.`t``x`");
-        assert_eq!(drop_sql("shop", "v", "view", false).unwrap(), "DROP VIEW `shop`.`v`");
-        assert_eq!(drop_sql("shop", "v", "matview", false).err().unwrap(), "Unknown kind \"matview\"");
-        assert_eq!(drop_sql("shop", "t", "table", true).err().unwrap(), "CASCADE isn't supported by MySQL");
+        assert_eq!(drop_sql(Engine::Mysql, "shop", "t`x", "table", false).unwrap(), "DROP TABLE `shop`.`t``x`");
+        assert_eq!(drop_sql(Engine::Mysql, "shop", "v", "view", false).unwrap(), "DROP VIEW `shop`.`v`");
+        assert_eq!(drop_sql(Engine::Mysql, "shop", "v", "matview", false).err().unwrap(), "Unknown kind \"matview\"");
+        assert_eq!(drop_sql(Engine::Mysql, "shop", "t", "table", true).err().unwrap(), "CASCADE isn't supported by MySQL");
 
-        assert_eq!(truncate_sql("shop", "t`x", false).unwrap(), "TRUNCATE TABLE `shop`.`t``x`");
-        assert_eq!(truncate_sql("shop", "t", true).err().unwrap(), "CASCADE isn't supported by MySQL");
+        assert_eq!(truncate_sql(Engine::Mysql, "shop", "t`x", false).unwrap(), "TRUNCATE TABLE `shop`.`t``x`");
+        assert_eq!(truncate_sql(Engine::Mysql, "shop", "t", true).err().unwrap(), "CASCADE isn't supported by MySQL");
     }
 
     #[test]
@@ -123,7 +123,7 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
     use serde_json::json;
 
-    use crate::db::mysql_common::tests_support::{exec, query_one, TestDb};
+    use crate::db::mysql_common::tests_support::{exec, query_one, TestDb, label};
     use crate::db::Driver;
 
     const SHOP: &str = include_str!("fixtures/shop.sql");
@@ -171,7 +171,7 @@ mod server_tests {
         assert_eq!(query_one::<i64>(&db.endpoint, "SELECT id FROM orders_copy").await, Some(1));
         let err = editor.truncate_table(schema, "customers", false, false).await.err().unwrap();
         assert!(err.to_lowercase().contains("foreign key"), "{err}");
-        assert_eq!(editor.truncate_table(schema, "orders", false, true).await.err().unwrap(), "CASCADE isn't supported by MySQL");
+        assert_eq!(editor.truncate_table(schema, "orders", false, true).await.err().unwrap(), format!("CASCADE isn\'t supported by {}", label()));
 
         // Rename a table and a view; the keys follow the table
         editor.rename_relation(schema, "customers", "table", "people").await.unwrap();
@@ -190,8 +190,8 @@ mod server_tests {
         editor.drop_relation(schema, "large_orders", "view", false).await.unwrap();
         editor.drop_relation(schema, "orders_empty", "table", false).await.unwrap();
         assert!(d.catalog().relation_kind(schema, "orders_empty").await.unwrap().is_none());
-        assert_eq!(editor.drop_relation(schema, "orders_copy", "table", true).await.err().unwrap(), "CASCADE isn't supported by MySQL");
-        assert_eq!(editor.refresh_materialized_view(schema, "x").await.err().unwrap(), "Materialized views isn't supported by MySQL");
+        assert_eq!(editor.drop_relation(schema, "orders_copy", "table", true).await.err().unwrap(), format!("CASCADE isn\'t supported by {}", label()));
+        assert_eq!(editor.refresh_materialized_view(schema, "x").await.err().unwrap(), format!("Materialized views isn\'t supported by {}", label()));
         // The server refuses what a key needs
         let err = editor.drop_relation(schema, "people", "table", false).await.err().unwrap();
         assert!(err.to_lowercase().contains("foreign key"), "{err}");

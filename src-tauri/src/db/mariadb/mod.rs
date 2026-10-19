@@ -32,6 +32,8 @@ mod server_tests {
     use crate::db::mysql_common::tests_support::{endpoint_from, exec, is_mariadb, open_server, raw_conn, TestDb};
     use crate::db::{Driver, Engine};
 
+    use crate::db::mysql_common::catalog::column_definitions;
+
     use super::MariadbDriver;
 
     #[tokio::test]
@@ -92,5 +94,111 @@ mod server_tests {
         assert_eq!(driver.engine(), Engine::Mariadb);
         driver.close().await;
         db.drop_now().await;
+    }
+
+    const COLUMNS: &str = r#"
+        CREATE TABLE cols (
+            id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            a INT DEFAULT 5,
+            s VARCHAR(20) DEFAULT 'x',
+            q VARCHAR(20) DEFAULT 'it''s \\ x',
+            n INT NULL DEFAULT NULL,
+            t TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            d INT DEFAULT (1 + 1),
+            u VARCHAR(36) DEFAULT (uuid()),
+            g INT GENERATED ALWAYS AS (a * 2) STORED,
+            v INT AS (a + 1) VIRTUAL,
+            j JSON,
+            CONSTRAINT ck_a CHECK (a < 100)
+        )"#;
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn mariadb_defaults_are_read_like_mysql() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(&db.endpoint, COLUMNS).await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let mut conn = driver.conn().await.unwrap();
+        let columns = column_definitions(&mut conn, driver.flavor(), &db.name, "cols").await.unwrap();
+        let named = |name: &str| columns.iter().find(|c| c.name == name).unwrap();
+        // Literals come without quotes, no default at all comes as None
+        assert_eq!(named("a").default.as_deref(), Some("5"));
+        assert_eq!(named("s").default.as_deref(), Some("x"));
+        assert_eq!(named("q").default.as_deref(), Some("it's \\ x"));
+        assert_eq!(named("n").default, None);
+        assert_eq!(named("id").default, None);
+        // Expressions are marked the way MySQL marks them
+        for (name, default) in [("t", "current_timestamp()"), ("d", "(1 + 1)"), ("u", "uuid()")] {
+            assert_eq!(named(name).default.as_deref(), Some(default), "{name}");
+            assert!(named(name).extra.contains("DEFAULT_GENERATED"), "{name}: {}", named(name).extra);
+        }
+        assert!(named("t").extra.to_lowercase().contains("on update current_timestamp"), "{}", named("t").extra);
+        assert!(!named("a").extra.contains("DEFAULT_GENERATED"));
+        drop(conn);
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn mariadb_generated_columns_are_read() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(&db.endpoint, COLUMNS).await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let columns = driver.catalog().columns(&db.name, "cols").await.unwrap();
+        let named = |name: &str| columns.iter().find(|c| c.name == name).unwrap();
+        assert!(named("g").is_generated && named("v").is_generated && !named("a").is_generated);
+        let mut conn = driver.conn().await.unwrap();
+        let definitions = column_definitions(&mut conn, driver.flavor(), &db.name, "cols").await.unwrap();
+        let stored = definitions.iter().find(|c| c.name == "g").unwrap();
+        assert!(stored.extra.contains("STORED GENERATED"), "{}", stored.extra);
+        assert_eq!(stored.generation_expression.as_deref(), Some("`a` * 2"));
+        drop(conn);
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn mariadb_json_column_keeps_its_check() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(&db.endpoint, COLUMNS).await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let structure = driver.catalog().table_structure(&db.name, "cols").await.unwrap();
+        // It reads as the JSON it was declared as, and its own check isn't a constraint to edit
+        let json = structure.columns.iter().find(|c| c.name == "j").unwrap();
+        assert_eq!(json.type_name, "json");
+        assert!(structure.constraints.iter().all(|c| c.name != "j"), "{:?}", structure.constraints.iter().map(|c| &c.name).collect::<Vec<_>>());
+        let check = structure.constraints.iter().find(|c| c.name == "ck_a").unwrap();
+        assert_eq!((check.kind.as_str(), check.definition.as_str()), ("check", "CHECK (`a` < 100)"));
+
+        // Changing another column of the table leaves the JSON column as it was
+        let before: String = show_create(&db, "cols").await;
+        let editor = driver.schema_editor().unwrap();
+        let change = crate::db::model::StructureChange::SetComment { name: "j".into(), comment: None };
+        editor.apply_change(&db.name, "cols", change).await.unwrap();
+        assert_eq!(show_create(&db, "cols").await, before);
+        // Dropping a check goes by CONSTRAINT on MariaDB
+        let drop = crate::db::model::StructureChange::DropConstraint { name: "ck_a".into(), cascade: false };
+        assert_eq!(editor.preview_change(&db.name, "cols", &drop).await.unwrap(), format!("ALTER TABLE `{}`.`cols` DROP CONSTRAINT `ck_a`;", db.name));
+        editor.apply_change(&db.name, "cols", drop).await.unwrap();
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    async fn show_create(db: &TestDb, table: &str) -> String {
+        let mut conn = raw_conn(&db.endpoint).await;
+        let row: (String, String) = conn.query_first(format!("SHOW CREATE TABLE `{}`.`{table}`", db.name)).await.unwrap().unwrap();
+        let _ = conn.disconnect().await;
+        row.1
     }
 }

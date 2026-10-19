@@ -42,11 +42,13 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
 
     use super::super::editor::ROLLED_BACK;
-    use crate::db::mysql_common::tests_support::{exec, query_one, raw_conn, TestDb};
+    use crate::db::mysql_common::tests_support::{exec, query_one, raw_conn, TestDb, label};
     use crate::db::mysql_common::driver::ServerDriver;
     use crate::db::Driver;
 
-    const IMPLICIT_COMMIT: &str = "This statement committed the open transaction: MySQL commits before DDL.";
+    fn implicit_commit() -> String {
+        format!("This statement committed the open transaction: {} commits before DDL.", label())
+    }
 
     async fn open() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
@@ -113,7 +115,7 @@ mod server_tests {
         console.execute("INSERT INTO t VALUES (1)").await.unwrap();
         let result = console.execute("CREATE TABLE y (x INT)").await.unwrap();
         let notice = result.notices.first().expect("the commit is reported");
-        assert_eq!((notice.severity.as_str(), notice.message.as_str()), ("Warning", IMPLICIT_COMMIT));
+        assert_eq!((notice.severity.as_str(), notice.message.as_str()), ("Warning", implicit_commit().as_str()));
         assert!(!result.in_transaction && !tx.is_open().await.unwrap());
         assert_eq!(rows_seen_elsewhere(&db).await, 1, "the insert was committed");
         // Outside a transaction DDL says nothing

@@ -492,14 +492,30 @@ mod server_tests {
     use serde_json::{json, Map};
 
     use super::*;
-    use crate::db::mysql_common::tests_support::{exec, raw_conn, TestDb};
+    use crate::db::mysql_common::tests_support::{exec, on_mariadb, raw_conn, TestDb};
     use crate::db::sql::dialect::Dialect;
     use crate::db::sql::edit::build_insert_in;
 
     type JsonRow = Map<String, JsonValue>;
 
-    /// Both rows of `fixtures/all_types.sql` as the grid shows them.
+    /// What the grid shows for the two rows of `all_types`. MariaDB keeps JSON as text, so
+    /// the value comes as the string that was written.
     fn expected() -> Vec<JsonRow> {
+        let mut rows = mysql_expected();
+        if on_mariadb() {
+            let written = [
+                r#"{"a": [1, 2]}"#,
+                r#"{"a": {"b": [1, {"c": null}], "d": "x"}, "e": true, "f": "9007199254740993"}"#,
+            ];
+            for (row, text) in rows.iter_mut().zip(written) {
+                row.insert("c_json".into(), JsonValue::String(text.into()));
+            }
+        }
+        rows
+    }
+
+    /// Both rows of `fixtures/all_types.sql` as the grid shows them on MySQL.
+    fn mysql_expected() -> Vec<JsonRow> {
         let rows = json!([
             {
                 "id": 1, "c_tinyint": -5, "c_tinyint_u": 200, "c_smallint": 300, "c_mediumint": -70000,
@@ -599,12 +615,14 @@ mod server_tests {
             ("c_tinyint_u", "tinyint"), ("c_smallint", "smallint"), ("c_mediumint", "mediumint"), ("c_int_u", "int"),
             ("c_bigint_u", "bigint"), ("c_decimal", "decimal"), ("c_float", "float"), ("c_double", "double"),
             ("c_date", "date"), ("c_datetime", "datetime"), ("c_timestamp", "timestamp"), ("c_time", "time"),
-            ("c_year", "year"), ("c_bit64", "bit"), ("c_json", "json"), ("c_binary", "binary"),
+            ("c_year", "year"), ("c_bit64", "bit"), ("c_binary", "binary"),
             ("c_varbinary", "varbinary"), ("c_blob", "blob"), ("c_char", "char"), ("c_varchar", "varchar"),
             ("c_text", "text"), ("c_enum", "enum"), ("c_set", "set"), ("c_geometry", "geometry"),
         ] {
             assert_eq!(name_of(column), type_name, "{column}");
         }
+        // MariaDB's JSON is a text column
+        assert_eq!(name_of("c_json"), if on_mariadb() { "text" } else { "json" });
 
         // Each value written back with the binder reads equal. Geometry is read-only in the
         // grid, so it isn't written.

@@ -113,10 +113,34 @@ impl Drop for TestDb {
 /// Opens a session on `endpoint` with the driver of the flavor the test server (the one in
 /// `DBUNNY_TEST_MYSQL_URL`) is.
 pub async fn open_server(endpoint: MysqlEndpoint) -> Result<Arc<ServerDriver>, String> {
-    if is_mariadb().await {
+    let mariadb = is_mariadb().await;
+    MARIADB_NOW.store(mariadb, std::sync::atomic::Ordering::Relaxed);
+    if mariadb {
         MariadbDriver::open(endpoint, None).await
     } else {
         MysqlDriver::open(endpoint, None).await
+    }
+}
+
+/// Whether the test server is MariaDB; set by `open_server`, which every server test calls first.
+static MARIADB_NOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// For checks that read the same on both servers but for how they write a type or a rule.
+pub fn on_mariadb() -> bool {
+    MARIADB_NOW.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The name of the test server's engine as the app's messages spell it.
+pub fn label() -> &'static str {
+    if on_mariadb() { "MariaDB" } else { "MySQL" }
+}
+
+/// How the server writes an integer type: MariaDB keeps the display width.
+pub fn ty(base: &str) -> String {
+    match (on_mariadb(), base) {
+        (true, "int") => "int(11)".into(),
+        (true, "bigint") => "bigint(20)".into(),
+        _ => base.into(),
     }
 }
 

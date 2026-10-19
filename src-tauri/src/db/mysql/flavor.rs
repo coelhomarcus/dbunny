@@ -35,6 +35,23 @@ impl Flavor for MysqlFlavor {
     }
 
     /// `EXPLAIN FORMAT=TREE`, which doesn't run the statement, or `EXPLAIN ANALYZE`, which does.
+    fn index_visible_sql(&self) -> &'static str {
+        "s.IS_VISIBLE"
+    }
+
+    /// Functional key parts exist from 8.0.13.
+    fn index_expression_sql(&self, version: ServerVersion) -> &'static str {
+        if version.at_least(8, 0, 13) { "s.EXPRESSION" } else { "NULL" }
+    }
+
+    fn has_check_constraints(&self, version: ServerVersion) -> bool {
+        version.at_least(8, 0, 16)
+    }
+
+    fn check_enforced_sql(&self) -> &'static str {
+        "tc.ENFORCED"
+    }
+
     fn read_only_sql(&self) -> &'static str {
         "SELECT @@read_only, @@super_read_only"
     }

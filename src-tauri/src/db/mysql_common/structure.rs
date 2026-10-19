@@ -6,6 +6,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Params, Row};
 
 use super::catalog::{non_empty, number, qualified, quote, show_create, string, table_columns, terminated, text};
+use crate::db::mysql_common::flavor::Flavor;
 use crate::db::mysql_common::version::ServerVersion;
 use crate::db::model::{
     ConstraintInfo, ForeignKeyInfo, IndexInfo, ReferencedBy, TableMeta, TablePrivilege, TableStructure, TriggerInfo,
@@ -27,6 +28,7 @@ fn section<T: Default>(warnings: &mut Vec<String>, endpoint: &MysqlEndpoint, nam
 pub(super) async fn table_structure(
     conn: &mut Conn,
     endpoint: &MysqlEndpoint,
+    flavor: &dyn Flavor,
     version: ServerVersion,
     schema: &str,
     table: &str,
@@ -63,7 +65,7 @@ pub(super) async fn table_structure(
             ..TableMeta::default()
         }
     };
-    let columns = section(&mut warnings, endpoint, "the columns", table_columns(conn, schema, table).await);
+    let columns = section(&mut warnings, endpoint, "the columns", table_columns(conn, flavor, schema, table).await);
     if is_view {
         let ddl = section(&mut warnings, endpoint, "the view definition", show_create(conn, "VIEW", schema, table, 1).await);
         return Ok(TableStructure {
@@ -80,14 +82,14 @@ pub(super) async fn table_structure(
         });
     }
 
-    let indexes = section(&mut warnings, endpoint, "the indexes", table_indexes(conn, schema, table, version).await);
+    let indexes = section(&mut warnings, endpoint, "the indexes", table_indexes(conn, flavor, schema, table, version).await);
     let keys = section(
         &mut warnings,
         endpoint,
         "the foreign keys",
         read_foreign_keys(conn, "k.TABLE_SCHEMA = ? AND k.TABLE_NAME = ?", (schema, table)).await,
     );
-    let constraints = section(&mut warnings, endpoint, "the constraints", table_constraints(conn, schema, table, version, &indexes, &keys).await);
+    let constraints = section(&mut warnings, endpoint, "the constraints", table_constraints(conn, flavor, schema, table, version, &indexes, &keys).await);
     let referencing = section(
         &mut warnings,
         endpoint,
@@ -191,14 +193,14 @@ pub(super) async fn read_constraint_types(conn: &mut Conn, schema: &str, table: 
     Ok(rows.iter().map(|r| (string(r, "constraint_name"), string(r, "constraint_type"))).collect())
 }
 
-async fn table_indexes(conn: &mut Conn, schema: &str, table: &str, version: ServerVersion) -> mysql_async::Result<Vec<IndexInfo>> {
-    // Functional key parts exist from 8.0.13
-    let expression = if version.at_least(8, 0, 13) { "s.EXPRESSION" } else { "NULL" };
+async fn table_indexes(conn: &mut Conn, flavor: &dyn Flavor, schema: &str, table: &str, version: ServerVersion) -> mysql_async::Result<Vec<IndexInfo>> {
+    let expression = flavor.index_expression_sql(version);
+    let visible = flavor.index_visible_sql();
     let rows: Vec<Row> = conn
         .exec(
             format!(
                 "SELECT s.INDEX_NAME AS index_name, s.COLUMN_NAME AS column_name, s.SUB_PART AS sub_part, \
-                        s.NON_UNIQUE AS non_unique, s.INDEX_TYPE AS index_type, s.IS_VISIBLE AS is_visible, \
+                        s.NON_UNIQUE AS non_unique, s.INDEX_TYPE AS index_type, {visible} AS is_visible, \
                         {expression} AS expression, s.COLLATION AS direction \
                  FROM information_schema.STATISTICS s WHERE s.TABLE_SCHEMA = ? AND s.TABLE_NAME = ? \
                  ORDER BY s.INDEX_NAME, s.SEQ_IN_INDEX"
@@ -277,6 +279,7 @@ async fn table_indexes(conn: &mut Conn, schema: &str, table: &str, version: Serv
 
 async fn table_constraints(
     conn: &mut Conn,
+    flavor: &dyn Flavor,
     schema: &str,
     table: &str,
     version: ServerVersion,
@@ -319,19 +322,22 @@ async fn table_constraints(
             _ => {}
         }
     }
-    if version.at_least(8, 0, 16) {
+    if flavor.has_check_constraints(version) {
         let rows: Vec<Row> = conn
             .exec(
-                "SELECT tc.CONSTRAINT_NAME AS constraint_name, cc.CHECK_CLAUSE AS check_clause, tc.ENFORCED AS enforced \
+                format!("SELECT tc.CONSTRAINT_NAME AS constraint_name, cc.CHECK_CLAUSE AS check_clause, {} AS enforced \
                  FROM information_schema.TABLE_CONSTRAINTS tc \
                  JOIN information_schema.CHECK_CONSTRAINTS cc \
                    ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME \
-                 WHERE tc.TABLE_SCHEMA = ? AND tc.TABLE_NAME = ? AND tc.CONSTRAINT_TYPE = 'CHECK' ORDER BY tc.CONSTRAINT_NAME",
+                 WHERE tc.TABLE_SCHEMA = ? AND tc.TABLE_NAME = ? AND tc.CONSTRAINT_TYPE = 'CHECK' ORDER BY tc.CONSTRAINT_NAME", flavor.check_enforced_sql()),
                 (schema, table),
             )
             .await?;
         for row in &rows {
             let clause = string(row, "check_clause");
+            if flavor.is_implicit_check(&string(row, "constraint_name"), &clause) {
+                continue;
+            }
             let mut definition = if clause.starts_with('(') { format!("CHECK {clause}") } else { format!("CHECK ({clause})") };
             if string(row, "enforced") == "NO" {
                 definition += " NOT ENFORCED";

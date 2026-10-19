@@ -48,7 +48,7 @@ fn server_message(code: u16, message: &str, endpoint: &MysqlEndpoint) -> String 
         // The console turns its "at line N" into a position in the script
         1064 => message.to_string(),
         code if LOST_CODES.contains(&code) => LOST.into(),
-        code => format!("{message} (MySQL error {code})"),
+        code => format!("{message} ({} error {code})", endpoint.engine_label()),
     }
 }
 

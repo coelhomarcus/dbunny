@@ -141,6 +141,7 @@ fn server_endpoint(app_handle: &tauri::AppHandle, params: MysqlConnectParams, ss
         ssh,
         known_hosts,
         read_only: params.read_only,
+        engine: None,
     })
 }
 

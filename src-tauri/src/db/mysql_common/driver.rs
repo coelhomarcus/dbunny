@@ -45,6 +45,7 @@ impl ServerDriver {
     /// pool. `trust_host_key` is an SSH host key fingerprint the user just confirmed.
     pub async fn open(endpoint: MysqlEndpoint, trust_host_key: Option<String>, flavor: &'static dyn Flavor) -> Result<Arc<ServerDriver>, String> {
         let mut endpoint = endpoint;
+        endpoint.engine = Some(flavor.engine());
         if is_socket(&endpoint.host) && endpoint.ssh.is_some() {
             return Err("A socket is a local file, so it can't be reached through an SSH tunnel".into());
         }

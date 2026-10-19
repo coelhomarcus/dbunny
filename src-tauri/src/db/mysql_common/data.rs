@@ -9,6 +9,7 @@ use serde_json::Value as JsonValue;
 
 use crate::db::mysql_common::catalog::{column_definitions, number, qualified, quote, table_engine};
 use crate::db::mysql_common::driver::ServerDriver;
+use crate::db::mysql_common::flavor::Flavor;
 use crate::db::model::{JsonMap, QueryColumn, RowChange, TableDataParams, TableDataResponse};
 use crate::db::mysql_common::errors::error_message;
 use crate::db::mysql_common::values::{kind_of, type_name, value_to_json, MysqlBinder};
@@ -51,10 +52,10 @@ struct TableShape {
 }
 
 impl TableShape {
-    async fn read(conn: &mut Conn, schema: &str, table: &str) -> Result<TableShape, String> {
-        let definitions = column_definitions(conn, schema, table).await?;
+    async fn read(conn: &mut Conn, flavor: &dyn Flavor, schema: &str, table: &str) -> Result<TableShape, String> {
+        let definitions = column_definitions(conn, flavor, schema, table).await?;
         if definitions.is_empty() {
-            return Err(format!("Table '{schema}.{table}' doesn't exist (MySQL error 1146)"));
+            return Err(format!("Table '{schema}.{table}' doesn't exist ({} error 1146)", flavor.engine().label()));
         }
         let mut shape = TableShape {
             columns: Vec::new(),
@@ -134,7 +135,7 @@ impl Data for ServerDriver {
         let page_size = params.page_size.unwrap_or(50).clamp(1, 500);
         let offset = (page - 1) * page_size;
 
-        let shape = TableShape::read(&mut conn, schema, table).await?;
+        let shape = TableShape::read(&mut conn, self.flavor(), schema, table).await?;
         let order = order_clause_in(MYSQL, &sort_keys(&params), &shape.columns);
         let filters = params.filters.as_deref().unwrap_or(&[]);
         let match_any = params.filter_mode.as_deref() == Some("any");
@@ -178,7 +179,7 @@ impl Data for ServerDriver {
     /// their defaults. A null value is SQL NULL.
     async fn insert_row(&self, schema: &str, table: &str, values: JsonMap) -> Result<u64, String> {
         let mut conn = self.conn().await?;
-        let shape = TableShape::read(&mut conn, schema, table).await?;
+        let shape = TableShape::read(&mut conn, self.flavor(), schema, table).await?;
         shape.refuse_geometry(values.keys())?;
         let relation = qualified(schema, table);
         let (sql, params) = build_insert_in(MYSQL, &relation, &values, &shape.columns, &shape.binder)?;
@@ -191,7 +192,7 @@ impl Data for ServerDriver {
     /// since it was read (or a key that matches several rows) stops the save.
     async fn save_rows(&self, schema: &str, table: &str, changes: Vec<RowChange>) -> Result<u64, String> {
         let mut conn = self.conn().await?;
-        let shape = TableShape::read(&mut conn, schema, table).await?;
+        let shape = TableShape::read(&mut conn, self.flavor(), schema, table).await?;
         let relation = qualified(schema, table);
         let total = changes.len();
         let which = |i: usize| if total > 1 { format!("Row {} of {total}", i + 1) } else { "The row".to_string() };
@@ -232,7 +233,7 @@ impl Data for ServerDriver {
 
     async fn delete_rows(&self, schema: &str, table: &str, keys: Vec<JsonMap>) -> Result<u64, String> {
         let mut conn = self.conn().await?;
-        let shape = TableShape::read(&mut conn, schema, table).await?;
+        let shape = TableShape::read(&mut conn, self.flavor(), schema, table).await?;
         for key in &keys {
             shape.refuse_geometry(key.keys())?;
         }
@@ -283,7 +284,7 @@ impl Data for ServerDriver {
         rows: Vec<Vec<Option<String>>>,
     ) -> Result<u64, String> {
         let mut conn = self.conn().await?;
-        let shape = TableShape::read(&mut conn, schema, table).await?;
+        let shape = TableShape::read(&mut conn, self.flavor(), schema, table).await?;
         shape.refuse_geometry(columns.iter())?;
         let relation = qualified(schema, table);
         let mut batches = build_import_batches_in(MYSQL, &relation, &columns, &rows, &shape.columns, &shape.binder)?;
@@ -360,7 +361,7 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
     use serde_json::{json, Value as JsonValue};
 
-    use crate::db::mysql_common::tests_support::{exec, query_one, TestDb};
+    use crate::db::mysql_common::tests_support::{exec, on_mariadb, query_one, TestDb};
     use crate::db::mysql_common::driver::ServerDriver;
     use crate::db::model::{JsonMap, RowChange, SortKey, TableDataParams, TableDataResponse};
     use crate::db::mysql_common::errors::LOCKED;
@@ -734,9 +735,9 @@ mod server_tests {
         exec(&db.endpoint, "CREATE TABLE big (id INT NOT NULL PRIMARY KEY, v INT NOT NULL) ENGINE=InnoDB").await;
         exec(
             &db.endpoint,
-            "SET SESSION cte_max_recursion_depth = 300000; \
+            &format!("SET SESSION {} = 300000; \
              INSERT INTO big SELECT n, n % 7 FROM (WITH RECURSIVE s(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM s WHERE n < 200000) SELECT n FROM s) t; \
-             ANALYZE TABLE big",
+             ANALYZE TABLE big", if on_mariadb() { "max_recursive_iterations" } else { "cte_max_recursion_depth" }),
         )
         .await;
         let big = page(&driver, &db, "big", TableDataParams { page_size: Some(5), ..Default::default() }).await;
