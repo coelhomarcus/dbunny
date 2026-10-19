@@ -52,6 +52,11 @@ pub fn check_reading(dialect: Dialect, sql: &str) -> Result<(), ReadRefusal> {
     }
 }
 
+/// The first word of `sql` in upper case, after any comments.
+pub fn first_word(dialect: Dialect, sql: &str) -> Option<String> {
+    tokenize(dialect, sql).first().and_then(Tok::word).map(str::to_string)
+}
+
 /// Whether `sql` is a query that neither writes a file or a variable nor takes locks.
 pub fn is_query(dialect: Dialect, sql: &str) -> bool {
     let tokens = tokenize(dialect, sql);
@@ -64,7 +69,7 @@ enum Tok {
     Word(String),
     /// A string or a quoted name
     Quoted,
-    /// MySQL's `/*! … */`, which the server runs
+    /// MySQL's `/*! … */` and MariaDB's `/*M! … */`, which the server runs
     Versioned,
     Punct(char),
 }
@@ -161,7 +166,8 @@ fn tokenize(dialect: Dialect, sql: &str) -> Vec<Tok> {
                 i += 1;
             }
         } else if c == '/' && next == Some('*') {
-            if mysql && chars.get(i + 2) == Some(&'!') {
+            // MariaDB's `/*M! … */` runs on MariaDB the way `/*! … */` does on both
+            if mysql && (chars.get(i + 2) == Some(&'!') || (chars.get(i + 2) == Some(&'M') && chars.get(i + 3) == Some(&'!'))) {
                 tokens.push(Tok::Versioned);
             }
             i = skip_block_comment(&chars, i, postgres);
@@ -253,10 +259,36 @@ fn has_writing_word(tokens: &[Tok]) -> bool {
                 "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "TRUNCATE" | "DROP" | "ALTER" | "CREATE" | "GRANT" | "REVOKE" => true,
                 "REPLACE" => tokens.get(at + 1) != Some(&Tok::Punct('(')),
                 "FOR" => matches!(tokens.get(at + 1).and_then(Tok::word), Some("NO" | "KEY")),
-                _ => false,
+                name => tokens.get(at + 1) == Some(&Tok::Punct('(')) && has_lasting_effect(name),
             },
             _ => false,
         })
+}
+
+/// Functions that act outside the transaction: a read-only transaction lets them through and
+/// a rollback does not undo them (locks that last for the connection, other sessions, sequences,
+/// settings, a remote server).
+fn has_lasting_effect(name: &str) -> bool {
+    name.starts_with("PG_ADVISORY_LOCK")
+        || name.starts_with("PG_TRY_ADVISORY_LOCK")
+        || matches!(
+            name,
+            "PG_TERMINATE_BACKEND"
+                | "PG_CANCEL_BACKEND"
+                | "PG_NOTIFY"
+                | "PG_RELOAD_CONF"
+                | "PG_ADVISORY_UNLOCK_ALL"
+                | "DBLINK_EXEC"
+                | "DBLINK"
+                | "NEXTVAL"
+                | "SETVAL"
+                | "SET_CONFIG"
+                | "LO_IMPORT"
+                | "LO_EXPORT"
+                | "GET_LOCK"
+                | "RELEASE_LOCK"
+                | "RELEASE_ALL_LOCKS"
+        )
 }
 
 #[cfg(test)]
@@ -338,6 +370,45 @@ mod tests {
         }
         // A conditional comment is run by MySQL, so what is inside counts
         assert_eq!(check_reading(Dialect::Mysql, "SELECT 1 /*!50000 INTO OUTFILE '/tmp/x' */"), Err(ReadRefusal::Writes));
+    }
+
+    #[test]
+    fn mariadb_executable_comments_count_like_mysql_ones() {
+        // MariaDB runs what is inside `/*M! … */`, so a file can be written from a "comment"
+        for sql in ["SELECT a FROM t /*M! INTO OUTFILE '/tmp/x' */", "SELECT a FROM t /*M!100100 INTO @v */"] {
+            assert_eq!(check_reading(Dialect::Mysql, sql), Err(ReadRefusal::Writes), "{sql}");
+            assert!(!is_query(Dialect::Mysql, sql), "{sql}");
+        }
+        assert_eq!(check_reading(Dialect::Mysql, "SELECT 1 /* M! plain */"), Ok(()));
+        assert_eq!(check_reading(Dialect::Postgres, "SELECT 1 /*M! plain */"), Ok(()));
+    }
+
+    #[test]
+    fn refuses_functions_whose_effects_outlive_the_transaction() {
+        for sql in [
+            "SELECT pg_advisory_lock(1)",
+            "SELECT pg_try_advisory_lock_shared(1)",
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity",
+            "SELECT pg_catalog.pg_cancel_backend(1)",
+            "SELECT pg_notify('c', 'x')",
+            "SELECT dblink_exec('x', 'DROP TABLE t')",
+            "SELECT nextval('s')",
+            "SELECT set_config('a', 'b', false)",
+            "SELECT GET_LOCK('a', 10)",
+            "SELECT release_all_locks()",
+        ] {
+            assert_eq!(check_reading(Dialect::Postgres, sql), Err(ReadRefusal::Writes), "{sql}");
+        }
+        // Only a call counts; a column with the same name is a column
+        assert_eq!(check_reading(Dialect::Postgres, "SELECT nextval FROM t"), Ok(()));
+        assert_eq!(check_reading(Dialect::Postgres, "SELECT pg_advisory_xact_lock(1)"), Ok(()));
+    }
+
+    #[test]
+    fn first_word_skips_comments() {
+        assert_eq!(first_word(Dialect::Postgres, "-- note\n  /* x */ show search_path").as_deref(), Some("SHOW"));
+        assert_eq!(first_word(Dialect::Mysql, "(SELECT 1)"), None);
+        assert_eq!(first_word(Dialect::Sqlite, "  "), None);
     }
 
     #[test]

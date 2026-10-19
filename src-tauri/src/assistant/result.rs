@@ -48,6 +48,10 @@ fn shown_value(value: &Value, column: &QueryColumn) -> Value {
     let Value::String(text) = value else { return value.clone() };
     let kind = column.data_type.to_ascii_lowercase();
     if ["bytea", "blob", "binary"].iter().any(|word| kind.contains(word)) {
+        // The read already described one that was too large to keep
+        if text.starts_with("<binary ") {
+            return value.clone();
+        }
         return Value::String(format!("<binary {} bytes>", binary_length(text)));
     }
     match text.char_indices().nth(MAX_VALUE_CHARS) {
@@ -143,6 +147,12 @@ mod tests {
         let blob = format!("\\x{}", "ab".repeat(16));
         let out = parsed(&agent_result(&read(vec![column("b", "blob"), column("c", "bytea")], vec![vec![json!(blob), json!("AAECAw==")]], false), 100, false));
         assert_eq!(out["rows"][0], json!(["<binary 16 bytes>", "<binary 4 bytes>"]));
+    }
+
+    #[test]
+    fn binary_the_read_already_described_stays_as_it_is() {
+        let out = parsed(&agent_result(&read(vec![column("b", "bytea")], vec![vec![json!("<binary 9000000 bytes>")]], false), 100, false));
+        assert_eq!(out["rows"][0][0], "<binary 9000000 bytes>");
     }
 
     #[test]

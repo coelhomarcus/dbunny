@@ -47,6 +47,10 @@ pub trait Flavor: Send + Sync {
     async fn refine_columns(&self, _conn: &mut mysql_async::Conn, _database: &str, _table: &str, _columns: &mut Vec<StoredColumn>) -> mysql_async::Result<()> {
         Ok(())
     }
+    /// The statement that asks the server for the plan of `statement`.
+    fn explain_sql(&self, statement: &str, analyze: bool) -> String;
+    /// The plan the server answered with, as the tree the plan view draws.
+    fn plan_of(&self, text: &str, analyze: bool) -> Result<ExplainResult, String>;
     /// The plan of one statement that was already checked (a single statement, no EXPLAIN of
     /// its own, and, to analyze, one that only reads). It runs on the editor's connection.
     async fn explain(&self, driver: &ServerDriver, statement: &str, analyze: bool) -> Result<ExplainResult, String>;

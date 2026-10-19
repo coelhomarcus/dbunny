@@ -60,8 +60,16 @@ impl Flavor for MysqlFlavor {
         "SELECT @@read_only, @@super_read_only"
     }
 
+    fn explain_sql(&self, statement: &str, analyze: bool) -> String {
+        if analyze { format!("EXPLAIN ANALYZE {statement}") } else { format!("EXPLAIN FORMAT=TREE {statement}") }
+    }
+
+    fn plan_of(&self, text: &str, analyze: bool) -> Result<ExplainResult, String> {
+        Ok(ExplainResult { plan: parse_tree(text)?, analyzed: analyze, format: ExplainFormat::MysqlTree })
+    }
+
     async fn explain(&self, driver: &ServerDriver, statement: &str, analyze: bool) -> Result<ExplainResult, String> {
-        let explain_sql = if analyze { format!("EXPLAIN ANALYZE {statement}") } else { format!("EXPLAIN FORMAT=TREE {statement}") };
+        let explain_sql = self.explain_sql(statement, analyze);
         let endpoint = driver.endpoint().clone();
         let text = driver
             .editor()
@@ -70,7 +78,7 @@ impl Flavor for MysqlFlavor {
             })
             .await?
             .ok_or("The server returned no plan")?;
-        Ok(ExplainResult { plan: parse_tree(&text)?, analyzed: analyze, format: ExplainFormat::MysqlTree })
+        self.plan_of(&text, analyze)
     }
 
     async fn accounts(&self, conn: &mut mysql_async::Conn) -> mysql_async::Result<Vec<RoleInfo>> {

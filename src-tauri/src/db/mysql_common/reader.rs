@@ -10,7 +10,7 @@ use mysql_async::{Column, Conn, Error as MysqlError};
 use super::driver::ServerDriver;
 use super::errors::error_message;
 use super::values::{type_name, value_to_json};
-use crate::db::model::{QueryColumn, ReadLimits, ReadResult};
+use crate::db::model::{ExplainResult, QueryColumn, ReadLimits, ReadResult};
 use crate::db::sql::reading::{check_reading, TIMED_OUT};
 use crate::db::sql::Dialect;
 use crate::db::ReadOnlyQueries;
@@ -48,16 +48,52 @@ impl ServerDriver {
             }
             Ok(Err(e)) => {
                 let _ = conn.disconnect().await;
-                Err(match &e {
-                    MysqlError::Server(server) if TIMEOUT_CODES.contains(&server.code) => TIMED_OUT.to_string(),
-                    _ => error_message(&e, self.endpoint()),
-                })
+                Err(self.read_failure(&e))
             }
             Err(_) => {
                 self.kill_query(id).await;
                 let _ = conn.disconnect().await;
                 Err(TIMED_OUT.to_string())
             }
+        }
+    }
+
+    /// EXPLAIN ANALYZE of `sql`, which runs it, under the terms of `read_unchecked`.
+    pub(crate) async fn explain_unchecked(&self, sql: &str, limits: ReadLimits) -> Result<ExplainResult, String> {
+        let mut conn = self.conn().await?;
+        let id = conn.id();
+        let flavor = self.flavor();
+        let ms = limits.timeout.as_millis() as u64;
+        let (limit_sql, lift_sql) = (flavor.statement_timeout_sql(ms), flavor.statement_timeout_sql(0));
+        let explain_sql = flavor.explain_sql(sql, true);
+        let work = async {
+            conn.query_drop(limit_sql).await?;
+            conn.query_drop("START TRANSACTION READ ONLY").await?;
+            let plan = conn.query_first::<String, _>(explain_sql).await?;
+            conn.query_drop("ROLLBACK").await?;
+            conn.query_drop(lift_sql).await?;
+            Ok::<_, MysqlError>(plan)
+        };
+        match tokio::time::timeout(limits.timeout + CLIENT_GRACE, work).await {
+            Ok(Ok(plan)) => flavor.plan_of(&plan.ok_or("The server returned no plan")?, true),
+            Ok(Err(e)) => {
+                let message = self.read_failure(&e);
+                let _ = conn.disconnect().await;
+                Err(message)
+            }
+            Err(_) => {
+                self.kill_query(id).await;
+                let _ = conn.disconnect().await;
+                Err(TIMED_OUT.to_string())
+            }
+        }
+    }
+
+    /// What a failed read says.
+    fn read_failure(&self, e: &MysqlError) -> String {
+        match e {
+            MysqlError::Server(server) if TIMEOUT_CODES.contains(&server.code) => TIMED_OUT.to_string(),
+            _ => error_message(e, self.endpoint()),
         }
     }
 
@@ -74,6 +110,11 @@ impl ReadOnlyQueries for ServerDriver {
     async fn query(&self, sql: &str, limits: ReadLimits) -> Result<ReadResult, String> {
         check_reading(Dialect::Mysql, sql).map_err(|refusal| refusal.message().to_string())?;
         self.read_unchecked(sql, limits).await
+    }
+
+    async fn explain_analyzed(&self, sql: &str, limits: ReadLimits) -> Result<ExplainResult, String> {
+        check_reading(Dialect::Mysql, sql).map_err(|refusal| refusal.message().to_string())?;
+        self.explain_unchecked(sql, limits).await
     }
 }
 
@@ -94,7 +135,14 @@ async fn read_on(conn: &mut Conn, limit_sql: &str, lift_sql: &str, sql: &str, ro
                 more = true;
                 break;
             }
-            out.push(row.unwrap().iter().zip(columns.iter()).map(|(value, column)| value_to_json(value, column)).collect());
+            out.push(
+                row.unwrap()
+                    .iter()
+                    .zip(columns.iter())
+                    .zip(info.iter())
+                    .map(|((value, column), described)| described.capped(value_to_json(value, column)))
+                    .collect(),
+            );
         }
     }
     let result = ReadResult { columns: info, rows: out, more };
@@ -188,6 +236,29 @@ mod server_tests {
         let err = d.read_unchecked("DELETE FROM t", limits(10)).await.unwrap_err();
         assert!(err.to_lowercase().contains("read-only"), "{err}");
         assert_eq!(count(&db).await, 1000);
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn explain_analyze_runs_in_the_read_only_transaction() {
+        let (db, d) = thousand().await;
+        let reader = d.reader().unwrap();
+        // A write is never analyzed, whether the server takes it or not
+        let _ = d.explain_unchecked("DELETE FROM t", limits(10)).await;
+        assert_eq!(count(&db).await, 1000);
+        let plan = reader.explain_analyzed("SELECT count(*) FROM t", limits(10)).await.unwrap();
+        assert!(plan.analyzed);
+        assert_eq!(reader.explain_analyzed("DELETE FROM t", limits(10)).await.err().unwrap(), READ_REFUSED);
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn executable_comments_do_not_hide_a_write_of_a_file() {
+        let (db, d) = thousand().await;
+        let sql = "SELECT a FROM t /*M! INTO OUTFILE '/tmp/dbunny_never.txt' */";
+        assert_eq!(d.reader().unwrap().query(sql, limits(10)).await.unwrap_err(), READ_REFUSED);
         db.drop_now().await;
     }
 

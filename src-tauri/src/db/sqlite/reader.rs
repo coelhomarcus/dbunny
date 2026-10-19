@@ -9,7 +9,7 @@ use super::conn::SqliteConn;
 use super::console::stored_type;
 use super::values::{standard_type, value_to_json};
 use super::{OpenOptions, SqliteDriver};
-use crate::db::model::{QueryColumn, ReadLimits, ReadResult};
+use crate::db::model::{cap_cell, ExplainResult, QueryColumn, ReadLimits, ReadResult};
 use crate::db::sql::reading::{check_reading, TIMED_OUT};
 use crate::db::sql::Dialect;
 use crate::db::ReadOnlyQueries;
@@ -60,6 +60,11 @@ impl ReadOnlyQueries for SqliteDriver {
         check_reading(Dialect::Sqlite, sql).map_err(|refusal| refusal.message().to_string())?;
         self.read_unchecked(sql, limits).await
     }
+
+    /// SQLite has no EXPLAIN ANALYZE.
+    async fn explain_analyzed(&self, _sql: &str, _limits: ReadLimits) -> Result<ExplainResult, String> {
+        Err("EXPLAIN ANALYZE isn't available on SQLite.".to_string())
+    }
 }
 
 /// Steps through the statement until `rows + 1` rows, the extra one only to tell there were more.
@@ -83,7 +88,8 @@ fn read_rows(c: &Connection, sql: &str, rows: usize) -> rusqlite::Result<ReadRes
             if seen.is_none() {
                 *seen = stored_type(value);
             }
-            values.push(value_to_json(value));
+            let kind = names[i].1.as_deref().map(standard_type).or(*seen).unwrap_or("text");
+            values.push(cap_cell(kind, value_to_json(value)));
         }
         out.push(values);
     }

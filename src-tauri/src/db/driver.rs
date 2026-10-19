@@ -91,6 +91,10 @@ pub trait ReadOnlyQueries: Send + Sync {
     /// Runs one statement that only reads, outside the editor's connection, in a read-only
     /// transaction that is always rolled back. Reads at most `limits.rows + 1` rows and stops.
     async fn query(&self, sql: &str, limits: ReadLimits) -> Result<ReadResult, String>;
+
+    /// The plan of one statement that only reads, run for real (EXPLAIN ANALYZE) under the same
+    /// terms as `query`: a read-only transaction on a connection apart from the editor's.
+    async fn explain_analyzed(&self, sql: &str, limits: ReadLimits) -> Result<ExplainResult, String>;
 }
 
 /// A transaction kept open across runs of the SQL editor.

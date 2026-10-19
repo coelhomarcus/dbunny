@@ -7,18 +7,19 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 use tokio_postgres::error::SqlState;
-use tokio_postgres::types::Type;
+use futures_util::TryStreamExt;
+use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::{Client, SimpleQueryMessage};
 
 use super::connect::open_connection;
-use super::console::run_statement;
+use super::console::{plan_from_messages, run_statement};
 use super::data::{columns_from_statement, db_message, row_to_json_values};
 use super::text::{is_native, text_to_json};
 use super::PostgresDriver;
-use crate::db::model::{ReadLimits, ReadResult};
-use crate::db::sql::reading::{check_reading, TIMED_OUT};
+use crate::db::model::{ExplainResult, ReadLimits, ReadResult};
+use crate::db::sql::reading::{check_reading, first_word, TIMED_OUT};
 use crate::db::sql::split::split_statements;
-use crate::db::ReadOnlyQueries;
+use crate::db::{ExplainFormat, ReadOnlyQueries};
 
 /// How long past the statement's own timeout the client waits before giving up on the connection.
 const CLIENT_GRACE: Duration = Duration::from_secs(2);
@@ -28,10 +29,27 @@ impl PostgresDriver {
     /// Runs `sql` on the assistant's connection without asking the classifier first. The
     /// read-only transaction refuses to write, which the tests rely on.
     pub(super) async fn read_unchecked(&self, sql: &str, limits: ReadLimits) -> Result<ReadResult, String> {
+        match self.guarded(limits, Job::Read(sql)).await? {
+            Done::Rows(result) => Ok(result),
+            Done::Plan(_) => Err("The read gave a plan".to_string()),
+        }
+    }
+
+    /// EXPLAIN ANALYZE of `sql`, which runs it, under the terms of `read_unchecked`.
+    pub(super) async fn explain_unchecked(&self, sql: &str, limits: ReadLimits) -> Result<ExplainResult, String> {
+        match self.guarded(limits, Job::Explain(sql)).await? {
+            Done::Plan(result) => Ok(result),
+            Done::Rows(_) => Err("The plan gave rows".to_string()),
+        }
+    }
+
+    /// Does `work` in a read-only transaction that is rolled back, on the assistant's connection,
+    /// one job at a time and within the time allowed.
+    async fn guarded(&self, limits: ReadLimits, job: Job<'_>) -> Result<Done, String> {
         // One read at a time: what runs on the connection stays inside its own transaction
         let _reading = self.reading.lock().await;
         let client = self.reader_client().await?;
-        match tokio::time::timeout(limits.timeout + CLIENT_GRACE, read_in_transaction(&client, sql, limits)).await {
+        match tokio::time::timeout(limits.timeout + CLIENT_GRACE, in_transaction(&client, job, limits)).await {
             Ok(Ok(result)) => Ok(result),
             Ok(Err(e)) => {
                 // A connection that can't roll back is not trusted again
@@ -84,16 +102,49 @@ impl ReadOnlyQueries for PostgresDriver {
         check_reading(crate::db::sql::Dialect::Postgres, sql).map_err(|refusal| refusal.message().to_string())?;
         self.read_unchecked(sql, limits).await
     }
+
+    async fn explain_analyzed(&self, sql: &str, limits: ReadLimits) -> Result<ExplainResult, String> {
+        check_reading(crate::db::sql::Dialect::Postgres, sql).map_err(|refusal| refusal.message().to_string())?;
+        self.explain_unchecked(sql, limits).await
+    }
 }
 
-/// BEGIN READ ONLY, the statement, ROLLBACK.
-async fn read_in_transaction(client: &Client, sql: &str, limits: ReadLimits) -> Result<ReadResult, String> {
+/// What the assistant's connection is asked to do.
+enum Job<'a> {
+    Read(&'a str),
+    Explain(&'a str),
+}
+
+enum Done {
+    Rows(ReadResult),
+    Plan(ExplainResult),
+}
+
+/// BEGIN READ ONLY, the job, ROLLBACK.
+async fn in_transaction(client: &Client, job: Job<'_>, limits: ReadLimits) -> Result<Done, String> {
     client.batch_execute("BEGIN READ ONLY").await.map_err(|e| db_message(&e))?;
-    let outcome = read(client, sql, limits).await;
+    let outcome = match job {
+        Job::Read(sql) => read(client, sql, limits).await.map(Done::Rows),
+        Job::Explain(sql) => explain(client, sql, limits).await.map(Done::Plan),
+    };
     let rolled_back = client.batch_execute("ROLLBACK").await;
     let result = outcome?;
     rolled_back.map_err(|e| db_message(&e))?;
     Ok(result)
+}
+
+/// The plan of `sql` as PostgreSQL measures it running.
+async fn explain(client: &Client, sql: &str, limits: ReadLimits) -> Result<ExplainResult, String> {
+    client.batch_execute(&format!("SET LOCAL statement_timeout = {}", limits.timeout.as_millis())).await.map_err(|e| db_message(&e))?;
+    let statement = split_statements(sql).into_iter().next().map(|s| s.text).unwrap_or_default();
+    let messages = client.simple_query(&format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {statement}")).await.map_err(|e| {
+        if e.code() == Some(&SqlState::QUERY_CANCELED) {
+            TIMED_OUT.to_string()
+        } else {
+            db_message(&e)
+        }
+    })?;
+    Ok(ExplainResult { plan: plan_from_messages(&messages)?, analyzed: true, format: ExplainFormat::PostgresJson })
 }
 
 async fn read(client: &Client, sql: &str, limits: ReadLimits) -> Result<ReadResult, String> {
@@ -108,8 +159,7 @@ async fn read(client: &Client, sql: &str, limits: ReadLimits) -> Result<ReadResu
     let wanted = limits.rows + 1;
 
     // SHOW can't be a cursor; it returns a handful of rows
-    let first = sql.trim_start().split(|c: char| !c.is_ascii_alphabetic()).next().unwrap_or("");
-    if first.eq_ignore_ascii_case("show") {
+    if first_word(crate::db::sql::Dialect::Postgres, sql).as_deref() == Some("SHOW") {
         let output = run_statement(client, sql).await.map_err(failed)?;
         return Ok(cut(output.columns, output.rows, limits.rows));
     }
@@ -124,7 +174,14 @@ async fn read(client: &Client, sql: &str, limits: ReadLimits) -> Result<ReadResu
     let prepared = client.prepare(&fetch).await.map_err(failed)?;
     let columns = columns_from_statement(prepared.columns());
     let rows = if prepared.columns().iter().all(|c| is_native(c.type_())) {
-        client.query(&prepared, &[]).await.map_err(failed)?.iter().map(row_to_json_values).collect()
+        // One row at a time, so that a large cell is cut before the next arrives
+        let stream = client.query_raw(&prepared, std::iter::empty::<&(dyn ToSql + Sync)>()).await.map_err(failed)?;
+        futures_util::pin_mut!(stream);
+        let mut rows: Vec<Vec<JsonValue>> = Vec::new();
+        while let Some(row) = stream.try_next().await.map_err(failed)? {
+            rows.push(capped_row(&columns, row_to_json_values(&row)));
+        }
+        rows
     } else {
         let types: Vec<Type> = prepared.columns().iter().map(|c| c.type_().clone()).collect();
         let messages = client.simple_query(&fetch).await.map_err(failed)?;
@@ -132,20 +189,27 @@ async fn read(client: &Client, sql: &str, limits: ReadLimits) -> Result<ReadResu
             .iter()
             .filter_map(|message| match message {
                 SimpleQueryMessage::Row(row) => Some(
-                    types
-                        .iter()
-                        .enumerate()
-                        .map(|(i, ty)| match row.try_get(i).ok().flatten() {
-                            Some(text) => text_to_json(ty, text),
-                            None => JsonValue::Null,
-                        })
-                        .collect(),
+                    capped_row(
+                        &columns,
+                        types
+                            .iter()
+                            .enumerate()
+                            .map(|(i, ty)| match row.try_get(i).ok().flatten() {
+                                Some(text) => text_to_json(ty, text),
+                                None => JsonValue::Null,
+                            })
+                            .collect(),
+                    ),
                 ),
                 _ => None,
             })
             .collect()
     };
     Ok(cut(columns, rows, limits.rows))
+}
+
+fn capped_row(columns: &[crate::db::model::QueryColumn], row: Vec<JsonValue>) -> Vec<JsonValue> {
+    row.into_iter().zip(columns).map(|(value, column)| column.capped(value)).collect()
 }
 
 /// At most `rows` of what was read, and whether there was more.
@@ -255,6 +319,31 @@ mod server_tests {
         let err = f.driver.read_unchecked(&format!("SELECT nextval('{seq}')"), limits(10)).await.unwrap_err();
         assert!(err.contains("read-only transaction"), "{err}");
         f.side.batch_execute(&format!("DROP SEQUENCE {seq}")).await.unwrap();
+        f.finish().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn explain_analyze_is_read_only_and_show_may_follow_a_comment() {
+        let f = Fixture::new().await;
+        let reader = f.driver.reader().unwrap();
+        let err = f.driver.explain_unchecked(&format!("DELETE FROM {}", f.table), limits(10)).await.err().unwrap();
+        assert!(err.to_lowercase().contains("read-only"), "{err}");
+        assert_eq!(f.count().await, 1000);
+        let plan = reader.explain_analyzed(&format!("SELECT count(*) FROM {}", f.table), limits(10)).await.unwrap();
+        assert!(plan.analyzed);
+        let shown = reader.query("-- the path\nSHOW search_path", limits(10)).await.unwrap();
+        assert_eq!(shown.rows.len(), 1);
+        f.finish().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn a_huge_cell_is_cut_as_it_is_read() {
+        let f = Fixture::new().await;
+        let result = f.driver.reader().unwrap().query("SELECT repeat('x', 300000) AS big, 1 AS n", limits(10)).await.unwrap();
+        assert_eq!(result.rows[0][0].as_str().unwrap().chars().count(), crate::db::model::MAX_CELL_CHARS + 1);
+        assert_eq!(result.rows[0][1], serde_json::json!(1));
         f.finish().await;
     }
 

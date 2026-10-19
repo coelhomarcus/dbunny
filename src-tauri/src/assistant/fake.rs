@@ -11,6 +11,8 @@ use crate::db::{Capabilities, Catalog, Console, Data, Driver, Engine, ExplainFor
 pub struct FakeDb {
     pub read_sql: Mutex<Vec<String>>,
     pub explained: Mutex<Vec<(String, bool)>>,
+    /// The statements explained with ANALYZE through the reader
+    pub analyzed: Mutex<Vec<String>>,
     pub rows: Vec<Vec<Value>>,
     capabilities: Capabilities,
 }
@@ -20,6 +22,7 @@ impl FakeDb {
         Arc::new(FakeDb {
             read_sql: Default::default(),
             explained: Default::default(),
+            analyzed: Default::default(),
             rows: vec![vec![json!(1), json!("ana")], vec![json!(2), json!("bo")]],
             capabilities: Capabilities::postgres(),
         })
@@ -192,5 +195,10 @@ impl ReadOnlyQueries for FakeDb {
             rows: self.rows.clone(),
             more: false,
         })
+    }
+
+    async fn explain_analyzed(&self, sql: &str, _limits: ReadLimits) -> Result<ExplainResult, String> {
+        self.analyzed.lock().unwrap().push(sql.to_string());
+        Ok(ExplainResult { plan: json!([{"Plan": {"Node Type": "Seq Scan"}}]), analyzed: true, format: ExplainFormat::PostgresJson })
     }
 }

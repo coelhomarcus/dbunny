@@ -184,7 +184,13 @@ impl Tools {
                 return Err(refused);
             }
         }
-        let plan = console.explain(sql, analyze).await.map_err(ToolOutput::error)?;
+        // A plan that runs the statement goes where the reads go; without ANALYZE nothing runs.
+        // A server that can't analyze answers through the console, with its own reason.
+        let plan = match driver.reader() {
+            Some(reader) if analyze && driver.capabilities().explain_analyze => reader.explain_analyzed(sql, ReadLimits::DEFAULT).await,
+            _ => console.explain(sql, analyze).await,
+        }
+        .map_err(ToolOutput::error)?;
         let text = serde_json::to_string(&plan).map_err(|e| ToolOutput::error(e.to_string()))?;
         if text.len() <= MAX_RESULT_BYTES {
             return Ok(ToolOutput { text, is_error: false });
@@ -402,13 +408,16 @@ mod tests {
         let out = f.call_answering("explain_query", json!({"sql": "SELECT * FROM t", "analyze": true}), Decision::Once).await;
         assert!(!out.is_error, "{}", out.text);
         assert!(f.sink.approvals()[0].analyze);
-        assert_eq!(f.db.explained.lock().unwrap()[0].1, true);
+        // It runs where reads run (a read-only transaction), not on the editor's connection
+        assert_eq!(f.db.analyzed.lock().unwrap().clone(), vec!["SELECT * FROM t".to_string()]);
+        assert!(f.db.explained.lock().unwrap().is_empty());
+        assert_eq!(json_of(&out)["plan"][0]["Plan"]["Node Type"], "Seq Scan");
 
         let hidden = fixture(options(true, true)).await;
         let blocked = hidden.call("explain_query", json!({"sql": "SELECT 1", "analyze": true})).await;
         assert!(blocked.is_error);
         assert_eq!(blocked.text, SCHEMA_ONLY);
-        assert!(hidden.db.explained.lock().unwrap().is_empty());
+        assert!(hidden.db.explained.lock().unwrap().is_empty() && hidden.db.analyzed.lock().unwrap().is_empty());
         // And it never runs a statement that writes
         let writes = f.call("explain_query", json!({"sql": "DELETE FROM t", "analyze": true})).await;
         assert_eq!(writes.text, READ_REFUSED);
