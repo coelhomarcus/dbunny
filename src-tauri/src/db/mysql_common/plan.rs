@@ -7,19 +7,19 @@ use crate::db::mysql_common::split::{next_token, Kind};
 
 /// What one line of the plan says about its node.
 #[derive(Debug, Default)]
-struct Node {
-    label: String,
-    cost: Option<f64>,
-    rows: Option<f64>,
-    actual_time_first: Option<f64>,
-    actual_time_last: Option<f64>,
-    actual_rows: Option<f64>,
-    loops: Option<f64>,
-    children: Vec<Node>,
+pub(crate) struct Node {
+    pub(crate) label: String,
+    pub(crate) cost: Option<f64>,
+    pub(crate) rows: Option<f64>,
+    pub(crate) actual_time_first: Option<f64>,
+    pub(crate) actual_time_last: Option<f64>,
+    pub(crate) actual_rows: Option<f64>,
+    pub(crate) loops: Option<f64>,
+    pub(crate) children: Vec<Node>,
 }
 
 impl Node {
-    fn to_json(&self) -> JsonValue {
+    pub(crate) fn to_json(&self) -> JsonValue {
         let number = |value: Option<f64>| value.and_then(serde_json::Number::from_f64).map_or(JsonValue::Null, JsonValue::Number);
         serde_json::json!({
             "label": self.label,

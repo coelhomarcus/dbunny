@@ -3,14 +3,16 @@
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 
+use super::plan::tree_from_json;
 use super::version::parse_mariadb_version;
 use crate::db::model::{ExplainResult, RoleInfo};
 use crate::db::mysql_common::admin::RawSession;
 use crate::db::mysql_common::catalog::{ColumnDefinition, StoredColumn};
 use crate::db::mysql_common::driver::ServerDriver;
+use crate::db::mysql_common::errors::error_message;
 use crate::db::mysql_common::flavor::Flavor;
 use crate::db::mysql_common::version::ServerVersion;
-use crate::db::{unsupported, Capabilities, Engine};
+use crate::db::{unsupported, Capabilities, Engine, ExplainFormat};
 
 pub struct MariadbFlavor;
 
@@ -106,8 +108,20 @@ impl Flavor for MariadbFlavor {
         "SELECT @@read_only, 0"
     }
 
-    async fn explain(&self, _driver: &ServerDriver, _statement: &str, _analyze: bool) -> Result<ExplainResult, String> {
-        Err(unsupported(Engine::Mariadb, "EXPLAIN"))
+    /// `EXPLAIN FORMAT=JSON`, which doesn't run the statement, or `ANALYZE FORMAT=JSON`, which
+    /// does; the plan is converted to the tree MySQL's comes as.
+    async fn explain(&self, driver: &ServerDriver, statement: &str, analyze: bool) -> Result<ExplainResult, String> {
+        let explain_sql = if analyze { format!("ANALYZE FORMAT=JSON {statement}") } else { format!("EXPLAIN FORMAT=JSON {statement}") };
+        let endpoint = driver.endpoint().clone();
+        let text = driver
+            .editor()
+            .run(move |conn| {
+                Box::pin(async move { conn.query_first::<String, _>(explain_sql).await.map_err(|e| error_message(&e, &endpoint)) })
+            })
+            .await?
+            .ok_or("The server returned no plan")?;
+        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("The server returned a plan DBunny can't read: {e}"))?;
+        Ok(ExplainResult { plan: tree_from_json(&json)?, analyzed: analyze, format: ExplainFormat::MysqlTree })
     }
 
     async fn accounts(&self, _conn: &mut mysql_async::Conn) -> mysql_async::Result<Vec<RoleInfo>> {

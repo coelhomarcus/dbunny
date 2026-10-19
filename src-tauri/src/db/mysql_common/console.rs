@@ -259,7 +259,7 @@ mod server_tests {
 
     use serde_json::{json, Value as JsonValue};
 
-    use crate::db::mysql_common::tests_support::{exec, query_one, TestDb};
+    use crate::db::mysql_common::tests_support::{exec, label, query_one, TestDb};
     use crate::db::mysql_common::driver::ServerDriver;
     use crate::db::mysql_common::split::DELIMITER_IS_A_CLIENT_COMMAND;
     use crate::db::sqlite::errors::CANCELLED;
@@ -437,7 +437,7 @@ mod server_tests {
         let (db, d) = shop().await;
         exec(&db.endpoint, "INSERT INTO customers (email, name) VALUES ('a@x.com', 'Ana')").await;
         let err = d.console().unwrap().explain("UPDATE customers SET name = 'Changed'", true).await.err().unwrap();
-        assert_eq!(err, "EXPLAIN ANALYZE runs only reading statements on MySQL.");
+        assert_eq!(err, format!("EXPLAIN ANALYZE runs only reading statements on {}.", label()));
         let name: Option<String> = query_one(&db.endpoint, "SELECT name FROM customers").await;
         assert_eq!(name.as_deref(), Some("Ana"), "the statement never ran");
     }

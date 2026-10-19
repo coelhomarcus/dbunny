@@ -2,6 +2,7 @@
 //! The session itself is `ServerDriver`.
 
 mod flavor;
+pub(crate) mod plan;
 pub mod version;
 
 use std::sync::Arc;
@@ -200,5 +201,75 @@ mod server_tests {
         let row: (String, String) = conn.query_first(format!("SHOW CREATE TABLE `{}`.`{table}`", db.name)).await.unwrap().unwrap();
         let _ = conn.disconnect().await;
         row.1
+    }
+
+    const PLAN_SHOP: &str = "
+        CREATE TABLE customers (id INT PRIMARY KEY AUTO_INCREMENT, email VARCHAR(120) UNIQUE, name VARCHAR(80), age INT);
+        CREATE TABLE orders (id INT PRIMARY KEY AUTO_INCREMENT, customer_id INT, total DECIMAL(10,2), KEY (customer_id));
+        INSERT INTO customers (email, name, age) VALUES ('a@x', 'A', 1), ('b@x', 'B', 2), ('c@x', 'C', 3);
+        INSERT INTO orders (customer_id, total) VALUES (1, 5), (1, 6), (2, 7);";
+
+    /// The labels of every step of a plan, depth first.
+    fn labels(nodes: &serde_json::Value) -> Vec<String> {
+        nodes
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|node| std::iter::once(node["label"].as_str().unwrap().to_string()).chain(labels(&node["children"])))
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn mariadb_plans_name_their_tables_and_analyze_measures_them() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(&db.endpoint, PLAN_SHOP).await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let console = driver.console().unwrap();
+        let sql = "SELECT c.name, SUM(o.total) FROM customers c JOIN orders o ON o.customer_id = c.id GROUP BY c.name ORDER BY 2 DESC";
+
+        let plan = console.explain(sql, false).await.unwrap();
+        assert_eq!((plan.format, plan.analyzed), (crate::db::ExplainFormat::MysqlTree, false));
+        let steps = labels(&plan.plan);
+        assert!(steps.iter().any(|l| l.contains("on c") || l.contains(" on c ")), "{steps:?}");
+        assert!(steps.iter().any(|l| l.contains(" on o")), "{steps:?}");
+        assert_eq!(plan.plan[0]["actualRows"], serde_json::json!(null));
+
+        let analyzed = console.explain(sql, true).await.unwrap();
+        assert!(analyzed.analyzed);
+        let root = &analyzed.plan[0];
+        assert!(root["actualRows"].is_number() && root["loops"].is_number(), "{root}");
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn explain_of_a_write_does_not_run_it() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(&db.endpoint, PLAN_SHOP).await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let console = driver.console().unwrap();
+        for sql in ["UPDATE customers SET name = 'Changed'", "DELETE FROM customers", "INSERT INTO customers (email) VALUES ('z@x')"] {
+            let plan = console.explain(sql, false).await.unwrap_or_else(|e| panic!("{sql}: {e}"));
+            assert!(!plan.analyzed && plan.plan.as_array().is_some_and(|roots| !roots.is_empty()), "{sql}");
+            let err = console.explain(sql, true).await.err().unwrap();
+            assert_eq!(err, "EXPLAIN ANALYZE runs only reading statements on MariaDB.", "{sql}");
+        }
+        let (count, names): (i64, i64) = {
+            let mut conn = raw_conn(&db.endpoint).await;
+            let row = conn.query_first(format!("SELECT COUNT(*), SUM(name = 'Changed') FROM `{}`.customers", db.name)).await.unwrap().unwrap();
+            let _ = conn.disconnect().await;
+            row
+        };
+        assert_eq!((count, names), (3, 0), "nothing ran");
+        driver.close().await;
+        db.drop_now().await;
     }
 }
