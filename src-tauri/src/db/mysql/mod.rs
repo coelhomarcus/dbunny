@@ -3,11 +3,9 @@
 
 mod admin;
 mod alter;
-pub(crate) mod catalog;
 mod console;
 mod flavor;
 pub(crate) mod plan;
-pub(crate) mod structure;
 pub mod version;
 
 use std::sync::Arc;

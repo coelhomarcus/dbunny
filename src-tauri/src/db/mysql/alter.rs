@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 
-use super::catalog::{column_definitions, constraint_kinds, qualified, quote, ColumnDefinition};
+use crate::db::mysql_common::catalog::{column_definitions, constraint_kinds, qualified, quote, ColumnDefinition};
 use crate::db::mysql_common::objects::{drop_sql, duplicate, rename_sql, truncate_sql};
 use crate::db::mysql_common::version::ServerVersion;
 use crate::db::mysql_common::driver::ServerDriver;
@@ -1038,7 +1038,7 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
     use mysql_async::Conn;
 
-    use super::super::catalog::{column_definitions, qualified, quote};
+    use crate::db::mysql_common::catalog::{column_definitions, qualified, quote};
     use crate::db::mysql_common::tests_support::{exec, query_one, TestDb};
     use crate::db::mysql_common::driver::ServerDriver;
     use super::*;

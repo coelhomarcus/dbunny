@@ -2,7 +2,7 @@
 
 use mysql_async::prelude::Queryable;
 
-use crate::db::mysql::catalog::{column_definitions, qualified, quote};
+use crate::db::mysql_common::catalog::{column_definitions, qualified, quote};
 use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::mysql_common::errors::error_message;
 use crate::db::{unsupported, Engine};

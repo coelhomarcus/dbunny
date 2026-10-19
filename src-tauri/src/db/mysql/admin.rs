@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Error as MysqlError, Row};
 
-use super::catalog::{number, quote, string, text};
+use crate::db::mysql_common::catalog::{number, quote, string, text};
 use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{DatabaseInfo, RoleInfo, RoleList, ServerActivity, ServerSession};
 use crate::db::mysql_common::connect::MysqlEndpoint;

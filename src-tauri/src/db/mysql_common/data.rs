@@ -7,7 +7,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Row, Value};
 use serde_json::Value as JsonValue;
 
-use crate::db::mysql::catalog::{column_definitions, number, qualified, quote, table_engine};
+use crate::db::mysql_common::catalog::{column_definitions, number, qualified, quote, table_engine};
 use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{JsonMap, QueryColumn, RowChange, TableDataParams, TableDataResponse};
 use crate::db::mysql_common::errors::error_message;
