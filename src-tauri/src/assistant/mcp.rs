@@ -24,6 +24,9 @@ use tokio_util::sync::CancellationToken;
 use super::conversation::{Conversation, Conversations};
 use super::tools::{definitions, Tools};
 
+/// How long the server waits after a connection could not be accepted.
+const ACCEPT_RETRY: std::time::Duration = std::time::Duration::from_millis(50);
+
 pub struct McpServer {
     pub port: u16,
     stop: CancellationToken,
@@ -50,7 +53,11 @@ impl McpServer {
                     _ = cancelled.cancelled() => break,
                     accepted = listener.accept() => match accepted {
                         Ok((stream, _)) => stream,
-                        Err(_) => continue,
+                        Err(_) => {
+                            // Out of file descriptors, say: trying again at once would only spin
+                            tokio::time::sleep(ACCEPT_RETRY).await;
+                            continue;
+                        }
                     },
                 };
                 let (service, conversations) = (service.clone(), Arc::clone(&conversations));

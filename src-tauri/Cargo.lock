@@ -1221,6 +1221,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "libc",
  "mysql_async",
  "native-tls",
  "pbkdf2 0.12.2",

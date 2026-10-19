@@ -54,6 +54,10 @@ http = "=1.4.0"
 tokio-util = "=0.7.18"
 mysql_async = { version = "=0.37.1", default-features = false, features = ["default-rustls-ring", "client_ed25519"] }
 
+[target.'cfg(unix)'.dependencies]
+# Ends the agent's whole process group, not only the command that started it
+libc = "=0.2.190"
+
 [profile.release]
 strip = true
 lto = true

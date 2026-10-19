@@ -9,7 +9,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use super::agent::{AgentHandle, SessionSetup};
+use super::agent::{AgentHandle, LogBuffer, SessionSetup};
 use super::approvals::Approvals;
 use super::context::{system_prompt, PromptInput};
 use super::conversation::{Conversation, ConversationOptions, Conversations};
@@ -58,7 +58,7 @@ impl Live {
 
         let path = login_shell_path().await;
         check_node(path.as_deref()).await.expect("Node 20 or newer is needed");
-        let agent = AgentHandle::spawn(&default_command(cfg!(windows)), path, events, Arc::clone(&conversations), approvals)
+        let agent = AgentHandle::spawn(&default_command(cfg!(windows)), path, Arc::new(LogBuffer::new(500)), events, Arc::clone(&conversations), approvals)
             .await
             .unwrap_or_else(|status| panic!("the agent didn't start: {status:?}"));
 

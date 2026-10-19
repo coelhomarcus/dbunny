@@ -19,14 +19,14 @@ pub mod tools;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
-use agent::{AgentError, AgentHandle, ModelChoice, SessionSetup, SessionSummary};
+use agent::{AgentError, AgentHandle, LogBuffer, ModelChoice, LOG_LINES, SessionSetup, SessionSummary};
 use approvals::{Approvals, Decision};
 use context::{system_prompt, PromptInput};
 use conversation::{Conversation, ConversationOptions, Conversations, Workspace};
@@ -65,6 +65,7 @@ pub trait AgentHost: Send + Sync {
         &self,
         command: &AgentCommand,
         path: Option<String>,
+        log: Arc<LogBuffer>,
         events: Arc<dyn EventSink>,
         conversations: Arc<Conversations>,
         approvals: Arc<Approvals>,
@@ -88,11 +89,12 @@ impl AgentHost for SystemHost {
         &self,
         command: &AgentCommand,
         path: Option<String>,
+        log: Arc<LogBuffer>,
         events: Arc<dyn EventSink>,
         conversations: Arc<Conversations>,
         approvals: Arc<Approvals>,
     ) -> Result<Arc<AgentHandle>, AgentStatus> {
-        AgentHandle::spawn(command, path, events, conversations, approvals).await
+        AgentHandle::spawn(command, path, log, events, conversations, approvals).await
     }
 }
 
@@ -135,6 +137,12 @@ pub struct Assistant {
     approvals: Arc<Approvals>,
     tools: Arc<Tools>,
     running: Mutex<Option<Running>>,
+    /// One start at a time; `running` is held only to look at or swap the agent, never while it comes up.
+    starting: Mutex<()>,
+    /// Counts the shutdowns, so that a start that was under way knows the app asked to end.
+    shutdowns: AtomicU64,
+    /// What the last agent started wrote to its stderr, kept also when it didn't come up.
+    log: StdMutex<Arc<LogBuffer>>,
     /// The agent is one the person chose, so how to sign in to it is not for DBunny to say.
     custom_command: AtomicBool,
 }
@@ -148,7 +156,7 @@ impl Assistant {
         let tap = Arc::new(StatusTap { inner: events, status: StdMutex::new(AgentStatus::Idle) });
         let approvals = Arc::new(Approvals::default());
         let tools = Arc::new(Tools { sessions: Arc::clone(&sessions), approvals: Arc::clone(&approvals), events: tap.clone() });
-        Assistant { data_dir, sessions, tap, host, conversations: Arc::new(Conversations::default()), approvals, tools, running: Mutex::new(None), custom_command: AtomicBool::new(false) }
+        Assistant { data_dir, sessions, tap, host, conversations: Arc::new(Conversations::default()), approvals, tools, running: Mutex::new(None), starting: Mutex::new(()), shutdowns: AtomicU64::new(0), log: StdMutex::new(Arc::new(LogBuffer::new(LOG_LINES))), custom_command: AtomicBool::new(false) }
     }
 
     pub fn status(&self) -> AgentStatus {
@@ -162,11 +170,16 @@ impl Assistant {
     /// Brings the agent and the tool server up, unless they already are. `command` is the
     /// person's own command, if they set one.
     pub async fn start(&self, command: Option<String>) -> AgentStatus {
-        let mut running = self.running.lock().await;
-        if running.is_some() && self.status() == AgentStatus::Ready {
-            return AgentStatus::Ready;
-        }
-        if let Some(old) = running.take() {
+        let _starting = self.starting.lock().await;
+        let shutdowns = self.shutdowns.load(Ordering::SeqCst);
+        let old = {
+            let mut running = self.running.lock().await;
+            if running.is_some() && self.status() == AgentStatus::Ready {
+                return AgentStatus::Ready;
+            }
+            running.take()
+        };
+        if let Some(old) = old {
             old.agent.shutdown().await;
             old.mcp.stop().await;
         }
@@ -189,8 +202,19 @@ impl Assistant {
             Err(message) => return self.fail(AgentStatus::Failed { message }),
         };
         let events: Arc<dyn EventSink> = self.tap.clone();
-        match self.host.launch(&command, path, events, Arc::clone(&self.conversations), Arc::clone(&self.approvals)).await {
+        let log = Arc::new(LogBuffer::new(LOG_LINES));
+        *self.log.lock().unwrap() = Arc::clone(&log);
+        match self.host.launch(&command, path, log, events, Arc::clone(&self.conversations), Arc::clone(&self.approvals)).await {
             Ok(agent) => {
+                let mut running = self.running.lock().await;
+                // The app asked to end while the agent was coming up: it goes at once
+                if self.shutdowns.load(Ordering::SeqCst) != shutdowns {
+                    drop(running);
+                    agent.shutdown().await;
+                    mcp.stop().await;
+                    self.set_status(AgentStatus::Idle);
+                    return AgentStatus::Idle;
+                }
                 *running = Some(Running { agent, mcp });
                 self.set_status(AgentStatus::Ready);
                 AgentStatus::Ready
@@ -214,6 +238,7 @@ impl Assistant {
 
     /// Ends the agent and the tool server.
     pub async fn shutdown(&self) {
+        self.shutdowns.fetch_add(1, Ordering::SeqCst);
         let old = self.running.lock().await.take();
         if let Some(old) = old {
             old.agent.shutdown().await;
@@ -376,7 +401,7 @@ impl Assistant {
     }
 
     pub async fn log(&self) -> Vec<String> {
-        self.running.lock().await.as_ref().map(|running| running.agent.log()).unwrap_or_default()
+        self.log.lock().unwrap().lines()
     }
 }
 
@@ -410,11 +435,32 @@ mod tests {
         config: StdMutex<FakeConfig>,
         agents: StdMutex<Vec<FakeAgent>>,
         launched: StdMutex<Vec<AgentCommand>>,
+        /// What the agent writes to stderr while it starts.
+        stderr: StdMutex<Vec<String>>,
+        launch_fails: StdMutex<Option<AgentStatus>>,
+        /// Launching waits for `release`, after telling `entered`.
+        hold_launch: AtomicBool,
+        entered: tokio::sync::Notify,
+        release: tokio::sync::Notify,
     }
 
     impl FakeHost {
         fn new(config: FakeConfig) -> Arc<FakeHost> {
-            Arc::new(FakeHost { node: Ok((22, 14, 0)), config: StdMutex::new(config), agents: Default::default(), launched: Default::default() })
+            FakeHost::with_node(Ok((22, 14, 0)), config)
+        }
+
+        fn with_node(node: Result<(u32, u32, u32), Option<String>>, config: FakeConfig) -> Arc<FakeHost> {
+            Arc::new(FakeHost {
+                node,
+                config: StdMutex::new(config),
+                agents: Default::default(),
+                launched: Default::default(),
+                stderr: Default::default(),
+                launch_fails: Default::default(),
+                hold_launch: AtomicBool::new(false),
+                entered: Default::default(),
+                release: Default::default(),
+            })
         }
 
         fn agent(&self) -> FakeAgent {
@@ -436,11 +482,22 @@ mod tests {
             &self,
             command: &AgentCommand,
             _path: Option<String>,
+            log: Arc<LogBuffer>,
             events: Arc<dyn EventSink>,
             conversations: Arc<Conversations>,
             approvals: Arc<Approvals>,
         ) -> Result<Arc<AgentHandle>, AgentStatus> {
             self.launched.lock().unwrap().push(command.clone());
+            for line in self.stderr.lock().unwrap().iter() {
+                log.push(line);
+            }
+            if let Some(status) = self.launch_fails.lock().unwrap().clone() {
+                return Err(status);
+            }
+            if self.hold_launch.load(Ordering::SeqCst) {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
             let (read, write, fake) = FakeAgent::start(self.config.lock().unwrap().clone());
             self.agents.lock().unwrap().push(fake);
             AgentHandle::over(read, write, events, conversations, approvals).await
@@ -509,11 +566,11 @@ mod tests {
 
     #[tokio::test]
     async fn start_reports_needs_node() {
-        let host = Arc::new(FakeHost { node: Err(Some("18.19.1".into())), config: StdMutex::new(FakeConfig::default()), agents: Default::default(), launched: Default::default() });
+        let host = FakeHost::with_node(Err(Some("18.19.1".into())), FakeConfig::default());
         let r = rig_with(host).await;
         assert_eq!(r.assistant.start(None).await, AgentStatus::NeedsNode { found: Some("18.19.1".into()) });
         assert!(r.host.launched.lock().unwrap().is_empty());
-        let none = Arc::new(FakeHost { node: Err(None), config: StdMutex::new(FakeConfig::default()), agents: Default::default(), launched: Default::default() });
+        let none = FakeHost::with_node(Err(None), FakeConfig::default());
         assert_eq!(rig_with(none).await.assistant.start(None).await, AgentStatus::NeedsNode { found: None });
     }
 
@@ -671,6 +728,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn nothing_waits_for_the_agent_to_come_up() {
+        let host = FakeHost::new(FakeConfig::default());
+        host.hold_launch.store(true, Ordering::SeqCst);
+        let r = rig_with(host).await;
+        let assistant = Arc::clone(&r.assistant);
+        let starting = tokio::spawn(async move { assistant.start(None).await });
+        r.host.entered.notified().await;
+        // Quitting the app, or looking at the log, doesn't wait for a start that may download for minutes
+        tokio::time::timeout(Duration::from_secs(2), async {
+            r.assistant.log().await;
+            r.assistant.mcp_url().await;
+            r.assistant.shutdown().await;
+        })
+        .await
+        .expect("held up by the start");
+        r.host.release.notify_one();
+        // The agent that came up after the app asked to end is ended too
+        assert_eq!(starting.await.unwrap(), AgentStatus::Idle);
+        assert_eq!(r.assistant.status(), AgentStatus::Idle);
+        assert!(r.assistant.mcp_url().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn the_log_is_kept_when_the_agent_does_not_start() {
+        let host = FakeHost::new(FakeConfig::default());
+        *host.stderr.lock().unwrap() = vec!["npm ERR! network".into()];
+        *host.launch_fails.lock().unwrap() = Some(AgentStatus::Failed { message: "The agent didn't start".into() });
+        let r = rig_with(host).await;
+        assert!(matches!(r.assistant.start(None).await, AgentStatus::Failed { .. }));
+        assert_eq!(r.assistant.log().await, vec!["npm ERR! network".to_string()]);
+    }
+
+    #[tokio::test]
     async fn restart_brings_the_agent_back() {
         let r = started(FakeConfig::default()).await;
         r.assistant.shutdown().await;
@@ -699,7 +789,7 @@ mod tests {
 
     #[tokio::test]
     async fn signing_out_says_why_when_the_agent_cannot_start() {
-        let host = Arc::new(FakeHost { node: Err(None), config: StdMutex::new(FakeConfig::default()), agents: Default::default(), launched: Default::default() });
+        let host = FakeHost::with_node(Err(None), FakeConfig::default());
         let r = rig_with(host).await;
         let err = r.assistant.sign_out(None).await.err().unwrap();
         assert!(err.contains("Node.js"), "{err}");

@@ -26,7 +26,7 @@ const RESOURCE_NOT_FOUND: i64 = -32002;
 const METHOD_NOT_FOUND: i64 = -32601;
 /// The prefix of the names the agent gives the tools of the `dbunny` MCP server.
 const OWN_TOOLS: &str = "mcp__dbunny__";
-const LOG_LINES: usize = 500;
+pub const LOG_LINES: usize = 500;
 const LIST_PAGES: usize = 10;
 
 /// What a session needs to know to reach the database tools.
@@ -287,7 +287,6 @@ pub struct AgentHandle {
     capabilities: Capabilities,
     /// The config option that holds each session's model, to change it.
     model_options: Mutex<HashMap<String, String>>,
-    log: Arc<LogBuffer>,
     child: Mutex<Option<tokio::process::Child>>,
 }
 
@@ -296,23 +295,14 @@ impl AgentHandle {
     pub async fn spawn(
         command: &AgentCommand,
         path: Option<String>,
+        log: Arc<LogBuffer>,
         events: Arc<dyn EventSink>,
         conversations: Arc<Conversations>,
         approvals: Arc<Approvals>,
     ) -> Result<Arc<AgentHandle>, AgentStatus> {
-        let mut process = tokio::process::Command::new(&command.program);
-        process
-            .args(&command.args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true);
-        if let Some(path) = path {
-            process.env("PATH", path);
-        }
-        let mut child = process.spawn().map_err(|e| AgentStatus::Failed { message: format!("Couldn't start {}: {e}", command.program) })?;
+        let mut child = child_process(command, path).map_err(|e| AgentStatus::Failed { message: format!("Couldn't start {}: {e}", command.program) })?;
+        let pid = child.id();
         let (stdout, stdin, stderr) = (child.stdout.take().unwrap(), child.stdin.take().unwrap(), child.stderr.take().unwrap());
-        let log = Arc::new(LogBuffer::new(LOG_LINES));
         let keep = Arc::clone(&log);
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
@@ -320,13 +310,16 @@ impl AgentHandle {
                 keep.push(&line);
             }
         });
-        match AgentHandle::connect(stdout, stdin, log.clone(), Some(child), events, conversations, approvals).await {
+        match AgentHandle::connect(stdout, stdin, Some(child), events, conversations, approvals).await {
             Ok(agent) => Ok(agent),
-            Err(AgentStatus::Failed { message }) => {
+            Err(status) => {
+                if let Some(pid) = pid {
+                    kill_tree(pid);
+                }
+                let AgentStatus::Failed { message } = status else { return Err(status) };
                 let hint = log.lines().into_iter().rev().find(|line| !line.trim().is_empty());
                 Err(AgentStatus::Failed { message: hint.map_or(message.clone(), |hint| format!("{message} ({hint})")) })
             }
-            Err(status) => Err(status),
         }
     }
 
@@ -339,13 +332,12 @@ impl AgentHandle {
         conversations: Arc<Conversations>,
         approvals: Arc<Approvals>,
     ) -> Result<Arc<AgentHandle>, AgentStatus> {
-        AgentHandle::connect(read, write, Arc::new(LogBuffer::new(LOG_LINES)), None, events, conversations, approvals).await
+        AgentHandle::connect(read, write, None, events, conversations, approvals).await
     }
 
     async fn connect(
         read: impl AsyncRead + Send + Unpin + 'static,
         write: impl AsyncWrite + Send + Unpin + 'static,
-        log: Arc<LogBuffer>,
         child: Option<tokio::process::Child>,
         events: Arc<dyn EventSink>,
         conversations: Arc<Conversations>,
@@ -395,7 +387,6 @@ impl AgentHandle {
             shared,
             capabilities: Capabilities { list_sessions: !sessions["list"].is_null(), system_prompt: !sessions["systemPrompt"].is_null() },
             model_options: Default::default(),
-            log,
             child: Mutex::new(child),
         }))
     }
@@ -502,10 +493,6 @@ impl AgentHandle {
         Ok(())
     }
 
-    pub fn log(&self) -> Vec<String> {
-        self.log.lines()
-    }
-
     /// The notifications of the agent's own extensions received so far.
     #[cfg(test)]
     pub(crate) fn extension_messages(&self) -> Vec<Value> {
@@ -517,8 +504,47 @@ impl AgentHandle {
         self.shared.shutting_down.store(true, Ordering::SeqCst);
         let child = self.child.lock().unwrap().take();
         if let Some(mut child) = child {
+            if let Some(pid) = child.id() {
+                kill_tree(pid);
+            }
             let _ = child.kill().await;
         }
+    }
+}
+
+/// The command as a child process of its own: its output piped, no console window on Windows, and
+/// on unix a process group of its own, so that what it starts can be ended with it.
+fn child_process(command: &AgentCommand, path: Option<String>) -> std::io::Result<tokio::process::Child> {
+    let mut process = tokio::process::Command::new(&command.program);
+    process.args(&command.args).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
+    if let Some(path) = path {
+        process.env("PATH", path);
+    }
+    #[cfg(unix)]
+    process.process_group(0);
+    #[cfg(windows)]
+    process.creation_flags(super::launch::CREATE_NO_WINDOW);
+    process.spawn()
+}
+
+/// Ends the process `pid` and everything it started. `npx` runs the agent as a child of its own,
+/// which would otherwise outlive it.
+fn kill_tree(pid: u32) {
+    #[cfg(unix)]
+    // SAFETY: killpg only sends a signal; the group is the one `child_process` made for this pid
+    unsafe {
+        libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(super::launch::CREATE_NO_WINDOW)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 }
 
@@ -801,6 +827,28 @@ mod tests {
         assert!(r.sink.events().iter().any(|e| matches!(e, AssistantEvent::Status { status: AgentStatus::Stopped })));
         // And nothing more can be asked
         assert_eq!(r.agent.new_session(&setup()).await.err().unwrap(), AgentError::Stopped);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ending_the_agent_ends_what_it_started() {
+        use tokio::io::AsyncBufReadExt;
+        // Like npx: the command starts the real thing as a child of its own and waits for it
+        let command = AgentCommand { program: "sh".into(), args: vec!["-c".into(), "sleep 300 & echo $!; wait".into()] };
+        let mut child = child_process(&command, None).unwrap();
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        let grandchild: i32 = lines.next_line().await.unwrap().unwrap().trim().parse().unwrap();
+        let alive = |pid: i32| unsafe { libc::kill(pid, 0) } == 0;
+        assert!(alive(grandchild));
+        kill_tree(child.id().unwrap());
+        let _ = child.wait().await;
+        for _ in 0..50 {
+            if !alive(grandchild) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!alive(grandchild), "the child of the command is still running");
     }
 
     #[test]

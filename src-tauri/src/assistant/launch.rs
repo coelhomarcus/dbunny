@@ -6,7 +6,14 @@ use std::time::Duration;
 pub const ADAPTER_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp@0.85.1";
 
 const MIN_NODE_MAJOR: u32 = 20;
+/// Windows creation flag: no console window for a program of a GUI app.
+#[cfg(windows)]
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(unix)]
+const PATH_START: &str = "<<dbunny-path>>";
+#[cfg(unix)]
+const PATH_END: &str = "<<dbunny-end>>";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AgentCommand {
@@ -98,14 +105,17 @@ pub async fn login_shell_path() -> Option<String> {
 #[cfg(unix)]
 pub async fn login_shell_path_with(shell: &str) -> Option<String> {
     let run = tokio::process::Command::new(shell)
-        .args(["-l", "-i", "-c", "printf %s \"$PATH\""])
+        .args(["-l", "-i", "-c", &format!("printf '%s%s%s' '{PATH_START}' \"$PATH\" '{PATH_END}'")])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .output();
     let output = tokio::time::timeout(SHELL_TIMEOUT, run).await.ok()?.ok()?;
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (output.status.success() && !path.is_empty()).then_some(path)
+    // The rc files of an interactive shell may print too: only what is between the markers is the PATH
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let after = &stdout[stdout.find(PATH_START)? + PATH_START.len()..];
+    let path = after[..after.find(PATH_END)?].trim();
+    (output.status.success() && !path.is_empty()).then(|| path.to_string())
 }
 
 /// The Node on `path` (or the app's own PATH): its version, `Err(None)` when there is none and
@@ -113,6 +123,8 @@ pub async fn login_shell_path_with(shell: &str) -> Option<String> {
 pub async fn check_node(path: Option<&str>) -> Result<(u32, u32, u32), Option<String>> {
     let mut command = tokio::process::Command::new("node");
     command.arg("--version").stdin(std::process::Stdio::null()).kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
     if let Some(path) = path {
         command.env("PATH", path);
     }
@@ -160,6 +172,21 @@ mod tests {
         assert_eq!(parse_node_version("garbage"), None);
         assert!(node_is_supported((22, 14, 0)) && node_is_supported((20, 0, 0)));
         assert!(!node_is_supported((18, 19, 1)));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn login_shell_path_ignores_what_the_shell_prints_on_its_own() {
+        use std::os::unix::fs::PermissionsExt;
+        // A shell whose rc files greet you, before and after the command
+        let dir = std::env::temp_dir().join(format!("dbunny-test-shell-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shell = dir.join("noisy-shell");
+        std::fs::write(&shell, "#!/bin/sh\necho 'welcome back'\n/bin/sh -c \"$4\"\necho 'bye'\n").unwrap();
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = login_shell_path_with(shell.to_str().unwrap()).await.unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(!path.contains("welcome") && !path.contains("bye") && path.contains("/bin"), "{path}");
     }
 
     #[cfg(unix)]
