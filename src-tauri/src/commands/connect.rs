@@ -164,3 +164,26 @@ pub async fn disconnect(
     }
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What the connection modal sends for `connect_mysql` (see `mysqlParamsOf` in the frontend).
+    #[test]
+    fn mysql_params_read_what_the_frontend_sends() {
+        let sent = serde_json::json!({
+            "host": "db.local", "port": 3307, "database": "", "user": "ana", "password": "pw", "readOnly": true,
+            "tls": { "mode": "verify-ca", "rootCert": "/ca.pem", "cert": "", "key": "" }
+        });
+        let params: MysqlConnectParams = serde_json::from_value(sent).unwrap();
+        assert_eq!((params.host.as_str(), params.port, params.database.as_str(), params.read_only), ("db.local", 3307, "", true));
+        let tls = params.tls.unwrap();
+        assert_eq!((tls.mode.as_str(), tls.root_cert.as_str()), ("verify-ca", "/ca.pem"));
+
+        // Without SSL the frontend sends null
+        let plain: MysqlConnectParams =
+            serde_json::from_value(serde_json::json!({ "host": "h", "port": 3306, "database": "d", "user": "u", "password": "", "readOnly": false, "tls": null })).unwrap();
+        assert!(plain.tls.is_none() && !plain.read_only);
+    }
+}
