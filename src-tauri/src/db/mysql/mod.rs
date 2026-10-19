@@ -6,6 +6,7 @@ mod catalog;
 mod console;
 mod data;
 mod editor;
+mod objects;
 pub(crate) mod plan;
 #[cfg(test)]
 pub(crate) mod tests_support;

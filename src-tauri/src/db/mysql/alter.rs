@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 
 use super::catalog::{column_definitions, constraint_kinds, qualified, quote, ColumnDefinition};
+use super::objects::{drop_sql, duplicate, rename_sql, truncate_sql};
 use super::version::MysqlVersion;
 use super::MysqlDriver;
 use crate::db::model::{ColumnGeneration, NewColumn, NewTable, StructureChange};
@@ -555,24 +556,25 @@ impl SchemaEditor for MysqlDriver {
         self.run_ddl(sql).await
     }
 
-    async fn rename_relation(&self, _schema: &str, _name: &str, _kind: &str, _new_name: &str) -> Result<(), String> {
-        unimplemented!("renaming tables comes with the objects (Task 12)")
+    async fn rename_relation(&self, schema: &str, name: &str, kind: &str, new_name: &str) -> Result<(), String> {
+        self.run_ddl(rename_sql(schema, name, kind, new_name)?).await
     }
 
-    async fn drop_relation(&self, _schema: &str, _name: &str, _kind: &str, _cascade: bool) -> Result<(), String> {
-        unimplemented!("dropping tables comes with the objects (Task 12)")
+    async fn drop_relation(&self, schema: &str, name: &str, kind: &str, cascade: bool) -> Result<(), String> {
+        self.run_ddl(drop_sql(schema, name, kind, cascade)?).await
     }
 
-    async fn truncate_table(&self, _schema: &str, _name: &str, _restart_identity: bool, _cascade: bool) -> Result<(), String> {
-        unimplemented!("truncating tables comes with the objects (Task 12)")
+    /// MySQL always starts the numbering again, so `restart_identity` has nothing to ask.
+    async fn truncate_table(&self, schema: &str, name: &str, _restart_identity: bool, cascade: bool) -> Result<(), String> {
+        self.run_ddl(truncate_sql(schema, name, cascade)?).await
     }
 
-    async fn duplicate_table(&self, _schema: &str, _name: &str, _new_name: &str, _with_data: bool) -> Result<(), String> {
-        unimplemented!("duplicating tables comes with the objects (Task 12)")
+    async fn duplicate_table(&self, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
+        duplicate(self, schema, name, new_name, with_data).await
     }
 
     async fn refresh_materialized_view(&self, _schema: &str, _name: &str) -> Result<(), String> {
-        unimplemented!("MySQL has no materialized views (Task 12)")
+        Err(unsupported(Engine::Mysql, "Materialized views"))
     }
 }
 
