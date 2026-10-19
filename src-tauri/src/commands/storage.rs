@@ -15,7 +15,7 @@ use crate::db::Engine;
 const PBKDF2_SALT: &[u8] = b"dbunny-connection-salt-v1";
 const PBKDF2_ITERATIONS: u32 = 100_000;
 
-/// Sensitive data of a PostgreSQL connection — encrypted at rest as a JSON blob.
+/// Sensitive data of a server connection (PostgreSQL or MySQL) — encrypted at rest as a JSON blob.
 #[derive(Serialize, Deserialize)]
 struct SensitiveData {
     host: String,
@@ -300,6 +300,17 @@ pub enum ConnectionDetails {
         tls: Option<TlsSettings>,
         ssl: bool,
     },
+    Mysql {
+        host: String,
+        port: u16,
+        /// May be empty: the session opens the first database it finds.
+        database: String,
+        user: String,
+        password: String,
+        ssh: Option<SshConfig>,
+        tls: Option<TlsSettings>,
+        ssl: bool,
+    },
     Sqlite {
         path: String,
     },
@@ -309,6 +320,7 @@ impl ConnectionDetails {
     pub fn engine(&self) -> Engine {
         match self {
             ConnectionDetails::Postgres { .. } => Engine::Postgres,
+            ConnectionDetails::Mysql { .. } => Engine::Mysql,
             ConnectionDetails::Sqlite { .. } => Engine::Sqlite,
         }
     }
@@ -327,7 +339,9 @@ impl SavedConnection {
         let engine = details.engine();
         // What gets encrypted depends on the engine
         let (json, ssl) = match details {
-            ConnectionDetails::Postgres { host, port, database, user, password, ssh, tls, ssl } => {
+            // A MySQL connection keeps the same details under its own engine
+            ConnectionDetails::Postgres { host, port, database, user, password, ssh, tls, ssl }
+            | ConnectionDetails::Mysql { host, port, database, user, password, ssh, tls, ssl } => {
                 let json = serde_json::to_string(&SensitiveData { host, port, database, user, password, ssh, tls })
                     .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?;
                 (json, ssl)
@@ -376,7 +390,7 @@ impl SavedConnection {
         };
         // A SQLite connection has only its path; the PostgreSQL fields are left empty
         let (sensitive, path) = match engine {
-            Engine::Postgres => (serde_json::from_str::<SensitiveData>(&json).map_err(deserialize_error)?, String::new()),
+            Engine::Postgres | Engine::Mysql => (serde_json::from_str::<SensitiveData>(&json).map_err(deserialize_error)?, String::new()),
             Engine::Sqlite => {
                 let SqliteData { path } = serde_json::from_str(&json).map_err(deserialize_error)?;
                 let empty = SensitiveData {
@@ -390,8 +404,6 @@ impl SavedConnection {
                 };
                 (empty, path)
             }
-            // Saved MySQL connections arrive with the driver
-            Engine::Mysql => return Err("This version doesn't support mysql connections".into()),
         };
 
         Ok(SavedConnectionInfo {
@@ -614,6 +626,53 @@ mod tests {
             tls: None,
             ssl,
         }
+    }
+
+    fn mysql(host: &str, port: u16, database: &str, user: &str, password: &str, ssl: bool) -> ConnectionDetails {
+        ConnectionDetails::Mysql {
+            host: host.into(),
+            port,
+            database: database.into(),
+            user: user.into(),
+            password: password.into(),
+            ssh: None,
+            tls: None,
+            ssl,
+        }
+    }
+
+    #[test]
+    fn a_mysql_connection_is_saved_and_read_back() {
+        let key = [8u8; 32];
+        let details = ConnectionDetails::Mysql {
+            host: "db.example.com".into(),
+            port: 3307,
+            database: "shop".into(),
+            user: "me".into(),
+            password: "secret".into(),
+            ssh: Some(SshConfig { host: "bastion".into(), port: 22, user: "ubuntu".into(), auth_method: "password".into(), password: "tunnelpw".into(), ..Default::default() }),
+            tls: Some(TlsSettings { mode: "verify-ca".into(), root_cert: "/ca.pem".into(), ..Default::default() }),
+            ssl: true,
+        };
+        let conn = SavedConnection::new(&key, "m1".into(), "Shop".into(), details, "#3b82f6".into(), "a".into(), "b".into()).unwrap();
+        let stored = serde_json::to_string(&conn).unwrap();
+        assert!(stored.contains(r#""engine":"mysql""#), "{stored}");
+        for private in ["db.example.com", "secret", "bastion", "tunnelpw", "/ca.pem"] {
+            assert!(!stored.contains(private), "{private} is in the clear: {stored}");
+        }
+
+        let info = serde_json::from_str::<SavedConnection>(&stored).unwrap().to_info(&key).unwrap();
+        assert_eq!(info.engine, Engine::Mysql);
+        assert_eq!((info.host.as_str(), info.port, info.database.as_str(), info.user.as_str(), info.password.as_str()), ("db.example.com", 3307, "shop", "me", "secret"));
+        assert_eq!((info.ssh.unwrap().host.as_str(), info.tls.unwrap().mode.as_str(), info.ssl, info.path.as_str()), ("bastion", "verify-ca", true, ""));
+    }
+
+    #[test]
+    fn a_mysql_connection_may_have_no_database() {
+        let key = [8u8; 32];
+        let conn = SavedConnection::new(&key, "m2".into(), "Server".into(), mysql("db.local", 3306, "", "root", "", false), "#000".into(), "a".into(), "b".into()).unwrap();
+        let info = conn.to_info(&key).unwrap();
+        assert_eq!((info.engine, info.database.as_str(), info.ssl), (Engine::Mysql, "", false));
     }
 
     fn temp_dir() -> PathBuf {
