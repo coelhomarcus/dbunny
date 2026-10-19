@@ -7,12 +7,14 @@ import {
   configuredTabs,
   connectionUrlOf,
   draftFromSaved,
+  draftFromUrl,
   missingFields,
   newDraft,
   saveInputOf,
   savedTagOf,
   sshConfigOf,
   tabsFor,
+  urlHints,
 } from "../../src/lib/connectionDraft.ts";
 
 const saved: SavedConnection = {
@@ -275,4 +277,29 @@ test("mysql has the server tabs, and ssh follows the draft", () => {
   assert.deepEqual([...configuredTabs({ ...d, fields: { ...d.fields, host: "db" } })], ["ssh"]);
   assert.equal(sshConfigOf({ ...d, fields: { ...d.fields, host: "db" } })?.host, "b");
   assert.equal(sshConfigOf({ ...d, fields: { ...d.fields, host: "/var/run/mysqld" } }), null);
+});
+
+test("a url opens the draft of the database it names", () => {
+  const mysql = draftFromUrl("mysql://ana:pw@db.local:3307/shop?ssl-mode=REQUIRED")!;
+  assert.deepEqual([mysql.engine, mysql.fields.host, mysql.fields.port, mysql.fields.database, mysql.fields.ssl], ["mysql", "db.local", "3307", "shop", true]);
+  const pg = draftFromUrl("postgresql://me:pw@db.example.com/app")!;
+  assert.deepEqual([pg.engine, pg.fields.host, pg.fields.port, pg.fields.database], ["postgres", "db.example.com", "5432", "app"]);
+  assert.equal(draftFromUrl("postgres://me@h/app")?.engine, "postgres");
+  assert.equal(draftFromUrl("  mysql://h  ")?.engine, "mysql");
+  assert.equal(draftFromUrl("sqlite:///x.db"), null);
+  assert.equal(draftFromUrl("not a url"), null);
+  assert.equal(draftFromUrl(""), null);
+});
+
+test("the url dialog speaks of the database it is for", () => {
+  assert.deepEqual(urlHints("mysql"), {
+    description: "Paste a MySQL connection string to fill in the form.",
+    placeholder: "mysql://user:password@host:3306/database",
+    invalid: "That doesn't look like a mysql:// connection URL.",
+  });
+  assert.equal(urlHints("postgres").placeholder, "postgresql://user:password@host:5432/database");
+  assert.equal(urlHints("postgres").invalid, "That doesn't look like a postgres:// connection URL.");
+  // From the home page any server database will do
+  assert.equal(urlHints(undefined).description, "Paste a PostgreSQL or MySQL connection string to fill in the form.");
+  assert.equal(urlHints(undefined).invalid, "That doesn't look like a postgres:// or mysql:// connection URL.");
 });

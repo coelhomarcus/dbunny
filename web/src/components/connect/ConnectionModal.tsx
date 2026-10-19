@@ -335,6 +335,7 @@ function ModalBody({
 
       {hostKeyPrompt}
       <ImportUrlDialog
+        engine={draft.engine}
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onImport={(url) => {

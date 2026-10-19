@@ -113,6 +113,39 @@ export function applyUrl(draft: ConnectionDraft, url: string): ConnectionDraft |
   return { ...draft, fields: { ...draft.fields, ...parsed } };
 }
 
+/** The draft a connection URL describes, for whichever server database its scheme names. Null if it isn't one. */
+export function draftFromUrl(url: string): ConnectionDraft | null {
+  for (const engine of ["postgres", "mysql"] as const) {
+    const draft = applyUrl(newDraft(engine), url);
+    if (draft) return draft;
+  }
+  return null;
+}
+
+/** What the import-from-URL dialog says: for one database, or (with none) for any server database. */
+export function urlHints(engine: Engine | undefined): { description: string; placeholder: string; invalid: string } {
+  switch (engine) {
+    case "mysql":
+      return {
+        description: "Paste a MySQL connection string to fill in the form.",
+        placeholder: "mysql://user:password@host:3306/database",
+        invalid: "That doesn't look like a mysql:// connection URL.",
+      };
+    case "postgres":
+      return {
+        description: "Paste a PostgreSQL connection string to fill in the form.",
+        placeholder: "postgresql://user:password@host:5432/database",
+        invalid: "That doesn't look like a postgres:// connection URL.",
+      };
+    default:
+      return {
+        description: "Paste a PostgreSQL or MySQL connection string to fill in the form.",
+        placeholder: "postgresql://user:password@host:5432/database",
+        invalid: "That doesn't look like a postgres:// or mysql:// connection URL.",
+      };
+  }
+}
+
 export function tabsFor(engine: Engine): ConnectionTab[] {
   switch (engine) {
     case "postgres":
