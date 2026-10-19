@@ -6,7 +6,8 @@
 # Progress goes to stderr and the variables to stdout, so this works:
 #   eval "$(src-tauri/tests/mysql-docker.sh up)"
 #   cargo test --manifest-path src-tauri/Cargo.toml --lib mysql -- --ignored
-# For MySQL 8.0, run the suite again with DBUNNY_TEST_MYSQL_URL set to DBUNNY_TEST_MYSQL80_URL.
+# For MySQL 8.0, MariaDB 10.6 and MariaDB 11.4, run the suite again with DBUNNY_TEST_MYSQL_URL set to
+# DBUNNY_TEST_MYSQL80_URL, DBUNNY_TEST_MARIADB106_URL or DBUNNY_TEST_MARIADB_URL.
 #
 # Only the containers named here (all dbunny-test-*) and the network dbunny-test-net are
 # touched, and every port is bound to 127.0.0.1.
@@ -16,9 +17,10 @@ set -euo pipefail
 NETWORK=dbunny-test-net
 MYSQL84=dbunny-test-mysql84
 MYSQL80=dbunny-test-mysql80
+MARIADB106=dbunny-test-mariadb106
 MARIADB=dbunny-test-mariadb
 SSH=dbunny-test-ssh
-CONTAINERS=("$MYSQL84" "$MYSQL80" "$MARIADB" "$SSH")
+CONTAINERS=("$MYSQL84" "$MYSQL80" "$MARIADB106" "$MARIADB" "$SSH")
 
 TMP_ROOT="${TMPDIR:-/tmp}"
 SSL_DIR="${TMP_ROOT%/}/dbunny-test-mysql-ssl"
@@ -88,6 +90,7 @@ up() {
 
     start "$MYSQL84" -p 127.0.0.1:33084:3306 -e MYSQL_ROOT_PASSWORD=test mysql:8.4
     start "$MYSQL80" -p 127.0.0.1:33080:3306 -e MYSQL_ROOT_PASSWORD=test mysql:8.0
+    start "$MARIADB106" -p 127.0.0.1:33106:3306 -e MARIADB_ROOT_PASSWORD=test mariadb:10.6
     start "$MARIADB" -p 127.0.0.1:33114:3306 -e MARIADB_ROOT_PASSWORD=test mariadb:11.4
 
     # The SSH server is optional: without its image the tunnel tests are skipped
@@ -108,6 +111,7 @@ up() {
     # Over TCP: while the image initializes, its temporary server only listens on the socket
     wait_for "$MYSQL84" mysqladmin ping -h 127.0.0.1 -uroot -ptest --silent
     wait_for "$MYSQL80" mysqladmin ping -h 127.0.0.1 -uroot -ptest --silent
+    wait_for "$MARIADB106" mariadb-admin ping -h 127.0.0.1 -uroot -ptest --silent
     wait_for "$MARIADB" mariadb-admin ping -h 127.0.0.1 -uroot -ptest --silent
     if $ssh_ok; then
         wait_for_ssh
@@ -123,6 +127,7 @@ up() {
 
     echo "export DBUNNY_TEST_MYSQL_URL=mysql://root:test@127.0.0.1:33084"
     echo "export DBUNNY_TEST_MYSQL80_URL=mysql://root:test@127.0.0.1:33080"
+    echo "export DBUNNY_TEST_MARIADB106_URL=mysql://root:test@127.0.0.1:33106"
     echo "export DBUNNY_TEST_MARIADB_URL=mysql://root:test@127.0.0.1:33114"
     echo "export DBUNNY_TEST_MYSQL_SSL_DIR=$SSL_DIR"
     if $ssh_ok; then
