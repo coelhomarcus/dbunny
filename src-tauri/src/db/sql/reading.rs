@@ -42,7 +42,10 @@ pub fn check_reading(dialect: Dialect, sql: &str) -> Result<(), ReadRefusal> {
         Dialect::Mysql => matches!(first, Some("SHOW" | "DESCRIBE" | "DESC")),
         Dialect::Sqlite => false,
     };
-    if (starts_as_query(&tokens) || shows) && !has_writing_word(&tokens) {
+    // SHOW and DESCRIBE can't write, and `SHOW CREATE TABLE` says CREATE; only a conditional comment, which
+    // MySQL runs as code, is still looked for
+    let clean = if shows { !tokens.contains(&Tok::Versioned) } else { starts_as_query(&tokens) && !has_writing_word(&tokens) };
+    if clean {
         Ok(())
     } else {
         Err(ReadRefusal::Writes)
@@ -289,6 +292,15 @@ mod tests {
         }
         assert_eq!(check_reading(Dialect::Postgres, "DESCRIBE t"), Err(ReadRefusal::Writes));
         assert_eq!(check_reading(Dialect::Sqlite, "PRAGMA table_info(t)"), Err(ReadRefusal::Writes));
+    }
+
+    #[test]
+    fn show_create_reads_though_it_says_create() {
+        for sql in ["SHOW CREATE TABLE orders", "SHOW CREATE VIEW v", "SHOW GRANTS FOR CURRENT_USER"] {
+            assert_eq!(check_reading(Dialect::Mysql, sql), Ok(()), "{sql}");
+        }
+        assert_eq!(check_reading(Dialect::Mysql, "SHOW CREATE TABLE orders; DROP TABLE orders"), Err(ReadRefusal::Several));
+        assert_eq!(check_reading(Dialect::Mysql, "SHOW CREATE TABLE orders /*!50000 INTO OUTFILE 'x' */"), Err(ReadRefusal::Writes));
     }
 
     #[test]
