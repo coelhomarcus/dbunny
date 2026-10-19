@@ -1,5 +1,7 @@
-import { Maximize2, Minimize2, SquarePen, Sparkles, X } from "lucide-react";
+import { useState } from "react";
+import { Maximize2, Minimize2, SlidersHorizontal, SquarePen, Sparkles, X } from "lucide-react";
 import { useAssistant } from "../../contexts/assistant";
+import { useConnection } from "../../contexts/useConnection";
 import { selectClass } from "../ui/styles";
 import Button from "../ui/Button";
 import Tooltip from "../Tooltip";
@@ -7,10 +9,13 @@ import AssistantStatusScreen from "./AssistantStatusScreen";
 import ConsentScreen from "./ConsentScreen";
 import AssistantConversation from "./AssistantConversation";
 import HistoryMenu from "./HistoryMenu";
+import ConnectionOptionsDialog from "./ConnectionOptionsDialog";
 
 /** The assistant, in the side panel or in a tab of its own: its header, then what the state of the agent allows. */
 export default function AssistantBody({ onClose, onBack }: { onClose?: () => void; onBack?: () => void }) {
   const assistant = useAssistant();
+  const { savedConnectionId } = useConnection();
+  const [options, setOptions] = useState(false);
   const ready = assistant.enabled && assistant.status.state === "ready";
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -35,6 +40,13 @@ export default function AssistantBody({ onClose, onBack }: { onClose?: () => voi
         {ready && (
           <>
             <HistoryMenu />
+            {savedConnectionId && (
+              <Tooltip label="Options for this connection" side="bottom">
+                <Button variant="ghost-muted" size="icon-xs" aria-label="Options for this connection" onClick={() => setOptions(true)}>
+                  <SlidersHorizontal />
+                </Button>
+              </Tooltip>
+            )}
             <Tooltip label="New chat" side="bottom">
               <Button variant="ghost-muted" size="icon-xs" aria-label="New chat" onClick={() => assistant.newChat()}>
                 <SquarePen />
@@ -64,6 +76,7 @@ export default function AssistantBody({ onClose, onBack }: { onClose?: () => voi
           </Tooltip>
         )}
       </div>
+      {savedConnectionId && options && <ConnectionOptionsDialog savedId={savedConnectionId} open onClose={() => setOptions(false)} />}
       <div className="min-h-0 flex-1">
         {!assistant.enabled ? (
           <ConsentScreen onEnable={assistant.enable} />

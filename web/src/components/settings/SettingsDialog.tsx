@@ -13,6 +13,7 @@ import {
   RefreshCw,
   RotateCw,
   Settings2,
+  Sparkles,
   ShieldCheck,
   Sun,
   TriangleAlert,
@@ -28,33 +29,19 @@ import type { SettingsSection } from "../../contexts/settingsDialog";
 import Button from "../ui/Button";
 import ReleaseNotesDialog from "../ReleaseNotesDialog";
 import Switch from "../ui/Switch";
+import AssistantSection from "./AssistantSection";
+import { Row, SectionTitle } from "./SettingsRows";
 import SegmentedTabs from "../ui/SegmentedTabs";
 
 const SECTIONS: { id: SettingsSection; label: string; icon: ReactNode }[] = [
   { id: "general", label: "General", icon: <Settings2 /> },
   { id: "editor", label: "Query editor", icon: <Code /> },
+  { id: "assistant", label: "AI Assistant", icon: <Sparkles /> },
   { id: "updates", label: "Updates", icon: <RefreshCw /> },
   { id: "about", label: "About", icon: <Info /> },
 ];
 
 const REPO_URL = "https://github.com/coelhomarcus/dbunny";
-
-/** One setting: what it is and what it does on the left, its control on the right. */
-function Row({ title, hint, children }: { title: string; hint?: ReactNode; children: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-6 border-b border-border py-3.5 last:border-b-0">
-      <div className="min-w-0">
-        <div className="text-[13px] font-medium">{title}</div>
-        {hint && <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>}
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  );
-}
-
-function SectionTitle({ children }: { children: ReactNode }) {
-  return <h2 className="mb-1 text-[15px] font-semibold">{children}</h2>;
-}
 
 function useAppVersion() {
   const [version, setVersion] = useState<string | null>(null);
@@ -287,6 +274,7 @@ export default function SettingsDialog({
           </Button>
           {section === "general" && <GeneralSection />}
           {section === "editor" && <EditorSection />}
+          {section === "assistant" && <AssistantSection />}
           {section === "updates" && <UpdatesSection />}
           {section === "about" && <AboutSection />}
         </div>
