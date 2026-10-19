@@ -3,20 +3,15 @@
 
 mod admin;
 mod alter;
-mod catalog;
+pub(crate) mod catalog;
 mod console;
-mod data;
-mod editor;
 mod flavor;
-mod objects;
 pub(crate) mod plan;
-mod structure;
-mod transactions;
+pub(crate) mod structure;
 pub mod version;
 
 use std::sync::Arc;
 
-pub(crate) use editor::EditorConn;
 pub use flavor::MysqlFlavor;
 
 use super::mysql_common::connect::MysqlEndpoint;

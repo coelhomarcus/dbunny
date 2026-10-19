@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 
 use super::catalog::{column_definitions, constraint_kinds, qualified, quote, ColumnDefinition};
-use super::objects::{drop_sql, duplicate, rename_sql, truncate_sql};
+use crate::db::mysql_common::objects::{drop_sql, duplicate, rename_sql, truncate_sql};
 use crate::db::mysql_common::version::ServerVersion;
 use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{ColumnGeneration, NewColumn, NewTable, StructureChange};
@@ -1045,7 +1045,7 @@ mod server_tests {
     use crate::db::model::{NewColumn, NewForeignKey, StructureChange};
     use crate::db::Driver;
 
-    const SHOP: &str = include_str!("fixtures/shop.sql");
+    const SHOP: &str = include_str!("../mysql_common/fixtures/shop.sql");
 
     /// A table with the columns that are hardest to restate: a character set and collation of
     /// their own, a default with quotes, `ON UPDATE`, expression defaults, stored and virtual

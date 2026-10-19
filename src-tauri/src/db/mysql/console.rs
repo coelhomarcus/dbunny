@@ -10,7 +10,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Column, Conn, Error as MysqlError, Row};
 use serde_json::Value as JsonValue;
 
-use super::editor::in_transaction_status;
+use crate::db::mysql_common::editor::in_transaction_status;
 use super::plan::{is_reading_statement, parse_tree};
 use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{ExplainResult, Notice, QueryColumn, QueryResult};
@@ -271,7 +271,7 @@ mod server_tests {
     use crate::db::sqlite::errors::CANCELLED;
     use crate::db::{Driver, ExplainFormat};
 
-    const SHOP: &str = include_str!("fixtures/shop.sql");
+    const SHOP: &str = include_str!("../mysql_common/fixtures/shop.sql");
 
     async fn open() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;

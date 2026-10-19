@@ -574,7 +574,7 @@ mod server_tests {
     #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
     async fn every_type_round_trips_through_the_grid() {
         let db = TestDb::new().await;
-        exec(&db.endpoint, include_str!("../mysql/fixtures/all_types.sql")).await;
+        exec(&db.endpoint, include_str!("fixtures/all_types.sql")).await;
         let mut conn = raw_conn(&db.endpoint).await;
         let columns = columns_of(&mut conn, "all_types").await;
         assert_eq!(columns.len(), expected()[0].len());

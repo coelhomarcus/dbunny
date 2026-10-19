@@ -2,7 +2,7 @@
 
 use mysql_async::prelude::Queryable;
 
-use super::catalog::{column_definitions, qualified, quote};
+use crate::db::mysql::catalog::{column_definitions, qualified, quote};
 use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::mysql_common::errors::error_message;
 use crate::db::{unsupported, Engine};
@@ -24,13 +24,13 @@ fn check_name(new_name: &str) -> Result<(), String> {
 }
 
 /// `RENAME TABLE` renames views too, and moves the keys that point at the table along.
-pub(super) fn rename_sql(schema: &str, name: &str, kind: &str, new_name: &str) -> Result<String, String> {
+pub(crate) fn rename_sql(schema: &str, name: &str, kind: &str, new_name: &str) -> Result<String, String> {
     keyword(kind)?;
     check_name(new_name)?;
     Ok(format!("RENAME TABLE {} TO {}", qualified(schema, name), qualified(schema, new_name.trim())))
 }
 
-pub(super) fn drop_sql(schema: &str, name: &str, kind: &str, cascade: bool) -> Result<String, String> {
+pub(crate) fn drop_sql(schema: &str, name: &str, kind: &str, cascade: bool) -> Result<String, String> {
     let keyword = keyword(kind)?;
     if cascade {
         return Err(unsupported(Engine::Mysql, "CASCADE"));
@@ -39,7 +39,7 @@ pub(super) fn drop_sql(schema: &str, name: &str, kind: &str, cascade: bool) -> R
 }
 
 /// `TRUNCATE TABLE` always starts the numbering again, so there is no option for it.
-pub(super) fn truncate_sql(schema: &str, name: &str, cascade: bool) -> Result<String, String> {
+pub(crate) fn truncate_sql(schema: &str, name: &str, cascade: bool) -> Result<String, String> {
     if cascade {
         return Err(unsupported(Engine::Mysql, "CASCADE"));
     }
@@ -48,7 +48,7 @@ pub(super) fn truncate_sql(schema: &str, name: &str, cascade: bool) -> Result<St
 
 /// The statements that copy a table: its structure (indexes and computed columns with it, keys
 /// to other tables not), then the rows of `columns` when there are any to copy.
-pub(super) fn duplicate_sql(schema: &str, name: &str, new_name: &str, columns: Option<&[String]>) -> Result<Vec<String>, String> {
+pub(crate) fn duplicate_sql(schema: &str, name: &str, new_name: &str, columns: Option<&[String]>) -> Result<Vec<String>, String> {
     check_name(new_name)?;
     let (source, target) = (qualified(schema, name), qualified(schema, new_name.trim()));
     let mut statements = vec![format!("CREATE TABLE {target} LIKE {source}")];
@@ -60,7 +60,7 @@ pub(super) fn duplicate_sql(schema: &str, name: &str, new_name: &str, columns: O
 }
 
 /// Copies a table, and its rows when `with_data`. A copy that fails halfway is dropped again.
-pub(super) async fn duplicate(driver: &ServerDriver, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
+pub(crate) async fn duplicate(driver: &ServerDriver, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
     let mut conn = driver.conn().await?;
     let columns = if with_data {
         // Computed columns can't be written

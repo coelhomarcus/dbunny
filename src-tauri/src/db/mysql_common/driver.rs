@@ -12,7 +12,7 @@ use super::connect::{is_socket, opts_for, ConnRole, MysqlEndpoint};
 use super::errors::error_message;
 use super::flavor::Flavor;
 use super::version::ServerVersion;
-use crate::db::mysql::EditorConn;
+use super::editor::EditorConn;
 use crate::db::net::ssh::{open_tunnel, KnownHosts, Tunnel};
 use crate::db::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, SchemaEditor, ServerAdmin, Transactions};
 

@@ -104,7 +104,7 @@ fn cell<'a>(row: &'a Row, name: &str) -> Option<&'a Value> {
     row.as_ref(at)
 }
 
-pub(super) fn value_text(value: &Value) -> Option<String> {
+pub(crate) fn value_text(value: &Value) -> Option<String> {
     match value {
         Value::NULL => None,
         Value::Bytes(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
@@ -117,17 +117,17 @@ pub(super) fn value_text(value: &Value) -> Option<String> {
 }
 
 /// The text of the cell `name`; None for NULL.
-pub(super) fn text(row: &Row, name: &str) -> Option<String> {
+pub(crate) fn text(row: &Row, name: &str) -> Option<String> {
     cell(row, name).and_then(value_text)
 }
 
 /// The text of the cell `name`; empty for NULL.
-pub(super) fn string(row: &Row, name: &str) -> String {
+pub(crate) fn string(row: &Row, name: &str) -> String {
     text(row, name).unwrap_or_default()
 }
 
 /// The number in the cell `name`; None for NULL.
-pub(super) fn number(row: &Row, name: &str) -> Option<i64> {
+pub(crate) fn number(row: &Row, name: &str) -> Option<i64> {
     match cell(row, name)? {
         Value::Int(n) => Some(*n),
         Value::UInt(n) => i64::try_from(*n).ok(),
@@ -139,17 +139,17 @@ pub(super) fn number(row: &Row, name: &str) -> Option<i64> {
 }
 
 /// `` `name` ``.
-pub(super) fn quote(name: &str) -> String {
+pub(crate) fn quote(name: &str) -> String {
     Dialect::Mysql.quote_ident(name)
 }
 
 /// `` `schema`.`name` ``.
-pub(super) fn qualified(schema: &str, name: &str) -> String {
+pub(crate) fn qualified(schema: &str, name: &str) -> String {
     format!("{}.{}", quote(schema), quote(name))
 }
 
 /// A text that is empty when the server has nothing to say.
-pub(super) fn non_empty(text: String) -> Option<String> {
+pub(crate) fn non_empty(text: String) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
@@ -186,12 +186,12 @@ impl ColumnDefinition {
 }
 
 /// A column with the key it belongs to (`PRI`, `UNI`, `MUL` or empty).
-pub(super) struct StoredColumn {
+pub(crate) struct StoredColumn {
     pub definition: ColumnDefinition,
     pub key: String,
 }
 
-pub(super) async fn read_columns(conn: &mut Conn, database: &str, table: &str) -> mysql_async::Result<Vec<StoredColumn>> {
+pub(crate) async fn read_columns(conn: &mut Conn, database: &str, table: &str) -> mysql_async::Result<Vec<StoredColumn>> {
     let rows: Vec<Row> = conn
         .exec(
             "SELECT COLUMN_NAME AS column_name, COLUMN_DEFAULT AS column_default, IS_NULLABLE AS is_nullable, \
@@ -257,7 +257,7 @@ fn detached(e: &mysql_async::Error) -> String {
 
 /// The values of an `enum('a','b')` or `set('a','b')` column type, with doubled quotes and
 /// backslash escapes resolved; None for any other type.
-pub(super) fn enum_values(column_type: &str) -> Option<Vec<String>> {
+pub(crate) fn enum_values(column_type: &str) -> Option<Vec<String>> {
     let lower = column_type.to_ascii_lowercase();
     let start = if lower.starts_with("enum(") {
         5
@@ -299,7 +299,7 @@ pub(super) fn enum_values(column_type: &str) -> Option<Vec<String>> {
     Some(values)
 }
 
-pub(super) async fn table_columns(conn: &mut Conn, database: &str, table: &str) -> mysql_async::Result<Vec<ColumnInfo>> {
+pub(crate) async fn table_columns(conn: &mut Conn, database: &str, table: &str) -> mysql_async::Result<Vec<ColumnInfo>> {
     let stored = read_columns(conn, database, table).await?;
     let keys = structure::read_foreign_keys(conn, "k.TABLE_SCHEMA = ? AND k.TABLE_NAME = ?", (database, table)).await?;
     Ok(stored
@@ -335,7 +335,7 @@ pub(super) async fn table_columns(conn: &mut Conn, database: &str, table: &str) 
 /// The parameters and the return type of a stored routine, as the explorer and the
 /// routine's page print them.
 #[derive(Default, Clone)]
-pub(super) struct Signature {
+pub(crate) struct Signature {
     /// `IN id int, OUT total decimal(10,2)` for a procedure, `o int` for a function.
     pub arguments: String,
     /// `decimal(10,2)`; empty for a procedure.
@@ -343,7 +343,7 @@ pub(super) struct Signature {
 }
 
 /// The signature of every routine of `database` by (name, `PROCEDURE` or `FUNCTION`).
-pub(super) async fn read_signatures(conn: &mut Conn, database: &str) -> mysql_async::Result<HashMap<(String, String), Signature>> {
+pub(crate) async fn read_signatures(conn: &mut Conn, database: &str) -> mysql_async::Result<HashMap<(String, String), Signature>> {
     let rows: Vec<Row> = conn
         .exec(
             "SELECT SPECIFIC_NAME AS routine_name, ROUTINE_TYPE AS routine_type, ORDINAL_POSITION AS position, \
@@ -552,13 +552,13 @@ async fn diagram(conn: &mut Conn, schema: &str) -> mysql_async::Result<Diagram> 
 
 /// The text SHOW CREATE gave: `column` of its only row. None when the server hides it
 /// (NULL, for a routine the user may not read) or there's no such object.
-pub(super) async fn show_create(conn: &mut Conn, what: &str, schema: &str, name: &str, column: usize) -> mysql_async::Result<Option<String>> {
+pub(crate) async fn show_create(conn: &mut Conn, what: &str, schema: &str, name: &str, column: usize) -> mysql_async::Result<Option<String>> {
     let row: Option<Row> = conn.query_first(format!("SHOW CREATE {what} {}", qualified(schema, name))).await?;
     Ok(row.and_then(|r| r.as_ref(column).and_then(value_text)))
 }
 
 /// `sql` ended with a semicolon, the way the other engines' definitions are.
-pub(super) fn terminated(sql: String) -> String {
+pub(crate) fn terminated(sql: String) -> String {
     let trimmed = sql.trim_end();
     if trimmed.is_empty() || trimmed.ends_with(';') {
         trimmed.to_string()
@@ -763,7 +763,7 @@ mod server_tests {
     use crate::db::model::{ColumnInfo, ExplorerTree};
     use crate::db::Driver;
 
-    const SHOP: &str = include_str!("fixtures/shop.sql");
+    const SHOP: &str = include_str!("../mysql_common/fixtures/shop.sql");
 
     /// A database with the shop in it, and a session open on it.
     async fn shop() -> (TestDb, Arc<ServerDriver>) {
