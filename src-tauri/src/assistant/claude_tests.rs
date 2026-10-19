@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 use super::agent::{AgentHandle, SessionSetup};
 use super::approvals::Approvals;
+use super::context::{system_prompt, PromptInput};
 use super::conversation::{Conversation, ConversationOptions, Conversations};
 use super::events::{AssistantEvent, EventSink, MemorySink};
 use super::launch::{check_node, default_command, login_shell_path};
@@ -35,6 +36,11 @@ fn enabled() -> bool {
 
 impl Live {
     async fn start() -> Live {
+        Live::start_with(false).await
+    }
+
+    /// `schema_only`: the connection hides values from the assistant.
+    async fn start_with(schema_only: bool) -> Live {
         let file = std::env::temp_dir().join(format!("dbunny-test-claude-{}.sqlite", uuid::Uuid::new_v4()));
         rusqlite::Connection::open(&file)
             .unwrap()
@@ -42,6 +48,7 @@ impl Live {
             .unwrap();
         let driver: Arc<dyn Driver> = SqliteDriver::open(file.clone(), OpenOptions::default()).await.unwrap();
         let sessions: Arc<Mutex<HashMap<String, Arc<dyn Driver>>>> = Default::default();
+        let driver_for_prompt = Arc::clone(&driver);
         sessions.lock().await.insert("s1".into(), driver);
 
         let (sink, conversations, approvals) = (MemorySink::new(), Arc::new(Conversations::default()), Arc::new(Approvals::default()));
@@ -55,15 +62,19 @@ impl Live {
             .await
             .unwrap_or_else(|status| panic!("the agent didn't start: {status:?}"));
 
-        let options = ConversationOptions { ask_before_queries: false, schema_only: false, row_limit: 100, instructions: String::new() };
+        let options = ConversationOptions { ask_before_queries: false, schema_only, row_limit: 100, instructions: String::new() };
         let conversation = conversations.create("s1", options);
         let cwd = std::env::temp_dir().join(format!("dbunny-test-claude-cwd-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&cwd).unwrap();
+        // The prompt the app gives, so that these tests see what the assistant really is told
+        let schema = driver_for_prompt.catalog().completion_schema().await.unwrap();
+        let info = driver_for_prompt.info();
+        let prompt = system_prompt(&PromptInput { engine: driver_for_prompt.engine(), info: &info, schema: &schema, instructions: "", schema_only });
         let setup = SessionSetup {
             cwd,
             mcp_url: server.url(),
             token: conversation.token.clone(),
-            system_prompt: "You are the SQL assistant inside DBunny. The database is SQLite. Use the tools to look at the data, and answer in one short sentence.".into(),
+            system_prompt: prompt,
         };
         Live { agent, server, conversations, sink, conversation, setup, file }
     }
@@ -178,5 +189,60 @@ async fn claude_reports_what_it_offers() {
     println!("models: {:?}", opened.models);
     println!("system prompt capability: {}", live.agent.supports_system_prompt());
     live.agent.set_model(&opened.acp_session, "haiku").await.unwrap();
+    live.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "needs DBUNNY_TEST_CLAUDE=1, Node 20+ and a signed-in Claude Code"]
+async fn claude_runs_the_query_without_pasting_it_first() {
+    if !enabled() {
+        return;
+    }
+    let live = Live::start().await;
+    let opened = live.agent.new_session(&live.setup).await.unwrap();
+    *live.conversation.acp_session.lock().unwrap() = Some(opened.acp_session.clone());
+    live.agent.prompt(&opened.acp_session, "Quantos registros tem na tabela t?").await.unwrap();
+    // What the assistant wrote before its first tool call
+    let mut before_the_call = String::new();
+    for event in live.sink.events() {
+        let AssistantEvent::Update { update, .. } = event else { continue };
+        match update["sessionUpdate"].as_str() {
+            Some("tool_call") if update["_meta"]["claudeCode"]["toolName"] == "mcp__dbunny__run_query" => break,
+            Some("agent_message_chunk") => before_the_call.push_str(update["content"]["text"].as_str().unwrap_or("")),
+            _ => {}
+        }
+    }
+    let (text, tools) = live.heard();
+    println!("before the call: {before_the_call:?}\nanswer: {text:?}\ntools: {tools:?}");
+    assert!(tools.iter().any(|t| t == "mcp__dbunny__run_query"), "{tools:?}");
+    assert!(!before_the_call.contains("```"), "the query was pasted before it ran: {before_the_call}");
+    live.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "needs DBUNNY_TEST_CLAUDE=1, Node 20+ and a signed-in Claude Code"]
+async fn claude_does_not_try_to_read_rows_when_values_are_hidden() {
+    if !enabled() {
+        return;
+    }
+    let live = Live::start_with(true).await;
+    let opened = live.agent.new_session(&live.setup).await.unwrap();
+    *live.conversation.acp_session.lock().unwrap() = Some(opened.acp_session.clone());
+    live.agent.prompt(&opened.acp_session, "Me mostra 3 linhas da tabela t").await.unwrap();
+    let (text, tools) = live.heard();
+    let ran: Vec<String> = live
+        .sink
+        .events()
+        .into_iter()
+        .filter_map(|e| match e {
+            AssistantEvent::Update { update, .. } if update["sessionUpdate"] == "tool_call" && update["_meta"]["claudeCode"]["toolName"] == "mcp__dbunny__run_query" => {
+                update["rawInput"]["sql"].as_str().map(str::to_string)
+            }
+            _ => None,
+        })
+        .collect();
+    println!("answer: {text:?}\ntools: {tools:?}\nran: {ran:?}");
+    assert!(ran.iter().all(|sql| sql.to_lowercase().contains("count")), "it ran a query that reads rows: {ran:?}");
+    assert!(text.contains("```"), "it should hand the query over to run in the editor: {text}");
     live.finish().await;
 }

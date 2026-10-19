@@ -147,3 +147,18 @@ test("an approval that arrives twice is shown once", () => {
   const alone = attachApproval(attachApproval(emptyConversation(), approval("a2", "SELECT 2")), approval("a2", "SELECT 2"));
   assert.equal(alone.items.length, 1);
 });
+
+test("the text of a tool that failed comes without the code fence the agent puts around it", () => {
+  const failed = (text: string) =>
+    play([
+      call("t1", "run_query", { sql: "SELECT 1" }),
+      { sessionUpdate: "tool_call_update", toolCallId: "t1", status: "failed", content: [{ type: "content", content: { type: "text", text } }] },
+    ]).items[0];
+  const declined = "The user declined to run this query. Ask them how to continue.";
+  assert.equal((failed("```\n" + declined + "\n```") as ToolItem).output, declined);
+  // Text that is not wrapped in one stays as it is, and so does a fence that holds only part of it
+  assert.equal((failed(declined) as ToolItem).output, declined);
+  assert.equal((failed("Run this:\n```\nSELECT 1\n```") as ToolItem).output, "Run this:\n```\nSELECT 1\n```");
+  // A result that is JSON is not touched either
+  assert.equal((failed('{"rowCount":1}') as ToolItem).output, '{"rowCount":1}');
+});

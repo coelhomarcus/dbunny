@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Ban, Check, Database, Loader2, Network, Table2, TriangleAlert } from "lucide-react";
+import { Ban, Check, ChevronDown, ChevronUp, Database, Loader2, Network, Table2, TriangleAlert } from "lucide-react";
 import { parseToolOutput, toolLabel, type ToolItem } from "../../lib/assistantConversation";
 import type { Decision } from "../../types/assistant";
 import ApprovalButtons from "./ApprovalButtons";
@@ -25,6 +25,8 @@ export default function ToolCard({ item, onDecide }: { item: ToolItem; onDecide:
 
 function QueryCard({ item, onDecide }: { item: ToolItem; onDecide: (approvalId: string, decision: Decision) => void }) {
   const [showAll, setShowAll] = useState(false);
+  // The rows stay folded: the assistant answers with them, and the card is for whoever wants to check
+  const [rowsOpen, setRowsOpen] = useState(false);
   const sql = typeof item.input.sql === "string" ? item.input.sql : "";
   const rows = item.output ? parseToolOutput(item.output) : null;
   const waiting = item.approval !== undefined;
@@ -41,13 +43,25 @@ function QueryCard({ item, onDecide }: { item: ToolItem; onDecide: (approvalId: 
   else if (rows) state = rows.valuesHidden ? `${rows.rowCount} rows (values hidden)` : `${rows.rowCount} rows${rows.truncated ? " (cut)" : ""}`;
   else state = "Done";
 
-  const shown = rows && !rows.valuesHidden ? (showAll ? rows.rows : rows.rows.slice(0, PREVIEW_ROWS)) : [];
+  const canShowRows = rows !== null && !rows.valuesHidden && rows.rows.length > 0;
+  const shown = rows && canShowRows ? (showAll ? rows.rows : rows.rows.slice(0, PREVIEW_ROWS)) : [];
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card text-xs">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
         {waiting || running ? <Loader2 size={13} className="animate-spin text-muted-foreground" /> : declined ? <Ban size={13} className="text-muted-foreground" /> : item.status === "failed" ? <TriangleAlert size={13} className="text-destructive-foreground" /> : <Check size={13} className="text-success-foreground" />}
         <span className="font-medium">{label}</span>
         <span className="flex-1" />
+        {canShowRows && (
+          <button
+            type="button"
+            aria-expanded={rowsOpen}
+            onClick={() => setRowsOpen(!rowsOpen)}
+            className="flex h-5 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            {rowsOpen ? "Hide rows" : "Show rows"}
+            {rowsOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+          </button>
+        )}
         <span className="text-muted-foreground">{state}</span>
       </div>
       {sql && (
@@ -63,7 +77,7 @@ function QueryCard({ item, onDecide }: { item: ToolItem; onDecide: (approvalId: 
       {item.status === "failed" && item.output && !declined && (
         <p className="border-t border-border px-2.5 py-1.5 whitespace-pre-wrap text-destructive-foreground">{item.output}</p>
       )}
-      {rows && shown.length > 0 && (
+      {rowsOpen && rows && shown.length > 0 && (
         <div className="border-t border-border">
           <ResultTable
             columns={rows.columns.map((column) => column.name)}

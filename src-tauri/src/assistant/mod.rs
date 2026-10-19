@@ -248,7 +248,7 @@ impl Assistant {
         let schema = driver.catalog().completion_schema().await.unwrap_or(CompletionSchema { current_schema: None, relations: vec![], functions: vec![] });
         let (cwd, temporary) = workspace_dir(&self.data_dir, saved_id, &info.database);
         std::fs::create_dir_all(&cwd).map_err(|e| format!("Couldn't prepare the assistant's folder: {e}"))?;
-        let prompt = system_prompt(&PromptInput { engine: driver.engine(), info: &info, schema: &schema, instructions: &options.instructions });
+        let prompt = system_prompt(&PromptInput { engine: driver.engine(), info: &info, schema: &schema, instructions: &options.instructions, schema_only: options.schema_only });
         let mcp_url = self.mcp_url().await.ok_or_else(|| "The assistant isn't running".to_string())?;
 
         let conversation = self.conversations.create(session_id, options);
@@ -531,6 +531,18 @@ mod tests {
         assert_eq!(params["mcpServers"][0]["url"], r.assistant.mcp_url().await.unwrap());
         let token = params["mcpServers"][0]["headers"][0]["value"].as_str().unwrap().strip_prefix("Bearer ").unwrap().to_string();
         assert_eq!(r.assistant.conversations.by_token(&token).unwrap().id, opened.conversation_id);
+    }
+
+    #[tokio::test]
+    async fn a_conversation_that_hides_values_tells_the_agent_so() {
+        let r = started(FakeConfig::default()).await;
+        r.assistant.new_conversation("s1", Some("saved-1"), ConversationOptions { schema_only: true, ..options() }).await.unwrap();
+        let params = r.host.agent().calls("session/new")[0]["params"].clone();
+        assert!(params["systemPrompt"]["content"][0]["text"].as_str().unwrap().contains("This connection hides values"));
+        let shown = started(FakeConfig::default()).await;
+        shown.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        let params = shown.host.agent().calls("session/new")[0]["params"].clone();
+        assert!(!params["systemPrompt"]["content"][0]["text"].as_str().unwrap().contains("This connection hides values"));
     }
 
     #[tokio::test]

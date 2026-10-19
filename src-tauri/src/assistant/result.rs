@@ -18,7 +18,8 @@ pub fn agent_result(result: &ReadResult, limit: usize, schema_only: bool) -> Str
     let columns: Vec<Value> = result.columns.iter().map(|c| json!({"name": c.name, "type": c.data_type})).collect();
     let shown = result.rows.len().min(limit);
     if schema_only {
-        return json!({"columns": columns, "rowCount": shown, "truncated": result.more, "valuesHidden": true}).to_string();
+        let note = "The values of this connection are hidden: only column names and the row count are returned.";
+        return json!({"columns": columns, "rowCount": shown, "truncated": result.more, "valuesHidden": true, "note": note}).to_string();
     }
 
     let mut truncated = result.more || result.rows.len() > limit;
@@ -148,6 +149,9 @@ mod tests {
     fn schema_only_hides_values() {
         let result = read(vec![column("id", "int4")], vec![vec![json!(1)], vec![json!(2)], vec![json!(3)]], false);
         let out = parsed(&agent_result(&result, 100, true));
-        assert_eq!(out, json!({"columns": [{"name": "id", "type": "int4"}], "rowCount": 3, "truncated": false, "valuesHidden": true}));
+        assert_eq!(out["columns"], json!([{"name": "id", "type": "int4"}]));
+        assert_eq!((out["rowCount"].clone(), out["truncated"].clone(), out["valuesHidden"].clone()), (json!(3), json!(false), json!(true)));
+        assert!(out.get("rows").is_none());
+        assert!(out["note"].as_str().unwrap().contains("hidden"), "{out}");
     }
 }

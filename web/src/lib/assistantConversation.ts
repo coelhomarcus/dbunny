@@ -55,6 +55,17 @@ function textOf(content: unknown): string {
     .join("");
 }
 
+/** The text without the code fence that wraps all of it (the agent puts one around the text of a tool that failed). */
+function unfence(text: string): string {
+  const lines = text.split("\n");
+  const wrapped =
+    lines.length >= 3 &&
+    /^```\w*$/.test(lines[0].trim()) &&
+    lines[lines.length - 1].trim() === "```" &&
+    !lines.slice(1, -1).some((line) => line.trim().startsWith("```"));
+  return wrapped ? lines.slice(1, -1).join("\n") : text;
+}
+
 function statusOf(value: unknown): ToolStatus | null {
   return value === "pending" || value === "in_progress" || value === "completed" || value === "failed" ? value : null;
 }
@@ -93,7 +104,7 @@ export function applyUpdate(conversation: Conversation, raw: unknown): Conversat
     const input = record(update.rawInput);
     const name = toolNameOf(update);
     const status = statusOf(update.status);
-    const text = textOf(update.content);
+    const text = unfence(textOf(update.content));
     const at = conversation.items.findIndex((item) => item.kind === "tool" && item.id === id);
     if (at >= 0) {
       const current = conversation.items[at] as Tool;
