@@ -341,4 +341,39 @@ mod server_tests {
         driver.close().await;
         db.drop_now().await;
     }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn a_system_versioned_table_is_a_table_like_any_other() {
+        use crate::db::model::TableDataParams;
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(
+            &db.endpoint,
+            "CREATE TABLE parent (id INT PRIMARY KEY); \
+             CREATE TABLE hist (id INT PRIMARY KEY, parent_id INT, v INT, FOREIGN KEY (parent_id) REFERENCES parent (id)) WITH SYSTEM VERSIONING; \
+             INSERT INTO parent VALUES (1); INSERT INTO hist (id, parent_id, v) VALUES (1, 1, 10)",
+        )
+        .await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let catalog = driver.catalog();
+        let tree = catalog.explorer().await.unwrap();
+        assert!(tree.schemas[0].objects.iter().any(|o| o.name == "hist" && o.kind == "table"), "the explorer lists it");
+        assert_eq!(catalog.relation_kind(&db.name, "hist").await.unwrap().as_deref(), Some("table"));
+        let structure = catalog.table_structure(&db.name, "hist").await.unwrap();
+        assert_eq!(structure.meta.kind, "table");
+        assert!(structure.ddl.contains("WITH SYSTEM VERSIONING"), "{}", structure.ddl);
+        let definition = catalog.object_definition(&db.name, "hist", "table").await.unwrap();
+        assert!(definition.ddl.contains("WITH SYSTEM VERSIONING"));
+        let completion = catalog.completion_schema().await.unwrap();
+        assert!(completion.relations.iter().any(|r| r.name == "hist"));
+        let diagram = catalog.diagram(&db.name).await.unwrap();
+        assert!(diagram.tables.iter().any(|t| t.name == "hist"));
+        let page = driver.data().table_page(&db.name, "hist", TableDataParams::default()).await.unwrap();
+        assert_eq!(page.total_rows, 1);
+        driver.close().await;
+        db.drop_now().await;
+    }
 }

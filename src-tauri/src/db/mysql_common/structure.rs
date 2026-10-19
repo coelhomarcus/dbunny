@@ -38,7 +38,7 @@ pub(super) async fn table_structure(
         .exec_first(
             "SELECT TABLE_TYPE AS table_type, ENGINE AS engine, TABLE_COLLATION AS collation_name, TABLE_ROWS AS table_rows, \
                     DATA_LENGTH AS data_length, INDEX_LENGTH AS index_length, TABLE_COMMENT AS table_comment \
-             FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')",
+             FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED', 'VIEW')",
             (schema, table),
         )
         .await
