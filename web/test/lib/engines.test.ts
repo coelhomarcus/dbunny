@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addressOf, dialectData, ENGINE_CARDS, engineLabel, locationOf, sqlDialectOf } from "../../src/lib/engines.ts";
+import { addressOf, dialectData, ENGINE_CARDS, engineLabel, explainAnalyzeHint, locationOf, sqlDialectOf } from "../../src/lib/engines.ts";
 
 test("mysql is available and mariadb is coming soon", () => {
   const card = (id: string) => ENGINE_CARDS.find((c) => c.id === id);
@@ -54,4 +54,10 @@ test("mysql dialect data", () => {
   assert.deepEqual(my.createTableFlags, []);
   const id = my.starterColumns[0];
   assert.deepEqual([id.name, id.dataType, id.primaryKey, id.generation], ["id", "bigint", true, "autoincrement"]);
+});
+
+test("explain analyze says what it does to the statement", () => {
+  assert.equal(explainAnalyzeHint("postgresJson"), "Runs it for real times, then rolls it back");
+  assert.equal(explainAnalyzeHint("mysqlTree"), "Runs it for real times. Only statements that read");
+  assert.equal(explainAnalyzeHint("sqliteQueryPlan"), "Runs it for real times, then rolls it back");
 });

@@ -1,4 +1,4 @@
-import type { ColumnGeneration, Engine } from "@/types";
+import type { ColumnGeneration, Engine, ExplainFormat } from "@/types";
 import type { SqlDialectName } from "./sqlStatements";
 
 /** The databases offered when creating a connection; the ones not ready yet show as coming soon. */
@@ -141,4 +141,9 @@ export function locationOf(info: { engine: Engine; host: string; port: number; d
 export function addressOf(info: { engine: Engine; host: string; port: number; database: string }): string {
   const { where, database } = locationOf(info);
   return database ? `${where}/${database}` : where;
+}
+
+/** What the menu says Explain analyze does: MySQL runs only statements that read, the others run it and roll it back. */
+export function explainAnalyzeHint(format: ExplainFormat): string {
+  return format === "mysqlTree" ? "Runs it for real times. Only statements that read" : "Runs it for real times, then rolls it back";
 }
