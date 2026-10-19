@@ -39,7 +39,14 @@ export default function MessageList({
           case "user":
             return (
               <div key={index} className="flex justify-end">
-                <p className="max-w-[85%] select-text whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-3 py-2 text-[13px] leading-relaxed">{item.text}</p>
+                {item.text.includes("```") ? (
+                  // A request from the editor carries its statement in a fence
+                  <div className="max-w-[90%] rounded-2xl rounded-br-md bg-muted px-3 py-2">
+                    <MarkdownView source={item.text} />
+                  </div>
+                ) : (
+                  <p className="max-w-[85%] select-text whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-3 py-2 text-[13px] leading-relaxed">{item.text}</p>
+                )}
               </div>
             );
           case "agent":
