@@ -12,7 +12,6 @@ import {
   PenLine,
   Plus,
   Server,
-  Sparkles,
   Shapes,
   Split,
   Table2,
@@ -33,6 +32,7 @@ import { useCapabilities } from "../../hooks/useCapabilities";
 import { cn } from "../../lib/cn";
 import { isMac } from "../../lib/platform";
 import Tooltip from "../Tooltip";
+import ClaudeCodeIcon from "../assistant/ClaudeCodeIcon";
 import type { DataIcon, Document } from "../../lib/documents";
 
 const DATA_ICON: Record<DataIcon, ComponentType<LucideProps>> = {
@@ -70,7 +70,7 @@ function iconFor(doc: Document): ComponentType<LucideProps> {
     case "diagram":
       return Waypoints;
     case "assistant":
-      return Sparkles;
+      return ClaudeCodeIcon;
   }
 }
 
@@ -112,7 +112,7 @@ function iconClass(doc: Document): string {
     case "diagram":
       return "text-info-foreground";
     case "assistant":
-      return "text-primary";
+      return "text-[#d97757]";
   }
 }
 
@@ -289,7 +289,7 @@ export default function DocumentTabBar() {
               assistant.panelOpen && "bg-muted text-foreground",
             )}
           >
-            <Sparkles size={15} />
+            <ClaudeCodeIcon size={15} />
           </button>
         </Tooltip>
       )}

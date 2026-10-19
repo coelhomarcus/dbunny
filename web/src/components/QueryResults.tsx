@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy, Sparkles } from "lucide-react";
+import { Copy, MessageSquare } from "lucide-react";
 import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
 import { writeClipboardText } from "../lib/clipboard";
 import { rowsToJson, rowsToTsv, valueText } from "../lib/copyRows";
@@ -89,7 +89,7 @@ function ErrorDisplay({ raw, onFix }: { raw: string; onFix?: () => void }) {
           {onFix && (
             <div className="pt-1">
               <Button variant="outline" size="xs" onClick={onFix}>
-                <Sparkles />
+                <MessageSquare />
                 Fix with AI
               </Button>
             </div>

@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Maximize2, Minimize2, SlidersHorizontal, SquarePen, Sparkles, X } from "lucide-react";
+import { Maximize2, Minimize2, SlidersHorizontal, SquarePen, X } from "lucide-react";
 import { useAssistant } from "../../contexts/assistant";
 import { useConnection } from "../../contexts/useConnection";
 import Button from "../ui/Button";
+import ClaudeCodeIcon from "./ClaudeCodeIcon";
 import Tooltip from "../Tooltip";
 import AssistantStatusScreen from "./AssistantStatusScreen";
 import ConsentScreen from "./ConsentScreen";
@@ -19,7 +20,7 @@ export default function AssistantBody({ onClose, onBack }: { onClose?: () => voi
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border px-3">
-        <Sparkles size={14} className="shrink-0 text-muted-foreground" />
+        <ClaudeCodeIcon size={15} className="shrink-0 text-[#d97757]" />
         <span className="shrink-0 text-[13px] font-medium">Claude Code</span>
         <span className="flex-1" />
         {ready && (
