@@ -12,6 +12,7 @@ import {
   PenLine,
   Plus,
   Server,
+  Sparkles,
   Shapes,
   Split,
   Table2,
@@ -27,8 +28,11 @@ import Popover from "../ui/Popover";
 import ContextMenu, { type ContextMenuItem } from "../ui/ContextMenu";
 import ConfirmDialog from "../ui/ConfirmDialog";
 import { useDocuments } from "../../contexts/DocumentsContext";
+import { useAssistant } from "../../contexts/assistant";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { cn } from "../../lib/cn";
+import { isMac } from "../../lib/platform";
+import Tooltip from "../Tooltip";
 import type { DataIcon, Document } from "../../lib/documents";
 
 const DATA_ICON: Record<DataIcon, ComponentType<LucideProps>> = {
@@ -112,6 +116,7 @@ function iconClass(doc: Document): string {
 export default function DocumentTabBar() {
   const { documents, openDocument, focusDocument, closeDocuments, renameQuery, dirtyIds } = useDocuments();
   const capabilities = useCapabilities();
+  const assistant = useAssistant();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [pendingClose, setPendingClose] = useState<string[] | null>(null);
@@ -267,6 +272,23 @@ export default function DocumentTabBar() {
       >
         <Plus size={15} />
       </button>
+
+      {assistant.available && (
+        <Tooltip label={`Assistant (${isMac ? "⌘I" : "Ctrl+I"})`} side="bottom">
+          <button
+            type="button"
+            aria-label="Assistant"
+            aria-pressed={assistant.panelOpen}
+            onClick={assistant.toggle}
+            className={cn(
+              "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground",
+              assistant.panelOpen && "bg-muted text-foreground",
+            )}
+          >
+            <Sparkles size={15} />
+          </button>
+        </Tooltip>
+      )}
 
       {(capabilities.activity || capabilities.roles) && (
         <>

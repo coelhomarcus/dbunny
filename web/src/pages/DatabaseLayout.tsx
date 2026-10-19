@@ -13,6 +13,8 @@ import { GitCommitVertical } from "lucide-react";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { RightPanelContext } from "../contexts/rightPanel";
 import { useCapabilities } from "../hooks/useCapabilities";
+import { AssistantProvider } from "../contexts/AssistantProvider";
+import AssistantPanel from "../components/assistant/AssistantPanel";
 
 export default function DatabaseLayout() {
   const { isConnected, connectionInfo, disconnect, api } = useConnection();
@@ -44,6 +46,7 @@ export default function DatabaseLayout() {
 
   return (
     <DocumentsProvider>
+    <AssistantProvider>
     <div className="h-full flex flex-col text-foreground">
       {/* Each part is a card of its own, with a small gap between them */}
       <div className="flex flex-1 min-h-0 gap-1.5">
@@ -84,6 +87,7 @@ export default function DatabaseLayout() {
         {/* Filled by the page (query library, activity detail). `contents` so the
             portaled card is the flex item and can animate like the sidebar. */}
         <div ref={setRightPanel} className="contents empty:hidden" />
+        <AssistantPanel />
       </div>
 
       <StatusBar
@@ -106,6 +110,7 @@ export default function DatabaseLayout() {
         confirmLabel="Roll back and disconnect"
       />
     </div>
+    </AssistantProvider>
     </DocumentsProvider>
   );
 }

@@ -6,11 +6,23 @@ export interface Settings {
   checkForUpdates: boolean;
   /** New query tabs start with safe mode on (it asks before destructive statements). */
   safeModeByDefault: boolean;
+  /** The person turned the assistant on after reading what it sends and where it is kept. */
+  assistantEnabled: boolean;
+  /** New conversations ask before running each query. */
+  assistantAskBeforeQueries: boolean;
+  /** Rows of a query the assistant sees, from 10 to 1000. */
+  assistantRowLimit: number;
+  /** The person's own command for the agent; empty for the usual one. */
+  assistantCommand: string;
 }
 
 const DEFAULTS: Settings = {
   checkForUpdates: true,
   safeModeByDefault: true,
+  assistantEnabled: false,
+  assistantAskBeforeQueries: true,
+  assistantRowLimit: 100,
+  assistantCommand: "",
 };
 
 const STORAGE_KEY = "dbunny:settings";
