@@ -1,22 +1,28 @@
-import type { PlanNode, SqlitePlanRow } from "@/types";
+import type { MysqlPlanNode, PlanNode, SqlitePlanRow } from "@/types";
 
-export interface PlanRow {
-  node: PlanNode;
+/** What a plan view shows of one step, whichever database made the plan. */
+export interface DisplayRow {
   depth: number;
-  /** "Hash Join", "Seq Scan" */
   title: string;
   /** What it works on: "users u", "using users_pkey" */
   target: string | null;
   /** Conditions and other notable details, one per line. */
   details: string[];
-  /** Time spent in the node and its children, across all loops (ANALYZE only). */
-  totalMs: number | null;
   /** Time spent in the node itself. */
   selfMs: number | null;
   actualRows: number | null;
-  estimatedRows: number;
+  estimatedRows: number | null;
+  cost: number | null;
   /** How far off the row estimate was (10 = ten times), when it's notable. */
   misestimate: number | null;
+}
+
+export interface PlanRow extends DisplayRow {
+  node: PlanNode;
+  /** Time spent in the node and its children, across all loops (ANALYZE only). */
+  totalMs: number | null;
+  estimatedRows: number;
+  cost: number;
 }
 
 const DETAIL_KEYS = ["Index Cond", "Recheck Cond", "Hash Cond", "Merge Cond", "Join Filter", "Filter", "Sort Key", "Group Key", "Cache Key"];
@@ -91,6 +97,7 @@ export function flattenPlan(root: PlanNode): PlanRow[] {
       selfMs: total === null ? null : Math.max(0, total - childTotal),
       actualRows,
       estimatedRows,
+      cost: node["Total Cost"],
       misestimate,
     });
     for (const child of children) visit(child, depth + 1);
@@ -132,4 +139,47 @@ export function sqlitePlanRows(rows: SqlitePlanRow[]): SqlitePlanLine[] {
   };
   visit(0, 0);
   return lines;
+}
+
+/** A step of MySQL's plan as a row of the plan view. */
+export interface MysqlPlanRow extends DisplayRow {
+  /** Time spent in the node and its children, across all loops (analyzed plans). */
+  totalMs: number | null;
+}
+
+/**
+ * MySQL's plan tree as rows in reading order. Times and row counts are per loop in the plan, so
+ * they are multiplied by the loops here; a step that reported nothing has no time of its own.
+ */
+export function mysqlPlanRows(roots: MysqlPlanNode[]): MysqlPlanRow[] {
+  const rows: MysqlPlanRow[] = [];
+  const total = (node: MysqlPlanNode) => (node.actualTimeLast === null ? null : node.actualTimeLast * (node.loops ?? 1));
+  const visit = (node: MysqlPlanNode, depth: number) => {
+    const loops = node.loops ?? 1;
+    const totalMs = total(node);
+    const childTotal = node.children.reduce((sum, child) => sum + (total(child) ?? 0), 0);
+    const actualRows = node.actualRows === null ? null : node.actualRows * loops;
+    const estimatedRows = node.rows === null ? null : node.rows * loops;
+    let misestimate: number | null = null;
+    if (actualRows !== null && estimatedRows !== null) {
+      const ratio = Math.max(actualRows, 1) / Math.max(estimatedRows, 1);
+      const off = Math.max(ratio, 1 / ratio);
+      if (off >= MISESTIMATE) misestimate = Math.round(off);
+    }
+    rows.push({
+      depth,
+      title: node.label,
+      target: null,
+      details: [],
+      totalMs,
+      selfMs: totalMs === null ? null : Math.max(0, totalMs - childTotal),
+      actualRows,
+      estimatedRows,
+      cost: node.cost,
+      misestimate,
+    });
+    for (const child of node.children) visit(child, depth + 1);
+  };
+  for (const root of roots) visit(root, 0);
+  return rows;
 }

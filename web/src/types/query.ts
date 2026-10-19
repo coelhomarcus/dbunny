@@ -60,7 +60,28 @@ export type ExplainResult =
       /** The statement really ran (EXPLAIN ANALYZE) and was rolled back. */
       analyzed: boolean;
     }
-  | { format: "sqliteQueryPlan"; plan: SqlitePlanRow[]; analyzed: boolean };
+  | { format: "sqliteQueryPlan"; plan: SqlitePlanRow[]; analyzed: boolean }
+  | {
+      format: "mysqlTree";
+      plan: MysqlPlanNode[];
+      /** The statement really ran (EXPLAIN ANALYZE); only statements that read are analyzed. */
+      analyzed: boolean;
+    };
+
+/** One step of MySQL's plan tree; what the plan doesn't say is null. */
+export interface MysqlPlanNode {
+  label: string;
+  cost: number | null;
+  /** Estimated rows per loop. */
+  rows: number | null;
+  /** Milliseconds to the first row and to the last, per loop (analyzed plans). */
+  actualTimeFirst: number | null;
+  actualTimeLast: number | null;
+  /** Rows per loop. */
+  actualRows: number | null;
+  loops: number | null;
+  children: MysqlPlanNode[];
+}
 
 export interface QueryError {
   message: string;
