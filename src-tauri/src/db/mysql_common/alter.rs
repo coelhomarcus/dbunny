@@ -1045,7 +1045,7 @@ mod server_tests {
     use crate::db::model::{NewColumn, NewForeignKey, StructureChange};
     use crate::db::Driver;
 
-    const SHOP: &str = include_str!("../mysql_common/fixtures/shop.sql");
+    const SHOP: &str = include_str!("fixtures/shop.sql");
 
     /// A table with the columns that are hardest to restate: a character set and collation of
     /// their own, a default with quotes, `ON UPDATE`, expression defaults, stored and virtual

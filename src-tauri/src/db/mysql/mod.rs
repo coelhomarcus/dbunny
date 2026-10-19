@@ -2,7 +2,6 @@
 //! session itself is `ServerDriver`.
 
 mod admin;
-mod alter;
 mod console;
 mod flavor;
 pub(crate) mod plan;
