@@ -11,6 +11,7 @@ import RolesView from "../../pages/RolesView";
 import CreateTablePage from "./CreateTablePage";
 import DiagramPage from "../diagram/DiagramPage";
 import Button from "../ui/Button";
+import AssistantDocument from "../assistant/AssistantDocument";
 
 /** Mounts every open document and shows only the one in front. */
 export default function DocumentHost() {
@@ -56,6 +57,7 @@ export default function DocumentHost() {
             {doc.kind === "roles" && <RolesView />}
             {doc.kind === "create-table" && doc.schema && <CreateTablePage documentId={doc.id} schema={doc.schema} />}
             {doc.kind === "diagram" && doc.schema && <DiagramPage schema={doc.schema} />}
+            {doc.kind === "assistant" && <AssistantDocument />}
           </div>
         );
       })}

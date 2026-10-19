@@ -19,6 +19,7 @@ import PlanView from "../query/PlanView";
 import NoticeList from "../query/NoticeList";
 import HistoryPanel, { type LibraryView } from "../query/HistoryPanel";
 import SideCard from "../layout/SideCard";
+import { registerEditor } from "../../lib/editorBridge";
 import Dialog from "../ui/Dialog";
 import Input from "../ui/Input";
 import { loadSaved, removeSaved, saveQuery, savedKey, type SavedQuery } from "../../lib/savedQueries";
@@ -412,6 +413,13 @@ function QueryPaneBody({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [active]);
+
+  // The assistant writes into the editor of the tab in front
+  useEffect(() => {
+    const handle = editorRef.current;
+    if (!active || !handle) return;
+    return registerEditor(documentId, handle);
+  }, [active, documentId]);
 
   // Esc stops the running query (only in the visible tab)
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { SquarePen, Sparkles, X } from "lucide-react";
+import { Maximize2, Minimize2, SquarePen, Sparkles, X } from "lucide-react";
 import { useAssistant } from "../../contexts/assistant";
 import { selectClass } from "../ui/styles";
 import Button from "../ui/Button";
@@ -9,7 +9,7 @@ import AssistantConversation from "./AssistantConversation";
 import HistoryMenu from "./HistoryMenu";
 
 /** The assistant, in the side panel or in a tab of its own: its header, then what the state of the agent allows. */
-export default function AssistantBody({ onClose }: { onClose?: () => void }) {
+export default function AssistantBody({ onClose, onBack }: { onClose?: () => void; onBack?: () => void }) {
   const assistant = useAssistant();
   const ready = assistant.enabled && assistant.status.state === "ready";
   return (
@@ -41,6 +41,20 @@ export default function AssistantBody({ onClose }: { onClose?: () => void }) {
               </Button>
             </Tooltip>
           </>
+        )}
+        {onClose && (
+          <Tooltip label="Open in a tab" side="bottom">
+            <Button variant="ghost-muted" size="icon-xs" aria-label="Open in a tab" onClick={assistant.expand}>
+              <Maximize2 />
+            </Button>
+          </Tooltip>
+        )}
+        {onBack && (
+          <Tooltip label="Back to the side panel" side="bottom">
+            <Button variant="ghost-muted" size="icon-xs" aria-label="Back to the side panel" onClick={onBack}>
+              <Minimize2 />
+            </Button>
+          </Tooltip>
         )}
         {onClose && (
           <Tooltip label="Close" side="bottom">

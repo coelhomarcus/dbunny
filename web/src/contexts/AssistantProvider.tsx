@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { AssistantContext } from "./assistant";
 import { useConnection } from "./useConnection";
 import { useTab } from "./workspace";
+import { useDocuments } from "./DocumentsContext";
 import { useCapabilities } from "../hooks/useCapabilities";
 import { assistantApi } from "../lib/api";
 import {
@@ -29,10 +30,12 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const { sessionId, savedConnectionId } = useConnection();
   const { isActive } = useTab();
   const [settings] = useSettings();
+  const { documents, openDocument, closeDocument } = useDocuments();
+  const assistantTab = documents.items.find((doc) => doc.kind === "assistant");
+  const inTab = assistantTab !== undefined && assistantTab.id === documents.activeId;
 
   const [status, setStatus] = useState<AgentStatus>({ state: "idle" });
   const [panelOpen, setPanelOpen] = useState(false);
-  const [inTab, setInTab] = useState(false);
   const [conversation, setConversation] = useState<Conversation>(emptyConversation);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [models, setModels] = useState<ModelChoice | null>(null);
@@ -176,9 +179,16 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, [settings.assistantCommand, status.state]);
 
   const ask = useCallback((text: string) => {
-    setPanelOpen(true);
+    // Written to in the tab if that is in front, in the panel otherwise
+    if (!inTab) setPanelOpen(true);
     setQueued(text);
-  }, []);
+  }, [inTab]);
+
+  const expand = useCallback(() => openDocument({ kind: "assistant" }), [openDocument]);
+  const backToPanel = useCallback(() => {
+    if (assistantTab) closeDocument(assistantTab.id);
+    setPanelOpen(true);
+  }, [assistantTab, closeDocument]);
 
   // The agent starts the first time the assistant is looked at
   const wanted = available && enabled && (panelOpen || inTab);
@@ -237,7 +247,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       setPanelOpen,
       toggle: () => setPanelOpen((open) => !open),
       inTab,
-      setInTab,
+      expand,
+      backToPanel,
       conversation,
       conversationId,
       models,
@@ -252,7 +263,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       ask,
       retry,
     }),
-    [available, status, enabled, panelOpen, inTab, conversation, conversationId, models, history, refreshHistory, send, stop, approve, newChat, openConversation, setModel, ask, retry],
+    [available, status, enabled, panelOpen, inTab, expand, backToPanel, conversation, conversationId, models, history, refreshHistory, send, stop, approve, newChat, openConversation, setModel, ask, retry],
   );
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;

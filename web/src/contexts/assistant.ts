@@ -12,9 +12,12 @@ export interface AssistantValue {
   panelOpen: boolean;
   setPanelOpen: (open: boolean) => void;
   toggle: () => void;
-  /** The conversation is shown in a tab of its own, not in the side panel. */
+  /** The conversation is in front in a tab of its own, not in the side panel. */
   inTab: boolean;
-  setInTab: (inTab: boolean) => void;
+  /** Moves the conversation to a tab of its own. */
+  expand: () => void;
+  /** Closes that tab and shows the conversation in the side panel again. */
+  backToPanel: () => void;
   conversation: Conversation;
   conversationId: string | null;
   models: ModelChoice | null;

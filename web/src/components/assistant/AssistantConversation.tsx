@@ -1,6 +1,12 @@
 import { useAssistant } from "../../contexts/assistant";
 import Composer from "./Composer";
 import MessageList from "./MessageList";
+import SqlBlock from "./SqlBlock";
+
+/** A fenced block that is SQL (or says nothing of what it is) gets the buttons to use it. */
+function renderCode(language: string, text: string) {
+  return language === "" || /^(sql|mysql|postgres|postgresql|pgsql|sqlite)$/i.test(language) ? <SqlBlock sql={text} /> : undefined;
+}
 
 const SUGGESTIONS = ["Which tables hold customer data?", "How many rows does each table have?", "What changed in the last 7 days?"];
 
@@ -27,7 +33,7 @@ export default function AssistantConversation() {
           </div>
         </div>
       ) : (
-        <MessageList conversation={conversation} onDecide={assistant.approve} />
+        <MessageList conversation={conversation} onDecide={assistant.approve} renderCode={renderCode} />
       )}
       <Composer running={conversation.running} onSend={assistant.send} onStop={assistant.stop} />
     </div>

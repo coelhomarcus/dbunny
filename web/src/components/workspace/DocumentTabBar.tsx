@@ -69,6 +69,8 @@ function iconFor(doc: Document): ComponentType<LucideProps> {
       return Table2;
     case "diagram":
       return Waypoints;
+    case "assistant":
+      return Sparkles;
   }
 }
 
@@ -109,6 +111,8 @@ function iconClass(doc: Document): string {
       return "text-success-foreground";
     case "diagram":
       return "text-info-foreground";
+    case "assistant":
+      return "text-primary";
   }
 }
 

@@ -154,3 +154,14 @@ test("seedQuery opens Query 1 only when the list is empty", () => {
   assert.equal(seeded.items[0].sql, "SELECT 1;");
   assert.equal(seedQuery(seeded), seeded);
 });
+
+test("the assistant tab is opened once and then brought to the front", () => {
+  let state = openDocument(emptyDocuments(), { kind: "assistant" });
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].kind, "assistant");
+  assert.equal(state.items[0].title, "Assistant");
+  state = openDocument(state, { kind: "query" });
+  state = openDocument(state, { kind: "assistant" });
+  assert.equal(state.items.filter((doc) => doc.kind === "assistant").length, 1);
+  assert.equal(state.items.find((doc) => doc.id === state.activeId)?.kind, "assistant");
+});
