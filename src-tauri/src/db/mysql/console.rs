@@ -10,12 +10,13 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Column, Conn, Error as MysqlError, Row};
 use serde_json::Value as JsonValue;
 
+use super::editor::in_transaction_status;
 use super::plan::{is_reading_statement, parse_tree};
 use super::MysqlDriver;
 use crate::db::model::{ExplainResult, Notice, QueryColumn, QueryResult};
 use crate::db::mysql_common::connect::MysqlEndpoint;
 use crate::db::mysql_common::errors::error_message;
-use crate::db::mysql_common::split::split_mysql;
+use crate::db::mysql_common::split::{next_token, split_mysql, Kind};
 use crate::db::mysql_common::values::{type_name, value_to_json};
 use crate::db::sql::split::Statement;
 use crate::db::sqlite::errors::CANCELLED;
@@ -23,6 +24,9 @@ use crate::db::{unsupported, Console, Driver, Engine, ExplainFormat};
 
 /// The SQLSTATE of a cancelled statement (error 1317).
 const CANCELLED_STATE: &str = "70100";
+
+/// What a statement that ended the open transaction on its own (a DDL) is told.
+const IMPLICIT_COMMIT: &str = "This statement committed the open transaction: MySQL commits before DDL.";
 
 /// The server answers a `KILL` for a connection that is already gone with this error.
 const UNKNOWN_THREAD: u16 = 1094;
@@ -132,6 +136,12 @@ fn locate_syntax_error(message: &str, statement: &Statement) -> (String, Option<
     (stripped, Some((statement.offset + found.unwrap_or(line_start) + 1) as i64))
 }
 
+/// Whether `sql` is the transaction ending on purpose: COMMIT or ROLLBACK.
+fn ends_the_transaction(sql: &str) -> bool {
+    let chars: Vec<char> = sql.chars().collect();
+    matches!(next_token(&chars, 0).map(|t| t.kind), Some(Kind::Word(w)) if w == "COMMIT" || w == "ROLLBACK")
+}
+
 /// Runs the statements in order, stopping at the first error or cancel.
 async fn run_script(conn: &mut Conn, statements: &[Statement], endpoint: &MysqlEndpoint, cancelled: &AtomicBool) -> Result<QueryResult, String> {
     // A cancel that came while nothing was running is forgotten
@@ -146,7 +156,12 @@ async fn run_script(conn: &mut Conn, statements: &[Statement], endpoint: &MysqlE
         if cancelled.load(Ordering::SeqCst) {
             return Err(cancelled_error(position));
         }
+        let was_open = in_transaction_status(conn);
         let output = run_statement(conn, &statement.text).await.map_err(|e| script_error(&e, endpoint, statement, position))?;
+        // A DDL commits the transaction before it runs; saying so beats a silent surprise
+        if was_open && !in_transaction_status(conn) && !ends_the_transaction(&statement.text) {
+            notices.push(Notice { severity: "Warning".into(), message: IMPLICIT_COMMIT.into(), detail: None, hint: None });
+        }
         // `KILL QUERY` ends some statements without an error (SLEEP gives 1)
         if cancelled.load(Ordering::SeqCst) {
             return Err(cancelled_error(position));
@@ -158,6 +173,7 @@ async fn run_script(conn: &mut Conn, statements: &[Statement], endpoint: &MysqlE
         }
     }
     let duration = start.elapsed().as_millis() as u64;
+    let in_transaction = in_transaction_status(conn);
     Ok(match shown {
         Some((columns, rows)) => QueryResult {
             row_count: rows.len(),
@@ -167,7 +183,7 @@ async fn run_script(conn: &mut Conn, statements: &[Statement], endpoint: &MysqlE
             duration,
             statement_count: total,
             notices,
-            in_transaction: false,
+            in_transaction,
         },
         None => QueryResult {
             columns: vec![],
@@ -177,7 +193,7 @@ async fn run_script(conn: &mut Conn, statements: &[Statement], endpoint: &MysqlE
             duration,
             statement_count: total,
             notices,
-            in_transaction: false,
+            in_transaction,
         },
     })
 }

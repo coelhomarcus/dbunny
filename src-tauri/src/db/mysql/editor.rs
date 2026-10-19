@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use futures_util::future::BoxFuture;
+use mysql_async::consts::StatusFlags;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Opts};
 
@@ -25,8 +26,8 @@ pub(crate) struct EditorConn {
     slot: Mutex<Option<Arc<tokio::sync::Mutex<Option<Conn>>>>>,
     /// The server's id of the current connection, for `KILL QUERY` from another connection.
     id: AtomicU32,
-    /// Whether a transaction is open, readable without waiting for the connection. The
-    /// console sets it after each statement (Task 10); a connection lost while it is set
+    /// Whether a transaction is open, readable without waiting for the connection. `run` sets it
+    /// after each command from the server's own status; a connection lost while it is set
     /// reports the rolled back transaction once, on the next command.
     in_transaction: AtomicBool,
     /// Set by a cancel, for a script to stop before its next statement. A script clears it
@@ -100,8 +101,12 @@ impl EditorConn {
         }
         let conn = held.as_mut().expect("connected above");
         let result = f(conn).await;
+        // A connection that went down with the command keeps the mark, for the next command to
+        // report the transaction it took along
         if result.is_err() && !alive(conn).await {
             *held = None;
+        } else {
+            self.in_transaction.store(in_transaction_status(conn), Ordering::SeqCst);
         }
         result
     }
@@ -118,7 +123,6 @@ impl EditorConn {
     }
 
     /// Whether a transaction is open, as last noted. Never waits.
-    #[allow(dead_code)] // read by the transactions (Task 10)
     pub(crate) fn in_transaction(&self) -> bool {
         self.in_transaction.load(Ordering::SeqCst)
     }
@@ -156,6 +160,11 @@ impl EditorConn {
             proceed.notified().await;
         }
     }
+}
+
+/// Whether the server says a transaction is open on `conn`, as of the last reply it read.
+pub(crate) fn in_transaction_status(conn: &Conn) -> bool {
+    conn.last_ok_packet().is_some_and(|ok| ok.status_flags().contains(StatusFlags::SERVER_STATUS_IN_TRANS))
 }
 
 /// Whether the server still answers on `conn`.

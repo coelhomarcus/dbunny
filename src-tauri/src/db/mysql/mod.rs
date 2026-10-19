@@ -9,6 +9,7 @@ pub(crate) mod plan;
 #[cfg(test)]
 pub(crate) mod tests_support;
 mod structure;
+mod transactions;
 pub mod version;
 
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -24,7 +25,7 @@ use version::MysqlVersion;
 use super::mysql_common::connect::{is_socket, opts_for, ConnRole, MysqlEndpoint};
 use super::mysql_common::errors::error_message;
 use super::net::ssh::{open_tunnel, KnownHosts, Tunnel};
-use super::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine};
+use super::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, Transactions};
 
 /// Databases every server has, never opened on their own.
 const SYSTEM_DATABASES: [&str; 4] = ["mysql", "sys", "information_schema", "performance_schema"];
@@ -205,6 +206,10 @@ impl Driver for MysqlDriver {
     }
 
     fn console(&self) -> Option<&dyn Console> {
+        Some(self)
+    }
+
+    fn transactions(&self) -> Option<&dyn Transactions> {
         Some(self)
     }
 }
