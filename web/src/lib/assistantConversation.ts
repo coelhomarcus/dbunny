@@ -146,8 +146,9 @@ export function resolveApproval(conversation: Conversation, approvalId: string):
     .filter((item) => !(item.kind === "approval" && item.approval.id === approvalId))
     .map((item) => {
       if (item.kind === "tool" && item.approval?.id === approvalId) {
-        const { approval: _approval, ...rest } = item;
-        return rest as Item;
+        const rest = { ...item };
+        delete rest.approval;
+        return rest;
       }
       return item;
     });
