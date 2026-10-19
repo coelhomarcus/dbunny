@@ -67,7 +67,9 @@ export function ConnectionProvider({
             ? await api.connectSqlite(args.path, args.readOnly, args.create)
             : args.kind === "mysql"
               ? await api.connectMysql(args.params, args.ssh, trustHostKey)
-              : await api.connect(args.url, args.ssh, trustHostKey);
+              : args.kind === "mariadb"
+                ? await api.connectMariadb(args.params, args.ssh, trustHostKey)
+                : await api.connect(args.url, args.ssh, trustHostKey);
         setSessionId(response.sessionId);
         setConnectionInfo(infoOf(response));
         setSavedConnectionName(saved?.name || null);

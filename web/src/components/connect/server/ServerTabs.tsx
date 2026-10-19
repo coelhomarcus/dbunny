@@ -4,6 +4,7 @@ import type { SshAuthMethod, SslMode } from "@/types";
 import { applyUrl, missingFields, type ConnectionDraft, type ConnectionTab, type SshFields } from "../../../lib/connectionDraft";
 import type { ConnectionFields } from "../../../lib/connectionUrl";
 import { isSocketHost } from "../../../lib/connectionUrl";
+import { isMysqlFamily } from "../../../lib/engines";
 import { isWindows } from "../../../lib/platform";
 import SegmentedTabs from "../../ui/SegmentedTabs";
 import Button from "../../ui/Button";
@@ -57,7 +58,7 @@ async function pickFile(title: string) {
   return typeof path === "string" ? path : null;
 }
 
-/** The body of one tab of a server connection (PostgreSQL or MySQL): server, SSL, SSH tunnel. */
+/** The body of one tab of a server connection (PostgreSQL, MySQL or MariaDB): server, SSL, SSH tunnel. */
 export default function ServerTabs({
   tab,
   draft,
@@ -73,7 +74,7 @@ export default function ServerTabs({
   onOpenImport: () => void;
 }) {
   const { fields, ssh } = draft;
-  const mysql = draft.engine === "mysql";
+  const mysql = isMysqlFamily(draft.engine);
   const socket = isSocketHost(fields.host);
   const missing = showErrors ? new Set(missingFields(draft, "connect").map((m) => m.fieldId)) : new Set<string>();
   const invalid = (id: string) => missing.has(id) || undefined;

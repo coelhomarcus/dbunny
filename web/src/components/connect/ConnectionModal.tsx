@@ -132,7 +132,9 @@ function ModalBody({
             ? await api.connectSqlite(args.path, args.readOnly, args.create)
             : args.kind === "mysql"
               ? await api.connectMysql(args.params, args.ssh, trustHostKey)
-              : await api.connect(args.url, args.ssh, trustHostKey);
+              : args.kind === "mariadb"
+                ? await api.connectMariadb(args.params, args.ssh, trustHostKey)
+                : await api.connect(args.url, args.ssh, trustHostKey);
         api.disconnect(res.sessionId).catch(() => {});
         setTest({ status: "ok", version: res.serverVersion.split(" ")[0] });
       } catch (err) {
@@ -219,7 +221,7 @@ function ModalBody({
             <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-2 pb-5">
               <EnginePicker
                 onPick={(engine) => {
-                  if (engine !== "postgres" && engine !== "sqlite" && engine !== "mysql") return;
+                  if (engine !== "postgres" && engine !== "sqlite" && engine !== "mysql" && engine !== "mariadb") return;
                   // A different database starts its own details; who the connection is stays
                   setDraft((d) => (d.engine === engine ? d : { ...newDraft(engine), identity: d.identity }));
                   setTab(tabsFor(engine)[0]);

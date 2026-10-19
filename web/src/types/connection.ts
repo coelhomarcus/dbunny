@@ -2,7 +2,7 @@ import type { Capabilities } from "./capabilities";
 import type { TlsSettings } from "./saved";
 
 /** The database a connection talks to. */
-export type Engine = "postgres" | "sqlite" | "mysql";
+export type Engine = "postgres" | "sqlite" | "mysql" | "mariadb";
 
 export interface ConnectRequest {
   connectionUrl: string;
@@ -31,7 +31,7 @@ export interface ConnectionInfo {
   capabilities: Capabilities;
 }
 
-/** The connection form of a MySQL server, as `connect_mysql` takes it. */
+/** The connection form of a MySQL or MariaDB server, as `connect_mysql` and `connect_mariadb` take it. */
 export interface MysqlConnectParams {
   host: string;
   port: number;

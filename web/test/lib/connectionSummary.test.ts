@@ -85,3 +85,10 @@ test("a mysql connection is a server, with the database when it has one", () => 
   assert.equal(summaryOf({ ...mysql, host: "/var/run/mysqld/mysqld.sock" }).address, "/var/run/mysqld/mysqld.sock (socket) / shop");
   assert.equal(summaryOf(mysql).ssl, true);
 });
+
+test("a mariadb connection is a server too", () => {
+  const mariadb = { ...saved, engine: "mariadb" as const, host: "db.local", port: 3306, database: "shop", ssl: false };
+  assert.equal(summaryOf(mariadb).engineLabel, "MariaDB");
+  assert.equal(summaryOf(mariadb).address, "db.local:3306/shop");
+  assert.equal(summaryOf({ ...mariadb, database: "" }).address, "db.local:3306");
+});

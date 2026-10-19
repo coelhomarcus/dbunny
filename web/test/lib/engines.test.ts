@@ -1,13 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addressOf, dialectData, ENGINE_CARDS, engineLabel, explainAnalyzeHint, locationOf, sqlDialectOf } from "../../src/lib/engines.ts";
+import { addressOf, dialectData, ENGINE_CARDS, engineLabel, explainAnalyzeHint, isMysqlFamily, locationOf, sqlDialectOf } from "../../src/lib/engines.ts";
 
-test("mysql is available and mariadb is coming soon", () => {
+test("mysql and mariadb are available", () => {
   const card = (id: string) => ENGINE_CARDS.find((c) => c.id === id);
   assert.deepEqual([card("mysql")?.label, card("mysql")?.kind, card("mysql")?.available], ["MySQL", "Server connection", true]);
-  assert.deepEqual([card("mariadb")?.label, card("mariadb")?.available], ["MariaDB", false]);
+  assert.deepEqual([card("mariadb")?.label, card("mariadb")?.kind, card("mariadb")?.available], ["MariaDB", "Server connection", true]);
   assert.equal(card("postgres")?.available, true);
   assert.equal(engineLabel("mysql"), "MySQL");
+  assert.equal(engineLabel("mariadb"), "MariaDB");
 });
 
 test("mysql is located like a server", () => {
@@ -16,6 +17,18 @@ test("mysql is located like a server", () => {
   assert.equal(addressOf(info), "db.local:3306/shop");
   assert.equal(addressOf({ ...info, database: "" }), "db.local:3306");
   assert.equal(addressOf({ engine: "sqlite", host: "/x.db", port: 0, database: "" }), "/x.db");
+});
+
+test("mariadb is located like a server and speaks the mysql dialect", () => {
+  const info = { engine: "mariadb" as const, host: "db.local", port: 3306, database: "shop" };
+  assert.deepEqual(locationOf(info), { where: "db.local:3306", database: "shop" });
+  assert.equal(addressOf({ ...info, database: "" }), "db.local:3306");
+  assert.equal(sqlDialectOf("mariadb"), "mysql");
+});
+
+test("mysql and mariadb are the same family of servers", () => {
+  assert.deepEqual((["mysql", "mariadb", "postgres", "sqlite"] as const).map(isMysqlFamily), [true, true, false, false]);
+  assert.equal(isMysqlFamily(undefined), false);
 });
 
 test("the sql dialect follows the engine", () => {

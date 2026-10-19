@@ -1,6 +1,7 @@
 import type { SavedConnection } from "@/types";
 // With the extension, so Node's test runner can load it too
 import { isSocketHost } from "./connectionUrl.ts";
+import { engineLabel, isMysqlFamily } from "./engines.ts";
 
 /** Hides a value character by character (host names, database names on screen). */
 export const mask = (value: string) => value.replace(/./g, "•");
@@ -27,12 +28,12 @@ export function summaryOf(conn: SavedConnection): ConnectionSummary {
   }
   const socket = isSocketHost(conn.host);
   const ssh = conn.ssh;
-  const mysql = conn.engine === "mysql";
+  const mysql = isMysqlFamily(conn.engine);
   const where = socket ? `${conn.host} (socket)` : `${conn.host}:${conn.port}`;
   // A MySQL connection may name no database
   const address = mysql && !conn.database ? where : socket ? `${where} / ${conn.database}` : `${where}/${conn.database}`;
   return {
-    engineLabel: mysql ? "MySQL" : "PostgreSQL",
+    engineLabel: engineLabel(conn.engine ?? "postgres"),
     address,
     user: conn.user,
     ssl: conn.ssl && !socket,
