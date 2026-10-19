@@ -284,5 +284,5 @@ export function saveInputOf(draft: ConnectionDraft): SavedConnectionInput {
 /** How the tab presents the connection; nothing without a name (it isn't a saved one then). */
 export function savedTagOf(draft: ConnectionDraft): SavedTag | undefined {
   const name = draft.identity.name.trim();
-  return name ? { name, color: draft.identity.color, icon: draft.identity.icon } : undefined;
+  return name ? { ...(draft.id ? { id: draft.id } : {}), name, color: draft.identity.color, icon: draft.identity.icon } : undefined;
 }

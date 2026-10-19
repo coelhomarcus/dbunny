@@ -107,7 +107,7 @@ test("socket hosts ignore ssl and ssh", () => {
 test("the connection url and saved tag come from the draft", () => {
   const d = draftFromSaved(saved);
   assert.equal(connectionUrlOf(d), "postgresql://me:pw@db.example.com:5433/app");
-  assert.deepEqual(savedTagOf(d), { name: "Prod", color: "#ef4444", icon: "rocket" });
+  assert.deepEqual(savedTagOf(d), { id: "c1", name: "Prod", color: "#ef4444", icon: "rocket" });
   assert.equal(savedTagOf(newDraft("postgres")), undefined);
 });
 
@@ -348,4 +348,9 @@ test("a saved mariadb connection reads back as a mariadb draft and saves as one"
   assert.deepEqual([input.engine, input.id, input.port, input.database], ["mariadb", "d1", 3306, "orders"]);
   // An empty port saves as the default of the family
   assert.equal(saveInputOf({ ...d, fields: { ...d.fields, port: "" } }).port, 3306);
+});
+
+test("a connection that was never saved has a tag without an id", () => {
+  const draft = { ...newDraft("postgres"), identity: { name: "Scratch", color: "#000", icon: "" } };
+  assert.deepEqual(savedTagOf(draft), { name: "Scratch", color: "#000", icon: "" });
 });

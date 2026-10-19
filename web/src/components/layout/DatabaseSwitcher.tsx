@@ -16,7 +16,7 @@ import { useCapabilities } from "../../hooks/useCapabilities";
  * login, SSL, SSH and read-only settings.
  */
 export default function DatabaseSwitcher() {
-  const { api, connectionInfo, savedConnectionName } = useConnection();
+  const { api, connectionInfo, savedConnectionName, savedConnectionId } = useConnection();
   const { tabs, openTab } = useWorkspace();
   const { tabId } = useTab();
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -65,7 +65,7 @@ export default function DatabaseSwitcher() {
       const tab = tabs.find((t) => t.id === tabId);
       openTab({
         response,
-        saved: { name: savedConnectionName ? `${savedConnectionName} / ${name}` : name, color: tab?.color ?? null, icon: tab?.icon ?? null },
+        saved: { id: savedConnectionId ?? undefined, name: savedConnectionName ? `${savedConnectionName} / ${name}` : name, color: tab?.color ?? null, icon: tab?.icon ?? null },
       });
       setOpen(false);
     } catch (err) {
