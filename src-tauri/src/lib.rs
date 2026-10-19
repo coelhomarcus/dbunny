@@ -154,6 +154,7 @@ pub fn run() {
             commands::connect::connect,
             commands::connect::connect_sqlite,
             commands::connect::connect_mysql,
+            commands::connect::connect_mariadb,
             commands::connect::disconnect,
             commands::catalog::get_function_detail,
             commands::catalog::get_columns,

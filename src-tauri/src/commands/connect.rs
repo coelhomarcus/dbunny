@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use super::state::AppState;
+use crate::db::mariadb::MariadbDriver;
 use crate::db::mysql::MysqlDriver;
 use crate::db::mysql_common::connect::MysqlEndpoint;
 use crate::db::net::ssh::SshConfig;
@@ -123,6 +124,26 @@ pub struct MysqlConnectParams {
     pub tls: Option<TlsSettings>,
 }
 
+/// The endpoint a server connection form describes.
+fn server_endpoint(app_handle: &tauri::AppHandle, params: MysqlConnectParams, ssh: Option<SshConfig>) -> Result<MysqlEndpoint, String> {
+    if params.host.trim().is_empty() {
+        return Err("host is required".into());
+    }
+    let known_hosts = known_hosts_for(app_handle, &ssh)?;
+    let database = params.database.trim();
+    Ok(MysqlEndpoint {
+        host: params.host.trim().to_string(),
+        port: params.port,
+        database: (!database.is_empty()).then(|| database.to_string()),
+        user: params.user,
+        password: params.password,
+        tls: params.tls,
+        ssh,
+        known_hosts,
+        read_only: params.read_only,
+    })
+}
+
 /// Connects to a MySQL server, optionally through SSH. `trust_host_key` is an SSH host
 /// key fingerprint the user confirmed.
 #[tauri::command]
@@ -133,23 +154,23 @@ pub async fn connect_mysql(
     ssh: Option<SshConfig>,
     trust_host_key: Option<String>,
 ) -> Result<ConnectResponse, String> {
-    if params.host.trim().is_empty() {
-        return Err("host is required".into());
-    }
-    let known_hosts = known_hosts_for(&app_handle, &ssh)?;
-    let database = params.database.trim();
-    let endpoint = MysqlEndpoint {
-        host: params.host.trim().to_string(),
-        port: params.port,
-        database: (!database.is_empty()).then(|| database.to_string()),
-        user: params.user,
-        password: params.password,
-        tls: params.tls,
-        ssh,
-        known_hosts,
-        read_only: params.read_only,
-    };
+    let endpoint = server_endpoint(&app_handle, params, ssh)?;
     let driver = MysqlDriver::open(endpoint, trust_host_key).await?;
+    let session_id = state.register(driver.clone()).await?;
+    Ok(ConnectResponse::new(session_id, driver.as_ref()))
+}
+
+/// Connects to a MariaDB server, optionally through SSH; the form is the MySQL one.
+#[tauri::command]
+pub async fn connect_mariadb(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+    params: MysqlConnectParams,
+    ssh: Option<SshConfig>,
+    trust_host_key: Option<String>,
+) -> Result<ConnectResponse, String> {
+    let endpoint = server_endpoint(&app_handle, params, ssh)?;
+    let driver = MariadbDriver::open(endpoint, trust_host_key).await?;
     let session_id = state.register(driver.clone()).await?;
     Ok(ConnectResponse::new(session_id, driver.as_ref()))
 }

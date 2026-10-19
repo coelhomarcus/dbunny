@@ -5,6 +5,7 @@
 pub mod capabilities;
 pub mod driver;
 pub mod model;
+pub mod mariadb;
 pub mod mysql;
 pub mod mysql_common;
 pub mod net;

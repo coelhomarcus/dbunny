@@ -5,6 +5,7 @@ use mysql_async::prelude::Queryable;
 
 use std::sync::Arc;
 
+use crate::db::mariadb::MariadbDriver;
 use crate::db::mysql::MysqlDriver;
 use crate::db::mysql_common::connect::{opts_for, ConnRole, MysqlEndpoint};
 use crate::db::mysql_common::driver::ServerDriver;
@@ -109,24 +110,26 @@ impl Drop for TestDb {
     }
 }
 
-/// Opens a session on `endpoint` with the driver of the flavor the server is.
+/// Opens a session on `endpoint` with the driver of the flavor the test server (the one in
+/// `DBUNNY_TEST_MYSQL_URL`) is.
 pub async fn open_server(endpoint: MysqlEndpoint) -> Result<Arc<ServerDriver>, String> {
-    MysqlDriver::open(endpoint, None).await
+    if is_mariadb().await {
+        MariadbDriver::open(endpoint, None).await
+    } else {
+        MysqlDriver::open(endpoint, None).await
+    }
 }
 
-#[allow(dead_code)] // the MariaDB tasks use it to pick what a test checks
 /// Whether the test server is MySQL (and not MariaDB), read once from `VERSION()`.
 pub async fn is_mysql() -> bool {
     !server_version().await.to_ascii_lowercase().contains("mariadb")
 }
 
-#[allow(dead_code)]
 /// Whether the test server is MariaDB.
 pub async fn is_mariadb() -> bool {
     !is_mysql().await
 }
 
-#[allow(dead_code)]
 async fn server_version() -> &'static str {
     static VERSION: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
     VERSION.get_or_init(|| async { query_one::<String>(&test_endpoint(), "SELECT VERSION()").await.unwrap_or_default() }).await

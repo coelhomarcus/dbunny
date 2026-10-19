@@ -96,10 +96,11 @@ impl ServerDriver {
         }
 
         let fail_flags = fail.clone();
+        let read_only_sql = flavor.read_only_sql();
         let (server_read_only, super_read_only): (i64, i64) = editor
             .run(|c| {
                 Box::pin(async move {
-                    c.query_first("SELECT @@read_only, @@super_read_only").await.map(Option::unwrap_or_default).map_err(fail_flags)
+                    c.query_first(read_only_sql).await.map(Option::unwrap_or_default).map_err(fail_flags)
                 })
             })
             .await?;

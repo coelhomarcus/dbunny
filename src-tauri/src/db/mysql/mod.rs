@@ -36,7 +36,7 @@ mod tests {
             known_hosts: Some(std::env::temp_dir().join("dbunny-never-read.json")),
             ..Default::default()
         };
-        let err = crate::db::mysql_common::tests_support::open_server(endpoint).await.err().unwrap();
+        let err = super::MysqlDriver::open(endpoint, None).await.err().unwrap();
         assert_eq!(err, "A socket is a local file, so it can't be reached through an SSH tunnel");
     }
 
@@ -59,7 +59,7 @@ mod server_tests {
 
     use mysql_async::prelude::Queryable;
 
-    use crate::db::mysql_common::tests_support::{endpoint_from, exec, query_one, test_endpoint, TestDb, SERVER_SETTINGS};
+    use crate::db::mysql_common::tests_support::{exec, query_one, test_endpoint, TestDb, SERVER_SETTINGS};
     use crate::db::mysql_common::driver::ServerDriver;
     use super::*;
     use crate::db::mysql_common::connect::MysqlEndpoint;
@@ -215,14 +215,6 @@ mod server_tests {
         assert!(!driver.info().read_only);
         driver.close().await;
         db.drop_now().await;
-    }
-
-    #[tokio::test]
-    #[ignore = "needs DBUNNY_TEST_MARIADB_URL"]
-    async fn mariadb_servers_are_refused() {
-        let err = crate::db::mysql_common::tests_support::open_server(endpoint_from("DBUNNY_TEST_MARIADB_URL")).await.err().unwrap();
-        assert!(err.starts_with("This server is MariaDB 11.4."), "{err}");
-        assert!(err.ends_with(", which DBunny doesn't support yet."), "{err}");
     }
 
     /// Whether the server still lists connection `id`.

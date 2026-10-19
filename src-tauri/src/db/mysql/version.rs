@@ -9,7 +9,7 @@ pub fn parse_mysql_version(version: &str) -> Result<ServerVersion, String> {
         // Older MariaDB servers prefix the real version with 5.5.5-
         let real = text.strip_prefix("5.5.5-").unwrap_or(text);
         let shown = numbers(real).map(|(_, shown)| shown).unwrap_or_else(|| real.to_string());
-        return Err(format!("This server is MariaDB {shown}, which DBunny doesn't support yet."));
+        return Err(format!("This server is MariaDB {shown}. Edit the connection and choose MariaDB."));
     }
     let (parsed, shown) = numbers(text).ok_or_else(|| format!("Couldn't read the MySQL version from \"{text}\"."))?;
     if parsed.major < 8 {
@@ -32,8 +32,8 @@ mod tests {
     #[test]
     fn old_mysql_and_mariadb_are_refused_by_name() {
         assert_eq!(parse_mysql_version("5.7.44-log").err().unwrap(), "MySQL 5.7.44 isn't supported; DBunny needs MySQL 8.0 or newer.");
-        assert_eq!(parse_mysql_version("11.4.13-MariaDB-ubu2404").err().unwrap(), "This server is MariaDB 11.4.13, which DBunny doesn't support yet.");
+        assert_eq!(parse_mysql_version("11.4.13-MariaDB-ubu2404").err().unwrap(), "This server is MariaDB 11.4.13. Edit the connection and choose MariaDB.");
         // Older MariaDB servers prefix the version with 5.5.5-
-        assert_eq!(parse_mysql_version("5.5.5-10.6.18-MariaDB").err().unwrap(), "This server is MariaDB 10.6.18, which DBunny doesn't support yet.");
+        assert_eq!(parse_mysql_version("5.5.5-10.6.18-MariaDB").err().unwrap(), "This server is MariaDB 10.6.18. Edit the connection and choose MariaDB.");
     }
 }

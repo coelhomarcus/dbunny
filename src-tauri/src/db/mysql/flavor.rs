@@ -35,6 +35,10 @@ impl Flavor for MysqlFlavor {
     }
 
     /// `EXPLAIN FORMAT=TREE`, which doesn't run the statement, or `EXPLAIN ANALYZE`, which does.
+    fn read_only_sql(&self) -> &'static str {
+        "SELECT @@read_only, @@super_read_only"
+    }
+
     async fn explain(&self, driver: &ServerDriver, statement: &str, analyze: bool) -> Result<ExplainResult, String> {
         let explain_sql = if analyze { format!("EXPLAIN ANALYZE {statement}") } else { format!("EXPLAIN FORMAT=TREE {statement}") };
         let endpoint = driver.endpoint().clone();

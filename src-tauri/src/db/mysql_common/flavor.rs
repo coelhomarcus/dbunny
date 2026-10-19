@@ -18,6 +18,9 @@ pub trait Flavor: Send + Sync {
     fn capabilities(&self, version: ServerVersion) -> Capabilities;
     /// Databases every server has, never opened on their own.
     fn system_databases(&self) -> &'static [&'static str];
+    /// A query for two flags, whether the server is read-only and whether even accounts with
+    /// SUPER are held to it, as integers.
+    fn read_only_sql(&self) -> &'static str;
     /// The plan of one statement that was already checked (a single statement, no EXPLAIN of
     /// its own, and, to analyze, one that only reads). It runs on the editor's connection.
     async fn explain(&self, driver: &ServerDriver, statement: &str, analyze: bool) -> Result<ExplainResult, String>;
