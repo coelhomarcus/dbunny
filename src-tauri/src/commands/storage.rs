@@ -311,6 +311,17 @@ pub enum ConnectionDetails {
         tls: Option<TlsSettings>,
         ssl: bool,
     },
+    Mariadb {
+        host: String,
+        port: u16,
+        /// May be empty: the session opens the first database it finds.
+        database: String,
+        user: String,
+        password: String,
+        ssh: Option<SshConfig>,
+        tls: Option<TlsSettings>,
+        ssl: bool,
+    },
     Sqlite {
         path: String,
     },
@@ -321,6 +332,7 @@ impl ConnectionDetails {
         match self {
             ConnectionDetails::Postgres { .. } => Engine::Postgres,
             ConnectionDetails::Mysql { .. } => Engine::Mysql,
+            ConnectionDetails::Mariadb { .. } => Engine::Mariadb,
             ConnectionDetails::Sqlite { .. } => Engine::Sqlite,
         }
     }
@@ -339,9 +351,10 @@ impl SavedConnection {
         let engine = details.engine();
         // What gets encrypted depends on the engine
         let (json, ssl) = match details {
-            // A MySQL connection keeps the same details under its own engine
+            // A MySQL or MariaDB connection keeps the same details under its own engine
             ConnectionDetails::Postgres { host, port, database, user, password, ssh, tls, ssl }
-            | ConnectionDetails::Mysql { host, port, database, user, password, ssh, tls, ssl } => {
+            | ConnectionDetails::Mysql { host, port, database, user, password, ssh, tls, ssl }
+            | ConnectionDetails::Mariadb { host, port, database, user, password, ssh, tls, ssl } => {
                 let json = serde_json::to_string(&SensitiveData { host, port, database, user, password, ssh, tls })
                     .map_err(|e| format!("Failed to serialize sensitive data: {e}"))?;
                 (json, ssl)
@@ -673,6 +686,49 @@ mod tests {
         let conn = SavedConnection::new(&key, "m2".into(), "Server".into(), mysql("db.local", 3306, "", "root", "", false), "#000".into(), "a".into(), "b".into()).unwrap();
         let info = conn.to_info(&key).unwrap();
         assert_eq!((info.engine, info.database.as_str(), info.ssl), (Engine::Mysql, "", false));
+    }
+
+    #[test]
+    fn a_mariadb_connection_is_saved_and_read_back() {
+        let key = [8u8; 32];
+        let details = ConnectionDetails::Mariadb {
+            host: "db.example.com".into(),
+            port: 3307,
+            database: "shop".into(),
+            user: "me".into(),
+            password: "secret".into(),
+            ssh: None,
+            tls: Some(TlsSettings { mode: "require".into(), ..Default::default() }),
+            ssl: true,
+        };
+        let conn = SavedConnection::new(&key, "d1".into(), "Shop".into(), details, "#3b82f6".into(), "a".into(), "b".into()).unwrap();
+        let stored = serde_json::to_string(&conn).unwrap();
+        assert!(stored.contains(r#""engine":"mariadb""#), "{stored}");
+        for private in ["db.example.com", "secret"] {
+            assert!(!stored.contains(private), "{private} is in the clear: {stored}");
+        }
+        let info = serde_json::from_str::<SavedConnection>(&stored).unwrap().to_info(&key).unwrap();
+        assert_eq!(info.engine, Engine::Mariadb);
+        assert_eq!((info.host.as_str(), info.port, info.database.as_str(), info.user.as_str(), info.password.as_str()), ("db.example.com", 3307, "shop", "me", "secret"));
+        assert_eq!((info.tls.unwrap().mode.as_str(), info.ssl, info.path.as_str()), ("require", true, ""));
+    }
+
+    #[test]
+    fn a_mariadb_connection_may_have_no_database() {
+        let key = [8u8; 32];
+        let details = ConnectionDetails::Mariadb {
+            host: "db.local".into(),
+            port: 3306,
+            database: "".into(),
+            user: "root".into(),
+            password: "".into(),
+            ssh: None,
+            tls: None,
+            ssl: false,
+        };
+        let conn = SavedConnection::new(&key, "d2".into(), "Server".into(), details, "#000".into(), "a".into(), "b".into()).unwrap();
+        let info = conn.to_info(&key).unwrap();
+        assert_eq!((info.engine, info.database.as_str(), info.ssl), (Engine::Mariadb, "", false));
     }
 
     fn temp_dir() -> PathBuf {
