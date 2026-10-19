@@ -46,7 +46,7 @@ export default function MarkdownView({
           return (
             <div key={index} className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full border-collapse text-left text-xs">
-                <thead className="bg-muted">
+                <thead className="bg-card-header">
                   <tr>
                     {block.header.map((cell, cellIndex) => (
                       <th key={cellIndex} className="px-2 py-1 font-medium">

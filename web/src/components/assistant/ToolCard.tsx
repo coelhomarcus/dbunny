@@ -66,7 +66,7 @@ function QueryCard({ item, onDecide }: { item: ToolItem; onDecide: (approvalId: 
       {rows && shown.length > 0 && (
         <div className="max-h-56 overflow-auto border-t border-border">
           <table className="w-full border-collapse text-left">
-            <thead className="sticky top-0 bg-muted">
+            <thead className="sticky top-0 bg-card-header">
               <tr>
                 {rows.columns.map((column, index) => (
                   <th key={index} className="px-2 py-1 font-medium whitespace-nowrap">
