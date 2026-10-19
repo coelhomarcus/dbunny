@@ -70,10 +70,17 @@ fn node_of(key: &str, object: &Map<String, JsonValue>) -> Node {
     let mut node = Node { label: label_of(key, object), children: children_of(object), ..Default::default() };
     node.cost = number(object, "cost");
     node.rows = number(object, "rows");
-    // What ANALYZE measured: per loop, the way the server reports it
-    node.actual_rows = number(object, "r_rows").or_else(|| number(object, "r_output_rows"));
+    // What ANALYZE measured. The tree carries it per loop, as MySQL's does (the view multiplies
+    // by the loops); MariaDB gives the rows of a table per loop but times and output rows in total
     node.loops = number(object, "r_loops");
-    node.actual_time_last = number(object, "r_total_time_ms").or_else(|| number(object, "r_table_time_ms"));
+    let per_loop = |total: f64| total / node.loops.filter(|loops| *loops > 0.0).unwrap_or(1.0);
+    node.actual_rows = number(object, "r_rows").or_else(|| number(object, "r_output_rows").map(per_loop));
+    // A table's time is reading it plus checking its conditions
+    let table_time = match (number(object, "r_table_time_ms"), number(object, "r_other_time_ms")) {
+        (None, None) => None,
+        (read, other) => Some(read.unwrap_or(0.0) + other.unwrap_or(0.0)),
+    };
+    node.actual_time_last = number(object, "r_total_time_ms").or(table_time).map(per_loop);
     node
 }
 
@@ -161,10 +168,30 @@ mod tests {
         assert_eq!(root["actualRows"], json!(3.0));
         let table = &root["children"][0];
         assert_eq!(table["label"], "ALL on customers where customers.age > 1");
-        assert_eq!((table["actualRows"].clone(), table["loops"].clone(), table["actualTimeLast"].clone()), (json!(3.0), json!(1.0), json!(0.01)));
+        assert_eq!((table["actualRows"].clone(), table["loops"].clone(), table["actualTimeLast"].clone()), (json!(3.0), json!(1.0), json!(0.014)));
         // The bookkeeping isn't a step
         assert_eq!(table["children"], json!([]));
         assert_eq!(root["children"].as_array().unwrap().len(), 1);
+    }
+
+    /// The view multiplies a step's time and rows by its loops, as MySQL reports them per loop.
+    /// MariaDB reports totals, so a step that ran three times must come as a third of them.
+    #[test]
+    fn measured_times_and_rows_come_per_loop() {
+        let analyzed = json!({"query_block": {"select_id": 1, "r_loops": 1, "r_total_time_ms": 0.12, "filesort": {
+            "sort_key": "x", "r_loops": 2, "r_total_time_ms": 0.02, "r_output_rows": 4, "nested_loop": [
+                {"table": {"table_name": "o", "access_type": "ALL", "r_loops": 1, "rows": 3, "r_rows": 3, "r_table_time_ms": 0.03, "r_other_time_ms": 0.01}},
+                {"table": {"table_name": "c", "access_type": "eq_ref", "r_loops": 3, "rows": 1, "r_rows": 1, "r_table_time_ms": 0.006, "r_other_time_ms": 0.054}}
+            ]}}});
+        let tree = tree_from_json(&analyzed).unwrap();
+        let close = |value: &JsonValue, expected: f64| (value.as_f64().unwrap() - expected).abs() < 1e-9;
+        let sort = &tree[0]["children"][0];
+        assert!(close(&sort["actualTimeLast"], 0.01) && close(&sort["actualRows"], 2.0), "{sort}");
+        let tables = sort["children"][0]["children"].as_array().unwrap();
+        // The time of a table is reading it and checking its conditions
+        assert!(close(&tables[0]["actualTimeLast"], 0.04), "{}", tables[0]);
+        assert!(close(&tables[1]["actualTimeLast"], 0.02) && close(&tables[1]["actualRows"], 1.0), "{}", tables[1]);
+        assert!(close(&tree[0]["actualTimeLast"], 0.12));
     }
 
     #[test]
