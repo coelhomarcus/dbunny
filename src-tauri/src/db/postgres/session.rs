@@ -19,6 +19,8 @@ pub struct PgState {
     /// The query editor's own connection, opened on first use: what's typed there (BEGIN,
     /// SET, a long query) stays there instead of reaching table views and the explorer.
     pub editor: Option<Arc<Client>>,
+    /// The assistant's connection, opened on its first read: what it runs stays on it.
+    pub reader: Option<Arc<Client>>,
     /// SSH tunnel the connections go through; held only to keep it open, and closed
     /// when the session is dropped.
     pub tunnel: Option<Arc<crate::db::net::ssh::Tunnel>>,

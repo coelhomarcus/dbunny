@@ -252,6 +252,7 @@ impl PostgresDriver {
             notices,
             transaction: None,
             editor: None,
+            reader: None,
             tunnel,
         };
 
@@ -259,6 +260,7 @@ impl PostgresDriver {
             state: tokio::sync::Mutex::new(Some(session)),
             endpoint,
             reconnect_lock: Default::default(),
+            reading: Default::default(),
             info: ConnectionInfo { database, host, port, server_version, read_only },
             capabilities: Capabilities::postgres(),
         }))
