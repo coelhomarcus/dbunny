@@ -189,7 +189,7 @@ mod tests {
         assert_eq!(json["materializedViews"], true);
         assert_eq!(json["explainFormat"], "postgresJson");
         assert_eq!(json["schemaEditing"], true);
-        assert_eq!(json["assistant"], false);
+        assert_eq!(json["assistant"], true);
     }
 
     #[test]
