@@ -995,6 +995,8 @@ mod server_tests {
         .await;
         let structure = driver.catalog().table_structure(&db.name, "customers").await.unwrap();
         let privilege = structure.privileges.iter().find(|p| p.grantee.contains(&user)).expect("the user's grant");
+        // Written the way the Grant and Revoke changes read an account: user@host
+        assert_eq!(privilege.grantee, format!("{user}@%"));
         assert_eq!(privilege.privileges, vec!["SELECT".to_string(), "UPDATE".to_string()]);
         assert_eq!(privilege.grantable, vec!["SELECT".to_string(), "UPDATE".to_string()]);
         assert!(structure.warnings.is_empty(), "{:?}", structure.warnings);

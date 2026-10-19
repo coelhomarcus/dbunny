@@ -5,7 +5,7 @@ use tauri::State;
 use super::connect::ConnectResponse;
 use super::require;
 use super::state::AppState;
-use crate::db::model::{DatabaseInfo, RoleInfo, ServerActivity};
+use crate::db::model::{DatabaseInfo, RoleList, ServerActivity};
 
 #[tauri::command]
 pub async fn get_databases(state: State<'_, AppState>, session_id: String) -> Result<Vec<DatabaseInfo>, String> {
@@ -84,7 +84,7 @@ pub async fn drop_schema(
 }
 
 #[tauri::command]
-pub async fn get_roles(state: State<'_, AppState>, session_id: String) -> Result<Vec<RoleInfo>, String> {
+pub async fn get_roles(state: State<'_, AppState>, session_id: String) -> Result<RoleList, String> {
     let driver = state.driver(&session_id).await?;
     require(driver.admin(), driver.engine(), "Server administration")?.roles().await
 }

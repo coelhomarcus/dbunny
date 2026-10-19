@@ -380,6 +380,15 @@ async fn table_triggers(conn: &mut Conn, schema: &str, table: &str) -> mysql_asy
     Ok(triggers)
 }
 
+/// `'user'@'host'` as the server writes an account, as `user@host`: the form the permission
+/// changes and the Roles page use.
+fn plain_account(grantee: &str) -> String {
+    match grantee.strip_prefix('\'').and_then(|rest| rest.strip_suffix('\'')).and_then(|inner| inner.split_once("'@'")) {
+        Some((user, host)) => format!("{user}@{host}"),
+        None => grantee.to_string(),
+    }
+}
+
 /// What each account may do on the table: its own grants and the ones on the whole database.
 async fn table_privileges(conn: &mut Conn, schema: &str, table: &str) -> mysql_async::Result<Vec<TablePrivilege>> {
     let rows: Vec<Row> = conn
@@ -396,7 +405,7 @@ async fn table_privileges(conn: &mut Conn, schema: &str, table: &str) -> mysql_a
     let mut accounts: BTreeMap<String, BTreeMap<String, bool>> = BTreeMap::new();
     for row in &rows {
         let grantable = string(row, "grantable") == "YES";
-        let entry = accounts.entry(string(row, "grantee")).or_default().entry(string(row, "privilege")).or_default();
+        let entry = accounts.entry(plain_account(&string(row, "grantee"))).or_default().entry(string(row, "privilege")).or_default();
         *entry |= grantable;
     }
     Ok(accounts
@@ -412,6 +421,14 @@ async fn table_privileges(conn: &mut Conn, schema: &str, table: &str) -> mysql_a
 #[cfg(test)]
 mod tests {
     use mysql_async::{Error, ServerError};
+
+    #[test]
+    fn accounts_are_written_without_quotes() {
+        assert_eq!(super::plain_account("'ana'@'%'"), "ana@%");
+        assert_eq!(super::plain_account("'ana'@'local.host'"), "ana@local.host");
+        assert_eq!(super::plain_account("ana"), "ana");
+    }
+
 
     use super::*;
 

@@ -8,13 +8,16 @@ use mysql_async::{Error as MysqlError, Row};
 
 use super::catalog::{number, quote, string, text};
 use super::MysqlDriver;
-use crate::db::model::{DatabaseInfo, RoleInfo, ServerActivity, ServerSession};
+use crate::db::model::{DatabaseInfo, RoleInfo, RoleList, ServerActivity, ServerSession};
 use crate::db::mysql_common::connect::MysqlEndpoint;
 use crate::db::mysql_common::errors::error_message;
 use crate::db::{unsupported, Driver, Engine, ServerAdmin};
 
 /// Databases every server has; they are never listed.
 const SYSTEM_DATABASES: &str = "'mysql', 'sys', 'information_schema', 'performance_schema'";
+
+/// The accounts MySQL makes for its own use.
+const BUILTIN_ACCOUNTS: [&str; 3] = ["mysql.sys", "mysql.session", "mysql.infoschema"];
 
 /// How long dropping a database waits for the locks other sessions hold. The server's own
 /// wait is a year.
@@ -26,8 +29,8 @@ const UNKNOWN_THREAD: u16 = 1094;
 /// Waiting for a lock longer than `lock_wait_timeout` allows.
 const LOCK_WAIT_TIMEOUT: u16 = 1205;
 
-/// The errors for a table or a privilege the account lacks (1142: no SELECT, 1227: no PROCESS).
-const DENIED: [u16; 3] = [1142, 1143, 1227];
+/// The errors for a table or a privilege the account lacks (1044 and 1142: no SELECT, 1227: no PROCESS).
+const DENIED: [u16; 4] = [1044, 1142, 1143, 1227];
 
 /// One row of the process list, whichever way it was read.
 struct RawSession {
@@ -99,6 +102,100 @@ async fn plain_sessions(conn: &mut mysql_async::Conn, database: Option<&str>) ->
             application: None,
         })
         .collect())
+}
+
+/// What the global grants of an account allow of the things the Roles page shows.
+#[derive(Debug, Default, PartialEq)]
+struct GlobalPrivileges {
+    superuser: bool,
+    create_db: bool,
+    create_role: bool,
+    replication: bool,
+}
+
+/// Reads `SHOW GRANTS` lines for the privileges granted on `*.*`.
+fn global_privileges(grants: &[String]) -> GlobalPrivileges {
+    let mut found = GlobalPrivileges::default();
+    for grant in grants {
+        let Some((list, _)) = grant.strip_prefix("GRANT ").and_then(|rest| rest.split_once(" ON *.* TO ")) else { continue };
+        for privilege in list.split(", ").map(str::trim) {
+            match privilege {
+                "ALL PRIVILEGES" | "ALL" => found = GlobalPrivileges { superuser: true, create_db: true, create_role: true, replication: true },
+                "SUPER" => found.superuser = true,
+                "CREATE" => found.create_db = true,
+                "CREATE USER" | "CREATE ROLE" => found.create_role = true,
+                "REPLICATION SLAVE" => found.replication = true,
+                _ => {}
+            }
+        }
+    }
+    found
+}
+
+/// The accounts of the server. An account that is locked, or that another is granted as a role,
+/// can't log in: it is a role. The server's own accounts are the built-in ones.
+async fn accounts(conn: &mut mysql_async::Conn) -> mysql_async::Result<Vec<RoleInfo>> {
+    let rows: Vec<Row> = conn
+        .query(
+            "SELECT u.User AS name, u.Host AS host, u.account_locked AS locked, u.password_expired AS expired, \
+                    u.Super_priv AS super_priv, u.Create_priv AS create_priv, u.Create_user_priv AS create_user_priv, \
+                    u.Repl_slave_priv AS repl_priv, u.max_user_connections AS max_connections, \
+                    CONCAT(u.User, '@', u.Host) = CURRENT_USER() AS is_current, \
+                    (SELECT GROUP_CONCAT(IF(e.FROM_HOST = '%', e.FROM_USER, CONCAT(e.FROM_USER, '@', e.FROM_HOST)) ORDER BY e.FROM_USER SEPARATOR ',') \
+                       FROM mysql.role_edges e WHERE e.TO_USER = u.User AND e.TO_HOST = u.Host) AS member_of, \
+                    EXISTS (SELECT 1 FROM mysql.role_edges e WHERE e.FROM_USER = u.User AND e.FROM_HOST = u.Host) AS is_role \
+             FROM mysql.user u",
+        )
+        .await?;
+    let mut accounts: Vec<RoleInfo> = rows
+        .iter()
+        .map(|row| {
+            let name = string(row, "name");
+            let can_login = string(row, "locked") != "Y" && number(row, "is_role") != Some(1);
+            let limit = number(row, "max_connections").unwrap_or(0);
+            RoleInfo {
+                is_builtin: BUILTIN_ACCOUNTS.contains(&name.as_str()),
+                name,
+                host: text(row, "host"),
+                can_login,
+                superuser: string(row, "super_priv") == "Y",
+                create_db: string(row, "create_priv") == "Y",
+                create_role: string(row, "create_user_priv") == "Y",
+                replication: string(row, "repl_priv") == "Y",
+                bypass_rls: None,
+                connection_limit: if limit > 0 { limit as i32 } else { -1 },
+                valid_until: (can_login && string(row, "expired") == "Y").then(|| "expired".to_string()),
+                member_of: text(row, "member_of").map(|names| names.split(',').map(String::from).collect()).unwrap_or_default(),
+                is_current: number(row, "is_current") == Some(1),
+            }
+        })
+        .collect();
+    accounts.sort_by(|a, b| (a.is_builtin, !a.can_login, &a.name, &a.host).cmp(&(b.is_builtin, !b.can_login, &b.name, &b.host)));
+    Ok(accounts)
+}
+
+/// Only the account of this session, for one that can't read the `mysql` schema: its global
+/// privileges come from its own grants.
+async fn own_account(conn: &mut mysql_async::Conn) -> mysql_async::Result<RoleInfo> {
+    let current: String = conn.query_first("SELECT CURRENT_USER()").await?.unwrap_or_default();
+    let (name, host) = current.rsplit_once('@').map_or((current.clone(), None), |(name, host)| (name.to_string(), Some(host.to_string())));
+    let grants: Vec<String> = conn.query("SHOW GRANTS").await?;
+    let privileges = global_privileges(&grants);
+    Ok(RoleInfo {
+        name,
+        host,
+        can_login: true,
+        superuser: privileges.superuser,
+        create_db: privileges.create_db,
+        create_role: privileges.create_role,
+        replication: privileges.replication,
+        bypass_rls: None,
+        connection_limit: -1,
+        valid_until: None,
+        member_of: vec![],
+        is_current: true,
+        is_builtin: false,
+    })
 }
 
 fn database_name(name: &str) -> Result<&str, String> {
@@ -198,8 +295,16 @@ impl ServerAdmin for MysqlDriver {
         Err(unsupported(Engine::Mysql, "Schemas"))
     }
 
-    async fn roles(&self) -> Result<Vec<RoleInfo>, String> {
-        unimplemented!("accounts and roles come in Task 14")
+    async fn roles(&self) -> Result<RoleList, String> {
+        let mut conn = self.conn().await?;
+        match accounts(&mut conn).await {
+            Ok(roles) => Ok(RoleList { roles, limited_view: false }),
+            Err(MysqlError::Server(server)) if DENIED.contains(&server.code) => {
+                let own = own_account(&mut conn).await.map_err(|e| error_message(&e, self.endpoint()))?;
+                Ok(RoleList { roles: vec![own], limited_view: true })
+            }
+            Err(e) => Err(error_message(&e, self.endpoint())),
+        }
     }
 
     /// What the server is doing: its sessions (the process list), which of them hold a
@@ -502,6 +607,79 @@ mod server_tests {
         d.close().await;
     }
 
+    fn unique(prefix: &str) -> String {
+        format!("{prefix}_{}", &uuid::Uuid::new_v4().simple().to_string()[..8])
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn roles_map_mysql_accounts() {
+        let (db, d) = open().await;
+        let (user, role) = (unique("dbunny_t_u"), unique("dbunny_t_r"));
+        let _users = (Cleanup(format!("DROP USER IF EXISTS '{user}'@'%'")), Cleanup(format!("DROP ROLE IF EXISTS '{role}'@'%'")));
+        exec(
+            &test_endpoint(),
+            &format!(
+                "CREATE USER '{user}'@'%' WITH MAX_USER_CONNECTIONS 3; CREATE ROLE '{role}'; \
+                 GRANT '{role}' TO '{user}'@'%'; GRANT CREATE ON *.* TO '{user}'@'%'"
+            ),
+        )
+        .await;
+        let list = d.admin().unwrap().roles().await.unwrap();
+        assert!(!list.limited_view);
+        let find = |name: &str| list.roles.iter().find(|r| r.name == name).unwrap_or_else(|| panic!("no account {name}"));
+
+        let account = find(&user);
+        assert_eq!(account.host.as_deref(), Some("%"));
+        assert!(account.can_login && account.create_db && !account.superuser && !account.create_role && !account.replication);
+        assert_eq!(account.connection_limit, 3);
+        assert_eq!(account.member_of, vec![role.clone()]);
+        assert_eq!((account.bypass_rls, account.valid_until.as_deref(), account.is_builtin, account.is_current), (None, None, false, false));
+
+        let group = find(&role);
+        assert!(!group.can_login && group.member_of.is_empty());
+
+        let root = find("root");
+        assert!(root.superuser && root.create_role && root.replication && root.is_current && root.can_login);
+        assert_eq!(root.connection_limit, -1);
+        for builtin in ["mysql.sys", "mysql.session", "mysql.infoschema"] {
+            assert!(find(builtin).is_builtin, "{builtin}");
+        }
+        // The server's own accounts come last
+        let first_builtin = list.roles.iter().position(|r| r.is_builtin).unwrap();
+        assert!(list.roles[first_builtin..].iter().all(|r| r.is_builtin));
+        let _ = db;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn an_expired_password_is_shown() {
+        let (_db, d) = open().await;
+        let user = unique("dbunny_t_x");
+        let _cleanup = Cleanup(format!("DROP USER IF EXISTS '{user}'@'%'"));
+        exec(&test_endpoint(), &format!("CREATE USER '{user}'@'%' PASSWORD EXPIRE")).await;
+        let list = d.admin().unwrap().roles().await.unwrap();
+        let account = list.roles.iter().find(|r| r.name == user).unwrap();
+        assert_eq!(account.valid_until.as_deref(), Some("expired"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn without_access_to_mysql_user_only_the_own_account_shows() {
+        let db = TestDb::new().await;
+        let user = unique("dbunny_t_l");
+        let _cleanup = Cleanup(format!("DROP USER IF EXISTS '{user}'@'%'"));
+        exec(&test_endpoint(), &format!("CREATE USER '{user}'@'%'; GRANT SELECT ON `{}`.* TO '{user}'@'%'", db.name)).await;
+        let d = MysqlDriver::open(MysqlEndpoint { user: user.clone(), password: String::new(), ..db.endpoint.clone() }, None).await.unwrap();
+        let list = d.admin().unwrap().roles().await.unwrap();
+        assert!(list.limited_view);
+        assert_eq!(list.roles.len(), 1);
+        let own = &list.roles[0];
+        assert_eq!((own.name.as_str(), own.is_current, own.can_login, own.superuser), (user.as_str(), true, true, false));
+        assert!(own.host.is_some());
+        d.close().await;
+    }
+
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
     async fn schemas_are_unsupported() {
@@ -510,5 +688,33 @@ mod server_tests {
         for result in [admin.create_schema("s").await, admin.rename_schema("s", "t").await, admin.drop_schema("s", false).await] {
             assert_eq!(result.err().unwrap(), "Schemas isn't supported by MySQL");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn grants(lines: &[&str]) -> Vec<String> {
+        lines.iter().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn global_grants_tell_what_an_account_may_do() {
+        let all = global_privileges(&grants(&["GRANT ALL PRIVILEGES ON *.* TO `root`@`%` WITH GRANT OPTION", "GRANT PROXY ON ``@`` TO `root`@`%` WITH GRANT OPTION"]));
+        assert_eq!(all, GlobalPrivileges { superuser: true, create_db: true, create_role: true, replication: true });
+
+        let some = global_privileges(&grants(&["GRANT CREATE, CREATE USER, REPLICATION SLAVE ON *.* TO `u`@`%`"]));
+        assert_eq!(some, GlobalPrivileges { superuser: false, create_db: true, create_role: true, replication: true });
+
+        assert!(global_privileges(&grants(&["GRANT SELECT, SUPER ON *.* TO `u`@`%`"])).superuser);
+        assert!(global_privileges(&grants(&["GRANT CREATE ROLE ON *.* TO `u`@`%`"])).create_role);
+        // Other CREATEs are other privileges
+        let views = global_privileges(&grants(&["GRANT CREATE VIEW, CREATE ROUTINE, CREATE TEMPORARY TABLES ON *.* TO `u`@`%`"]));
+        assert_eq!(views, GlobalPrivileges::default());
+        // Only what is granted on every database counts
+        let scoped = global_privileges(&grants(&["GRANT USAGE ON *.* TO `u`@`%`", "GRANT ALL PRIVILEGES ON `shop`.* TO `u`@`%`", "GRANT SUPER ON `shop`.`t` TO `u`@`%`"]));
+        assert_eq!(scoped, GlobalPrivileges::default());
+        assert_eq!(global_privileges(&[]), GlobalPrivileges::default());
     }
 }

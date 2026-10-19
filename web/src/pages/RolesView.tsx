@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Copy, Users, X } from "lucide-react";
+import { Copy, TriangleAlert, Users, X } from "lucide-react";
 import ContextMenu from "../components/ui/ContextMenu";
 import { writeClipboardText } from "../lib/clipboard";
 import type { RoleInfo } from "@/types";
@@ -13,6 +13,7 @@ import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import SegmentedTabs from "../components/ui/SegmentedTabs";
 import { cn } from "../lib/cn";
+import { accountOf, hasHosts } from "../lib/roles";
 import { useNotify } from "../contexts/NoticeProvider";
 
 /** Attributes worth a badge, in the order they're shown. */
@@ -34,6 +35,7 @@ export default function RolesView() {
   const rightPanel = useRightPanel();
   const notify = useNotify();
   const [roles, setRoles] = useState<RoleInfo[] | null>(null);
+  const [limitedView, setLimitedView] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showBuiltin, setShowBuiltin] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -44,7 +46,11 @@ export default function RolesView() {
     let stale = false;
     api
       .getRoles()
-      .then((list) => !stale && setRoles(list))
+      .then((list) => {
+        if (stale) return;
+        setRoles(list.roles);
+        setLimitedView(list.limitedView);
+      })
       .catch((err) => {
         if (stale) return;
         const text = typeof err === "string" ? err : "Couldn't read the roles";
@@ -58,10 +64,11 @@ export default function RolesView() {
 
   const shown = (roles ?? []).filter((role) => showBuiltin || !role.isBuiltin);
   const builtinCount = (roles ?? []).filter((role) => role.isBuiltin).length;
+  const withHosts = hasHosts(roles ?? []);
 
   useEffect(() => {
     if (!selected || !roles) return;
-    const role = roles.find((item) => item.name === selected);
+    const role = roles.find((item) => accountOf(item) === selected);
     if (!role || (!showBuiltin && role.isBuiltin)) setSelected(null);
     else setShownRole(role);
   }, [roles, selected, showBuiltin]);
@@ -83,6 +90,13 @@ export default function RolesView() {
           />
         )}
       </PageHeader>
+
+      {limitedView && (
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-4 py-2 text-[13px] text-warning-foreground">
+          <TriangleAlert size={13} />
+          Only your own account is visible: listing the others needs SELECT on mysql.user.
+        </div>
+      )}
 
       {error ? (
         <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">Couldn't read the roles.</div>
@@ -109,14 +123,15 @@ export default function RolesView() {
               <tbody>
                 {shown.map((role, index) => {
                   const rights = rightsOf(role);
-                  const active = selected === role.name;
+                  const account = accountOf(role);
+                  const active = selected === account;
                   return (
                     <tr
-                      key={role.name}
-                      onClick={() => setSelected(active ? null : role.name)}
+                      key={account}
+                      onClick={() => setSelected(active ? null : account)}
                       onContextMenu={(e) => {
                         e.preventDefault();
-                        setMenu({ x: e.clientX, y: e.clientY, name: role.name });
+                        setMenu({ x: e.clientX, y: e.clientY, name: account });
                       }}
                       className={cn(
                         "cursor-pointer border-b border-border align-middle transition-colors hover:bg-accent",
@@ -125,6 +140,7 @@ export default function RolesView() {
                     >
                       <td className="truncate px-4 py-2 font-medium">
                         {role.name}
+                        {withHosts && role.host && <span className="font-normal text-muted-foreground">@{role.host}</span>}
                         {role.isCurrent && <span className="ml-2 text-[11px] font-normal text-primary">you</span>}
                       </td>
                       <td className="px-4 py-2">
@@ -167,7 +183,7 @@ export default function RolesView() {
         onClose={() => setMenu(null)}
       />
       {rightPanel && createPortal(
-        <SideCard open={selected !== null && shownRole !== null} widthClass="w-80" label={shownRole ? shownRole.name : "Role"}>
+        <SideCard open={selected !== null && shownRole !== null} widthClass="w-80" label={shownRole ? accountOf(shownRole) : "Role"}>
           {shownRole && <RolePanel role={shownRole} onClose={() => setSelected(null)} />}
         </SideCard>,
         rightPanel,
@@ -183,7 +199,7 @@ function RolePanel({ role, onClose }: { role: RoleInfo; onClose: () => void }) {
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium">{role.name}</span>
+          <span className="truncate text-sm font-medium">{accountOf(role)}</span>
           {role.isCurrent && <span className="shrink-0 text-[11px] text-primary">you</span>}
         </div>
         <Button variant="ghost-muted" size="icon-sm" aria-label="Close" onClick={onClose}>

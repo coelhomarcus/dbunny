@@ -12,7 +12,7 @@ use super::objects::{
 };
 use super::session::Endpoint;
 use super::PostgresDriver;
-use crate::db::model::{DatabaseInfo, RoleInfo, ServerActivity, ServerSession};
+use crate::db::model::{DatabaseInfo, RoleInfo, RoleList, ServerActivity, ServerSession};
 use crate::db::{Driver, ServerAdmin};
 
 #[async_trait]
@@ -52,9 +52,10 @@ impl ServerAdmin for PostgresDriver {
         run(self, &drop_schema_sql(name, cascade)).await
     }
 
-    async fn roles(&self) -> Result<Vec<RoleInfo>, String> {
+    async fn roles(&self) -> Result<RoleList, String> {
         let client = self.client().await?;
-        roles(&client).await.map_err(|e| db_message(&e))
+        let roles = roles(&client).await.map_err(|e| db_message(&e))?;
+        Ok(RoleList { roles, limited_view: false })
     }
 
     async fn activity(&self, all_databases: bool) -> Result<ServerActivity, String> {
@@ -183,12 +184,13 @@ async fn roles(client: &Client) -> Result<Vec<RoleInfo>, tokio_postgres::Error> 
         .iter()
         .map(|r| RoleInfo {
             name: r.get("name"),
+            host: None,
             can_login: r.get("can_login"),
             superuser: r.get("superuser"),
             create_db: r.get("create_db"),
             create_role: r.get("create_role"),
             replication: r.get("replication"),
-            bypass_rls: r.get("bypass_rls"),
+            bypass_rls: Some(r.get("bypass_rls")),
             connection_limit: r.get("connection_limit"),
             valid_until: r.get("valid_until"),
             member_of: r.get("member_of"),

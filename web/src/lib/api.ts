@@ -23,7 +23,7 @@ import type {
   ExplorerTree,
   Diagram,
   DatabaseInfo,
-  RoleInfo,
+  RoleList,
 } from "@/types";
 
 /** Relation kinds as the explorer names them. */
@@ -112,7 +112,7 @@ export function createSessionApi(sessionId: string | null) {
     },
 
     async getRoles() {
-      return invoke<RoleInfo[]>("get_roles", { sessionId });
+      return invoke<RoleList>("get_roles", { sessionId });
     },
 
     async getDatabases() {

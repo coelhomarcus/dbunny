@@ -541,12 +541,16 @@ pub struct DatabaseInfo {
 #[serde(rename_all = "camelCase")]
 pub struct RoleInfo {
     pub name: String,
+    /// The host an account is for (MySQL names accounts `user@host`); None where roles have no host.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
     pub can_login: bool,
     pub superuser: bool,
     pub create_db: bool,
     pub create_role: bool,
     pub replication: bool,
-    pub bypass_rls: bool,
+    /// None where the engine has no row-level security to bypass.
+    pub bypass_rls: Option<bool>,
     /// -1 when unlimited.
     pub connection_limit: i32,
     pub valid_until: Option<String>,
@@ -555,6 +559,14 @@ pub struct RoleInfo {
     pub is_current: bool,
     /// Built in (pg_*), hidden unless asked for.
     pub is_builtin: bool,
+}
+
+/// The roles of a server. `limited_view` is set when the account may read only its own.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleList {
+    pub roles: Vec<RoleInfo>,
+    pub limited_view: bool,
 }
 
 // Server activity
