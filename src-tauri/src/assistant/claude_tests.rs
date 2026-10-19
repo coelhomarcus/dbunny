@@ -163,6 +163,7 @@ async fn claude_answers_with_run_query_and_keeps_history() {
     live.agent.load_session(&id, &again).await.unwrap();
     let replayed = live.sink.events().into_iter().skip(before).filter(|e| matches!(e, AssistantEvent::Update { update, .. } if update["sessionUpdate"] == "user_message_chunk")).count();
     assert!(replayed >= 1, "nothing was played back");
+
     live.finish().await;
 }
 
@@ -175,19 +176,7 @@ async fn claude_reports_what_it_offers() {
     let live = Live::start().await;
     let opened = live.agent.new_session(&live.setup).await.unwrap();
     println!("models: {:?}", opened.models);
-    println!("system prompt supported: {}", live.agent.supports_system_prompt());
-    live.finish().await;
-}
-
-/// Keeps the tool server up so that a CLI can be pointed at it by hand.
-#[tokio::test]
-#[ignore = "manual probe"]
-async fn serve_for_a_manual_probe() {
-    if !enabled() {
-        return;
-    }
-    let live = Live::start().await;
-    println!("PROBE port={} token={}", live.server.port, live.conversation.token);
-    tokio::time::sleep(std::time::Duration::from_secs(90)).await;
+    println!("system prompt capability: {}", live.agent.supports_system_prompt());
+    live.agent.set_model(&opened.acp_session, "haiku").await.unwrap();
     live.finish().await;
 }
