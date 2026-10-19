@@ -6,7 +6,8 @@ import type { SqlDialectName } from "./sqlStatements";
  */
 export async function formatSql(sql: string, dialect: SqlDialectName = "postgres"): Promise<string> {
   const { format } = await import("sql-formatter");
-  return format(sql, { language: dialect === "sqlite" ? "sqlite" : "postgresql", keywordCase: "upper", tabWidth: 2, linesBetweenQueries: 1 });
+  const language = dialect === "sqlite" ? "sqlite" : dialect === "mysql" ? "mysql" : "postgresql";
+  return format(sql, { language, keywordCase: "upper", tabWidth: 2, linesBetweenQueries: 1 });
 }
 
 const formattedCache = new Map<string, string>();

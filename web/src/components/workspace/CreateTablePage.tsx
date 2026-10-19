@@ -10,6 +10,7 @@ import { requestSchemaRefresh } from "../../lib/schemaRefresh";
 import { requestOpenQuery } from "../../lib/openQuery";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useSqlDialect } from "../../hooks/useSqlDialect";
+import { dialectData, type DialectData } from "../../lib/engines";
 import { cn } from "../../lib/cn";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
@@ -19,9 +20,16 @@ import SegmentedTabs from "../ui/SegmentedTabs";
 import { selectClass } from "../ui/styles";
 import { SqlPreviewBox } from "../schema/SqlPreview";
 
-const COMMON_TYPES = ["bigserial", "bigint", "integer", "text", "varchar(255)", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
-const SQLITE_TYPES = ["INTEGER", "TEXT", "REAL", "NUMERIC", "BLOB"];
 const PARTITION_METHODS = ["RANGE", "LIST", "HASH"];
+
+/** How each way of producing a column is named in the generation menu. */
+const GENERATION_LABELS: Record<ColumnGeneration, string> = {
+  none: "None",
+  autoincrement: "Autoincrement",
+  identityByDefault: "Identity by default",
+  identityAlways: "Identity always",
+  generated: "Generated",
+};
 
 type ForeignKey = ForeignKeyDraft & { key: number };
 type Row = NewColumn & { key: number };
@@ -37,13 +45,14 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
   const { openDocument, closeDocument, updateCreateTable, setQueryDirty } = useDocuments();
   const dialect = useSqlDialect();
   const capabilities = useCapabilities();
-  const sqlite = dialect === "sqlite";
-  const suggestedTypes = sqlite ? SQLITE_TYPES : COMMON_TYPES;
+  const data = dialectData(dialect);
+  const suggestedTypes = data.newTableTypes;
+  const hasFlag = (flag: DialectData["createTableFlags"][number]) => data.createTableFlags.includes(flag);
   const nextKey = useRef(0);
   const newRow = (patch: Partial<NewColumn> = {}): Row => ({
     key: nextKey.current++,
     name: "",
-    dataType: sqlite ? "TEXT" : "text",
+    dataType: data.defaultTextType,
     nullable: true,
     primaryKey: false,
     default: null,
@@ -58,15 +67,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
   const [table, setTable] = useState("");
   const [mode, setMode] = useState<Mode>("simple");
   const [rows, setRows] = useState<Row[]>(() =>
-    sqlite
-      ? [
-          newRow({ name: "id", dataType: "INTEGER", nullable: false, primaryKey: true }),
-          newRow({ name: "created_at", dataType: "TEXT", nullable: false, default: "CURRENT_TIMESTAMP" }),
-        ]
-      : [
-          newRow({ name: "id", dataType: "bigserial", nullable: false, primaryKey: true }),
-          newRow({ name: "created_at", dataType: "timestamptz", nullable: false, default: "now()" }),
-        ],
+    data.starterColumns.map((c) => newRow({ name: c.name, dataType: c.dataType, nullable: c.nullable, primaryKey: c.primaryKey, default: c.default ?? null, generation: c.generation ?? "none" })),
   );
   const [foreignKeys, setForeignKeys] = useState<ForeignKey[]>([]);
   const [relations, setRelations] = useState<CompletionRelation[] | null>(null);
@@ -121,14 +122,14 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
   const fkErrors = foreignKeys.map((fk) => foreignKeyDraftError(fk, named));
   const hasIncompleteForeignKey = fkErrors.some(Boolean);
   const partitionKey = partitionExpr.trim();
-  const partitionIncomplete = !sqlite && !!partitionMethod && !partitionKey;
+  const partitionIncomplete = hasFlag("partition") && !!partitionMethod && !partitionKey;
   const spec: NewTable = {
     columns,
     foreignKeys: foreignKeysForSpec(foreignKeys, relations, named),
-    unlogged: !sqlite && unlogged,
-    withoutRowid: sqlite && withoutRowid,
-    strict: sqlite && strict,
-    partition: !sqlite && partitionMethod && partitionKey ? { method: partitionMethod, expression: partitionKey } : null,
+    unlogged: hasFlag("unlogged") && unlogged,
+    withoutRowid: hasFlag("withoutRowid") && withoutRowid,
+    strict: hasFlag("strict") && strict,
+    partition: hasFlag("partition") && partitionMethod && partitionKey ? { method: partitionMethod, expression: partitionKey } : null,
   };
   const specKey = JSON.stringify(spec);
 
@@ -282,16 +283,11 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                         onChange={(e) => update(r.key, { generation: e.target.value as ColumnGeneration })}
                         className="h-9 w-full cursor-pointer bg-transparent px-2 text-[13px] outline-none"
                       >
-                        <option value="none">None</option>
-                        {sqlite ? (
-                          <option value="autoincrement">Autoincrement</option>
-                        ) : (
-                          <>
-                            <option value="identityByDefault">Identity by default</option>
-                            <option value="identityAlways">Identity always</option>
-                          </>
-                        )}
-                        <option value="generated">Generated</option>
+                        {data.newTableGenerations.map((option) => (
+                          <option key={option} value={option}>
+                            {GENERATION_LABELS[option]}
+                          </option>
+                        ))}
                       </select>
                     )}
                     {advanced && (
@@ -435,46 +431,49 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                     })}
                   </div>
                 )}
-                {sqlite && (
+                {!capabilities.schemas && (
                   <p className="mt-2 text-xs text-muted-foreground">
                     Referenced tables must be in schema <span className="font-mono">{schema || initialSchema}</span> (same database).
                   </p>
                 )}
               </section>
 
-              <section className="flex flex-col gap-2">
-                <h2 className="text-sm font-semibold">Options</h2>
-                {sqlite ? (
-                  <div className="flex flex-wrap gap-x-6 gap-y-1">
-                    <CheckOption checked={withoutRowid} onChange={setWithoutRowid} label="WITHOUT ROWID" />
-                    <CheckOption checked={strict} onChange={setStrict} label="STRICT" />
-                  </div>
-                ) : (
-                  <>
-                    <CheckOption checked={unlogged} onChange={setUnlogged} label="UNLOGGED" />
-                    <div className="grid grid-cols-[9rem_1fr] gap-2">
-                      <select aria-label="Partition method" value={partitionMethod} onChange={(e) => setPartitionMethod(e.target.value)} className={cn(selectClass, "h-8 w-full")}>
-                        <option value="">No partition</option>
-                        {PARTITION_METHODS.map((method) => (
-                          <option key={method} value={method}>
-                            PARTITION BY {method}
-                          </option>
-                        ))}
-                      </select>
-                      <Input
-                        value={partitionExpr}
-                        onChange={(e) => setPartitionExpr(e.target.value)}
-                        aria-label="Partition key"
-                        placeholder="partition key, e.g. created_at"
-                        disabled={!partitionMethod}
-                        spellCheck={false}
-                        className={cn("h-8 font-mono text-xs", partitionIncomplete && "border-destructive")}
-                      />
+              {data.createTableFlags.length > 0 && (
+                <section className="flex flex-col gap-2">
+                  <h2 className="text-sm font-semibold">Options</h2>
+                  {(hasFlag("withoutRowid") || hasFlag("strict")) && (
+                    <div className="flex flex-wrap gap-x-6 gap-y-1">
+                      {hasFlag("withoutRowid") && <CheckOption checked={withoutRowid} onChange={setWithoutRowid} label="WITHOUT ROWID" />}
+                      {hasFlag("strict") && <CheckOption checked={strict} onChange={setStrict} label="STRICT" />}
                     </div>
-                    {partitionIncomplete && <p className="select-text text-xs text-destructive-foreground">Enter a partition key</p>}
-                  </>
-                )}
-              </section>
+                  )}
+                  {hasFlag("unlogged") && <CheckOption checked={unlogged} onChange={setUnlogged} label="UNLOGGED" />}
+                  {hasFlag("partition") && (
+                    <>
+                      <div className="grid grid-cols-[9rem_1fr] gap-2">
+                        <select aria-label="Partition method" value={partitionMethod} onChange={(e) => setPartitionMethod(e.target.value)} className={cn(selectClass, "h-8 w-full")}>
+                          <option value="">No partition</option>
+                          {PARTITION_METHODS.map((method) => (
+                            <option key={method} value={method}>
+                              PARTITION BY {method}
+                            </option>
+                          ))}
+                        </select>
+                        <Input
+                          value={partitionExpr}
+                          onChange={(e) => setPartitionExpr(e.target.value)}
+                          aria-label="Partition key"
+                          placeholder="partition key, e.g. created_at"
+                          disabled={!partitionMethod}
+                          spellCheck={false}
+                          className={cn("h-8 font-mono text-xs", partitionIncomplete && "border-destructive")}
+                        />
+                      </div>
+                      {partitionIncomplete && <p className="select-text text-xs text-destructive-foreground">Enter a partition key</p>}
+                    </>
+                  )}
+                </section>
+              )}
 
               <SqlPreviewBox
                 source={sql}

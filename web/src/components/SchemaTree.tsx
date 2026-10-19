@@ -10,11 +10,12 @@ import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
 import RelationActionDialog, { type RelationAction, type RelationTarget } from "./schema/RelationActionDialog";
 import { writeClipboardText } from "../lib/clipboard";
 import ContainerDialog, { type ContainerOptions, type ContainerRequest } from "./schema/ContainerDialog";
-import { quoteIdent } from "../lib/copyRows";
+import { quoteIdentFor } from "../lib/copyRows";
 import { shortType } from "../lib/columnMeta";
 import { cn } from "../lib/cn";
 import type { Capabilities, ColumnInfo, ExplorerObject, ExplorerPartition, ExplorerTree, ExtensionInfo } from "@/types";
 import { useCapabilities } from "../hooks/useCapabilities";
+import { useSqlDialect } from "../hooks/useSqlDialect";
 import Button from "./ui/Button";
 import Tooltip from "./Tooltip";
 import {
@@ -180,6 +181,7 @@ export default function SchemaTree() {
   const { connectionInfo } = useConnection();
   const readOnly = connectionInfo?.readOnly ?? false;
   const capabilities = useCapabilities();
+  const quoteIdent = quoteIdentFor(useSqlDialect());
   const pinsKey = connectionInfo ? `dbunny:pins:${connectionInfo.host}:${connectionInfo.port}/${connectionInfo.database}` : null;
 
   const [tree, setTree] = useState<ExplorerTree | null>(null);

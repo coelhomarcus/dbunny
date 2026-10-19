@@ -11,6 +11,7 @@ import { isJsonType, shortType } from "../lib/columnMeta";
 import CellEditorDialog from "../components/table/CellEditorDialog";
 import { useTableData, toSortKeys } from "../hooks/useTableData";
 import { useApi, useConnection } from "../contexts/useConnection";
+import { useSqlDialect } from "../hooks/useSqlDialect";
 import type { FilterRequest } from "../lib/documents";
 import { useCellEditing } from "../hooks/useCellEditing";
 import { useRowSelection } from "../hooks/useRowSelection";
@@ -82,6 +83,7 @@ function TableViewContent({
   active: boolean;
 }) {
   const api = useApi();
+  const dialect = useSqlDialect();
   const { openDocument, registerDataRefresh, setQueryDirty } = useDocuments();
   const initialFilters = filterRequest?.filters;
 
@@ -379,7 +381,7 @@ function TableViewContent({
         items: [
           { label: "JSON", icon: <Braces />, onSelect: () => copy(rowsToJson(data.columns, targetRows)) },
           { label: "TSV (for spreadsheets)", icon: <Sheet />, onSelect: () => copy(rowsToTsv(data.columns, targetRows)) },
-          { label: "SQL INSERT", icon: <Database />, onSelect: () => copy(rowsToInsertSql(schema!, table!, data.columns, targetRows)) },
+          { label: "SQL INSERT", icon: <Database />, onSelect: () => copy(rowsToInsertSql(schema!, table!, data.columns, targetRows, dialect)) },
         ],
       },
       "separator",
@@ -459,7 +461,7 @@ function TableViewContent({
         }}
         onReviewSql={() => {
           setSqlCopied(false);
-          setReviewSql(pendingChangesToSql(schema!, table!, pending.changedRows()));
+          setReviewSql(pendingChangesToSql(schema!, table!, pending.changedRows(), dialect));
         }}
         onInsertRow={guard(() => openDraft())}
         filterCount={tableData.filters.length}

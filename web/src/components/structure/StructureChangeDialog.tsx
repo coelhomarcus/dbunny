@@ -14,6 +14,7 @@ import Checkbox from "../Checkbox";
 import { selectClass } from "../ui/styles";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useSqlDialect } from "../../hooks/useSqlDialect";
+import { dialectData } from "../../lib/engines";
 import { SqlPreviewBox } from "../schema/SqlPreview";
 import ForeignKeyEditor from "./ForeignKeyEditor";
 import { guessReference } from "../../lib/foreignKeyForm";
@@ -28,9 +29,14 @@ export type ChangeDraft =
   | { kind: "addForeignKey" | "addUnique" | "addCheck" }
   | { kind: "dropConstraint"; constraint: string };
 
-const COMMON_TYPES = ["text", "varchar(255)", "integer", "bigint", "numeric(12,2)", "boolean", "date", "timestamptz", "jsonb", "uuid"];
-const SQLITE_TYPES = ["INTEGER", "TEXT", "REAL", "NUMERIC", "BLOB"];
-const INDEX_METHODS = ["btree", "hash", "gin", "gist", "brin"];
+/** How each way of producing a column is named when adding one. */
+const GENERATION_LABELS: Record<ColumnGeneration, string> = {
+  none: "None",
+  autoincrement: "Auto increment",
+  identityByDefault: "Identity, by default",
+  identityAlways: "Identity, always",
+  generated: "Generated",
+};
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1.5">
@@ -85,7 +91,8 @@ function ChangeForm({
   const api = useApi();
   const { tabId } = useTab();
   const capabilities = useCapabilities();
-  const suggestedTypes = useSqlDialect() === "sqlite" ? SQLITE_TYPES : COMMON_TYPES;
+  const data = dialectData(useSqlDialect());
+  const suggestedTypes = data.suggestedTypes;
   const column = "column" in draft ? draft.column : null;
   const [name, setName] = useState(column?.name ?? "");
   const [dataType, setDataType] = useState(draft.kind === "setType" ? draft.column.typeName : "text");
@@ -100,7 +107,7 @@ function ChangeForm({
   const [indexColumns, setIndexColumns] = useState<string[]>([]);
   const [expression, setExpression] = useState("");
   const [unique, setUnique] = useState(false);
-  const [method, setMethod] = useState("btree");
+  const [method, setMethod] = useState(data.defaultIndexMethod);
   const [concurrently, setConcurrently] = useState(false);
   const [using, setUsing] = useState("");
   const [keyColumns, setKeyColumns] = useState<string[]>([]);
@@ -140,7 +147,7 @@ function ChangeForm({
           comment: comment || null,
           unique: columnUnique,
           check: columnCheck.trim() || null,
-          generation: suggestedTypes === SQLITE_TYPES ? "none" : generation,
+          generation: data.addColumnGenerations.length > 0 ? generation : "none",
           generated: generation === "generated" ? generatedExpr.trim() || null : null,
         };
       case "renameColumn":
@@ -294,14 +301,15 @@ function ChangeForm({
             <Field label="Type">
               <Input value={dataType} onChange={(e) => setDataType(e.target.value)} spellCheck={false} className="font-mono" list="dbunny-common-types" />
             </Field>
-            {suggestedTypes !== SQLITE_TYPES && (
+            {data.addColumnGenerations.length > 0 && (
               <>
                 <Field label="Generation">
                   <select value={generation} onChange={(e) => setGeneration(e.target.value as ColumnGeneration)} className={cn(selectClass, "w-full")}>
-                    <option value="none">None</option>
-                    <option value="identityByDefault">Identity, by default</option>
-                    <option value="identityAlways">Identity, always</option>
-                    <option value="generated">Generated</option>
+                    {data.addColumnGenerations.map((option) => (
+                      <option key={option} value={option}>
+                        {GENERATION_LABELS[option]}
+                      </option>
+                    ))}
                   </select>
                 </Field>
                 {generation === "generated" && (
@@ -341,7 +349,7 @@ function ChangeForm({
               {capabilities.indexMethods && (
                 <Field label="Method">
                   <select value={method} onChange={(e) => setMethod(e.target.value)} className={cn(selectClass, "w-full")}>
-                    {INDEX_METHODS.map((m) => (
+                    {data.indexMethods.map((m) => (
                       <option key={m} value={m}>
                         {m}
                       </option>
