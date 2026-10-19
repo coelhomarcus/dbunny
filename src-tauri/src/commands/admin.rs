@@ -105,7 +105,7 @@ pub async fn get_server_activity(
 pub async fn signal_backend(
     state: State<'_, AppState>,
     session_id: String,
-    pid: i32,
+    pid: i64,
     terminate: bool,
 ) -> Result<bool, String> {
     let driver = state.driver(&session_id).await?;

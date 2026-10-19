@@ -116,7 +116,7 @@ pub trait ServerAdmin: Send + Sync {
     async fn drop_schema(&self, name: &str, cascade: bool) -> Result<(), String>;
     async fn roles(&self) -> Result<Vec<RoleInfo>, String>;
     async fn activity(&self, all_databases: bool) -> Result<ServerActivity, String>;
-    async fn signal_backend(&self, pid: i32, terminate: bool) -> Result<bool, String>;
+    async fn signal_backend(&self, pid: i64, terminate: bool) -> Result<bool, String>;
 }
 
 #[cfg(test)]

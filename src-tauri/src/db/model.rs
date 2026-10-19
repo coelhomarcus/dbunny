@@ -562,7 +562,8 @@ pub struct RoleInfo {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerSession {
-    pub pid: i32,
+    /// The server's id of the session; MySQL's grow without end, so it is wide.
+    pub pid: i64,
     pub user: Option<String>,
     pub database: Option<String>,
     pub application: Option<String>,
@@ -577,7 +578,7 @@ pub struct ServerSession {
     pub transaction_seconds: Option<f64>,
     pub query: Option<String>,
     /// Sessions holding locks this one waits on.
-    pub blocked_by: Vec<i32>,
+    pub blocked_by: Vec<i64>,
     /// The connection DBunny itself uses for this query.
     pub is_self: bool,
 }
