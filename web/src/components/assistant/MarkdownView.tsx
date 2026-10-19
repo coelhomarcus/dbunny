@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { parseMarkdown, type Inline } from "../../lib/markdown";
+import { isWebLink } from "../../lib/links";
 import { openExternal } from "../../lib/openExternal";
 import ResultTable from "./ResultTable";
 
@@ -76,6 +77,8 @@ function Inlines({ parts }: { parts: Inline[] }) {
     }
     if (part.kind === "strong") return <strong key={index}>{part.text}</strong>;
     if (part.kind === "link") {
+      // Text from the database can end up in a link: only web and mail ones are links
+      if (!isWebLink(part.href)) return <span key={index}>{part.text}</span>;
       return (
         <button key={index} type="button" className="cursor-pointer text-primary underline underline-offset-2" onClick={() => openExternal(part.href)}>
           {part.text}

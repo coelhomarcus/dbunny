@@ -48,3 +48,11 @@ test("an empty text has no blocks", () => {
   assert.deepEqual(parseMarkdown(""), []);
   assert.deepEqual(parseMarkdown("\n\n"), []);
 });
+
+test("only web and mail links are safe to open", async () => {
+  const { isWebLink } = await import("../../src/lib/links.ts");
+  for (const url of ["https://example.com/a?b=1", "http://localhost:3000", "mailto:a@b.co"]) assert.equal(isWebLink(url), true, url);
+  for (const url of ["javascript:alert(1)", "file:///etc/passwd", "smb://host/share", "x-apple.systempreferences:", "ssh://h", "//example.com", "example.com", ""]) {
+    assert.equal(isWebLink(url), false, url);
+  }
+});

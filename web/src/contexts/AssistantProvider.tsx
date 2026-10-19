@@ -15,7 +15,9 @@ import {
   resolveApproval,
   type Conversation,
 } from "../lib/assistantConversation";
+import { ConversationOpener } from "../lib/assistantOpener";
 import { conversationOptions, getConnectionPrefs } from "../lib/assistantPrefs";
+import { isAssistantShortcut } from "../lib/assistantShortcut";
 import { isMac } from "../lib/platform";
 import { updateSettings, useSettings } from "../lib/settings";
 import type { AgentStatus, ApprovalRequest, Decision, ModelChoice, OpenedConversation, SessionSummary } from "../types/assistant";
@@ -42,11 +44,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [history, setHistory] = useState<SessionSummary[]>([]);
   const [queued, setQueued] = useState<string | null>(null);
 
-  // The id the event handlers compare with, and the updates that arrive while a conversation is
-  // opening (a reopened one replays before its id is known)
+  // The id the event handlers compare with, and the opener that keeps the updates that arrive while
+  // a conversation is opening (a reopened one replays before its id is known)
   const idRef = useRef<string | null>(null);
-  const opening = useRef(false);
-  const buffered = useRef(new Map<string, unknown[]>());
+  const opener = useRef<ConversationOpener | null>(null);
+  if (opener.current === null) opener.current = new ConversationOpener((id) => void assistantApi.closeConversation(id).catch(() => {}));
   // The conversation made ahead of the first message, so that the model can be picked before it
   const preparing = useRef<Promise<void> | null>(null);
   const createdWith = useRef("");
@@ -63,8 +65,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         const { conversationId: id, update } = event.payload;
         if (idRef.current === id) {
           setConversation((current) => applyUpdate(current, update));
-        } else if (opening.current) {
-          buffered.current.set(id, [...(buffered.current.get(id) ?? []), update]);
+        } else {
+          opener.current?.receive(id, update);
         }
       }),
       listen<ApprovalRequest>("assistant:approval", (event) => {
@@ -82,29 +84,24 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const forgetConversation = useCallback(() => {
     const id = idRef.current;
     idRef.current = null;
+    // Whatever is opening is no longer wanted either
+    opener.current?.invalidate();
+    preparing.current = null;
     setConversationId(null);
     setConversation(emptyConversation());
     setModels(null);
     if (id) assistantApi.closeConversation(id).catch(() => {});
   }, []);
 
-  /** Opens a conversation and shows what the agent replays of it. */
+  /** Opens a conversation and shows what the agent replays of it; null when another opening came first. */
   const begin = useCallback(async (open: () => Promise<OpenedConversation>) => {
-    opening.current = true;
-    buffered.current.clear();
-    try {
-      const opened = await open();
-      let state = emptyConversation();
-      for (const update of buffered.current.get(opened.conversationId) ?? []) state = applyUpdate(state, update);
-      idRef.current = opened.conversationId;
-      setConversationId(opened.conversationId);
-      setModels(opened.models);
-      setConversation(state);
-      return opened;
-    } finally {
-      opening.current = false;
-      buffered.current.clear();
-    }
+    const result = await opener.current!.open(open);
+    if (!result) return null;
+    idRef.current = result.opened.conversationId;
+    setConversationId(result.opened.conversationId);
+    setModels(result.opened.models);
+    setConversation(result.state);
+    return result.opened;
   }, []);
 
   /** Makes sure there is a conversation to write to: one made with what the settings say now. */
@@ -115,15 +112,18 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     if (idRef.current && emptyRef.current && key !== createdWith.current) forgetConversation();
     if (idRef.current) return;
     if (!preparing.current) {
-      preparing.current = begin(() => assistantApi.newConversation(sessionId, savedConnectionId, options()))
-        .then(() => {
-          createdWith.current = key;
+      const making: Promise<void> = begin(() => assistantApi.newConversation(sessionId, savedConnectionId, options()))
+        .then((opened) => {
+          if (opened) createdWith.current = key;
         })
         .finally(() => {
-          preparing.current = null;
+          if (preparing.current === making) preparing.current = null;
         });
+      preparing.current = making;
     }
     await preparing.current;
+    // Another conversation (a past one) was being opened over this one
+    if (!idRef.current) throw new Error("The conversation is still opening. Try again in a moment.");
   }, [sessionId, savedConnectionId, options, forgetConversation, begin]);
 
   const refreshHistory = useCallback(async () => {
@@ -150,11 +150,12 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       const id = idRef.current;
       if (!id) return;
       setConversation((current) => addUserMessage(current, text));
+      // The turn ends in the conversation it was sent in, which may have been left meanwhile
       try {
         await assistantApi.prompt(id, text);
-        setConversation((current) => finishTurn(current));
+        if (idRef.current === id) setConversation((current) => finishTurn(current));
       } catch (error) {
-        setConversation((current) => finishTurn(current, messageOf(error)));
+        if (idRef.current === id) setConversation((current) => finishTurn(current, messageOf(error)));
       }
       refreshHistory();
     },
@@ -242,7 +243,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   // With the agent ready, a conversation is made at once (a new one after "New chat"), which is when the models are known
   useEffect(() => {
-    if (wanted && status.state === "ready" && sessionId && !conversationId && !opening.current) ensureConversation().catch(() => {});
+    if (wanted && status.state === "ready" && sessionId && !conversationId && !opener.current?.opening) ensureConversation().catch(() => {});
   }, [wanted, status.state, sessionId, conversationId, ensureConversation]);
 
   // The conversation belongs to the session: another session, or none, starts afresh
@@ -264,14 +265,15 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!available || !isActive) return;
     function onKeyDown(event: KeyboardEvent) {
-      const modifier = isMac ? event.metaKey : event.ctrlKey;
-      if (modifier && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "i") {
+      if (isAssistantShortcut(event, isMac)) {
         event.preventDefault();
+        // Before the SQL editor sees it: its own Cmd+I selects the parent syntax node
+        event.stopPropagation();
         setPanelOpen((open) => !open);
       }
     }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [available, isActive]);
 
   const value = useMemo(
