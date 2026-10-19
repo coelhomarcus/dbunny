@@ -1,6 +1,7 @@
 //! The MySQL driver: a session on one database of a server, with a pool for the explorer,
 //! table views, structure and administration, and the query editor's own connection.
 
+mod alter;
 mod catalog;
 mod console;
 mod data;
@@ -25,7 +26,7 @@ use version::MysqlVersion;
 use super::mysql_common::connect::{is_socket, opts_for, ConnRole, MysqlEndpoint};
 use super::mysql_common::errors::error_message;
 use super::net::ssh::{open_tunnel, KnownHosts, Tunnel};
-use super::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, Transactions};
+use super::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, SchemaEditor, Transactions};
 
 /// Databases every server has, never opened on their own.
 const SYSTEM_DATABASES: [&str; 4] = ["mysql", "sys", "information_schema", "performance_schema"];
@@ -210,6 +211,10 @@ impl Driver for MysqlDriver {
     }
 
     fn transactions(&self) -> Option<&dyn Transactions> {
+        Some(self)
+    }
+
+    fn schema_editor(&self) -> Option<&dyn SchemaEditor> {
         Some(self)
     }
 }

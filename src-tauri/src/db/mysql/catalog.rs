@@ -172,6 +172,9 @@ pub(crate) struct ColumnDefinition {
     pub extra: String,
     pub generation_expression: Option<String>,
     pub comment: String,
+    /// The collation is the table's own, so the column never named one. Restating it would
+    /// make the server show it from then on, and the column would no longer follow the table.
+    pub inherits_collation: bool,
 }
 
 impl ColumnDefinition {
@@ -194,8 +197,10 @@ pub(super) async fn read_columns(conn: &mut Conn, database: &str, table: &str) -
             "SELECT COLUMN_NAME AS column_name, COLUMN_DEFAULT AS column_default, IS_NULLABLE AS is_nullable, \
                     DATA_TYPE AS data_type, COLUMN_TYPE AS column_type, COLUMN_KEY AS column_key, EXTRA AS extra, \
                     COLUMN_COMMENT AS column_comment, CHARACTER_SET_NAME AS charset_name, COLLATION_NAME AS collation_name, \
-                    GENERATION_EXPRESSION AS generation_expression \
-             FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+                    GENERATION_EXPRESSION AS generation_expression, \
+                    (SELECT TABLE_COLLATION FROM information_schema.TABLES t \
+                      WHERE t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME) AS table_collation \
+             FROM information_schema.COLUMNS c WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
             (database, table),
         )
         .await?;
@@ -213,6 +218,7 @@ pub(super) async fn read_columns(conn: &mut Conn, database: &str, table: &str) -
                 extra: string(row, "extra"),
                 generation_expression: text(row, "generation_expression").and_then(non_empty),
                 comment: string(row, "column_comment"),
+                inherits_collation: text(row, "collation_name").is_some() && text(row, "collation_name") == text(row, "table_collation"),
             },
             key: string(row, "column_key"),
         })
@@ -239,7 +245,6 @@ pub(crate) async fn table_engine(conn: &mut Conn, database: &str, table: &str) -
 
 /// What kind each constraint of a table is, by name: `PRIMARY KEY` (named `PRIMARY`),
 /// `UNIQUE`, `FOREIGN KEY` or `CHECK`.
-#[allow(dead_code)] // used by dropping constraints (Task 11)
 pub(crate) async fn constraint_kinds(conn: &mut Conn, database: &str, table: &str) -> Result<HashMap<String, String>, String> {
     let rows = structure::read_constraint_types(conn, database, table).await.map_err(|e| detached(&e))?;
     Ok(rows.into_iter().collect())
