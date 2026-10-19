@@ -130,6 +130,15 @@ impl Capabilities {
     /// databases, users and sessions, but no schemas, sequences or RETURNING. What
     /// changes with the version is EXPLAIN ANALYZE (8.0.18).
     pub fn mysql(version: ServerVersion) -> Self {
+        Self::mysql_family(version.at_least(8, 0, 18))
+    }
+
+    /// MariaDB 10.6+: the same pieces as MySQL, and `ANALYZE` in every supported version.
+    pub fn mariadb(_version: ServerVersion) -> Self {
+        Self::mysql_family(true)
+    }
+
+    fn mysql_family(explain_analyze: bool) -> Self {
         Self {
             console: true,
             transactions: true,
@@ -155,7 +164,7 @@ impl Capabilities {
             cascade: false,
             truncate_options: false,
             duplicate_table: true,
-            explain_analyze: version.at_least(8, 0, 18),
+            explain_analyze,
             explain_format: ExplainFormat::MysqlTree,
             returning: false,
             ssh: true,
@@ -201,6 +210,18 @@ mod tests {
         assert!(!Capabilities::mysql(v(8, 0, 17)).explain_analyze);
         assert!(Capabilities::mysql(v(8, 0, 18)).explain_analyze);
         assert_eq!(serde_json::to_value(&c).unwrap()["explainFormat"], "mysqlTree");
+    }
+
+    #[test]
+    fn mariadb_capabilities() {
+        let v = |major, minor, patch| ServerVersion { major, minor, patch };
+        let c = Capabilities::mariadb(v(10, 6, 0));
+        assert!(c.console && c.transactions && c.schema_editing && c.admin && c.databases && c.roles && c.activity);
+        assert!(!c.schemas && !c.returning && !c.trigger_toggle && !c.cascade && !c.sequences);
+        assert!(c.explain_analyze && c.constraints);
+        assert_eq!(c.explain_format, ExplainFormat::MysqlTree);
+        // The same pieces as MySQL, whatever the version
+        assert_eq!(Capabilities::mariadb(v(11, 4, 0)), Capabilities { explain_analyze: true, ..Capabilities::mysql(v(8, 4, 0)) });
     }
 
     #[test]

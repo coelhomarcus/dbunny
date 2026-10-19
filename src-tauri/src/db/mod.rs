@@ -31,6 +31,7 @@ pub enum Engine {
     Postgres,
     Sqlite,
     Mysql,
+    Mariadb,
 }
 
 impl Engine {
@@ -40,6 +41,7 @@ impl Engine {
             Engine::Postgres => "postgres",
             Engine::Sqlite => "sqlite",
             Engine::Mysql => "mysql",
+            Engine::Mariadb => "mariadb",
         }
     }
 
@@ -49,6 +51,7 @@ impl Engine {
             "postgres" => Some(Engine::Postgres),
             "sqlite" => Some(Engine::Sqlite),
             "mysql" => Some(Engine::Mysql),
+            "mariadb" => Some(Engine::Mariadb),
             _ => None,
         }
     }
@@ -59,6 +62,7 @@ impl Engine {
             Engine::Postgres => "PostgreSQL",
             Engine::Sqlite => "SQLite",
             Engine::Mysql => "MySQL",
+            Engine::Mariadb => "MariaDB",
         }
     }
 }
@@ -74,6 +78,15 @@ mod tests {
         assert_eq!(Engine::Sqlite.as_str(), "sqlite");
         assert_eq!(Engine::from_name("sqlite"), Some(Engine::Sqlite));
         assert_eq!(Engine::Sqlite.label(), "SQLite");
+    }
+
+    #[test]
+    fn mariadb_engine_has_its_names() {
+        assert_eq!(serde_json::to_value(Engine::Mariadb).unwrap(), "mariadb");
+        assert_eq!(serde_json::from_value::<Engine>("mariadb".into()).unwrap(), Engine::Mariadb);
+        assert_eq!(Engine::Mariadb.as_str(), "mariadb");
+        assert_eq!(Engine::from_name("mariadb"), Some(Engine::Mariadb));
+        assert_eq!(Engine::Mariadb.label(), "MariaDB");
     }
 
     #[test]

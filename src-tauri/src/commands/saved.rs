@@ -71,6 +71,8 @@ impl SavedConnectionInput {
                 tls: self.tls,
                 ssl: self.ssl,
             }),
+            // Saving MariaDB connections comes with the rest of the MariaDB work
+            Engine::Mariadb => Err("MariaDB connections can't be saved yet".into()),
             Engine::Sqlite => {
                 if self.path.trim().is_empty() {
                     return Err("path is required".into());

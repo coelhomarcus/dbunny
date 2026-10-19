@@ -390,7 +390,7 @@ impl SavedConnection {
         };
         // A SQLite connection has only its path; the PostgreSQL fields are left empty
         let (sensitive, path) = match engine {
-            Engine::Postgres | Engine::Mysql => (serde_json::from_str::<SensitiveData>(&json).map_err(deserialize_error)?, String::new()),
+            Engine::Postgres | Engine::Mysql | Engine::Mariadb => (serde_json::from_str::<SensitiveData>(&json).map_err(deserialize_error)?, String::new()),
             Engine::Sqlite => {
                 let SqliteData { path } = serde_json::from_str(&json).map_err(deserialize_error)?;
                 let empty = SensitiveData {
@@ -555,7 +555,7 @@ mod tests {
     fn file_with_an_unknown_engine(key: &[u8; 32]) -> (String, String) {
         let mariadb_payload = encrypt(key, r#"{"host":"my.example.com","port":3306,"user":"root","password":"pw"}"#).unwrap();
         let json = format!(
-            r##"{{"version":2,"connections":[{{"id":"pg","name":"Prod","engine":"postgres","encryptedData":"{}","ssl":true,"color":"#ef4444","createdAt":"t1","updatedAt":"t2"}},{{"id":"my","name":"Shop","engine":"mariadb","encryptedData":"{mariadb_payload}","ssl":false,"readOnly":true,"color":"#3b82f6","icon":"cart","createdAt":"t3","updatedAt":"t4"}}]}}"##,
+            r##"{{"version":2,"connections":[{{"id":"pg","name":"Prod","engine":"postgres","encryptedData":"{}","ssl":true,"color":"#ef4444","createdAt":"t1","updatedAt":"t2"}},{{"id":"my","name":"Shop","engine":"oracle","encryptedData":"{mariadb_payload}","ssl":false,"readOnly":true,"color":"#3b82f6","icon":"cart","createdAt":"t3","updatedAt":"t4"}}]}}"##,
             legacy_payload(key)
         );
         (json, mariadb_payload)
@@ -591,7 +591,7 @@ mod tests {
             entries.into_iter().find(|c| c["id"] == "my").expect("the mariadb connection")
         };
         let check = |entry: serde_json::Value| {
-            assert_eq!(entry["engine"], "mariadb");
+            assert_eq!(entry["engine"], "oracle");
             assert_eq!(entry["encryptedData"].as_str().unwrap(), mariadb_payload);
             assert_eq!((entry["name"].as_str(), entry["icon"].as_str(), entry["readOnly"].as_bool()), (Some("Shop"), Some("cart"), Some(true)));
             assert_eq!((entry["createdAt"].as_str(), entry["updatedAt"].as_str()), (Some("t3"), Some("t4")));
@@ -873,7 +873,7 @@ mod tests {
             }),
         );
         let original_unknown = file["connections"][2].clone();
-        assert_eq!(original_unknown["engine"], "mariadb");
+        assert_eq!(original_unknown["engine"], "oracle");
         fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
         let loaded = load_connections_from_path(&path);
