@@ -72,7 +72,7 @@ fn run_statement(c: &Connection, sql: &str) -> rusqlite::Result<StatementOutput>
 }
 
 /// The type name the screens know for a value SQLite stored as integer, real, text or blob.
-fn stored_type(value: ValueRef<'_>) -> Option<&'static str> {
+pub(super) fn stored_type(value: ValueRef<'_>) -> Option<&'static str> {
     match value {
         ValueRef::Null => None,
         ValueRef::Integer(_) => Some("bigint"),

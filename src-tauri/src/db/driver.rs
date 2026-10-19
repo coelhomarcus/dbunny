@@ -2,7 +2,6 @@
 //! the other pieces are optional and a driver hands them out only when its engine has them.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 

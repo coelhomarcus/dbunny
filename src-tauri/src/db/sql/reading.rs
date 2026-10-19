@@ -6,6 +6,7 @@ use super::Dialect;
 
 pub const READ_REFUSED: &str = "DBunny only runs statements that read. Show the SQL to the user in a ```sql block so they can run it from the editor.";
 pub const SEVERAL_REFUSED: &str = "Run one statement at a time.";
+pub const TIMED_OUT: &str = "The query was stopped after 30 s.";
 pub const EMPTY_REFUSED: &str = "There is no statement to run.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

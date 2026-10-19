@@ -101,7 +101,7 @@ impl Capabilities {
             transactions: true,
             schema_editing: true,
             admin: false,
-            assistant: false,
+            assistant: true,
             roles: false,
             activity: false,
             schemas: false,
