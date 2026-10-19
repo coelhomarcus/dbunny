@@ -47,6 +47,10 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const idRef = useRef<string | null>(null);
   const opening = useRef(false);
   const buffered = useRef(new Map<string, unknown[]>());
+  // The conversation made ahead of the first message, so that the model can be picked before it
+  const preparing = useRef<Promise<void> | null>(null);
+  const createdWith = useRef("");
+  const emptyRef = useRef(true);
 
   const available = capabilities.assistant;
   const enabled = settings.assistantEnabled;
@@ -103,6 +107,25 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /** Makes sure there is a conversation to write to: one made with what the settings say now. */
+  const ensureConversation = useCallback(async () => {
+    if (!sessionId) return;
+    const key = JSON.stringify(options());
+    // A conversation that is still empty is made again when the options changed meanwhile
+    if (idRef.current && emptyRef.current && key !== createdWith.current) forgetConversation();
+    if (idRef.current) return;
+    if (!preparing.current) {
+      preparing.current = begin(() => assistantApi.newConversation(sessionId, savedConnectionId, options()))
+        .then(() => {
+          createdWith.current = key;
+        })
+        .finally(() => {
+          preparing.current = null;
+        });
+    }
+    await preparing.current;
+  }, [sessionId, savedConnectionId, options, forgetConversation, begin]);
+
   const refreshHistory = useCallback(async () => {
     if (!sessionId || !savedConnectionId) {
       setHistory([]);
@@ -118,13 +141,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const send = useCallback(
     async (text: string) => {
       if (!sessionId || !text.trim()) return;
-      if (!idRef.current) {
-        try {
-          await begin(() => assistantApi.newConversation(sessionId, savedConnectionId, options()));
-        } catch (error) {
-          setConversation((current) => finishTurn(addUserMessage(current, text), messageOf(error)));
-          return;
-        }
+      try {
+        await ensureConversation();
+      } catch (error) {
+        setConversation((current) => finishTurn(addUserMessage(current, text), messageOf(error)));
+        return;
       }
       const id = idRef.current;
       if (!id) return;
@@ -137,7 +158,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       }
       refreshHistory();
     },
-    [sessionId, savedConnectionId, begin, options, refreshHistory],
+    [sessionId, ensureConversation, refreshHistory],
   );
 
   const stop = useCallback(async () => {
@@ -207,6 +228,15 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (wanted && status.state === "ready") refreshHistory();
   }, [wanted, status.state, refreshHistory]);
+
+  useEffect(() => {
+    emptyRef.current = conversation.items.length === 0;
+  }, [conversation]);
+
+  // With the agent ready, a conversation is made at once (a new one after "New chat"), which is when the models are known
+  useEffect(() => {
+    if (wanted && status.state === "ready" && sessionId && !conversationId && !opening.current) ensureConversation().catch(() => {});
+  }, [wanted, status.state, sessionId, conversationId, ensureConversation]);
 
   // The conversation belongs to the session: another session, or none, starts afresh
   useEffect(() => {

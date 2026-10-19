@@ -35,7 +35,7 @@ export default function AssistantConversation() {
       ) : (
         <MessageList conversation={conversation} onDecide={assistant.approve} renderCode={renderCode} />
       )}
-      <Composer running={conversation.running} onSend={assistant.send} onStop={assistant.stop} />
+      <Composer running={conversation.running} models={assistant.models} onSend={assistant.send} onStop={assistant.stop} onModel={assistant.setModel} />
     </div>
   );
 }

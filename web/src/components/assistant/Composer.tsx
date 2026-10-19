@@ -1,9 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Square } from "lucide-react";
+import type { ModelChoice } from "../../types/assistant";
 import Button from "../ui/Button";
+import ModelPicker from "./ModelPicker";
 
 /** Where the person writes to the assistant. Enter sends; Shift+Enter starts a new line. */
-export default function Composer({ running, onSend, onStop }: { running: boolean; onSend: (text: string) => void; onStop: () => void }) {
+export default function Composer({
+  running,
+  models,
+  onSend,
+  onStop,
+  onModel,
+}: {
+  running: boolean;
+  /** The models the conversation can run on, once it has started. */
+  models: ModelChoice | null;
+  onSend: (text: string) => void;
+  onStop: () => void;
+  onModel: (modelId: string) => void;
+}) {
   const [draft, setDraft] = useState("");
   const field = useRef<HTMLTextAreaElement>(null);
 
@@ -50,6 +65,11 @@ export default function Composer({ running, onSend, onStop }: { running: boolean
           </Button>
         )}
       </div>
+      {models && models.available.length > 0 && (
+        <div className="flex px-0.5 pt-1">
+          <ModelPicker models={models} onChange={onModel} />
+        </div>
+      )}
     </div>
   );
 }
