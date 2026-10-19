@@ -1,7 +1,7 @@
 //! The MySQL driver: MySQL's flavor and the way to open a session on a MySQL server. The
 //! session itself is `ServerDriver`.
 
-mod admin;
+mod accounts;
 mod flavor;
 pub mod version;
 

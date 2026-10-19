@@ -3,8 +3,10 @@
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 
+use super::accounts;
 use super::version::parse_mysql_version;
-use crate::db::model::ExplainResult;
+use crate::db::model::{ExplainResult, RoleInfo};
+use crate::db::mysql_common::admin::RawSession;
 use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::mysql_common::errors::error_message;
 use crate::db::mysql_common::flavor::Flavor;
@@ -44,6 +46,26 @@ impl Flavor for MysqlFlavor {
             .await?
             .ok_or("The server returned no plan")?;
         Ok(ExplainResult { plan: parse_tree(&text)?, analyzed: analyze, format: ExplainFormat::MysqlTree })
+    }
+
+    async fn accounts(&self, conn: &mut mysql_async::Conn) -> mysql_async::Result<Vec<RoleInfo>> {
+        accounts::accounts(conn).await
+    }
+
+    async fn own_account(&self, conn: &mut mysql_async::Conn) -> mysql_async::Result<RoleInfo> {
+        accounts::own_account(conn).await
+    }
+
+    async fn rich_sessions(&self, conn: &mut mysql_async::Conn, database: Option<&str>) -> mysql_async::Result<Vec<RawSession>> {
+        accounts::rich_sessions(conn, database).await
+    }
+
+    async fn blockers(&self, conn: &mut mysql_async::Conn) -> Vec<(i64, i64)> {
+        accounts::blockers(conn).await
+    }
+
+    async fn session_ids_in(&self, conn: &mut mysql_async::Conn, name: &str) -> mysql_async::Result<Vec<i64>> {
+        accounts::session_ids_in(conn, name).await
     }
 }
 
