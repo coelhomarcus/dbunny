@@ -13,6 +13,8 @@ pub struct Capabilities {
     pub transactions: bool,
     pub schema_editing: bool,
     pub admin: bool,
+    /// The assistant can read through `Driver::reader`.
+    pub assistant: bool,
     // Server screens, separate from `admin` so each engine picks the ones it has
     pub roles: bool,
     pub activity: bool,
@@ -62,6 +64,7 @@ impl Capabilities {
             transactions: true,
             schema_editing: true,
             admin: true,
+            assistant: false,
             roles: true,
             activity: true,
             schemas: true,
@@ -98,6 +101,7 @@ impl Capabilities {
             transactions: true,
             schema_editing: true,
             admin: false,
+            assistant: false,
             roles: false,
             activity: false,
             schemas: false,
@@ -144,6 +148,7 @@ impl Capabilities {
             transactions: true,
             schema_editing: true,
             admin: true,
+            assistant: false,
             roles: true,
             activity: true,
             schemas: false,
@@ -184,6 +189,7 @@ mod tests {
         assert_eq!(json["materializedViews"], true);
         assert_eq!(json["explainFormat"], "postgresJson");
         assert_eq!(json["schemaEditing"], true);
+        assert_eq!(json["assistant"], false);
     }
 
     #[test]

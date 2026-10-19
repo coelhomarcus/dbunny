@@ -8,6 +8,8 @@ export interface Capabilities {
   transactions: boolean;
   schemaEditing: boolean;
   admin: boolean;
+  /** The assistant can read this database. */
+  assistant: boolean;
   // Server screens
   roles: boolean;
   activity: boolean;

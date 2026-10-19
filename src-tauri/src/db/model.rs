@@ -1,5 +1,7 @@
 //! The serializable shapes the commands send and receive, shared by every driver.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -319,7 +321,29 @@ pub struct TableStructure {
 
 // Table data and query results
 
-#[derive(Serialize)]
+/// What a read for the assistant may fetch.
+#[derive(Clone, Copy, Debug)]
+pub struct ReadLimits {
+    /// Rows to return; one more is read to know there were more.
+    pub rows: usize,
+    pub timeout: Duration,
+}
+
+impl ReadLimits {
+    pub const DEFAULT: ReadLimits = ReadLimits { rows: 100, timeout: Duration::from_secs(30) };
+}
+
+/// The rows of a read for the assistant, at most `limits.rows`.
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadResult {
+    pub columns: Vec<QueryColumn>,
+    pub rows: Vec<Vec<JsonValue>>,
+    /// The statement had more rows than `limits.rows`.
+    pub more: bool,
+}
+
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryColumn {
     pub name: String,
