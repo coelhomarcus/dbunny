@@ -21,13 +21,13 @@ DBunny is a native database client for **macOS**, **Windows** and **Linux**, bui
 
 ## Supported databases
 
-| Database | Status | Connection |
-| --- | --- | --- |
-| PostgreSQL | Supported | Server (TCP, Unix socket, SSL, SSH tunnel) |
-| SQLite | Supported | Local database file |
-| MySQL | Supported | Server (TCP, Unix socket, SSL, SSH tunnel), 8.0 and newer |
-| MariaDB | Supported | Server (TCP, Unix socket, SSL, SSH tunnel), 10.6 and newer |
-| SQL Server | Planned | Server |
+| Database | Status | Versions | Connection |
+| --- | --- | --- | --- |
+| PostgreSQL | Supported | 13 and newer | Server (TCP, Unix socket, SSL, SSH tunnel) |
+| SQLite | Supported | Any database file (SQLite 3.53 is bundled) | Local database file |
+| MySQL | Supported | 8.0 and newer | Server (TCP, Unix socket, SSL, SSH tunnel) |
+| MariaDB | Supported | 10.6 and newer | Server (TCP, Unix socket, SSL, SSH tunnel) |
+| SQL Server | Planned | - | Server |
 
 Screens and actions adapt to what the connected engine supports (for example, schemas and materialized views are PostgreSQL-only today, and MySQL and MariaDB have databases instead of schemas).
 
