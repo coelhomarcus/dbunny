@@ -127,6 +127,11 @@ export const assistantApi = {
   async log() {
     return invoke<string[]>("assistant_log");
   },
+
+  /** Signs out of Claude on this computer; every conversation ends. */
+  async signOut(command?: string) {
+    return invoke<void>("assistant_sign_out", { command: command || null });
+  },
 };
 
 /** An approval request, to refer to by id. */

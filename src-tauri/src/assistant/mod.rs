@@ -353,6 +353,28 @@ impl Assistant {
         }
     }
 
+    /// Signs out of Claude on this computer, which ends every conversation; the panel then asks to sign in.
+    pub async fn sign_out(&self, command: Option<String>) -> Result<(), String> {
+        let status = self.start(command).await;
+        if status != AgentStatus::Ready {
+            return Err(match status {
+                AgentStatus::NeedsNode { .. } => "Node.js 20 or newer is needed".to_string(),
+                AgentStatus::Failed { message } | AgentStatus::Unsupported { message } => message,
+                _ => "The assistant isn't running".to_string(),
+            });
+        }
+        self.agent().await?.logout().await.map_err(|e| e.to_string())?;
+        // What was said is gone with the account: nothing of it can go on
+        for conversation in self.conversations.all() {
+            self.conversations.remove(&conversation.id);
+            self.stop_turn(&conversation).await;
+            self.forget_workspace(&conversation);
+        }
+        let command = (!self.custom_command.load(Ordering::SeqCst)).then(login_command);
+        self.set_status(AgentStatus::NeedsSignIn { methods: vec![], command });
+        Ok(())
+    }
+
     pub async fn log(&self) -> Vec<String> {
         self.running.lock().await.as_ref().map(|running| running.agent.log()).unwrap_or_default()
     }
@@ -643,6 +665,32 @@ mod tests {
         assert_eq!(r.assistant.restart(None).await, AgentStatus::Ready);
         assert_eq!(r.host.launched.lock().unwrap().len(), 2);
         assert!(r.assistant.new_conversation("s1", Some("saved-1"), options()).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn signing_out_ends_the_conversations_and_asks_to_sign_in() {
+        let r = started(FakeConfig::default()).await;
+        let opened = r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        r.assistant.sign_out(None).await.unwrap();
+        assert_eq!(r.host.agent().calls("logout").len(), 1);
+        assert!(r.assistant.conversations.all().is_empty());
+        assert!(r.assistant.prompt(&opened.conversation_id, "hi").await.is_err());
+        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec![], command: Some(launch::login_command()) });
+    }
+
+    #[tokio::test]
+    async fn signing_out_starts_the_agent_if_it_is_not_up() {
+        let r = rig(FakeConfig::default()).await;
+        r.assistant.sign_out(None).await.unwrap();
+        assert_eq!(r.host.agent().calls("logout").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn signing_out_says_why_when_the_agent_cannot_start() {
+        let host = Arc::new(FakeHost { node: Err(None), config: StdMutex::new(FakeConfig::default()), agents: Default::default(), launched: Default::default() });
+        let r = rig_with(host).await;
+        let err = r.assistant.sign_out(None).await.err().unwrap();
+        assert!(err.contains("Node.js"), "{err}");
     }
 
     #[tokio::test]

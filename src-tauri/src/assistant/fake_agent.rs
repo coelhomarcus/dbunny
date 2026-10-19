@@ -112,7 +112,7 @@ async fn run(config: FakeConfig, input: DuplexStream, mut out: DuplexStream, rec
                 Ok(json!({}))
             }
             "session/list" => Ok(json!({"sessions": config.sessions})),
-            "session/set_config_option" => Ok(json!({})),
+            "session/set_config_option" | "logout" => Ok(json!({})),
             "session/prompt" => {
                 let before = answers.lock().unwrap().len();
                 let requests = config.prompt_script.iter().filter(|m| m.get("id").is_some()).count();

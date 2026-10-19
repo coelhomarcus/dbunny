@@ -102,6 +102,12 @@ pub async fn assistant_close_conversation(assistant: State<'_, Assistant>, conve
     Ok(())
 }
 
+/// Signs out of Claude on this computer; every conversation ends and the panel asks to sign in again.
+#[tauri::command]
+pub async fn assistant_sign_out(assistant: State<'_, Assistant>, command: Option<String>) -> Result<(), String> {
+    assistant.sign_out(command).await
+}
+
 #[tauri::command]
 pub async fn assistant_log(assistant: State<'_, Assistant>) -> Result<Vec<String>, String> {
     Ok(assistant.log().await)

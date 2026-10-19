@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { LogOut } from "lucide-react";
 import { useSettings } from "../../lib/settings";
 import { assistantApi } from "../../lib/api";
 import Button from "../ui/Button";
+import ConfirmDialog from "../ui/ConfirmDialog";
 import Dialog from "../ui/Dialog";
 import SegmentedTabs from "../ui/SegmentedTabs";
 import Switch from "../ui/Switch";
@@ -14,6 +16,23 @@ export default function AssistantSection() {
   const [custom, setCustom] = useState(settings.assistantCommand !== "");
   const [command, setCommand] = useState(settings.assistantCommand);
   const [log, setLog] = useState<string[] | null>(null);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutResult, setSignOutResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function signOut() {
+    setConfirmSignOut(false);
+    setSigningOut(true);
+    setSignOutResult(null);
+    try {
+      await assistantApi.signOut(settings.assistantCommand || undefined);
+      setSignOutResult({ ok: true, text: "Signed out. Open the assistant to sign in again." });
+    } catch (error) {
+      setSignOutResult({ ok: false, text: typeof error === "string" ? error : error instanceof Error ? error.message : "Couldn't sign out" });
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   // A new command takes effect by starting the agent again, if it is up
   async function applyCommand(next: string) {
@@ -59,6 +78,21 @@ export default function AssistantSection() {
           )}
         </div>
       </Row>
+      <Row
+        title="Claude account"
+        hint={
+          signOutResult ? (
+            <span className={signOutResult.ok ? "text-success-foreground" : "text-destructive-foreground"}>{signOutResult.text}</span>
+          ) : (
+            "Signs out Claude Code on this computer, not only in DBunny."
+          )
+        }
+      >
+        <Button variant="outline" size="sm" disabled={signingOut} onClick={() => setConfirmSignOut(true)}>
+          <LogOut />
+          {signingOut ? "Signing out…" : "Sign out"}
+        </Button>
+      </Row>
       <Row title="Ask before each query" hint="New conversations ask before running each query. You can allow reads for one conversation from the chat.">
         <Switch checked={settings.assistantAskBeforeQueries} onChange={(v) => update({ assistantAskBeforeQueries: v })} aria-label="Ask before each query" />
       </Row>
@@ -82,6 +116,15 @@ export default function AssistantSection() {
       <p className="mt-4 text-xs text-muted-foreground">
         Claude Code keeps conversations in ~/.claude/projects. Removing a saved connection removes DBunny&apos;s folder for it, not those files.
       </p>
+      <ConfirmDialog
+        open={confirmSignOut}
+        onClose={() => setConfirmSignOut(false)}
+        onConfirm={signOut}
+        icon={<LogOut />}
+        title="Sign out of Claude?"
+        description="This signs out Claude Code on this computer, not only in DBunny, and ends the conversations of the assistant. You sign in again from its panel."
+        confirmLabel="Sign out"
+      />
       <Dialog open={log !== null} onClose={() => setLog(null)} title="Assistant log" className="max-w-2xl">
         <pre className="max-h-96 overflow-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap">
           {log && log.length > 0 ? log.join("\n") : "Nothing was logged."}

@@ -495,6 +495,13 @@ impl AgentHandle {
         Ok(())
     }
 
+    /// Signs out of the account the agent uses. The agent's own credentials are what go, so every other
+    /// program that uses them is signed out too.
+    pub async fn logout(&self) -> Result<(), AgentError> {
+        self.shared.request("logout", json!({})).await?;
+        Ok(())
+    }
+
     pub fn log(&self) -> Vec<String> {
         self.log.lines()
     }
@@ -664,6 +671,14 @@ mod tests {
         let none = rig(FakeConfig { list_sessions: false, ..Default::default() }).await.unwrap();
         assert!(none.agent.list_sessions(std::path::Path::new("/tmp/work")).await.unwrap().is_empty());
         assert!(none.fake.calls("session/list").is_empty());
+    }
+
+    #[tokio::test]
+    async fn logout_asks_the_agent_to_sign_out() {
+        let r = rig(FakeConfig::default()).await.unwrap();
+        r.agent.logout().await.unwrap();
+        assert_eq!(r.fake.calls("logout").len(), 1);
+        assert_eq!(r.fake.calls("logout")[0]["params"], json!({}));
     }
 
     #[tokio::test]

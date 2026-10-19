@@ -199,6 +199,13 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setStatus(status.state === "idle" ? await assistantApi.start(command) : await assistantApi.restart(command));
   }, [settings.assistantCommand, status.state]);
 
+  // The agent went away (stopped, or signed out): what was said to it can't go on
+  const lastState = useRef(status.state);
+  useEffect(() => {
+    if (lastState.current === "ready" && status.state !== "ready") forgetConversation();
+    lastState.current = status.state;
+  }, [status.state, forgetConversation]);
+
   const ask = useCallback((text: string) => {
     // Written to in the tab if that is in front, in the panel otherwise
     if (!inTab) setPanelOpen(true);
