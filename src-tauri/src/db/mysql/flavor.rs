@@ -74,7 +74,7 @@ impl Flavor for MysqlFlavor {
     }
 
     async fn own_account(&self, conn: &mut mysql_async::Conn) -> mysql_async::Result<RoleInfo> {
-        accounts::own_account(conn).await
+        crate::db::mysql_common::admin::own_account(conn).await
     }
 
     async fn rich_sessions(&self, conn: &mut mysql_async::Conn, database: Option<&str>) -> mysql_async::Result<Vec<RawSession>> {

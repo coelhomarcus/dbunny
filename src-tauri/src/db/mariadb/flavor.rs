@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 
+use super::accounts;
 use super::plan::tree_from_json;
 use super::version::parse_mariadb_version;
 use crate::db::model::{ExplainResult, RoleInfo};
@@ -12,14 +13,9 @@ use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::mysql_common::errors::error_message;
 use crate::db::mysql_common::flavor::Flavor;
 use crate::db::mysql_common::version::ServerVersion;
-use crate::db::{unsupported, Capabilities, Engine, ExplainFormat};
+use crate::db::{Capabilities, Engine, ExplainFormat};
 
 pub struct MariadbFlavor;
-
-/// Until the pieces that read the server's accounts and sessions exist for MariaDB.
-fn not_yet(what: &str) -> mysql_async::Error {
-    mysql_async::Error::Other(unsupported(Engine::Mariadb, what).into())
-}
 
 #[async_trait]
 impl Flavor for MariadbFlavor {
@@ -124,24 +120,24 @@ impl Flavor for MariadbFlavor {
         Ok(ExplainResult { plan: tree_from_json(&json)?, analyzed: analyze, format: ExplainFormat::MysqlTree })
     }
 
-    async fn accounts(&self, _conn: &mut mysql_async::Conn) -> mysql_async::Result<Vec<RoleInfo>> {
-        Err(not_yet("Roles"))
+    async fn accounts(&self, conn: &mut mysql_async::Conn) -> mysql_async::Result<Vec<RoleInfo>> {
+        accounts::accounts(conn).await
     }
 
-    async fn own_account(&self, _conn: &mut mysql_async::Conn) -> mysql_async::Result<RoleInfo> {
-        Err(not_yet("Roles"))
+    async fn own_account(&self, conn: &mut mysql_async::Conn) -> mysql_async::Result<RoleInfo> {
+        crate::db::mysql_common::admin::own_account(conn).await
     }
 
-    async fn rich_sessions(&self, _conn: &mut mysql_async::Conn, _database: Option<&str>) -> mysql_async::Result<Vec<RawSession>> {
-        Err(not_yet("Activity"))
+    async fn rich_sessions(&self, conn: &mut mysql_async::Conn, database: Option<&str>) -> mysql_async::Result<Vec<RawSession>> {
+        accounts::rich_sessions(conn, database).await
     }
 
-    async fn blockers(&self, _conn: &mut mysql_async::Conn) -> Vec<(i64, i64)> {
-        Vec::new()
+    async fn blockers(&self, conn: &mut mysql_async::Conn) -> Vec<(i64, i64)> {
+        accounts::blockers(conn).await
     }
 
-    async fn session_ids_in(&self, _conn: &mut mysql_async::Conn, _name: &str) -> mysql_async::Result<Vec<i64>> {
-        Err(not_yet("Activity"))
+    async fn session_ids_in(&self, conn: &mut mysql_async::Conn, name: &str) -> mysql_async::Result<Vec<i64>> {
+        accounts::session_ids_in(conn, name).await
     }
 }
 

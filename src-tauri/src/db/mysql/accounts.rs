@@ -3,7 +3,7 @@
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 
-use crate::db::mysql_common::admin::{global_privileges, RawSession};
+use crate::db::mysql_common::admin::{raw_sessions, RawSession};
 use crate::db::mysql_common::catalog::{number, string, text};
 use crate::db::model::RoleInfo;
 
@@ -29,21 +29,7 @@ pub(super) async fn rich_sessions(conn: &mut mysql_async::Conn, database: Option
         Some(database) => conn.exec(sql, (database,)).await?,
         None => conn.query(sql).await?,
     };
-    Ok(rows
-        .iter()
-        .map(|row| RawSession {
-            id: number(row, "id").unwrap_or(0),
-            user: text(row, "user_name"),
-            host: text(row, "host"),
-            database: text(row, "db_name"),
-            command: string(row, "command"),
-            seconds: text(row, "seconds").and_then(|s| s.parse().ok()),
-            state: text(row, "state"),
-            query: text(row, "info"),
-            transaction_seconds: number(row, "trx_seconds").map(|s| s as f64),
-            application: text(row, "application"),
-        })
-        .collect())
+    Ok(raw_sessions(&rows))
 }
 
 /// The accounts of the server. An account that is locked, or that another is granted as a role,
@@ -86,30 +72,6 @@ pub(super) async fn accounts(conn: &mut mysql_async::Conn) -> mysql_async::Resul
         .collect();
     accounts.sort_by(|a, b| (a.is_builtin, !a.can_login, &a.name, &a.host).cmp(&(b.is_builtin, !b.can_login, &b.name, &b.host)));
     Ok(accounts)
-}
-
-/// Only the account of this session, for one that can't read the `mysql` schema: its global
-/// privileges come from its own grants.
-pub(super) async fn own_account(conn: &mut mysql_async::Conn) -> mysql_async::Result<RoleInfo> {
-    let current: String = conn.query_first("SELECT CURRENT_USER()").await?.unwrap_or_default();
-    let (name, host) = current.rsplit_once('@').map_or((current.clone(), None), |(name, host)| (name.to_string(), Some(host.to_string())));
-    let grants: Vec<String> = conn.query("SHOW GRANTS").await?;
-    let privileges = global_privileges(&grants);
-    Ok(RoleInfo {
-        name,
-        host,
-        can_login: true,
-        superuser: privileges.superuser,
-        create_db: privileges.create_db,
-        create_role: privileges.create_role,
-        replication: privileges.replication,
-        bypass_rls: None,
-        connection_limit: -1,
-        valid_until: None,
-        member_of: vec![],
-        is_current: true,
-        is_builtin: false,
-    })
 }
 
 /// Who waits on whom, as `(waiting, blocking)` process ids. Without the permission to see it

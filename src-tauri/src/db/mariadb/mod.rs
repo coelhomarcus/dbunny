@@ -1,6 +1,7 @@
 //! The MariaDB driver: MariaDB's flavor and the way to open a session on a MariaDB server.
 //! The session itself is `ServerDriver`.
 
+mod accounts;
 mod flavor;
 pub(crate) mod plan;
 pub mod version;
@@ -269,6 +270,43 @@ mod server_tests {
             row
         };
         assert_eq!((count, names), (3, 0), "nothing ran");
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn a_locked_mariadb_account_cannot_log_in() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        let (locked, open_one) = (format!("dbunny_t_{}", &db.name[9..]), format!("dbunny_t_o{}", &db.name[9..]));
+        exec(&db.endpoint, &format!("CREATE USER '{locked}'@'%' ACCOUNT LOCK; CREATE USER '{open_one}'@'%'")).await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let list = driver.admin().unwrap().roles().await.unwrap();
+        exec(&db.endpoint, &format!("DROP USER '{locked}'@'%'; DROP USER '{open_one}'@'%'")).await;
+        let find = |name: &str| list.roles.iter().find(|r| r.name == name).unwrap();
+        assert!(!find(&locked).can_login, "a locked account can't log in");
+        assert!(find(&open_one).can_login);
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn activity_lists_sessions_without_performance_schema() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        let off: Option<i64> = crate::db::mysql_common::tests_support::query_one(&db.endpoint, "SELECT @@performance_schema").await;
+        assert_eq!(off, Some(0), "the test server runs without the performance schema, like MariaDB by default");
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let activity = driver.admin().unwrap().activity(true).await.unwrap();
+        assert!(!activity.limited_view);
+        assert!(activity.sessions.iter().any(|s| s.is_self), "DBunny's own session is listed");
+        assert!(activity.sessions.iter().all(|s| s.application.is_none()));
         driver.close().await;
         db.drop_now().await;
     }

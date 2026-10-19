@@ -8,7 +8,7 @@ use mysql_async::{Error as MysqlError, Row};
 
 use crate::db::mysql_common::catalog::{number, quote, string, text};
 use crate::db::mysql_common::driver::ServerDriver;
-use crate::db::model::{DatabaseInfo, RoleList, ServerActivity, ServerSession};
+use crate::db::model::{DatabaseInfo, RoleInfo, RoleList, ServerActivity, ServerSession};
 use crate::db::mysql_common::connect::MysqlEndpoint;
 use crate::db::mysql_common::errors::error_message;
 use crate::db::{unsupported, Driver, ServerAdmin};
@@ -39,6 +39,49 @@ pub(crate) struct RawSession {
     /// Seconds since the open transaction started; only the full picture knows
     pub(crate) transaction_seconds: Option<f64>,
     pub(crate) application: Option<String>,
+}
+
+/// The rows of a session list as `rich_sessions` of a flavor selects them: `id`, `user_name`,
+/// `host`, `db_name`, `command`, `seconds`, `state`, `info`, `trx_seconds` and `application`.
+pub(crate) fn raw_sessions(rows: &[Row]) -> Vec<RawSession> {
+    rows.iter()
+        .map(|row| RawSession {
+            id: number(row, "id").unwrap_or(0),
+            user: text(row, "user_name"),
+            host: text(row, "host"),
+            database: text(row, "db_name"),
+            command: string(row, "command"),
+            seconds: text(row, "seconds").and_then(|s| s.parse().ok()),
+            state: text(row, "state"),
+            query: text(row, "info"),
+            transaction_seconds: number(row, "trx_seconds").map(|s| s as f64),
+            application: text(row, "application"),
+        })
+        .collect()
+}
+
+/// Only the account of this session, for one that can't read the `mysql` schema: its global
+/// privileges come from its own grants.
+pub(crate) async fn own_account(conn: &mut mysql_async::Conn) -> mysql_async::Result<RoleInfo> {
+    let current: String = conn.query_first("SELECT CURRENT_USER()").await?.unwrap_or_default();
+    let (name, host) = current.rsplit_once('@').map_or((current.clone(), None), |(name, host)| (name.to_string(), Some(host.to_string())));
+    let grants: Vec<String> = conn.query("SHOW GRANTS").await?;
+    let privileges = global_privileges(&grants);
+    Ok(RoleInfo {
+        name,
+        host,
+        can_login: true,
+        superuser: privileges.superuser,
+        create_db: privileges.create_db,
+        create_role: privileges.create_role,
+        replication: privileges.replication,
+        bypass_rls: None,
+        connection_limit: -1,
+        valid_until: None,
+        member_of: vec![],
+        is_current: true,
+        is_builtin: false,
+    })
 }
 
 /// `SHOW FULL PROCESSLIST`, which any account may run (it lists its own sessions).
@@ -295,7 +338,7 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
     use mysql_async::Conn;
 
-    use crate::db::mysql_common::tests_support::{exec, raw_conn, test_endpoint, TestDb};
+    use crate::db::mysql_common::tests_support::{exec, label, on_mariadb, raw_conn, test_endpoint, TestDb};
     use crate::db::mysql_common::driver::ServerDriver;
     use crate::db::mysql_common::connect::MysqlEndpoint;
     use crate::db::Driver;
@@ -353,7 +396,7 @@ mod server_tests {
 
         let opened = admin.open_database(&other).await.unwrap();
         assert_eq!(opened.info().database, other);
-        assert_eq!(opened.engine(), crate::db::Engine::Mysql);
+        assert_eq!(opened.engine(), d.flavor().engine());
         opened.close().await;
 
         assert!(admin.drop_database(&other, false).await.is_ok());
@@ -497,7 +540,7 @@ mod server_tests {
     async fn roles_map_mysql_accounts() {
         let (db, d) = open().await;
         let (user, role) = (unique("dbunny_t_u"), unique("dbunny_t_r"));
-        let _users = (Cleanup(format!("DROP USER IF EXISTS '{user}'@'%'")), Cleanup(format!("DROP ROLE IF EXISTS '{role}'@'%'")));
+        let _users = (Cleanup(format!("DROP USER IF EXISTS '{user}'@'%'")), Cleanup(if on_mariadb() { format!("DROP ROLE IF EXISTS '{role}'") } else { format!("DROP ROLE IF EXISTS '{role}'@'%'") }));
         exec(
             &test_endpoint(),
             &format!(
@@ -523,7 +566,8 @@ mod server_tests {
         let root = find("root");
         assert!(root.superuser && root.create_role && root.replication && root.is_current && root.can_login);
         assert_eq!(root.connection_limit, -1);
-        for builtin in ["mysql.sys", "mysql.session", "mysql.infoschema"] {
+        let builtins: &[&str] = if on_mariadb() { &["mariadb.sys"] } else { &["mysql.sys", "mysql.session", "mysql.infoschema"] };
+        for builtin in builtins.iter().copied() {
             assert!(find(builtin).is_builtin, "{builtin}");
         }
         // The server's own accounts come last
@@ -567,7 +611,7 @@ mod server_tests {
         let (_db, d) = open().await;
         let admin = d.admin().unwrap();
         for result in [admin.create_schema("s").await, admin.rename_schema("s", "t").await, admin.drop_schema("s", false).await] {
-            assert_eq!(result.err().unwrap(), "Schemas isn't supported by MySQL");
+            assert_eq!(result.err().unwrap(), format!("Schemas isn't supported by {}", label()));
         }
     }
 }

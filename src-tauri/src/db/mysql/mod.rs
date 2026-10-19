@@ -59,7 +59,7 @@ mod server_tests {
 
     use mysql_async::prelude::Queryable;
 
-    use crate::db::mysql_common::tests_support::{exec, query_one, test_endpoint, TestDb, SERVER_SETTINGS};
+    use crate::db::mysql_common::tests_support::{exec, is_mysql, query_one, test_endpoint, TestDb, SERVER_SETTINGS};
     use crate::db::mysql_common::driver::ServerDriver;
     use super::*;
     use crate::db::mysql_common::connect::MysqlEndpoint;
@@ -71,6 +71,10 @@ mod server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
     async fn the_session_answers_as_mysql() {
+        // The certificates and the SSH target belong to the MySQL 8.4 container
+        if !is_mysql().await {
+            return;
+        }
         let _settings = SERVER_SETTINGS.read().await;
         let db = TestDb::new().await;
         let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
@@ -384,6 +388,10 @@ mod server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
     async fn require_encrypts_with_the_servers_own_certificate() {
+        // The certificates and the SSH target belong to the MySQL 8.4 container
+        if !is_mysql().await {
+            return;
+        }
         let db = TestDb::new().await;
         // No CA file: the server's self-made certificate is accepted as it is
         let driver = MysqlDriver::open(with_tls(db.endpoint.clone(), "require", "", "", ""), None).await.unwrap();
@@ -402,6 +410,10 @@ mod server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_URL (the 8.4 one) and DBUNNY_TEST_MYSQL_SSL_DIR"]
     async fn verify_ca_checks_the_chain() {
+        // The certificates and the SSH target belong to the MySQL 8.4 container
+        if !is_mysql().await {
+            return;
+        }
         let db = TestDb::new().await;
         let name_message = "The server's certificate doesn't name 127.0.0.1, and verifying only the CA isn't possible yet. \
                             Use Required, or issue a certificate that names the host.";
@@ -450,6 +462,10 @@ mod server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_URL (the 8.4 one) and DBUNNY_TEST_MYSQL_SSL_DIR"]
     async fn client_certificates_log_in() {
+        // The certificates and the SSH target belong to the MySQL 8.4 container
+        if !is_mysql().await {
+            return;
+        }
         let user = CertUser::new().await;
         let as_user = MysqlEndpoint { user: user.name.clone(), password: "certpass".into(), ..test_endpoint() };
 
@@ -525,6 +541,10 @@ mod server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_SSH and DBUNNY_TEST_MYSQL_SSH_TARGET"]
     async fn the_session_goes_through_an_ssh_tunnel() {
+        // The certificates and the SSH target belong to the MySQL 8.4 container
+        if !is_mysql().await {
+            return;
+        }
         let db = TestDb::new().await;
         let endpoint = through_ssh(&db);
         // Not reachable without the tunnel
@@ -548,6 +568,10 @@ mod server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_SSH, DBUNNY_TEST_MYSQL_SSH_TARGET and DBUNNY_TEST_MYSQL_SSL_DIR"]
     async fn tls_works_through_an_ssh_tunnel() {
+        // The certificates and the SSH target belong to the MySQL 8.4 container
+        if !is_mysql().await {
+            return;
+        }
         let db = TestDb::new().await;
         // This tests the transport; the CA checks are in `verify_ca_checks_the_chain`
         let driver = open_through_ssh(with_tls(through_ssh(&db), "require", "", "", "")).await.unwrap();
