@@ -1,0 +1,5 @@
+//! The AI assistant: the database tools an agent may use, how a conversation is kept, and
+//! what the agent is told about the database.
+
+pub mod context;
+pub mod result;
