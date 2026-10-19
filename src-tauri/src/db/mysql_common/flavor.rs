@@ -17,6 +17,9 @@ pub trait Flavor: Send + Sync {
     /// Reads `VERSION()`; refuses the other flavor and versions the flavor doesn't support.
     fn parse_version(&self, text: &str) -> Result<ServerVersion, String>;
     fn capabilities(&self, version: ServerVersion) -> Capabilities;
+    /// The statement that limits how long a SELECT of this session may run, in milliseconds
+    /// (0 for no limit).
+    fn statement_timeout_sql(&self, ms: u64) -> String;
     /// Databases every server has, never opened on their own.
     fn system_databases(&self) -> &'static [&'static str];
     /// A query for two flags, whether the server is read-only and whether even accounts with

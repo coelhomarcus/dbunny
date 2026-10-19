@@ -13,6 +13,7 @@ pub mod errors;
 pub mod flavor;
 pub mod objects;
 pub mod plan;
+pub mod reader;
 pub mod split;
 pub mod structure;
 pub mod transactions;

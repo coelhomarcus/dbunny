@@ -31,6 +31,11 @@ impl Flavor for MariadbFlavor {
         Capabilities::mariadb(version)
     }
 
+    /// In seconds, with milliseconds.
+    fn statement_timeout_sql(&self, ms: u64) -> String {
+        format!("SET SESSION max_statement_time = {}.{:03}", ms / 1000, ms % 1000)
+    }
+
     fn system_databases(&self) -> &'static [&'static str] {
         &["mysql", "sys", "information_schema", "performance_schema"]
     }

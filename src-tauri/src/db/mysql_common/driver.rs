@@ -14,7 +14,7 @@ use super::flavor::Flavor;
 use super::version::ServerVersion;
 use super::editor::EditorConn;
 use crate::db::net::ssh::{open_tunnel, KnownHosts, Tunnel};
-use crate::db::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, SchemaEditor, ServerAdmin, Transactions};
+use crate::db::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, ReadOnlyQueries, SchemaEditor, ServerAdmin, Transactions};
 
 /// How long `close` waits for the editor's query to be killed.
 const KILL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -218,6 +218,10 @@ impl Driver for ServerDriver {
     }
 
     fn admin(&self) -> Option<&dyn ServerAdmin> {
+        Some(self)
+    }
+
+    fn reader(&self) -> Option<&dyn ReadOnlyQueries> {
         Some(self)
     }
 }

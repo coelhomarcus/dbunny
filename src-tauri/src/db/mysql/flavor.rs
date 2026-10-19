@@ -30,6 +30,10 @@ impl Flavor for MysqlFlavor {
         Capabilities::mysql(version)
     }
 
+    fn statement_timeout_sql(&self, ms: u64) -> String {
+        format!("SET SESSION max_execution_time = {ms}")
+    }
+
     fn system_databases(&self) -> &'static [&'static str] {
         &["mysql", "sys", "information_schema", "performance_schema"]
     }
