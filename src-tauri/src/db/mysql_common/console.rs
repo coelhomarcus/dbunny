@@ -10,9 +10,9 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Column, Conn, Error as MysqlError, Row};
 use serde_json::Value as JsonValue;
 
-use super::editor::in_transaction_status;
-use super::plan::{is_reading_statement, parse_tree};
-use super::MysqlDriver;
+use crate::db::mysql_common::editor::in_transaction_status;
+use super::plan::is_reading_statement;
+use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{ExplainResult, Notice, QueryColumn, QueryResult};
 use crate::db::mysql_common::connect::MysqlEndpoint;
 use crate::db::mysql_common::errors::error_message;
@@ -20,13 +20,15 @@ use crate::db::mysql_common::split::{next_token, split_mysql, Kind};
 use crate::db::mysql_common::values::{type_name, value_to_json};
 use crate::db::sql::split::Statement;
 use crate::db::sqlite::errors::CANCELLED;
-use crate::db::{unsupported, Console, Driver, Engine, ExplainFormat};
+use crate::db::{unsupported, Console, Driver};
 
 /// The SQLSTATE of a cancelled statement (error 1317).
 const CANCELLED_STATE: &str = "70100";
 
 /// What a statement that ended the open transaction on its own (a DDL) is told.
-const IMPLICIT_COMMIT: &str = "This statement committed the open transaction: MySQL commits before DDL.";
+fn implicit_commit(label: &str) -> String {
+    format!("This statement committed the open transaction: {label} commits before DDL.")
+}
 
 /// The server answers a `KILL` for a connection that is already gone with this error.
 const UNKNOWN_THREAD: u16 = 1094;
@@ -41,7 +43,7 @@ struct StatementOutput {
 }
 
 /// Runs one statement. A `CALL` may give several result sets; the last one with columns is kept.
-async fn run_statement(conn: &mut Conn, sql: &str) -> Result<StatementOutput, MysqlError> {
+async fn run_statement(conn: &mut Conn, label: &str, sql: &str) -> Result<StatementOutput, MysqlError> {
     let mut shown = None;
     let mut affected = 0;
     {
@@ -66,16 +68,16 @@ async fn run_statement(conn: &mut Conn, sql: &str) -> Result<StatementOutput, My
             }
         }
     }
-    let notices = if conn.get_warnings() > 0 { warnings(conn).await? } else { vec![] };
+    let notices = if conn.get_warnings() > 0 { warnings(conn, label).await? } else { vec![] };
     Ok(StatementOutput { shown, affected, notices })
 }
 
 /// What `SHOW WARNINGS` says about the statement that just ran.
-async fn warnings(conn: &mut Conn) -> Result<Vec<Notice>, MysqlError> {
+async fn warnings(conn: &mut Conn, label: &str) -> Result<Vec<Notice>, MysqlError> {
     let rows: Vec<(String, u32, String)> = conn.query("SHOW WARNINGS").await?;
     Ok(rows
         .into_iter()
-        .map(|(level, code, message)| Notice { severity: level, message, detail: Some(format!("MySQL warning {code}")), hint: None })
+        .map(|(level, code, message)| Notice { severity: level, message, detail: Some(format!("{label} warning {code}")), hint: None })
         .collect())
 }
 
@@ -157,10 +159,10 @@ async fn run_script(conn: &mut Conn, statements: &[Statement], endpoint: &MysqlE
             return Err(cancelled_error(position));
         }
         let was_open = in_transaction_status(conn);
-        let output = run_statement(conn, &statement.text).await.map_err(|e| script_error(&e, endpoint, statement, position))?;
+        let output = run_statement(conn, endpoint.engine_label(), &statement.text).await.map_err(|e| script_error(&e, endpoint, statement, position))?;
         // A DDL commits the transaction before it runs; saying so beats a silent surprise
         if was_open && !in_transaction_status(conn) && !ends_the_transaction(&statement.text) {
-            notices.push(Notice { severity: "Warning".into(), message: IMPLICIT_COMMIT.into(), detail: None, hint: None });
+            notices.push(Notice { severity: "Warning".into(), message: implicit_commit(endpoint.engine_label()), detail: None, hint: None });
         }
         // `KILL QUERY` ends some statements without an error (SLEEP gives 1)
         if cancelled.load(Ordering::SeqCst) {
@@ -199,7 +201,7 @@ async fn run_script(conn: &mut Conn, statements: &[Statement], endpoint: &MysqlE
 }
 
 #[async_trait]
-impl Console for MysqlDriver {
+impl Console for ServerDriver {
     /// Runs the script's statements in order on the editor's connection. The rows of the last
     /// statement that returns rows are shown; the others only add to the affected count.
     async fn execute(&self, sql: &str) -> Result<QueryResult, String> {
@@ -237,24 +239,16 @@ impl Console for MysqlDriver {
         if statement.text.split_whitespace().next().is_some_and(|w| w.eq_ignore_ascii_case("explain")) {
             return Err("Leave out EXPLAIN: the plan is requested for you.".into());
         }
+        let engine = self.flavor().engine();
         if analyze {
             if !self.capabilities().explain_analyze {
-                return Err(unsupported(Engine::Mysql, "EXPLAIN ANALYZE"));
+                return Err(unsupported(engine, "EXPLAIN ANALYZE"));
             }
             if !is_reading_statement(&statement.text) {
-                return Err("EXPLAIN ANALYZE runs only reading statements on MySQL.".into());
+                return Err(format!("EXPLAIN ANALYZE runs only reading statements on {}.", engine.label()));
             }
         }
-        let explain_sql = if analyze { format!("EXPLAIN ANALYZE {}", statement.text) } else { format!("EXPLAIN FORMAT=TREE {}", statement.text) };
-        let endpoint = self.endpoint().clone();
-        let text = self
-            .editor()
-            .run(move |conn| {
-                Box::pin(async move { conn.query_first::<String, _>(explain_sql).await.map_err(|e| error_message(&e, &endpoint)) })
-            })
-            .await?
-            .ok_or("The server returned no plan")?;
-        Ok(ExplainResult { plan: parse_tree(&text)?, analyzed: analyze, format: ExplainFormat::MysqlTree })
+        self.flavor().explain(self, &statement.text, analyze).await
     }
 }
 
@@ -265,24 +259,24 @@ mod server_tests {
 
     use serde_json::{json, Value as JsonValue};
 
-    use super::super::tests_support::{exec, query_one, TestDb};
-    use super::super::MysqlDriver;
+    use crate::db::mysql_common::tests_support::{exec, label, query_one, TestDb};
+    use crate::db::mysql_common::driver::ServerDriver;
     use crate::db::mysql_common::split::DELIMITER_IS_A_CLIENT_COMMAND;
     use crate::db::sqlite::errors::CANCELLED;
     use crate::db::{Driver, ExplainFormat};
 
     const SHOP: &str = include_str!("fixtures/shop.sql");
 
-    async fn open() -> (TestDb, Arc<MysqlDriver>) {
+    async fn open() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 
-    async fn shop() -> (TestDb, Arc<MysqlDriver>) {
+    async fn shop() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
         exec(&db.endpoint, SHOP).await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 
@@ -443,7 +437,7 @@ mod server_tests {
         let (db, d) = shop().await;
         exec(&db.endpoint, "INSERT INTO customers (email, name) VALUES ('a@x.com', 'Ana')").await;
         let err = d.console().unwrap().explain("UPDATE customers SET name = 'Changed'", true).await.err().unwrap();
-        assert_eq!(err, "EXPLAIN ANALYZE runs only reading statements on MySQL.");
+        assert_eq!(err, format!("EXPLAIN ANALYZE runs only reading statements on {}.", label()));
         let name: Option<String> = query_one(&db.endpoint, "SELECT name FROM customers").await;
         assert_eq!(name.as_deref(), Some("Ana"), "the statement never ran");
     }

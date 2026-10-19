@@ -1,3 +1,4 @@
+import { isMysqlFamily } from "./engines.ts";
 import type { Engine, MysqlConnectParams, SavedConnection, SavedConnectionInput, SavedTag, SshConfig } from "@/types";
 // With the extension, so Node's test runner can load it too
 import { type ConnectionFields, buildConnectionUrl, isSocketHost, parseConnectionUrl, parseMysqlUrl, tlsFieldsOf, tlsSettingsOf } from "./connectionUrl.ts";
@@ -65,8 +66,8 @@ export function newDraft(engine: Engine): ConnectionDraft {
     id: null,
     engine,
     identity: { name: "", color: DEFAULT_COLOR, icon: "" },
-    // MySQL shows its port filled in; PostgreSQL leaves it to the placeholder
-    fields: engine === "mysql" ? { ...EMPTY_FIELDS, port: "3306" } : EMPTY_FIELDS,
+    // MySQL and MariaDB show their port filled in; PostgreSQL leaves it to the placeholder
+    fields: isMysqlFamily(engine) ? { ...EMPTY_FIELDS, port: "3306" } : EMPTY_FIELDS,
     sshEnabled: false,
     ssh: EMPTY_SSH,
     sqlitePath: "",
@@ -99,7 +100,7 @@ export function draftFromSaved(conn: SavedConnection): ConnectionDraft {
 }
 
 /**
- * Fills the server details from a postgres:// URL (or a mysql:// one for a MySQL draft), keeping
+ * Fills the server details from a postgres:// URL (or a mysql:// one for a MySQL draft, a mariadb:// one for a MariaDB draft), keeping
  * who the connection is. Null if the URL isn't one of this draft's database.
  */
 export function applyUrl(draft: ConnectionDraft, url: string): ConnectionDraft | null {
@@ -108,6 +109,7 @@ export function applyUrl(draft: ConnectionDraft, url: string): ConnectionDraft |
   let parsed: Partial<ConnectionFields>;
   if (draft.engine === "postgres" && /^postgres(ql)?:\/\//i.test(text)) parsed = parseConnectionUrl(text);
   else if (draft.engine === "mysql" && /^mysql:\/\//i.test(text)) parsed = parseMysqlUrl(text);
+  else if (draft.engine === "mariadb" && /^mariadb:\/\//i.test(text)) parsed = parseMysqlUrl(text);
   else return null;
   if (!parsed.host) return null;
   return { ...draft, fields: { ...draft.fields, ...parsed } };
@@ -115,7 +117,7 @@ export function applyUrl(draft: ConnectionDraft, url: string): ConnectionDraft |
 
 /** The draft a connection URL describes, for whichever server database its scheme names. Null if it isn't one. */
 export function draftFromUrl(url: string): ConnectionDraft | null {
-  for (const engine of ["postgres", "mysql"] as const) {
+  for (const engine of ["postgres", "mysql", "mariadb"] as const) {
     const draft = applyUrl(newDraft(engine), url);
     if (draft) return draft;
   }
@@ -131,6 +133,12 @@ export function urlHints(engine: Engine | undefined): { description: string; pla
         placeholder: "mysql://user:password@host:3306/database",
         invalid: "That doesn't look like a mysql:// connection URL.",
       };
+    case "mariadb":
+      return {
+        description: "Paste a MariaDB connection string to fill in the form.",
+        placeholder: "mariadb://user:password@host:3306/database",
+        invalid: "That doesn't look like a mariadb:// connection URL.",
+      };
     case "postgres":
       return {
         description: "Paste a PostgreSQL connection string to fill in the form.",
@@ -139,9 +147,9 @@ export function urlHints(engine: Engine | undefined): { description: string; pla
       };
     default:
       return {
-        description: "Paste a PostgreSQL or MySQL connection string to fill in the form.",
+        description: "Paste a PostgreSQL, MySQL or MariaDB connection string to fill in the form.",
         placeholder: "postgresql://user:password@host:5432/database",
-        invalid: "That doesn't look like a postgres:// or mysql:// connection URL.",
+        invalid: "That doesn't look like a postgres://, mysql:// or mariadb:// connection URL.",
       };
   }
 }
@@ -150,6 +158,7 @@ export function tabsFor(engine: Engine): ConnectionTab[] {
   switch (engine) {
     case "postgres":
     case "mysql":
+    case "mariadb":
       return ["connection", "ssl", "ssh", "options"];
     case "sqlite":
       return ["file", "options"];
@@ -181,7 +190,7 @@ export function missingFields(draft: ConnectionDraft, purpose: "connect" | "save
   }
   if (!fields.host.trim()) missing.push({ tab: "connection", fieldId: "conn-host" });
   // A MySQL session opens the first database it finds when none is named
-  if (draft.engine !== "mysql" && !fields.database.trim()) missing.push({ tab: "connection", fieldId: "conn-db" });
+  if (!isMysqlFamily(draft.engine) && !fields.database.trim()) missing.push({ tab: "connection", fieldId: "conn-db" });
   if (draft.sshEnabled && !isSocketHost(fields.host)) {
     if (!ssh.host.trim()) missing.push({ tab: "ssh", fieldId: "ssh-host" });
     if (!ssh.user.trim()) missing.push({ tab: "ssh", fieldId: "ssh-user" });
@@ -201,13 +210,14 @@ export function connectionUrlOf(draft: ConnectionDraft): string {
   return buildConnectionUrl(draft.fields);
 }
 
-/** What to open a session with: a URL (and SSH) for PostgreSQL, the fields for MySQL, a file for SQLite. */
+/** What to open a session with: a URL (and SSH) for PostgreSQL, the fields for MySQL and MariaDB, a file for SQLite. */
 export type ConnectArgs =
   | { kind: "postgres"; url: string; ssh: SshConfig | null }
   | { kind: "mysql"; params: MysqlConnectParams; ssh: SshConfig | null }
+  | { kind: "mariadb"; params: MysqlConnectParams; ssh: SshConfig | null }
   | { kind: "sqlite"; path: string; readOnly: boolean; create: boolean };
 
-/** The form of a MySQL draft as `connect_mysql` takes it. SSL means nothing over a local socket. */
+/** The form of a MySQL or MariaDB draft as `connect_mysql` and `connect_mariadb` take it. SSL means nothing over a local socket. */
 export function mysqlParamsOf(draft: ConnectionDraft): MysqlConnectParams {
   const { fields } = draft;
   return {
@@ -226,6 +236,7 @@ export function connectArgsOf(draft: ConnectionDraft): ConnectArgs {
     return { kind: "sqlite", path: draft.sqlitePath.trim(), readOnly: draft.fields.readOnly, create: draft.sqliteCreate };
   }
   if (draft.engine === "mysql") return { kind: "mysql", params: mysqlParamsOf(draft), ssh: sshConfigOf(draft) };
+  if (draft.engine === "mariadb") return { kind: "mariadb", params: mysqlParamsOf(draft), ssh: sshConfigOf(draft) };
   return { kind: "postgres", url: connectionUrlOf(draft), ssh: sshConfigOf(draft) };
 }
 
@@ -257,7 +268,7 @@ export function saveInputOf(draft: ConnectionDraft): SavedConnectionInput {
     name: identity.name.trim(),
     engine: draft.engine,
     host: fields.host.trim(),
-    port: parseInt(fields.port || (draft.engine === "mysql" ? "3306" : "5432"), 10),
+    port: parseInt(fields.port || (isMysqlFamily(draft.engine) ? "3306" : "5432"), 10),
     database: fields.database.trim(),
     user: fields.user.trim(),
     password: fields.password,

@@ -7,8 +7,9 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Row, Value};
 use serde_json::Value as JsonValue;
 
-use super::catalog::{column_definitions, number, qualified, quote, table_engine};
-use super::MysqlDriver;
+use crate::db::mysql_common::catalog::{column_definitions, number, qualified, quote, table_engine};
+use crate::db::mysql_common::driver::ServerDriver;
+use crate::db::mysql_common::flavor::Flavor;
 use crate::db::model::{JsonMap, QueryColumn, RowChange, TableDataParams, TableDataResponse};
 use crate::db::mysql_common::errors::error_message;
 use crate::db::mysql_common::values::{kind_of, type_name, value_to_json, MysqlBinder};
@@ -51,10 +52,10 @@ struct TableShape {
 }
 
 impl TableShape {
-    async fn read(conn: &mut Conn, schema: &str, table: &str) -> Result<TableShape, String> {
-        let definitions = column_definitions(conn, schema, table).await?;
+    async fn read(conn: &mut Conn, flavor: &dyn Flavor, schema: &str, table: &str) -> Result<TableShape, String> {
+        let definitions = column_definitions(conn, flavor, schema, table).await?;
         if definitions.is_empty() {
-            return Err(format!("Table '{schema}.{table}' doesn't exist (MySQL error 1146)"));
+            return Err(format!("Table '{schema}.{table}' doesn't exist ({} error 1146)", flavor.engine().label()));
         }
         let mut shape = TableShape {
             columns: Vec::new(),
@@ -92,7 +93,7 @@ fn already_done(n: usize, total: usize, done: &str, engine: Option<&str>) -> Str
     format!("{n} of {total} rows were already {done}: the table uses {}, which can't undo changes.", engine.unwrap_or("an engine that"))
 }
 
-impl MysqlDriver {
+impl ServerDriver {
     /// An error of the server in the app's words.
     fn failure(&self, e: &mysql_async::Error) -> String {
         error_message(e, self.endpoint())
@@ -127,14 +128,14 @@ impl MysqlDriver {
 }
 
 #[async_trait]
-impl Data for MysqlDriver {
+impl Data for ServerDriver {
     async fn table_page(&self, schema: &str, table: &str, params: TableDataParams) -> Result<TableDataResponse, String> {
         let mut conn = self.conn().await?;
         let page = params.page.unwrap_or(1).max(1);
         let page_size = params.page_size.unwrap_or(50).clamp(1, 500);
         let offset = (page - 1) * page_size;
 
-        let shape = TableShape::read(&mut conn, schema, table).await?;
+        let shape = TableShape::read(&mut conn, self.flavor(), schema, table).await?;
         let order = order_clause_in(MYSQL, &sort_keys(&params), &shape.columns);
         let filters = params.filters.as_deref().unwrap_or(&[]);
         let match_any = params.filter_mode.as_deref() == Some("any");
@@ -178,7 +179,7 @@ impl Data for MysqlDriver {
     /// their defaults. A null value is SQL NULL.
     async fn insert_row(&self, schema: &str, table: &str, values: JsonMap) -> Result<u64, String> {
         let mut conn = self.conn().await?;
-        let shape = TableShape::read(&mut conn, schema, table).await?;
+        let shape = TableShape::read(&mut conn, self.flavor(), schema, table).await?;
         shape.refuse_geometry(values.keys())?;
         let relation = qualified(schema, table);
         let (sql, params) = build_insert_in(MYSQL, &relation, &values, &shape.columns, &shape.binder)?;
@@ -191,7 +192,7 @@ impl Data for MysqlDriver {
     /// since it was read (or a key that matches several rows) stops the save.
     async fn save_rows(&self, schema: &str, table: &str, changes: Vec<RowChange>) -> Result<u64, String> {
         let mut conn = self.conn().await?;
-        let shape = TableShape::read(&mut conn, schema, table).await?;
+        let shape = TableShape::read(&mut conn, self.flavor(), schema, table).await?;
         let relation = qualified(schema, table);
         let total = changes.len();
         let which = |i: usize| if total > 1 { format!("Row {} of {total}", i + 1) } else { "The row".to_string() };
@@ -232,7 +233,7 @@ impl Data for MysqlDriver {
 
     async fn delete_rows(&self, schema: &str, table: &str, keys: Vec<JsonMap>) -> Result<u64, String> {
         let mut conn = self.conn().await?;
-        let shape = TableShape::read(&mut conn, schema, table).await?;
+        let shape = TableShape::read(&mut conn, self.flavor(), schema, table).await?;
         for key in &keys {
             shape.refuse_geometry(key.keys())?;
         }
@@ -283,7 +284,7 @@ impl Data for MysqlDriver {
         rows: Vec<Vec<Option<String>>>,
     ) -> Result<u64, String> {
         let mut conn = self.conn().await?;
-        let shape = TableShape::read(&mut conn, schema, table).await?;
+        let shape = TableShape::read(&mut conn, self.flavor(), schema, table).await?;
         shape.refuse_geometry(columns.iter())?;
         let relation = qualified(schema, table);
         let mut batches = build_import_batches_in(MYSQL, &relation, &columns, &rows, &shape.columns, &shape.binder)?;
@@ -360,8 +361,8 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
     use serde_json::{json, Value as JsonValue};
 
-    use super::super::tests_support::{exec, query_one, TestDb};
-    use super::super::MysqlDriver;
+    use crate::db::mysql_common::tests_support::{exec, on_mariadb, query_one, TestDb};
+    use crate::db::mysql_common::driver::ServerDriver;
     use crate::db::model::{JsonMap, RowChange, SortKey, TableDataParams, TableDataResponse};
     use crate::db::mysql_common::errors::LOCKED;
     use crate::db::sql::filter::TableFilter;
@@ -370,10 +371,10 @@ mod server_tests {
     const SHOP: &str = include_str!("fixtures/shop.sql");
 
     /// A database with the shop in it, and a session open on it.
-    async fn shop() -> (TestDb, Arc<MysqlDriver>) {
+    async fn shop() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
         exec(&db.endpoint, SHOP).await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 
@@ -397,7 +398,7 @@ mod server_tests {
         page.rows.iter().map(|r| r[0].clone()).collect()
     }
 
-    async fn page(driver: &MysqlDriver, db: &TestDb, table: &str, params: TableDataParams) -> TableDataResponse {
+    async fn page(driver: &ServerDriver, db: &TestDb, table: &str, params: TableDataParams) -> TableDataResponse {
         driver.data().table_page(&db.name, table, params).await.unwrap()
     }
 
@@ -734,9 +735,9 @@ mod server_tests {
         exec(&db.endpoint, "CREATE TABLE big (id INT NOT NULL PRIMARY KEY, v INT NOT NULL) ENGINE=InnoDB").await;
         exec(
             &db.endpoint,
-            "SET SESSION cte_max_recursion_depth = 300000; \
+            &format!("SET SESSION {} = 300000; \
              INSERT INTO big SELECT n, n % 7 FROM (WITH RECURSIVE s(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM s WHERE n < 200000) SELECT n FROM s) t; \
-             ANALYZE TABLE big",
+             ANALYZE TABLE big", if on_mariadb() { "max_recursive_iterations" } else { "cte_max_recursion_depth" }),
         )
         .await;
         let big = page(&driver, &db, "big", TableDataParams { page_size: Some(5), ..Default::default() }).await;
@@ -769,7 +770,7 @@ mod server_tests {
         let (db, _) = shop().await;
         customers(&db, 1).await;
         let endpoint = crate::db::mysql_common::connect::MysqlEndpoint { read_only: true, ..db.endpoint.clone() };
-        let driver = MysqlDriver::open(endpoint, None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(endpoint).await.unwrap();
         let err = driver.data().save_rows(&db.name, "customers", vec![change(json!({"id": 1}), json!({"name": "x"}))]).await.err().unwrap();
         assert_eq!(err, "Nothing was saved. The row: This connection is read-only.");
         assert_eq!(driver.data().insert_row(&db.name, "customers", map(json!({"email": "z@z"}))).await.err().unwrap(), "This connection is read-only.");

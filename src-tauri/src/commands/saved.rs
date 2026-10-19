@@ -71,6 +71,16 @@ impl SavedConnectionInput {
                 tls: self.tls,
                 ssl: self.ssl,
             }),
+            Engine::Mariadb => Ok(ConnectionDetails::Mariadb {
+                host: self.host,
+                port: self.port,
+                database: self.database,
+                user: self.user,
+                password: self.password,
+                ssh: self.ssh,
+                tls: self.tls,
+                ssl: self.ssl,
+            }),
             Engine::Sqlite => {
                 if self.path.trim().is_empty() {
                     return Err("path is required".into());
@@ -184,6 +194,17 @@ mod tests {
         assert_eq!((info.engine, info.host.as_str(), info.port, info.database.as_str()), (Engine::Mysql, "db.example.com", 5432, "shop"));
         assert_eq!(info.path, "", "a server has no file");
         assert_eq!(info.tls.unwrap().mode, "require");
+    }
+
+    #[test]
+    fn a_mariadb_connection_saves_its_server_fields() {
+        let mut connections = Vec::new();
+        let saved = upsert(&mut connections, &KEY, input("mariadb", None, "/ignored.sqlite"), "t1".into()).unwrap();
+        assert_eq!(saved.engine, "mariadb");
+        assert!(!saved.encrypted_data.contains("db.example.com") && saved.ssl && saved.read_only);
+        let info = saved.to_info(&KEY).unwrap();
+        assert_eq!((info.engine, info.host.as_str(), info.port, info.database.as_str()), (Engine::Mariadb, "db.example.com", 5432, "shop"));
+        assert_eq!(info.path, "", "a server has no file");
     }
 
     #[test]

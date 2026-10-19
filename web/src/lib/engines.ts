@@ -1,12 +1,12 @@
 import type { ColumnGeneration, Engine, ExplainFormat } from "@/types";
 import type { SqlDialectName } from "./sqlStatements";
 
-/** The databases offered when creating a connection; the ones not ready yet show as coming soon. */
+/** The databases offered when creating a connection; one not ready would show as coming soon. */
 export const ENGINE_CARDS: { id: "postgres" | "sqlite" | "mysql" | "mariadb"; label: string; /** What kind of connection it is, under the name. */ kind: string; available: boolean }[] = [
   { id: "postgres", label: "PostgreSQL", kind: "Server connection", available: true },
   { id: "sqlite", label: "SQLite", kind: "Database file", available: true },
   { id: "mysql", label: "MySQL", kind: "Server connection", available: true },
-  { id: "mariadb", label: "MariaDB", kind: "Server connection", available: false },
+  { id: "mariadb", label: "MariaDB", kind: "Server connection", available: true },
 ];
 
 export type EngineCardId = (typeof ENGINE_CARDS)[number]["id"];
@@ -21,10 +21,15 @@ export function notAvailableFor(engine: Engine): string {
   return `Not available for ${engineLabel(engine)}`;
 }
 
+/** Whether the engine is one of the servers of the MySQL family (MySQL and MariaDB), which are reached the same way and speak the same SQL. */
+export function isMysqlFamily(engine: Engine | undefined): boolean {
+  return engine === "mysql" || engine === "mariadb";
+}
+
 /** The SQL a database speaks: it decides how scripts are split, formatted and completed. */
 export function sqlDialectOf(engine: Engine | undefined): SqlDialectName {
   if (engine === "sqlite") return "sqlite";
-  return engine === "mysql" ? "mysql" : "postgres";
+  return isMysqlFamily(engine) ? "mysql" : "postgres";
 }
 
 /** A column of the table the new-table page starts with. */
@@ -143,7 +148,7 @@ export function addressOf(info: { engine: Engine; host: string; port: number; da
   return database ? `${where}/${database}` : where;
 }
 
-/** What the menu says Explain analyze does: MySQL runs only statements that read, the others run it and roll it back. */
+/** What the menu says Explain analyze does: MySQL and MariaDB run only statements that read, the others run it and roll it back. */
 export function explainAnalyzeHint(format: ExplainFormat): string {
   return format === "mysqlTree" ? "Runs it for real times. Only statements that read" : "Runs it for real times, then rolls it back";
 }

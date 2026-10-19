@@ -6,18 +6,12 @@ use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Error as MysqlError, Row};
 
-use super::catalog::{number, quote, string, text};
-use super::MysqlDriver;
+use crate::db::mysql_common::catalog::{number, quote, string, text};
+use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{DatabaseInfo, RoleInfo, RoleList, ServerActivity, ServerSession};
 use crate::db::mysql_common::connect::MysqlEndpoint;
 use crate::db::mysql_common::errors::error_message;
-use crate::db::{unsupported, Driver, Engine, ServerAdmin};
-
-/// Databases every server has; they are never listed.
-const SYSTEM_DATABASES: &str = "'mysql', 'sys', 'information_schema', 'performance_schema'";
-
-/// The accounts MySQL makes for its own use.
-const BUILTIN_ACCOUNTS: [&str; 3] = ["mysql.sys", "mysql.session", "mysql.infoschema"];
+use crate::db::{unsupported, Driver, ServerAdmin};
 
 /// How long dropping a database waits for the locks other sessions hold. The server's own
 /// wait is a year.
@@ -30,44 +24,27 @@ const UNKNOWN_THREAD: u16 = 1094;
 const LOCK_WAIT_TIMEOUT: u16 = 1205;
 
 /// The errors for a table or a privilege the account lacks (1044 and 1142: no SELECT, 1227: no PROCESS).
-const DENIED: [u16; 4] = [1044, 1142, 1143, 1227];
+pub(crate) const DENIED: [u16; 4] = [1044, 1142, 1143, 1227];
 
 /// One row of the process list, whichever way it was read.
-struct RawSession {
-    id: i64,
-    user: Option<String>,
-    host: Option<String>,
-    database: Option<String>,
-    command: String,
-    seconds: Option<f64>,
-    state: Option<String>,
-    query: Option<String>,
+pub(crate) struct RawSession {
+    pub(crate) id: i64,
+    pub(crate) user: Option<String>,
+    pub(crate) host: Option<String>,
+    pub(crate) database: Option<String>,
+    pub(crate) command: String,
+    pub(crate) seconds: Option<f64>,
+    pub(crate) state: Option<String>,
+    pub(crate) query: Option<String>,
     /// Seconds since the open transaction started; only the full picture knows
-    transaction_seconds: Option<f64>,
-    application: Option<String>,
+    pub(crate) transaction_seconds: Option<f64>,
+    pub(crate) application: Option<String>,
 }
 
-/// The sessions with their transactions and applications: the performance schema and
-/// `INNODB_TRX`. `database` limits them to those using it.
-async fn rich_sessions(conn: &mut mysql_async::Conn, database: Option<&str>) -> mysql_async::Result<Vec<RawSession>> {
-    let filter = if database.is_some() { "WHERE p.DB = ?" } else { "" };
-    let sql = format!(
-        "SELECT p.ID AS id, p.USER AS user_name, p.HOST AS host, p.DB AS db_name, p.COMMAND AS command, \
-                p.TIME AS seconds, p.STATE AS state, p.INFO AS info, \
-                TIMESTAMPDIFF(SECOND, trx.trx_started, NOW()) AS trx_seconds, \
-                COALESCE(program.ATTR_VALUE, client.ATTR_VALUE) AS application \
-         FROM performance_schema.processlist p \
-         LEFT JOIN information_schema.INNODB_TRX trx ON trx.trx_mysql_thread_id = p.ID \
-         LEFT JOIN performance_schema.session_connect_attrs program ON program.PROCESSLIST_ID = p.ID AND program.ATTR_NAME = 'program_name' \
-         LEFT JOIN performance_schema.session_connect_attrs client ON client.PROCESSLIST_ID = p.ID AND client.ATTR_NAME = '_client_name' \
-         {filter} ORDER BY p.ID"
-    );
-    let rows: Vec<Row> = match database {
-        Some(database) => conn.exec(sql, (database,)).await?,
-        None => conn.query(sql).await?,
-    };
-    Ok(rows
-        .iter()
+/// The rows of a session list as `rich_sessions` of a flavor selects them: `id`, `user_name`,
+/// `host`, `db_name`, `command`, `seconds`, `state`, `info`, `trx_seconds` and `application`.
+pub(crate) fn raw_sessions(rows: &[Row]) -> Vec<RawSession> {
+    rows.iter()
         .map(|row| RawSession {
             id: number(row, "id").unwrap_or(0),
             user: text(row, "user_name"),
@@ -80,7 +57,31 @@ async fn rich_sessions(conn: &mut mysql_async::Conn, database: Option<&str>) -> 
             transaction_seconds: number(row, "trx_seconds").map(|s| s as f64),
             application: text(row, "application"),
         })
-        .collect())
+        .collect()
+}
+
+/// Only the account of this session, for one that can't read the `mysql` schema: its global
+/// privileges come from its own grants.
+pub(crate) async fn own_account(conn: &mut mysql_async::Conn) -> mysql_async::Result<RoleInfo> {
+    let current: String = conn.query_first("SELECT CURRENT_USER()").await?.unwrap_or_default();
+    let (name, host) = current.rsplit_once('@').map_or((current.clone(), None), |(name, host)| (name.to_string(), Some(host.to_string())));
+    let grants: Vec<String> = conn.query("SHOW GRANTS").await?;
+    let privileges = global_privileges(&grants);
+    Ok(RoleInfo {
+        name,
+        host,
+        can_login: true,
+        superuser: privileges.superuser,
+        create_db: privileges.create_db,
+        create_role: privileges.create_role,
+        replication: privileges.replication,
+        bypass_rls: None,
+        connection_limit: -1,
+        valid_until: None,
+        member_of: vec![],
+        is_current: true,
+        is_builtin: false,
+    })
 }
 
 /// `SHOW FULL PROCESSLIST`, which any account may run (it lists its own sessions).
@@ -106,15 +107,15 @@ async fn plain_sessions(conn: &mut mysql_async::Conn, database: Option<&str>) ->
 
 /// What the global grants of an account allow of the things the Roles page shows.
 #[derive(Debug, Default, PartialEq)]
-struct GlobalPrivileges {
-    superuser: bool,
-    create_db: bool,
-    create_role: bool,
-    replication: bool,
+pub(crate) struct GlobalPrivileges {
+    pub(crate) superuser: bool,
+    pub(crate) create_db: bool,
+    pub(crate) create_role: bool,
+    pub(crate) replication: bool,
 }
 
 /// Reads `SHOW GRANTS` lines for the privileges granted on `*.*`.
-fn global_privileges(grants: &[String]) -> GlobalPrivileges {
+pub(crate) fn global_privileges(grants: &[String]) -> GlobalPrivileges {
     let mut found = GlobalPrivileges::default();
     for grant in grants {
         let Some((list, _)) = grant.strip_prefix("GRANT ").and_then(|rest| rest.split_once(" ON *.* TO ")) else { continue };
@@ -132,72 +133,6 @@ fn global_privileges(grants: &[String]) -> GlobalPrivileges {
     found
 }
 
-/// The accounts of the server. An account that is locked, or that another is granted as a role,
-/// can't log in: it is a role. The server's own accounts are the built-in ones.
-async fn accounts(conn: &mut mysql_async::Conn) -> mysql_async::Result<Vec<RoleInfo>> {
-    let rows: Vec<Row> = conn
-        .query(
-            "SELECT u.User AS name, u.Host AS host, u.account_locked AS locked, u.password_expired AS expired, \
-                    u.Super_priv AS super_priv, u.Create_priv AS create_priv, u.Create_user_priv AS create_user_priv, \
-                    u.Repl_slave_priv AS repl_priv, u.max_user_connections AS max_connections, \
-                    CONCAT(u.User, '@', u.Host) = CURRENT_USER() AS is_current, \
-                    (SELECT GROUP_CONCAT(IF(e.FROM_HOST = '%', e.FROM_USER, CONCAT(e.FROM_USER, '@', e.FROM_HOST)) ORDER BY e.FROM_USER SEPARATOR ',') \
-                       FROM mysql.role_edges e WHERE e.TO_USER = u.User AND e.TO_HOST = u.Host) AS member_of, \
-                    EXISTS (SELECT 1 FROM mysql.role_edges e WHERE e.FROM_USER = u.User AND e.FROM_HOST = u.Host) AS is_role \
-             FROM mysql.user u",
-        )
-        .await?;
-    let mut accounts: Vec<RoleInfo> = rows
-        .iter()
-        .map(|row| {
-            let name = string(row, "name");
-            let can_login = string(row, "locked") != "Y" && number(row, "is_role") != Some(1);
-            let limit = number(row, "max_connections").unwrap_or(0);
-            RoleInfo {
-                is_builtin: BUILTIN_ACCOUNTS.contains(&name.as_str()),
-                name,
-                host: text(row, "host"),
-                can_login,
-                superuser: string(row, "super_priv") == "Y",
-                create_db: string(row, "create_priv") == "Y",
-                create_role: string(row, "create_user_priv") == "Y",
-                replication: string(row, "repl_priv") == "Y",
-                bypass_rls: None,
-                connection_limit: if limit > 0 { limit as i32 } else { -1 },
-                valid_until: (can_login && string(row, "expired") == "Y").then(|| "expired".to_string()),
-                member_of: text(row, "member_of").map(|names| names.split(',').map(String::from).collect()).unwrap_or_default(),
-                is_current: number(row, "is_current") == Some(1),
-            }
-        })
-        .collect();
-    accounts.sort_by(|a, b| (a.is_builtin, !a.can_login, &a.name, &a.host).cmp(&(b.is_builtin, !b.can_login, &b.name, &b.host)));
-    Ok(accounts)
-}
-
-/// Only the account of this session, for one that can't read the `mysql` schema: its global
-/// privileges come from its own grants.
-async fn own_account(conn: &mut mysql_async::Conn) -> mysql_async::Result<RoleInfo> {
-    let current: String = conn.query_first("SELECT CURRENT_USER()").await?.unwrap_or_default();
-    let (name, host) = current.rsplit_once('@').map_or((current.clone(), None), |(name, host)| (name.to_string(), Some(host.to_string())));
-    let grants: Vec<String> = conn.query("SHOW GRANTS").await?;
-    let privileges = global_privileges(&grants);
-    Ok(RoleInfo {
-        name,
-        host,
-        can_login: true,
-        superuser: privileges.superuser,
-        create_db: privileges.create_db,
-        create_role: privileges.create_role,
-        replication: privileges.replication,
-        bypass_rls: None,
-        connection_limit: -1,
-        valid_until: None,
-        member_of: vec![],
-        is_current: true,
-        is_builtin: false,
-    })
-}
-
 fn database_name(name: &str) -> Result<&str, String> {
     let name = name.trim();
     if name.is_empty() {
@@ -209,7 +144,7 @@ fn database_name(name: &str) -> Result<&str, String> {
 /// DROP DATABASE waiting at most `wait` for the locks other sessions hold. With `force` the
 /// other sessions that use the database are ended first. The one the session itself is open
 /// on stays: its pool would lose it from under the app.
-pub(super) async fn drop_database_waiting(driver: &MysqlDriver, name: &str, force: bool, wait: Duration) -> Result<(), String> {
+pub(crate) async fn drop_database_waiting(driver: &ServerDriver, name: &str, force: bool, wait: Duration) -> Result<(), String> {
     let name = database_name(name)?;
     if name == driver.database() {
         return Err(format!("This session is open on {name}: open another database first."));
@@ -217,10 +152,7 @@ pub(super) async fn drop_database_waiting(driver: &MysqlDriver, name: &str, forc
     let mut conn = driver.conn().await?;
     let own = [i64::from(driver.editor().connection_id())];
     if force {
-        let sessions: Vec<i64> = conn
-            .exec("SELECT ID FROM performance_schema.processlist WHERE DB = ? AND ID <> CONNECTION_ID()", (name,))
-            .await
-            .map_err(|e| error_message(&e, driver.endpoint()))?;
+        let sessions = driver.flavor().session_ids_in(&mut conn, name).await.map_err(|e| error_message(&e, driver.endpoint()))?;
         for id in sessions.into_iter().filter(|id| !own.contains(id)) {
             // One that finished meanwhile is fine
             let _ = conn.query_drop(format!("KILL CONNECTION {id}")).await;
@@ -239,16 +171,17 @@ pub(super) async fn drop_database_waiting(driver: &MysqlDriver, name: &str, forc
 }
 
 #[async_trait]
-impl ServerAdmin for MysqlDriver {
+impl ServerAdmin for ServerDriver {
     /// The databases the user can see, without the server's own.
     async fn databases(&self) -> Result<Vec<DatabaseInfo>, String> {
         let mut conn = self.conn().await?;
+        let system = self.flavor().system_databases().iter().map(|name| format!("'{name}'")).collect::<Vec<_>>().join(", ");
         let rows: Vec<Row> = conn
             .query(format!(
                 "SELECT s.SCHEMA_NAME AS name, SUM(t.DATA_LENGTH + t.INDEX_LENGTH) AS size_bytes \
                  FROM information_schema.SCHEMATA s \
                  LEFT JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = s.SCHEMA_NAME \
-                 WHERE s.SCHEMA_NAME NOT IN ({SYSTEM_DATABASES}) GROUP BY s.SCHEMA_NAME ORDER BY s.SCHEMA_NAME"
+                 WHERE s.SCHEMA_NAME NOT IN ({system}) GROUP BY s.SCHEMA_NAME ORDER BY s.SCHEMA_NAME"
             ))
             .await
             .map_err(|e| error_message(&e, self.endpoint()))?;
@@ -269,7 +202,7 @@ impl ServerAdmin for MysqlDriver {
             return Err("Choose a database".into());
         }
         let endpoint = MysqlEndpoint { database: Some(name.trim().to_string()), ..self.endpoint().clone() };
-        let driver: Arc<dyn Driver> = MysqlDriver::open(endpoint, None).await?;
+        let driver: Arc<dyn Driver> = ServerDriver::open(endpoint, None, self.flavor()).await?;
         Ok(driver)
     }
 
@@ -284,23 +217,23 @@ impl ServerAdmin for MysqlDriver {
     }
 
     async fn create_schema(&self, _name: &str) -> Result<(), String> {
-        Err(unsupported(Engine::Mysql, "Schemas"))
+        Err(unsupported(self.flavor().engine(), "Schemas"))
     }
 
     async fn rename_schema(&self, _name: &str, _new_name: &str) -> Result<(), String> {
-        Err(unsupported(Engine::Mysql, "Schemas"))
+        Err(unsupported(self.flavor().engine(), "Schemas"))
     }
 
     async fn drop_schema(&self, _name: &str, _cascade: bool) -> Result<(), String> {
-        Err(unsupported(Engine::Mysql, "Schemas"))
+        Err(unsupported(self.flavor().engine(), "Schemas"))
     }
 
     async fn roles(&self) -> Result<RoleList, String> {
         let mut conn = self.conn().await?;
-        match accounts(&mut conn).await {
+        match self.flavor().accounts(&mut conn).await {
             Ok(roles) => Ok(RoleList { roles, limited_view: false }),
             Err(MysqlError::Server(server)) if DENIED.contains(&server.code) => {
-                let own = own_account(&mut conn).await.map_err(|e| error_message(&e, self.endpoint()))?;
+                let own = self.flavor().own_account(&mut conn).await.map_err(|e| error_message(&e, self.endpoint()))?;
                 Ok(RoleList { roles: vec![own], limited_view: true })
             }
             Err(e) => Err(error_message(&e, self.endpoint())),
@@ -318,26 +251,17 @@ impl ServerAdmin for MysqlDriver {
         // The full picture needs the performance schema and, for transactions, PROCESS; an
         // account without them still gets its own sessions from the plain process list
         let scope = if all_databases { None } else { Some(self.database()) };
-        let sessions = match rich_sessions(&mut conn, scope).await {
+        let sessions = match self.flavor().rich_sessions(&mut conn, scope).await {
             Ok(rows) => rows,
             Err(MysqlError::Server(server)) if DENIED.contains(&server.code) => plain_sessions(&mut conn, scope).await.map_err(fail)?,
             Err(e) => return Err(fail(e)),
         };
 
         // Who waits on whom; without the permission to see it nobody is shown as blocked
-        let waits: Vec<(Option<i64>, Option<i64>)> = conn
-            .query(
-                "SELECT DISTINCT waiting.PROCESSLIST_ID, blocking.PROCESSLIST_ID FROM performance_schema.data_lock_waits w \
-                 JOIN performance_schema.threads waiting ON waiting.THREAD_ID = w.REQUESTING_THREAD_ID \
-                 JOIN performance_schema.threads blocking ON blocking.THREAD_ID = w.BLOCKING_THREAD_ID",
-            )
-            .await
-            .unwrap_or_default();
+        let waits = self.flavor().blockers(&mut conn).await;
         let mut blocked_by: HashMap<i64, Vec<i64>> = HashMap::new();
         for (waiting, blocking) in waits {
-            if let (Some(waiting), Some(blocking)) = (waiting, blocking) {
-                blocked_by.entry(waiting).or_default().push(blocking);
-            }
+            blocked_by.entry(waiting).or_default().push(blocking);
         }
 
         // Without PROCESS the server lists only the account's own sessions
@@ -414,14 +338,14 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
     use mysql_async::Conn;
 
-    use super::super::tests_support::{exec, raw_conn, test_endpoint, TestDb};
-    use super::super::MysqlDriver;
+    use crate::db::mysql_common::tests_support::{exec, label, on_mariadb, raw_conn, test_endpoint, TestDb};
+    use crate::db::mysql_common::driver::ServerDriver;
     use crate::db::mysql_common::connect::MysqlEndpoint;
     use crate::db::Driver;
 
-    async fn open() -> (TestDb, Arc<MysqlDriver>) {
+    async fn open() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 
@@ -472,7 +396,7 @@ mod server_tests {
 
         let opened = admin.open_database(&other).await.unwrap();
         assert_eq!(opened.info().database, other);
-        assert_eq!(opened.engine(), crate::db::Engine::Mysql);
+        assert_eq!(opened.engine(), d.flavor().engine());
         opened.close().await;
 
         assert!(admin.drop_database(&other, false).await.is_ok());
@@ -595,7 +519,7 @@ mod server_tests {
         exec(&test_endpoint(), &format!("CREATE USER '{user}'@'%'; GRANT SELECT ON `{}`.* TO '{user}'@'%'", db.name)).await;
         // A session of someone else that the limited user must not see
         let (stranger_id, _stranger) = busy(&db.endpoint, "SELECT SLEEP(5)").await;
-        let d = MysqlDriver::open(MysqlEndpoint { user: user.clone(), password: String::new(), ..db.endpoint.clone() }, None).await.unwrap();
+        let d = crate::db::mysql_common::tests_support::open_server(MysqlEndpoint { user: user.clone(), password: String::new(), ..db.endpoint.clone() }).await.unwrap();
         let admin = d.admin().unwrap();
         tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -616,7 +540,7 @@ mod server_tests {
     async fn roles_map_mysql_accounts() {
         let (db, d) = open().await;
         let (user, role) = (unique("dbunny_t_u"), unique("dbunny_t_r"));
-        let _users = (Cleanup(format!("DROP USER IF EXISTS '{user}'@'%'")), Cleanup(format!("DROP ROLE IF EXISTS '{role}'@'%'")));
+        let _users = (Cleanup(format!("DROP USER IF EXISTS '{user}'@'%'")), Cleanup(if on_mariadb() { format!("DROP ROLE IF EXISTS '{role}'") } else { format!("DROP ROLE IF EXISTS '{role}'@'%'") }));
         exec(
             &test_endpoint(),
             &format!(
@@ -642,7 +566,8 @@ mod server_tests {
         let root = find("root");
         assert!(root.superuser && root.create_role && root.replication && root.is_current && root.can_login);
         assert_eq!(root.connection_limit, -1);
-        for builtin in ["mysql.sys", "mysql.session", "mysql.infoschema"] {
+        let builtins: &[&str] = if on_mariadb() { &["mariadb.sys"] } else { &["mysql.sys", "mysql.session", "mysql.infoschema"] };
+        for builtin in builtins.iter().copied() {
             assert!(find(builtin).is_builtin, "{builtin}");
         }
         // The server's own accounts come last
@@ -670,7 +595,7 @@ mod server_tests {
         let user = unique("dbunny_t_l");
         let _cleanup = Cleanup(format!("DROP USER IF EXISTS '{user}'@'%'"));
         exec(&test_endpoint(), &format!("CREATE USER '{user}'@'%'; GRANT SELECT ON `{}`.* TO '{user}'@'%'", db.name)).await;
-        let d = MysqlDriver::open(MysqlEndpoint { user: user.clone(), password: String::new(), ..db.endpoint.clone() }, None).await.unwrap();
+        let d = crate::db::mysql_common::tests_support::open_server(MysqlEndpoint { user: user.clone(), password: String::new(), ..db.endpoint.clone() }).await.unwrap();
         let list = d.admin().unwrap().roles().await.unwrap();
         assert!(list.limited_view);
         assert_eq!(list.roles.len(), 1);
@@ -686,7 +611,7 @@ mod server_tests {
         let (_db, d) = open().await;
         let admin = d.admin().unwrap();
         for result in [admin.create_schema("s").await, admin.rename_schema("s", "t").await, admin.drop_schema("s", false).await] {
-            assert_eq!(result.err().unwrap(), "Schemas isn't supported by MySQL");
+            assert_eq!(result.err().unwrap(), format!("Schemas isn't supported by {}", label()));
         }
     }
 }

@@ -21,24 +21,24 @@ DBunny is a native database client for **macOS**, **Windows** and **Linux**, bui
 
 ## Supported databases
 
-| Database | Status | Connection |
-| --- | --- | --- |
-| PostgreSQL | Supported | Server (TCP, Unix socket, SSL, SSH tunnel) |
-| SQLite | Supported | Local database file |
-| MySQL | Supported | Server (TCP, Unix socket, SSL, SSH tunnel), 8.0 and newer |
-| MariaDB | Planned | Server |
-| SQL Server | Planned | Server |
+| Database | Status | Versions | Connection |
+| --- | --- | --- | --- |
+| PostgreSQL | Supported | 13 and newer | Server (TCP, Unix socket, SSL, SSH tunnel) |
+| SQLite | Supported | Any database file (SQLite 3.53 is bundled) | Local database file |
+| MySQL | Supported | 8.0 and newer | Server (TCP, Unix socket, SSL, SSH tunnel) |
+| MariaDB | Supported | 10.6 and newer | Server (TCP, Unix socket, SSL, SSH tunnel) |
+| SQL Server | Planned | - | Server |
 
-Screens and actions adapt to what the connected engine supports (for example, schemas and materialized views are PostgreSQL-only today, and MySQL has databases instead of schemas).
+Screens and actions adapt to what the connected engine supports (for example, schemas and materialized views are PostgreSQL-only today, and MySQL and MariaDB have databases instead of schemas).
 
 ## Features
 
-- **Connections:** saved connections with names and colors, one tab per connection; PostgreSQL and MySQL add SSL, SSH tunnels, Unix sockets and read-only mode; credentials and file paths encrypted at rest.
+- **Connections:** saved connections with names and colors, one tab per connection; PostgreSQL, MySQL and MariaDB add SSL, SSH tunnels, Unix sockets and read-only mode; credentials and file paths encrypted at rest.
 - **Explorer:** schemas, tables, views, indexes, triggers and more (exact objects depend on the engine), with a filter, pinned tables and inline columns.
 - **Data:** paginated and sortable tables, filters, inline editing with a review of the SQL before saving, insert, delete, CSV import, and export to CSV or JSON.
 - **Queries:** a SQL editor with autocomplete, run the statement at the cursor or the whole script, query plans, transactions, formatting, history and saved queries. Safe mode asks before destructive statements.
 - **Structure:** columns, indexes, constraints, foreign keys, triggers, permissions and DDL where the engine allows it, with the SQL shown before it runs.
-- **Server (PostgreSQL and MySQL):** create and drop databases (and schemas on PostgreSQL), see roles or accounts and live activity, and cancel or end sessions.
+- **Server (PostgreSQL, MySQL and MariaDB):** create and drop databases (and schemas on PostgreSQL), see roles or accounts and live activity, and cancel or end sessions.
 
 ## Getting started
 
@@ -67,7 +67,7 @@ npm run build   # build the installer
 
 ## Tech stack
 
-React 19, TypeScript, Tailwind CSS 4 and CodeMirror on the front; Tauri 2 and Rust on the back, with a shared driver layer and engine-specific backends (PostgreSQL via tokio-postgres, MySQL via mysql_async, SQLite via bundled rusqlite).
+React 19, TypeScript, Tailwind CSS 4 and CodeMirror on the front; Tauri 2 and Rust on the back, with a shared driver layer and engine-specific backends (PostgreSQL via tokio-postgres, MySQL and MariaDB via mysql_async, SQLite via bundled rusqlite).
 
 ## Credits
 

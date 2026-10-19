@@ -43,6 +43,11 @@ export const api = {
     return invoke<ConnectResponse>("connect_mysql", { params, ssh: ssh ?? null, trustHostKey: trustHostKey ?? null });
   },
 
+  /** Connects to a MariaDB server, optionally through SSH; the form is the MySQL one. */
+  async connectMariadb(params: MysqlConnectParams, ssh?: SshConfig | null, trustHostKey?: string) {
+    return invoke<ConnectResponse>("connect_mariadb", { params, ssh: ssh ?? null, trustHostKey: trustHostKey ?? null });
+  },
+
   /** Opens a SQLite file; `create` makes it when it doesn't exist. */
   async connectSqlite(path: string, readOnly: boolean, create: boolean) {
     return invoke<ConnectResponse>("connect_sqlite", { path, readOnly, create });

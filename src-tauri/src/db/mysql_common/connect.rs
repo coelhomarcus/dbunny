@@ -25,9 +25,16 @@ pub struct MysqlEndpoint {
     pub known_hosts: Option<PathBuf>,
     /// Every connection only reads.
     pub read_only: bool,
+    /// The engine of the server, once a session knows it; errors name it. None reads as MySQL.
+    pub engine: Option<crate::db::Engine>,
 }
 
 impl MysqlEndpoint {
+    /// The name of the server's engine as errors and notices spell it.
+    pub fn engine_label(&self) -> &'static str {
+        self.engine.map_or("MySQL", crate::db::Engine::label)
+    }
+
     /// The port, with 3306 for 0.
     pub fn port_or_default(&self) -> u16 {
         if self.port == 0 {

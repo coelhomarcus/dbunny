@@ -11,10 +11,10 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 
-use super::catalog::{column_definitions, constraint_kinds, qualified, quote, ColumnDefinition};
-use super::objects::{drop_sql, duplicate, rename_sql, truncate_sql};
-use super::version::MysqlVersion;
-use super::MysqlDriver;
+use crate::db::mysql_common::catalog::{column_definitions, constraint_kinds, qualified, quote, ColumnDefinition};
+use crate::db::mysql_common::objects::{drop_sql, duplicate, rename_sql, truncate_sql};
+use crate::db::mysql_common::version::ServerVersion;
+use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{ColumnGeneration, NewColumn, NewTable, StructureChange};
 use crate::db::mysql_common::errors::error_message;
 use crate::db::{unsupported, Engine, SchemaEditor};
@@ -269,13 +269,13 @@ fn privileges(list: &[String]) -> Result<String, String> {
     Ok(upper.join(", "))
 }
 
-fn no_identity() -> String {
-    "MySQL has no identity columns; use auto increment.".into()
+fn no_identity(engine: Engine) -> String {
+    format!("{} has no identity columns; use auto increment.", engine.label())
 }
 
 /// A new column after its name: type, null, default, auto increment or generation, `UNIQUE`,
 /// `CHECK` and comment. A primary key column of a new table is `NOT NULL` already.
-fn column_body(column: &NewColumn, primary_key_implies_not_null: bool) -> Result<String, String> {
+fn column_body(engine: Engine, column: &NewColumn, primary_key_implies_not_null: bool) -> Result<String, String> {
     let mut line = fragment("type", &column.data_type)?;
     let default = column.default.as_deref().filter(|d| !d.trim().is_empty());
     let not_null = if column.nullable { "NULL" } else { "NOT NULL" };
@@ -308,16 +308,17 @@ fn column_body(column: &NewColumn, primary_key_implies_not_null: bool) -> Result
                 line += " NOT NULL";
             }
         }
-        ColumnGeneration::IdentityByDefault | ColumnGeneration::IdentityAlways => return Err(no_identity()),
+        ColumnGeneration::IdentityByDefault | ColumnGeneration::IdentityAlways => return Err(no_identity(engine)),
+    }
+    // The comment comes before UNIQUE and CHECK: MariaDB doesn't take it after them
+    if let Some(comment) = column.comment.as_deref().filter(|c| !c.trim().is_empty()) {
+        line += &format!(" COMMENT {}", literal(comment));
     }
     if column.unique {
         line += " UNIQUE";
     }
     if let Some(check) = column.check.as_deref().filter(|c| !c.trim().is_empty()) {
         line += &format!(" CHECK ({})", fragment("check", check)?);
-    }
-    if let Some(comment) = column.comment.as_deref().filter(|c| !c.trim().is_empty()) {
-        line += &format!(" COMMENT {}", literal(comment));
     }
     Ok(line)
 }
@@ -341,7 +342,8 @@ pub(crate) fn change_sql(
     change: &StructureChange,
     columns: &[ColumnDefinition],
     constraints: &HashMap<String, String>,
-    version: MysqlVersion,
+    version: ServerVersion,
+    engine: Engine,
 ) -> Result<String, String> {
     let alter = format!("ALTER TABLE {table}");
     Ok(match change {
@@ -358,7 +360,7 @@ pub(crate) fn change_sql(
                 generation: *generation,
                 generated: generated.clone(),
             };
-            format!("{alter} ADD COLUMN {} {}", name("column name", column)?, column_body(&spec, false)?)
+            format!("{alter} ADD COLUMN {} {}", name("column name", column)?, column_body(engine, &spec, false)?)
         }
         StructureChange::RenameColumn { name: column, new_name } => {
             format!("{alter} RENAME COLUMN {} TO {}", name("column name", column)?, name("new column name", new_name)?)
@@ -378,7 +380,7 @@ pub(crate) fn change_sql(
         })?,
         StructureChange::SetType { name: column, data_type, using } => {
             if using.as_deref().is_some_and(|u| !u.trim().is_empty()) {
-                return Err("MySQL has no USING clause; convert the values first.".into());
+                return Err(format!("{} has no USING clause; convert the values first.", engine.label()));
             }
             let column_type = fragment("type", data_type)?;
             modify(table, columns, column, |c| {
@@ -389,7 +391,7 @@ pub(crate) fn change_sql(
         }
         StructureChange::CreateIndex { name: index, columns: key_columns, unique, method, concurrently } => {
             if *concurrently {
-                return Err(unsupported(Engine::Mysql, "Creating indexes concurrently"));
+                return Err(unsupported(engine, "Creating indexes concurrently"));
             }
             if key_columns.is_empty() {
                 return Err("Choose at least one column".into());
@@ -439,7 +441,7 @@ pub(crate) fn change_sql(
         }
         StructureChange::AddCheck { name: constraint, expression } => {
             if !version.at_least(8, 0, 16) {
-                return Err("CHECK constraints need MySQL 8.0.16 or newer".into());
+                return Err(format!("CHECK constraints need {} {} or newer", engine.label(), if engine == Engine::Mariadb { "10.2" } else { "8.0.16" }));
             }
             format!("{alter} ADD {}CHECK ({})", constraint_name(constraint)?, fragment("check", expression)?)
         }
@@ -448,13 +450,14 @@ pub(crate) fn change_sql(
             // The kind decides the clause: only 8.0.19 and later have a plain DROP CONSTRAINT
             match constraints.get(given).map(String::as_str) {
                 Some("FOREIGN KEY") => format!("{alter} DROP FOREIGN KEY {}", quote(given)),
+                Some("CHECK") if engine == Engine::Mariadb => format!("{alter} DROP CONSTRAINT {}", quote(given)),
                 Some("CHECK") => format!("{alter} DROP CHECK {}", quote(given)),
                 Some("UNIQUE") => format!("{alter} DROP INDEX {}", quote(given)),
                 Some("PRIMARY KEY") => format!("{alter} DROP PRIMARY KEY"),
                 _ => return Err(format!("Constraint {given} doesn't exist")),
             }
         }
-        StructureChange::SetTriggerEnabled { .. } => return Err(unsupported(Engine::Mysql, "Turning triggers on and off")),
+        StructureChange::SetTriggerEnabled { .. } => return Err(unsupported(engine, "Turning triggers on and off")),
         StructureChange::Grant { grantee, privileges: list, grant_option } => {
             let option = if *grant_option { " WITH GRANT OPTION" } else { "" };
             format!("GRANT {} ON {table} TO {}{option}", privileges(list)?, account(grantee)?)
@@ -464,18 +467,18 @@ pub(crate) fn change_sql(
 }
 
 /// `CREATE TABLE` from the table builder. Several primary key columns make a composite key.
-pub(crate) fn create_table_sql(table: &str, spec: &NewTable) -> Result<String, String> {
+pub(crate) fn create_table_sql(engine: Engine, table: &str, spec: &NewTable) -> Result<String, String> {
     if spec.unlogged {
-        return Err(unsupported(Engine::Mysql, "Unlogged tables"));
+        return Err(unsupported(engine, "Unlogged tables"));
     }
     if spec.without_rowid {
-        return Err(unsupported(Engine::Mysql, "WITHOUT ROWID"));
+        return Err(unsupported(engine, "WITHOUT ROWID"));
     }
     if spec.strict {
-        return Err(unsupported(Engine::Mysql, "STRICT tables"));
+        return Err(unsupported(engine, "STRICT tables"));
     }
     if spec.partition.is_some() {
-        return Err(unsupported(Engine::Mysql, "Partitions"));
+        return Err(unsupported(engine, "Partitions"));
     }
     if spec.columns.is_empty() {
         return Err("Add at least one column".into());
@@ -488,7 +491,7 @@ pub(crate) fn create_table_sql(table: &str, spec: &NewTable) -> Result<String, S
             return Err(format!("Column {} appears twice", column.name.trim()));
         }
         seen.push(column.name.trim().to_lowercase());
-        lines.push(format!("{quoted} {}", column_body(column, true)?));
+        lines.push(format!("{quoted} {}", column_body(engine, column, true)?));
     }
     let keys: Vec<String> = spec.columns.iter().filter(|c| c.primary_key).map(|c| quote(c.name.trim())).collect();
     if !keys.is_empty() {
@@ -511,7 +514,7 @@ pub(crate) fn create_table_sql(table: &str, spec: &NewTable) -> Result<String, S
     Ok(format!("CREATE TABLE {table} (\n    {}\n)", lines.join(",\n    ")))
 }
 
-impl MysqlDriver {
+impl ServerDriver {
     /// The statement for a change, reading the table's columns or constraints when the change needs them.
     async fn change_statement(&self, schema: &str, table: &str, change: &StructureChange) -> Result<String, String> {
         let restates_a_column = matches!(change, StructureChange::SetNullable { .. } | StructureChange::SetType { .. } | StructureChange::SetComment { .. });
@@ -520,13 +523,13 @@ impl MysqlDriver {
         if restates_a_column || drops_a_constraint {
             let mut conn = self.conn().await?;
             if restates_a_column {
-                columns = column_definitions(&mut conn, schema, table).await?;
+                columns = column_definitions(&mut conn, self.flavor(), schema, table).await?;
             }
             if drops_a_constraint {
                 constraints = constraint_kinds(&mut conn, schema, table).await?;
             }
         }
-        change_sql(&qualified(schema, table), change, &columns, &constraints, self.version())
+        change_sql(&qualified(schema, table), change, &columns, &constraints, self.version(), self.flavor().engine())
     }
 
     async fn run_ddl(&self, sql: String) -> Result<(), String> {
@@ -536,7 +539,7 @@ impl MysqlDriver {
 }
 
 #[async_trait]
-impl SchemaEditor for MysqlDriver {
+impl SchemaEditor for ServerDriver {
     /// The SQL a change would run, for showing before running it.
     async fn preview_change(&self, schema: &str, table: &str, change: &StructureChange) -> Result<String, String> {
         Ok(format!("{};", self.change_statement(schema, table, change).await?))
@@ -548,11 +551,11 @@ impl SchemaEditor for MysqlDriver {
     }
 
     async fn preview_create_table(&self, schema: &str, table: &str, spec: &NewTable) -> Result<String, String> {
-        Ok(format!("{};", create_table_sql(&qualified(schema, &table_name(table)?), spec)?))
+        Ok(format!("{};", create_table_sql(self.flavor().engine(), &qualified(schema, &table_name(table)?), spec)?))
     }
 
     async fn create_table(&self, schema: &str, table: &str, spec: NewTable) -> Result<(), String> {
-        let sql = create_table_sql(&qualified(schema, &table_name(table)?), &spec)?;
+        let sql = create_table_sql(self.flavor().engine(), &qualified(schema, &table_name(table)?), &spec)?;
         self.run_ddl(sql).await
     }
 
@@ -561,12 +564,12 @@ impl SchemaEditor for MysqlDriver {
     }
 
     async fn drop_relation(&self, schema: &str, name: &str, kind: &str, cascade: bool) -> Result<(), String> {
-        self.run_ddl(drop_sql(schema, name, kind, cascade)?).await
+        self.run_ddl(drop_sql(self.flavor().engine(), schema, name, kind, cascade)?).await
     }
 
     /// MySQL always starts the numbering again, so `restart_identity` has nothing to ask.
     async fn truncate_table(&self, schema: &str, name: &str, _restart_identity: bool, cascade: bool) -> Result<(), String> {
-        self.run_ddl(truncate_sql(schema, name, cascade)?).await
+        self.run_ddl(truncate_sql(self.flavor().engine(), schema, name, cascade)?).await
     }
 
     async fn duplicate_table(&self, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
@@ -574,7 +577,7 @@ impl SchemaEditor for MysqlDriver {
     }
 
     async fn refresh_materialized_view(&self, _schema: &str, _name: &str) -> Result<(), String> {
-        Err(unsupported(Engine::Mysql, "Materialized views"))
+        Err(unsupported(self.flavor().engine(), "Materialized views"))
     }
 }
 
@@ -592,7 +595,7 @@ mod tests {
     use crate::db::model::{ColumnGeneration, NewColumn, NewForeignKey};
 
     const TABLE: &str = "`shop`.`customers`";
-    const V84: MysqlVersion = MysqlVersion { major: 8, minor: 4, patch: 0 };
+    const V84: ServerVersion = ServerVersion { major: 8, minor: 4, patch: 0 };
 
     fn column(name: &str, column_type: &str) -> ColumnDefinition {
         let data_type = column_type.split(|c: char| c == '(' || c == ' ').next().unwrap_or("").to_lowercase();
@@ -615,9 +618,9 @@ mod tests {
         ColumnDefinition { charset: Some("utf8mb4".into()), collation: Some("utf8mb4_0900_ai_ci".into()), nullable, ..column(name, column_type) }
     }
 
-    fn sql_with(change: StructureChange, columns: &[ColumnDefinition], constraints: &[(&str, &str)], version: MysqlVersion) -> String {
+    fn sql_with(change: StructureChange, columns: &[ColumnDefinition], constraints: &[(&str, &str)], version: ServerVersion) -> String {
         let constraints = constraints.iter().map(|(n, k)| (n.to_string(), k.to_string())).collect();
-        change_sql(TABLE, &change, columns, &constraints, version).unwrap_or_else(|e| format!("ERR {e}"))
+        change_sql(TABLE, &change, columns, &constraints, version, Engine::Mysql).unwrap_or_else(|e| format!("ERR {e}"))
     }
 
     fn sql(change: StructureChange) -> String {
@@ -738,7 +741,7 @@ mod tests {
                 generation: ColumnGeneration::None,
                 generated: None,
             }),
-            format!("{alter} ADD COLUMN `nick` varchar(40) NOT NULL DEFAULT 'x' UNIQUE CHECK (char_length(`nick`) > 1) COMMENT 'it''s'")
+            format!("{alter} ADD COLUMN `nick` varchar(40) NOT NULL DEFAULT 'x' COMMENT 'it''s' UNIQUE CHECK (char_length(`nick`) > 1)")
         );
         assert_eq!(
             sql(StructureChange::AddColumn {
@@ -867,7 +870,7 @@ mod tests {
         assert_eq!(sql(StructureChange::AddUnique { name: Some("u".into()), columns: vec!["a".into()] }), format!("{alter} ADD CONSTRAINT `u` UNIQUE (`a`)"));
         assert_eq!(sql(StructureChange::AddCheck { name: Some("c".into()), expression: "age >= 0".into() }), format!("{alter} ADD CONSTRAINT `c` CHECK (age >= 0)"));
         assert_eq!(sql(StructureChange::AddCheck { name: None, expression: "age >= 0; --".into() }), "ERR The check must be a single expression, without ';'");
-        let old = MysqlVersion { major: 8, minor: 0, patch: 15 };
+        let old = ServerVersion { major: 8, minor: 0, patch: 15 };
         assert_eq!(
             sql_with(StructureChange::AddCheck { name: None, expression: "age >= 0".into() }, &[], &[], old),
             "ERR CHECK constraints need MySQL 8.0.16 or newer"
@@ -922,9 +925,9 @@ mod tests {
             (NewTable { strict: true, ..one_column() }, "STRICT tables isn't supported by MySQL"),
             (NewTable { partition: Some(crate::db::model::NewPartition { method: "range".into(), expression: "id".into() }), ..one_column() }, "Partitions isn't supported by MySQL"),
         ] {
-            assert_eq!(create_table_sql(TABLE, &spec).err().as_deref(), Some(message));
+            assert_eq!(create_table_sql(Engine::Mysql, TABLE, &spec).err().as_deref(), Some(message));
         }
-        assert_eq!(create_table_sql(TABLE, &NewTable::default()).err().as_deref(), Some("Add at least one column"));
+        assert_eq!(create_table_sql(Engine::Mysql, TABLE, &NewTable::default()).err().as_deref(), Some("Add at least one column"));
     }
 
     fn one_column() -> NewTable {
@@ -1009,15 +1012,15 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            create_table_sql("`shop`.`items`", &spec).unwrap(),
-            "CREATE TABLE `shop`.`items` (\n    `id` bigint AUTO_INCREMENT,\n    `email` varchar(120) NOT NULL DEFAULT '' UNIQUE CHECK (char_length(`email`) > 0) COMMENT 'it''s',\n    `owner` bigint NULL,\n    `twice` bigint GENERATED ALWAYS AS (id * 2) STORED,\n    PRIMARY KEY (`id`),\n    FOREIGN KEY (`owner`) REFERENCES `shop`.`people` (`id`) ON UPDATE NO ACTION ON DELETE CASCADE\n)"
+            create_table_sql(Engine::Mysql, "`shop`.`items`", &spec).unwrap(),
+            "CREATE TABLE `shop`.`items` (\n    `id` bigint AUTO_INCREMENT,\n    `email` varchar(120) NOT NULL DEFAULT '' COMMENT 'it''s' UNIQUE CHECK (char_length(`email`) > 0),\n    `owner` bigint NULL,\n    `twice` bigint GENERATED ALWAYS AS (id * 2) STORED,\n    PRIMARY KEY (`id`),\n    FOREIGN KEY (`owner`) REFERENCES `shop`.`people` (`id`) ON UPDATE NO ACTION ON DELETE CASCADE\n)"
         );
         let mut twice = spec.clone();
         twice.columns.push(twice.columns[0].clone());
-        assert_eq!(create_table_sql("`shop`.`items`", &twice).err().as_deref(), Some("Column id appears twice"));
+        assert_eq!(create_table_sql(Engine::Mysql, "`shop`.`items`", &twice).err().as_deref(), Some("Column id appears twice"));
         let mut identity = one_column();
         identity.columns[0].generation = ColumnGeneration::IdentityByDefault;
-        assert_eq!(create_table_sql("`shop`.`items`", &identity).err().as_deref(), Some("MySQL has no identity columns; use auto increment."));
+        assert_eq!(create_table_sql(Engine::Mysql, "`shop`.`items`", &identity).err().as_deref(), Some("MySQL has no identity columns; use auto increment."));
     }
 
     #[test]
@@ -1038,9 +1041,9 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
     use mysql_async::Conn;
 
-    use super::super::catalog::{column_definitions, qualified, quote};
-    use super::super::tests_support::{exec, query_one, TestDb};
-    use super::super::MysqlDriver;
+    use crate::db::mysql_common::catalog::{column_definitions, qualified, quote};
+    use crate::db::mysql_common::tests_support::{exec, on_mariadb, query_one, ty, TestDb, label};
+    use crate::db::mysql_common::driver::ServerDriver;
     use super::*;
     use crate::db::model::{NewColumn, NewForeignKey, StructureChange};
     use crate::db::Driver;
@@ -1074,10 +1077,36 @@ mod server_tests {
             PRIMARY KEY (id)
         )"#;
 
-    async fn open(setup: &str) -> (TestDb, Arc<MysqlDriver>) {
+    /// `HARD` as MariaDB takes it: a generated column can't say NOT NULL, `DEFAULT (expr)` and
+    /// JSON defaults are written the way it reads them, and JSON is a text column.
+    const HARD_MARIADB: &str = r#"
+        CREATE TABLE hard (
+            id INT NOT NULL AUTO_INCREMENT,
+            a INT NOT NULL DEFAULT 5,
+            b VARCHAR(20) CHARACTER SET latin1 COLLATE latin1_bin NOT NULL DEFAULT 'it''s \\ x',
+            c TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            d INT DEFAULT (1 + 1),
+            e VARCHAR(36) DEFAULT (uuid()),
+            f DECIMAL(10,2) GENERATED ALWAYS AS (a * 2) STORED,
+            g VARCHAR(40) CHARACTER SET latin1 GENERATED ALWAYS AS (concat(b, ' ', 'x')) VIRTUAL,
+            h INT INVISIBLE,
+            i BIT(3) DEFAULT b'101',
+            j DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+            k INT NULL DEFAULT NULL COMMENT 'it''s',
+            l ENUM('x','y') DEFAULT 'y',
+            m DATE DEFAULT (CURRENT_DATE),
+            n JSON,
+            o TINYINT(1) DEFAULT 1,
+            p DOUBLE DEFAULT 1.5,
+            q TEXT,
+            r VARCHAR(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin COMMENT 'quote '' and \\ slash',
+            PRIMARY KEY (id)
+        )"#;
+
+    async fn open(setup: &str) -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
         exec(&db.endpoint, setup).await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 
@@ -1103,7 +1132,7 @@ mod server_tests {
             let sql = format!("DROP USER IF EXISTS {}", self.0);
             let _ = std::thread::spawn(move || {
                 let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-                runtime.block_on(exec(&super::super::tests_support::test_endpoint(), &sql));
+                runtime.block_on(exec(&crate::db::mysql_common::tests_support::test_endpoint(), &sql));
             })
             .join();
         }
@@ -1112,10 +1141,12 @@ mod server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
     async fn modify_without_change_keeps_show_create_table() {
-        let (db, d) = open(HARD).await;
+        // The column list differs where MariaDB spells things differently (see HARD_MARIADB)
+        let setup = if crate::db::mysql_common::tests_support::is_mariadb().await { HARD_MARIADB } else { HARD };
+        let (db, d) = open(setup).await;
         let mut conn = d.conn().await.unwrap();
         let before = show_create(&mut conn, &db.name, "hard").await;
-        let columns = column_definitions(&mut conn, &db.name, "hard").await.unwrap();
+        let columns = column_definitions(&mut conn, d.flavor(), &db.name, "hard").await.unwrap();
         assert_eq!(columns.len(), 19);
         for column in &columns {
             let sql = format!("ALTER TABLE {} MODIFY COLUMN {} {}", qualified(&db.name, "hard"), quote(&column.name), definition_sql(column));
@@ -1143,7 +1174,7 @@ mod server_tests {
             let schema = schema.to_string();
             async move {
                 let mut conn = d.conn().await.unwrap();
-                column_definitions(&mut conn, &schema, "customers").await.unwrap().into_iter().find(|c| c.name == name)
+                column_definitions(&mut conn, d.flavor(), &schema, "customers").await.unwrap().into_iter().find(|c| c.name == name)
             }
         };
 
@@ -1189,7 +1220,7 @@ mod server_tests {
         );
         // A number takes no character set
         apply(StructureChange::SetType { name: "age".into(), data_type: "bigint".into(), using: None }).await;
-        assert_eq!(column("age").await.unwrap().column_type, "bigint");
+        assert_eq!(column("age").await.unwrap().column_type, ty("bigint"));
 
         let index = |name: Option<&str>, columns: &[&str], unique: bool, method: &str| StructureChange::CreateIndex {
             name: name.map(String::from),
@@ -1202,8 +1233,11 @@ mod server_tests {
         assert!(exists(&db, "statistics", "index_name", "customers", "customers_age_idx").await);
         apply(index(Some("by_name_hash"), &["name"], false, "hash")).await;
         apply(index(Some("name_ft"), &["name"], false, "fulltext")).await;
-        apply(index(Some("lower_email"), &["lower(`email`)"], false, "btree")).await;
-        assert!(exists(&db, "statistics", "index_name", "customers", "lower_email").await);
+        // MariaDB has no indexes on expressions
+        if !on_mariadb() {
+            apply(index(Some("lower_email"), &["lower(`email`)"], false, "btree")).await;
+            assert!(exists(&db, "statistics", "index_name", "customers", "lower_email").await);
+        }
         apply(StructureChange::DropIndex { name: "by_name_hash".into(), cascade: false }).await;
         assert!(!exists(&db, "statistics", "index_name", "customers", "by_name_hash").await);
 
@@ -1257,7 +1291,7 @@ mod server_tests {
         // Permissions
         let user = format!("dbunny_t_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         let _account = Account(format!("'{user}'@'%'"));
-        exec(&super::super::tests_support::test_endpoint(), &format!("CREATE USER '{user}'@'%'")).await;
+        exec(&crate::db::mysql_common::tests_support::test_endpoint(), &format!("CREATE USER '{user}'@'%'")).await;
         apply(StructureChange::Grant { grantee: user.clone(), privileges: vec!["select".into(), "update".into()], grant_option: true }).await;
         let granted = |privilege: &str| {
             let sql = format!(
@@ -1308,6 +1342,6 @@ mod server_tests {
         assert!(dup.is_err(), "the email is unique");
         // A refused option reaches the user as it is
         let err = editor.create_table(&db.name, "bad", NewTable { unlogged: true, ..Default::default() }).await.err().unwrap();
-        assert_eq!(err, "Unlogged tables isn't supported by MySQL");
+        assert_eq!(err, format!("Unlogged tables isn\'t supported by {}", label()));
     }
 }

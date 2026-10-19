@@ -1,6 +1,6 @@
 [package]
 name = "dbunny"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 
 [lib]
@@ -45,7 +45,7 @@ sha2 = "0.10"
 hostname = "0.4"
 rusqlite = { version = "=0.40.2", features = ["bundled", "column_decltype"] }
 # rustls, not native-tls: with native-tls a client certificate must be PKCS#12, and the SSL tab takes PEM files
-mysql_async = { version = "=0.37.1", default-features = false, features = ["default-rustls-ring"] }
+mysql_async = { version = "=0.37.1", default-features = false, features = ["default-rustls-ring", "client_ed25519"] }
 
 [profile.release]
 strip = true

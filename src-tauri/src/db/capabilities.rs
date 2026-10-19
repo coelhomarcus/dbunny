@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use super::mysql::version::MysqlVersion;
+use super::mysql_common::version::ServerVersion;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -129,7 +129,16 @@ impl Capabilities {
     /// MySQL 8.0+: the console, transactions, schema editing and administration of
     /// databases, users and sessions, but no schemas, sequences or RETURNING. What
     /// changes with the version is EXPLAIN ANALYZE (8.0.18).
-    pub fn mysql(version: MysqlVersion) -> Self {
+    pub fn mysql(version: ServerVersion) -> Self {
+        Self::mysql_family(version.at_least(8, 0, 18))
+    }
+
+    /// MariaDB 10.6+: the same pieces as MySQL, and `ANALYZE` in every supported version.
+    pub fn mariadb(_version: ServerVersion) -> Self {
+        Self::mysql_family(true)
+    }
+
+    fn mysql_family(explain_analyze: bool) -> Self {
         Self {
             console: true,
             transactions: true,
@@ -155,7 +164,7 @@ impl Capabilities {
             cascade: false,
             truncate_options: false,
             duplicate_table: true,
-            explain_analyze: version.at_least(8, 0, 18),
+            explain_analyze,
             explain_format: ExplainFormat::MysqlTree,
             returning: false,
             ssh: true,
@@ -167,7 +176,7 @@ impl Capabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::mysql::version::MysqlVersion;
+    use crate::db::mysql_common::version::ServerVersion;
 
     #[test]
     fn capabilities_serialize_in_camel_case() {
@@ -192,7 +201,7 @@ mod tests {
 
     #[test]
     fn mysql_capabilities_follow_the_version() {
-        let v = |major, minor, patch| MysqlVersion { major, minor, patch };
+        let v = |major, minor, patch| ServerVersion { major, minor, patch };
         let c = Capabilities::mysql(v(8, 4, 0));
         assert!(c.console && c.transactions && c.schema_editing && c.admin && c.databases && c.roles && c.activity);
         assert!(!c.schemas && !c.returning && !c.trigger_toggle && !c.cascade && !c.sequences);
@@ -201,6 +210,18 @@ mod tests {
         assert!(!Capabilities::mysql(v(8, 0, 17)).explain_analyze);
         assert!(Capabilities::mysql(v(8, 0, 18)).explain_analyze);
         assert_eq!(serde_json::to_value(&c).unwrap()["explainFormat"], "mysqlTree");
+    }
+
+    #[test]
+    fn mariadb_capabilities() {
+        let v = |major, minor, patch| ServerVersion { major, minor, patch };
+        let c = Capabilities::mariadb(v(10, 6, 0));
+        assert!(c.console && c.transactions && c.schema_editing && c.admin && c.databases && c.roles && c.activity);
+        assert!(!c.schemas && !c.returning && !c.trigger_toggle && !c.cascade && !c.sequences);
+        assert!(c.explain_analyze && c.constraints);
+        assert_eq!(c.explain_format, ExplainFormat::MysqlTree);
+        // The same pieces as MySQL, whatever the version
+        assert_eq!(Capabilities::mariadb(v(11, 4, 0)), Capabilities { explain_analyze: true, ..Capabilities::mysql(v(8, 4, 0)) });
     }
 
     #[test]

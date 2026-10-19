@@ -300,6 +300,52 @@ test("the url dialog speaks of the database it is for", () => {
   assert.equal(urlHints("postgres").placeholder, "postgresql://user:password@host:5432/database");
   assert.equal(urlHints("postgres").invalid, "That doesn't look like a postgres:// connection URL.");
   // From the home page any server database will do
-  assert.equal(urlHints(undefined).description, "Paste a PostgreSQL or MySQL connection string to fill in the form.");
-  assert.equal(urlHints(undefined).invalid, "That doesn't look like a postgres:// or mysql:// connection URL.");
+  assert.equal(urlHints(undefined).description, "Paste a PostgreSQL, MySQL or MariaDB connection string to fill in the form.");
+  assert.equal(urlHints(undefined).invalid, "That doesn't look like a postgres://, mysql:// or mariadb:// connection URL.");
+});
+
+const savedMariadb: SavedConnection = { ...savedMysql, id: "d1", name: "Orders", engine: "mariadb", port: 3306, database: "orders", tls: null, ssl: false, readOnly: false };
+
+test("a mariadb draft starts on port 3306 and doesn't require a database", () => {
+  const d = newDraft("mariadb");
+  assert.equal(d.fields.port, "3306");
+  assert.deepEqual(missingFields({ ...d, fields: { ...d.fields, host: "db.local" } }, "connect"), []);
+  assert.deepEqual(tabsFor("mariadb"), ["connection", "ssl", "ssh", "options"]);
+});
+
+test("a mariadb url fills a mariadb form and only that one", () => {
+  const d = applyUrl(newDraft("mariadb"), "mariadb://ana:pw@db.local:3307/shop?ssl-mode=VERIFY_CA&ssl-ca=%2Fca.pem")!;
+  assert.deepEqual([d.engine, d.fields.host, d.fields.port, d.fields.database, d.fields.user, d.fields.ssl, d.fields.sslMode, d.fields.sslRootCert], ["mariadb", "db.local", "3307", "shop", "ana", true, "verify-ca", "/ca.pem"]);
+  assert.equal(applyUrl(newDraft("mysql"), "mariadb://me@db.local/app"), null);
+  assert.equal(applyUrl(newDraft("mariadb"), "mysql://me@db.local/app"), null);
+  assert.equal(applyUrl(newDraft("postgres"), "mariadb://me@db.local/app"), null);
+});
+
+test("any server url makes the draft of its own database", () => {
+  const draft = draftFromUrl("mariadb://ana:pw@db.local:3307/shop")!;
+  assert.deepEqual([draft.engine, draft.fields.host, draft.fields.port, draft.fields.database], ["mariadb", "db.local", "3307", "shop"]);
+  assert.equal(draftFromUrl("mysql://h")?.engine, "mysql");
+});
+
+test("the url dialog speaks of mariadb", () => {
+  assert.deepEqual(urlHints("mariadb"), {
+    description: "Paste a MariaDB connection string to fill in the form.",
+    placeholder: "mariadb://user:password@host:3306/database",
+    invalid: "That doesn't look like a mariadb:// connection URL.",
+  });
+});
+
+test("mariadb connects with its fields through its own command", () => {
+  const args = connectArgsOf(draftFromSaved(savedMariadb));
+  assert.equal(args.kind, "mariadb");
+  assert.deepEqual(args.kind === "mariadb" && [args.params.host, args.params.port, args.params.database, args.params.tls], ["db.local", 3306, "orders", null]);
+});
+
+test("a saved mariadb connection reads back as a mariadb draft and saves as one", () => {
+  const d = draftFromSaved(savedMariadb);
+  assert.equal(d.engine, "mariadb");
+  const input = saveInputOf(d);
+  assert.deepEqual([input.engine, input.id, input.port, input.database], ["mariadb", "d1", 3306, "orders"]);
+  // An empty port saves as the default of the family
+  assert.equal(saveInputOf({ ...d, fields: { ...d.fields, port: "" } }).port, 3306);
 });
