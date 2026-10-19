@@ -179,8 +179,11 @@ pub async fn connect_mariadb(
 #[tauri::command]
 pub async fn disconnect(
     state: State<'_, AppState>,
+    assistant: State<'_, crate::assistant::Assistant>,
     session_id: String,
 ) -> Result<bool, String> {
+    // Its conversations end first: they act on this session
+    assistant.close_for_session(&session_id).await;
     if let Some(driver) = state.remove(&session_id).await {
         driver.close().await;
     }

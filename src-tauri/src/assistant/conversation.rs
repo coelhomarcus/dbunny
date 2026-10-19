@@ -33,6 +33,15 @@ pub struct Conversation {
     pub options: ConversationOptions,
     /// "Allow reads in this chat" was chosen.
     pub reads_allowed: AtomicBool,
+    /// The folder the agent works in, once the conversation has one.
+    pub workspace: Mutex<Option<Workspace>>,
+}
+
+/// A conversation's folder; one of a connection that wasn't saved goes away with the conversation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Workspace {
+    pub path: std::path::PathBuf,
+    pub temporary: bool,
 }
 
 #[derive(Default)]
@@ -51,6 +60,7 @@ impl Conversations {
             token: secret.iter().map(|byte| format!("{byte:02x}")).collect(),
             options: ConversationOptions { row_limit: options.row_limit.clamp(MIN_ROWS, MAX_ROWS), ..options },
             reads_allowed: AtomicBool::new(false),
+            workspace: Mutex::new(None),
         });
         self.items.lock().unwrap().push(Arc::clone(&conversation));
         conversation

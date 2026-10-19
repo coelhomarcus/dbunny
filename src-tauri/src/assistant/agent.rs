@@ -331,6 +331,7 @@ impl AgentHandle {
     }
 
     /// Talks to an agent over `read` and `write` (the child's stdout and stdin).
+    #[cfg(test)]
     pub async fn over(
         read: impl AsyncRead + Send + Unpin + 'static,
         write: impl AsyncWrite + Send + Unpin + 'static,
@@ -399,6 +400,7 @@ impl AgentHandle {
         }))
     }
 
+    #[cfg(test)]
     pub fn supports_system_prompt(&self) -> bool {
         self.capabilities.system_prompt
     }

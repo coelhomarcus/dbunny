@@ -21,6 +21,8 @@ pub struct FakeConfig {
     /// The agent goes away in the middle of a prompt.
     pub die_on_prompt: bool,
     pub sessions: Vec<Value>,
+    /// Sent to the client before `session/load` is answered, like the replay of a conversation.
+    pub load_script: Vec<Value>,
 }
 
 impl Default for FakeConfig {
@@ -34,10 +36,12 @@ impl Default for FakeConfig {
             prompt_script: vec![],
             die_on_prompt: false,
             sessions: vec![],
+            load_script: vec![],
         }
     }
 }
 
+#[derive(Clone)]
 pub struct FakeAgent {
     /// Every request and notification the client sent, in order.
     pub received: Arc<Mutex<Vec<Value>>>,
@@ -101,7 +105,12 @@ async fn run(config: FakeConfig, input: DuplexStream, mut out: DuplexStream, rec
                     }],
                 }))
             }
-            "session/load" => Ok(json!({})),
+            "session/load" => {
+                for item in &config.load_script {
+                    send(&mut out, item).await;
+                }
+                Ok(json!({}))
+            }
             "session/list" => Ok(json!({"sessions": config.sessions})),
             "session/set_config_option" => Ok(json!({})),
             "session/prompt" => {
