@@ -3,6 +3,8 @@
 
 pub mod agent;
 pub mod approvals;
+#[cfg(test)]
+mod claude_tests;
 pub mod context;
 pub mod conversation;
 pub mod events;

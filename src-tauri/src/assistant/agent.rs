@@ -153,6 +153,9 @@ struct Shared {
     stopped: AtomicBool,
     shutting_down: AtomicBool,
     auth_methods: OnceLock<Vec<String>>,
+    /// Notifications of the agent's own extensions, kept for the tests that look at them.
+    #[cfg(test)]
+    extensions: Mutex<Vec<Value>>,
     events: Arc<dyn EventSink>,
     conversations: Arc<Conversations>,
     approvals: Arc<Approvals>,
@@ -225,7 +228,12 @@ impl Shared {
                     self.events.emit(AssistantEvent::Update { conversation_id: conversation.id.clone(), update: params["update"].clone() });
                 }
             }
-            (Some(_), None) => {}
+            (Some(_method), None) => {
+                #[cfg(test)]
+                if _method.starts_with('_') && self.extensions.lock().unwrap().len() < 500 {
+                    self.extensions.lock().unwrap().push(json!({"method": _method, "params": message["params"]}));
+                }
+            }
             (None, Some(id)) => {
                 let Some(reply) = id.as_u64().and_then(|id| self.pending.lock().unwrap().remove(&id)) else { return };
                 let _ = reply.send(match message.get("error") {
@@ -349,6 +357,8 @@ impl AgentHandle {
             stopped: AtomicBool::new(false),
             shutting_down: AtomicBool::new(false),
             auth_methods: OnceLock::new(),
+            #[cfg(test)]
+            extensions: Default::default(),
             events,
             conversations,
             approvals,
@@ -393,28 +403,38 @@ impl AgentHandle {
         self.capabilities.system_prompt
     }
 
-    fn session_params(&self, setup: &SessionSetup) -> serde_json::Map<String, Value> {
+    fn session_params(&self, setup: &SessionSetup, meta: Value) -> serde_json::Map<String, Value> {
         let mut params = serde_json::Map::new();
         params.insert("cwd".into(), json!(setup.cwd));
         params.insert(
             "mcpServers".into(),
             json!([{"type": "http", "name": "dbunny", "url": setup.mcp_url, "headers": [{"name": "Authorization", "value": format!("Bearer {}", setup.token)}]}]),
         );
-        params.insert("_meta".into(), session_meta());
+        let mut meta = meta;
         if self.capabilities.system_prompt {
             params.insert("systemPrompt".into(), json!({"mode": "override", "content": [{"type": "text", "text": setup.system_prompt}]}));
+        } else {
+            // The adapter before that capability reads a string here as the whole system prompt
+            meta["systemPrompt"] = json!(setup.system_prompt);
         }
+        params.insert("_meta".into(), meta);
         params
     }
 
     pub async fn new_session(&self, setup: &SessionSetup) -> Result<OpenedSession, AgentError> {
-        let result = self.shared.request("session/new", Value::Object(self.session_params(setup))).await?;
+        self.new_session_with_meta(setup, session_meta()).await
+    }
+
+    /// `new_session` with other `_meta` than the usual (the tests with the real agent ask it to
+    /// report what the session has).
+    pub(crate) async fn new_session_with_meta(&self, setup: &SessionSetup, meta: Value) -> Result<OpenedSession, AgentError> {
+        let result = self.shared.request("session/new", Value::Object(self.session_params(setup, meta))).await?;
         let acp_session = result["sessionId"].as_str().ok_or_else(|| AgentError::Other("The agent gave no session".into()))?.to_string();
         Ok(self.opened(acp_session, &result))
     }
 
     pub async fn load_session(&self, acp_session: &str, setup: &SessionSetup) -> Result<OpenedSession, AgentError> {
-        let mut params = self.session_params(setup);
+        let mut params = self.session_params(setup, session_meta());
         params.insert("sessionId".into(), json!(acp_session));
         let result = self.shared.request("session/load", Value::Object(params)).await?;
         Ok(self.opened(acp_session.to_string(), &result))
@@ -475,6 +495,12 @@ impl AgentHandle {
 
     pub fn log(&self) -> Vec<String> {
         self.log.lines()
+    }
+
+    /// The notifications of the agent's own extensions received so far.
+    #[cfg(test)]
+    pub(crate) fn extension_messages(&self) -> Vec<Value> {
+        self.shared.extensions.lock().unwrap().clone()
     }
 
     /// Ends the agent without telling the interface that it stopped.
@@ -590,7 +616,11 @@ mod tests {
 
         let without = rig(FakeConfig { system_prompt: false, ..Default::default() }).await.unwrap();
         without.agent.new_session(&setup()).await.unwrap();
-        assert!(without.fake.calls("session/new")[0]["params"].get("systemPrompt").is_none());
+        let without_params = without.fake.calls("session/new")[0]["params"].clone();
+        assert!(without_params.get("systemPrompt").is_none());
+        // The Claude adapter without that capability takes the prompt in `_meta`
+        assert_eq!(without_params["_meta"]["systemPrompt"], "You are the assistant.");
+        assert_eq!(without_params["_meta"]["claudeCode"], session_meta()["claudeCode"]);
         assert!(!without.agent.supports_system_prompt());
     }
 

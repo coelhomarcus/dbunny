@@ -12,7 +12,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
-use rmcp::model::{CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool};
+use rmcp::model::{CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool};
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
@@ -135,7 +135,8 @@ impl ServerHandler for Handler {
             .into_iter()
             .map(|d| Tool::new(d.name, d.description, Arc::new(d.input_schema.as_object().cloned().unwrap_or_default())))
             .collect();
-        Ok(ListToolsResult::with_all_items(tools))
+        // The newest protocol wants every list to say how long it may be kept; 0 asks again each time
+        Ok(ListToolsResult::with_all_items(tools).with_ttl_ms(0).with_cache_scope(CacheScope::Private))
     }
 
     async fn call_tool(&self, request: CallToolRequestParams, context: RequestContext<RoleServer>) -> Result<CallToolResponse, McpError> {
@@ -222,10 +223,15 @@ mod tests {
 
     /// One POST over a plain socket: the status and the JSON of the answer.
     async fn post(port: u16, token: Option<&str>, body: &Value) -> (u16, Value) {
+        post_as(port, token, body, "2025-06-18").await
+    }
+
+    async fn post_as(port: u16, token: Option<&str>, body: &Value, protocol: &str) -> (u16, Value) {
+        let method = body["method"].as_str().unwrap_or("").to_string();
         let body = body.to_string();
         let auth = token.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
         let request = format!(
-            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{auth}Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\nMCP-Protocol-Version: 2025-06-18\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{auth}Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\nMCP-Protocol-Version: {protocol}\r\nMcp-Method: {method}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         );
         let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
@@ -254,6 +260,25 @@ mod tests {
         assert_eq!(status, 200, "{answer}");
         let names: Vec<&str> = answer["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(names, vec!["list_tables", "describe_table", "relationships", "run_query", "explain_query"]);
+        r.server.stop().await;
+    }
+
+    /// Claude Code speaks the 2026-07-28 protocol, whose lists must say how long they may be kept;
+    /// without it the client throws the tools away.
+    #[tokio::test]
+    async fn tools_list_carries_the_cache_hints_of_the_newest_protocol() {
+        let r = running().await;
+        let token = r.conversations.create("s1", options()).token.clone();
+        let list = json!({"jsonrpc": "2.0", "id": 0, "method": "tools/list", "params": {"_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "claude-code", "version": "2"},
+            "io.modelcontextprotocol/clientCapabilities": {},
+        }}});
+        let (status, answer) = post_as(r.server.port, Some(&token), &list, "2026-07-28").await;
+        assert_eq!(status, 200, "{answer}");
+        assert_eq!(answer["result"]["tools"].as_array().unwrap().len(), 5, "{answer}");
+        assert!(answer["result"]["ttlMs"].is_number(), "{answer}");
+        assert!(matches!(answer["result"]["cacheScope"].as_str(), Some("public" | "private")), "{answer}");
         r.server.stop().await;
     }
 
