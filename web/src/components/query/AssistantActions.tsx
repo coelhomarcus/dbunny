@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { BookOpenText, Gauge, MessageSquare } from "lucide-react";
+import { BookOpenText, Gauge, Sparkles } from "lucide-react";
 import { useAssistant } from "../../contexts/assistant";
 import Button from "../ui/Button";
 import Popover from "../ui/Popover";
@@ -21,7 +21,7 @@ export default function AssistantActions({ onExplain, onOptimize }: { onExplain:
     <div ref={anchor}>
       <Tooltip label="Ask the assistant" side="top">
         <Button variant="ghost-muted" size="icon-sm" aria-label="Ask the assistant" aria-expanded={open} onClick={() => setOpen(!open)}>
-          <MessageSquare />
+          <Sparkles />
         </Button>
       </Tooltip>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} className="w-56 p-1">

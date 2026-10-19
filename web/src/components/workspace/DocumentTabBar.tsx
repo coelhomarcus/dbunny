@@ -6,6 +6,7 @@ import {
   Columns3,
   Eye,
   Layers,
+  MessageSquare,
   ListOrdered,
   ListTree,
   ArrowRightToLine,
@@ -289,7 +290,7 @@ export default function DocumentTabBar() {
               assistant.panelOpen && "bg-muted text-foreground",
             )}
           >
-            <ClaudeCodeIcon size={15} />
+            <MessageSquare size={15} />
           </button>
         </Tooltip>
       )}
