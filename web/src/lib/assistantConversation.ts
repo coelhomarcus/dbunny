@@ -132,6 +132,8 @@ export function finishTurn(conversation: Conversation, error?: string): Conversa
 
 /** A query waits for the person: it goes on the card that runs it, or on one of its own. */
 export function attachApproval(conversation: Conversation, request: ApprovalRequest): Conversation {
+  const known = conversation.items.some((item) => (item.kind === "approval" ? item.approval.id : item.kind === "tool" ? item.approval?.id : null) === request.id);
+  if (known) return conversation;
   let at = -1;
   conversation.items.forEach((item, index) => {
     if (item.kind === "tool" && !item.approval && matches(item, request)) at = index;

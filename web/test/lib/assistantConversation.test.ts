@@ -139,3 +139,11 @@ test("what the agent saw is read back from a tool's output", () => {
   assert.equal(parseToolOutput('{"schemas":[]}'), null);
   assert.equal(parseToolOutput(""), null);
 });
+
+test("an approval that arrives twice is shown once", () => {
+  let state = play([call("t1", "run_query", { sql: "SELECT 1" })]);
+  state = attachApproval(attachApproval(state, approval("a1", "SELECT 1")), approval("a1", "SELECT 1"));
+  assert.equal(state.items.length, 1);
+  const alone = attachApproval(attachApproval(emptyConversation(), approval("a2", "SELECT 2")), approval("a2", "SELECT 2"));
+  assert.equal(alone.items.length, 1);
+});
