@@ -2,9 +2,7 @@
 //! session itself is `ServerDriver`.
 
 mod admin;
-mod console;
 mod flavor;
-pub(crate) mod plan;
 pub mod version;
 
 use std::sync::Arc;

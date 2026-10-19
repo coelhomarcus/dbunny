@@ -4,12 +4,14 @@
 pub mod alter;
 pub mod catalog;
 pub mod connect;
+pub mod console;
 pub mod data;
 pub mod driver;
 pub mod editor;
 pub mod errors;
 pub mod flavor;
 pub mod objects;
+pub mod plan;
 pub mod split;
 pub mod structure;
 pub mod transactions;

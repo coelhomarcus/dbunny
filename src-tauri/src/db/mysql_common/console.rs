@@ -11,7 +11,7 @@ use mysql_async::{Column, Conn, Error as MysqlError, Row};
 use serde_json::Value as JsonValue;
 
 use crate::db::mysql_common::editor::in_transaction_status;
-use super::plan::{is_reading_statement, parse_tree};
+use super::plan::is_reading_statement;
 use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{ExplainResult, Notice, QueryColumn, QueryResult};
 use crate::db::mysql_common::connect::MysqlEndpoint;
@@ -20,7 +20,7 @@ use crate::db::mysql_common::split::{next_token, split_mysql, Kind};
 use crate::db::mysql_common::values::{type_name, value_to_json};
 use crate::db::sql::split::Statement;
 use crate::db::sqlite::errors::CANCELLED;
-use crate::db::{unsupported, Console, Driver, Engine, ExplainFormat};
+use crate::db::{unsupported, Console, Driver};
 
 /// The SQLSTATE of a cancelled statement (error 1317).
 const CANCELLED_STATE: &str = "70100";
@@ -237,24 +237,16 @@ impl Console for ServerDriver {
         if statement.text.split_whitespace().next().is_some_and(|w| w.eq_ignore_ascii_case("explain")) {
             return Err("Leave out EXPLAIN: the plan is requested for you.".into());
         }
+        let engine = self.flavor().engine();
         if analyze {
             if !self.capabilities().explain_analyze {
-                return Err(unsupported(Engine::Mysql, "EXPLAIN ANALYZE"));
+                return Err(unsupported(engine, "EXPLAIN ANALYZE"));
             }
             if !is_reading_statement(&statement.text) {
-                return Err("EXPLAIN ANALYZE runs only reading statements on MySQL.".into());
+                return Err(format!("EXPLAIN ANALYZE runs only reading statements on {}.", engine.label()));
             }
         }
-        let explain_sql = if analyze { format!("EXPLAIN ANALYZE {}", statement.text) } else { format!("EXPLAIN FORMAT=TREE {}", statement.text) };
-        let endpoint = self.endpoint().clone();
-        let text = self
-            .editor()
-            .run(move |conn| {
-                Box::pin(async move { conn.query_first::<String, _>(explain_sql).await.map_err(|e| error_message(&e, &endpoint)) })
-            })
-            .await?
-            .ok_or("The server returned no plan")?;
-        Ok(ExplainResult { plan: parse_tree(&text)?, analyzed: analyze, format: ExplainFormat::MysqlTree })
+        self.flavor().explain(self, &statement.text, analyze).await
     }
 }
 
@@ -271,7 +263,7 @@ mod server_tests {
     use crate::db::sqlite::errors::CANCELLED;
     use crate::db::{Driver, ExplainFormat};
 
-    const SHOP: &str = include_str!("../mysql_common/fixtures/shop.sql");
+    const SHOP: &str = include_str!("fixtures/shop.sql");
 
     async fn open() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
