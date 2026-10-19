@@ -5,6 +5,7 @@ pub mod approvals;
 pub mod context;
 pub mod conversation;
 pub mod events;
+pub mod mcp;
 #[cfg(test)]
 mod fake;
 pub mod result;
