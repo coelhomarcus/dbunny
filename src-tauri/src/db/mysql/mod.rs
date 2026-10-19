@@ -2,8 +2,10 @@
 //! table views, structure and administration, and the query editor's own connection.
 
 mod catalog;
+mod console;
 mod data;
 mod editor;
+pub(crate) mod plan;
 #[cfg(test)]
 pub(crate) mod tests_support;
 mod structure;
@@ -22,7 +24,7 @@ use version::MysqlVersion;
 use super::mysql_common::connect::{is_socket, opts_for, ConnRole, MysqlEndpoint};
 use super::mysql_common::errors::error_message;
 use super::net::ssh::{open_tunnel, KnownHosts, Tunnel};
-use super::{Capabilities, Catalog, ConnectionInfo, Data, Driver, Engine};
+use super::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine};
 
 /// Databases every server has, never opened on their own.
 const SYSTEM_DATABASES: [&str; 4] = ["mysql", "sys", "information_schema", "performance_schema"];
@@ -135,7 +137,6 @@ impl MysqlDriver {
     }
 
     /// The query editor's connection.
-    #[allow(dead_code)] // used by the console and the transactions (Tasks 9 and 10)
     pub(crate) fn editor(&self) -> &EditorConn {
         &self.editor
     }
@@ -201,6 +202,10 @@ impl Driver for MysqlDriver {
 
     fn data(&self) -> &dyn Data {
         self
+    }
+
+    fn console(&self) -> Option<&dyn Console> {
+        Some(self)
     }
 }
 

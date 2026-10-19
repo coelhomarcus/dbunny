@@ -389,7 +389,9 @@ pub struct RowChange {
 #[serde(rename_all = "camelCase")]
 pub struct ExplainResult {
     /// Postgres' JSON plan: `[{ "Plan": {...}, "Planning Time": .., "Execution Time": .. }]`,
-    /// or SQLite's query plan rows: `[{ "id": .., "parent": .., "detail": ".." }]`.
+    /// SQLite's query plan rows: `[{ "id": .., "parent": .., "detail": ".." }]`, or MySQL's plan
+    /// tree: `[{ "label", "cost", "rows", "actualTimeFirst", "actualTimeLast", "actualRows",
+    /// "loops", "children": [..] }]`.
     pub plan: JsonValue,
     /// The statement was actually run (ANALYZE), then rolled back.
     pub analyzed: bool,

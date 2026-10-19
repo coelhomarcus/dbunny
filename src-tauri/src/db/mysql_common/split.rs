@@ -39,7 +39,7 @@ struct Piece {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Kind {
+pub(crate) enum Kind {
     /// A name, keyword or number, in ASCII upper case
     Word(String),
     /// A string or a backtick name
@@ -51,10 +51,10 @@ enum Kind {
 }
 
 #[derive(Debug, Clone)]
-struct Token {
-    kind: Kind,
-    start: usize,
-    end: usize,
+pub(crate) struct Token {
+    pub(crate) kind: Kind,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
 impl Token {
@@ -121,7 +121,7 @@ fn block_comment_end(chars: &[char], i: usize) -> usize {
 }
 
 /// The next token at or after `i`, past whitespace and comments.
-fn next_token(chars: &[char], mut i: usize) -> Option<Token> {
+pub(crate) fn next_token(chars: &[char], mut i: usize) -> Option<Token> {
     while i < chars.len() {
         let c = chars[i];
         let next = chars.get(i + 1).copied();
@@ -248,7 +248,7 @@ fn expects_operand(token: Option<&Token>) -> bool {
 #[derive(Default)]
 struct Current {
     /// Where its text starts (just after the previous statement)
-    start: usize,
+    pub(crate) start: usize,
     /// It has something besides whitespace and comments
     has_content: bool,
     /// Its first tokens, until `routine` is decided

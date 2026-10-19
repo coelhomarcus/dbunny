@@ -29,8 +29,8 @@ pub(crate) struct EditorConn {
     /// console sets it after each statement (Task 10); a connection lost while it is set
     /// reports the rolled back transaction once, on the next command.
     in_transaction: AtomicBool,
-    /// Set by a cancel, for a script to stop before its next statement (Task 9).
-    #[allow(dead_code)]
+    /// Set by a cancel, for a script to stop before its next statement. A script clears it
+    /// when it starts, so a cancel that came with nothing running is forgotten.
     cancelled: Arc<AtomicBool>,
     /// How to open the connection again.
     opts: Mutex<Opts>,
@@ -104,6 +104,12 @@ impl EditorConn {
             *held = None;
         }
         result
+    }
+
+    /// The mark a cancel leaves for the script that is running, to be checked between statements
+    /// and after each one: `KILL QUERY` makes some statements end without an error (`SLEEP`).
+    pub(crate) fn cancel_flag(&self) -> Arc<AtomicBool> {
+        self.cancelled.clone()
     }
 
     /// The server's id of the connection (the latest one, after a reconnect).
