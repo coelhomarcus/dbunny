@@ -211,7 +211,21 @@ impl Console for ServerDriver {
         }
         let endpoint = self.endpoint().clone();
         let cancelled = self.editor().cancel_flag();
-        self.editor().run(move |conn| Box::pin(async move { run_script(conn, &statements, &endpoint, &cancelled).await })).await
+        let (result, database) = self
+            .editor()
+            .run(move |conn| {
+                Box::pin(async move {
+                    let result = run_script(conn, &statements, &endpoint, &cancelled).await;
+                    // Where a `USE` in the script left the connection, for a reconnect to go back to
+                    let database = conn.query_first::<Option<String>, _>("SELECT DATABASE()").await.ok().flatten().flatten();
+                    Ok((result, database))
+                })
+            })
+            .await?;
+        if let Some(database) = database {
+            self.editor().note_database(Some(database));
+        }
+        result
     }
 
     /// Stops what the editor's connection is running, and the rest of its script: the script
@@ -453,5 +467,31 @@ mod server_tests {
             "EXPLAIN works on one statement at a time. Select the one to explain."
         );
         assert_eq!(console.explain("EXPLAIN SELECT 1", false).await.err().unwrap(), "Leave out EXPLAIN: the plan is requested for you.");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn the_database_picked_with_use_survives_a_lost_connection() {
+        let (db, d) = open().await;
+        let other = TestDb::new().await;
+        let console = d.console().unwrap();
+        console.execute(&format!("USE `{}`", other.name)).await.unwrap();
+        exec(&db.endpoint, &format!("KILL CONNECTION {}", d.editor().connection_id())).await;
+
+        // The new connection is where the editor was, not back in the session's database
+        let here = console.execute("SELECT DATABASE()").await.unwrap();
+        assert_eq!(here.rows, vec![vec![json!(other.name.clone())]]);
+
+        // When that database can't be opened again, nothing runs elsewhere
+        exec(&db.endpoint, &format!("KILL CONNECTION {}", d.editor().connection_id())).await;
+        other.drop_now().await;
+        let err = console.execute("CREATE TABLE stray (id INT)").await.err().unwrap();
+        assert!(err.contains("reopened") && err.contains("can't be opened again"), "{err}");
+        let stray: Option<i64> = query_one(&db.endpoint, &format!("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '{}' AND TABLE_NAME = 'stray'", db.name)).await;
+        assert_eq!(stray, Some(0), "the statement never ran in the session's database");
+        // Once told, the editor is back in the session's database
+        let back = console.execute("SELECT DATABASE()").await.unwrap();
+        assert_eq!(back.rows, vec![vec![json!(db.name.clone())]]);
+        d.close().await;
     }
 }
