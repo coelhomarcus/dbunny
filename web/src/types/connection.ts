@@ -2,7 +2,7 @@ import type { Capabilities } from "./capabilities";
 import type { TlsSettings } from "./saved";
 
 /** The database a connection talks to. */
-export type Engine = "postgres" | "sqlite";
+export type Engine = "postgres" | "sqlite" | "mysql";
 
 export interface ConnectRequest {
   connectionUrl: string;

@@ -75,3 +75,13 @@ test("a file name is the last segment of its path", () => {
   assert.equal(fileNameOf("C:\\data\\shop.db"), "shop.db");
   assert.equal(fileNameOf("plain.db"), "plain.db");
 });
+
+test("a mysql connection is a server, with the database when it has one", () => {
+  const mysql = { ...saved, engine: "mysql" as const, host: "db.local", port: 3307, database: "shop", ssl: true };
+  assert.equal(summaryOf(mysql).engineLabel, "MySQL");
+  assert.equal(summaryOf(mysql).address, "db.local:3307/shop");
+  assert.equal(summaryOf({ ...mysql, database: "" }).address, "db.local:3307");
+  assert.equal(summaryOf({ ...mysql, host: "/var/run/mysqld/mysqld.sock", database: "" }).address, "/var/run/mysqld/mysqld.sock (socket)");
+  assert.equal(summaryOf({ ...mysql, host: "/var/run/mysqld/mysqld.sock" }).address, "/var/run/mysqld/mysqld.sock (socket) / shop");
+  assert.equal(summaryOf(mysql).ssl, true);
+});

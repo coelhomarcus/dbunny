@@ -49,6 +49,35 @@ export function parseConnectionUrl(url: string): Partial<ConnectionFields> {
   }
 }
 
+// MySQL's ssl-mode values that turn encryption on, and the mode of the form each one is
+const MYSQL_SSL_MODES: Record<string, SslMode> = { REQUIRED: "require", VERIFY_CA: "verify-ca", VERIFY_IDENTITY: "verify-full" };
+
+/**
+ * The fields a mysql:// URL carries: `mysql://user:pass@host:3306/db?ssl-mode=REQUIRED|VERIFY_CA|VERIFY_IDENTITY`,
+ * with `ssl-ca`, `ssl-cert` and `ssl-key` for the certificate files. Any other ssl-mode (DISABLED,
+ * PREFERRED) leaves encryption off. What the URL doesn't carry, such as read-only, is left out.
+ */
+export function parseMysqlUrl(url: string): Partial<ConnectionFields> {
+  try {
+    const parsed = new URL(url);
+    const mode = MYSQL_SSL_MODES[(parsed.searchParams.get("ssl-mode") ?? "").toUpperCase()];
+    return {
+      host: decodeURIComponent(parsed.hostname || ""),
+      port: parsed.port || "3306",
+      database: decodeURIComponent(parsed.pathname.replace(/^\//, "")),
+      user: decodeURIComponent(parsed.username || ""),
+      password: decodeURIComponent(parsed.password || ""),
+      ssl: mode !== undefined,
+      sslMode: mode ?? "require",
+      sslRootCert: parsed.searchParams.get("ssl-ca") ?? "",
+      sslCert: parsed.searchParams.get("ssl-cert") ?? "",
+      sslKey: parsed.searchParams.get("ssl-key") ?? "",
+    };
+  } catch {
+    return {};
+  }
+}
+
 export function buildConnectionUrl(fields: ConnectionFields): string {
   const { user, password, port, database, readOnly } = fields;
   const socket = isSocketHost(fields.host);

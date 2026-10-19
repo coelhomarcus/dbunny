@@ -91,7 +91,7 @@ function ConnectionRow({
         <div className="truncate text-[13px] font-medium leading-snug">{conn.name || "Unnamed"}</div>
         <div className="flex min-w-0 items-center gap-1 text-xs leading-snug text-muted-foreground">
           <EngineLogo engine={conn.engine} bare />
-          <span className="truncate">{conn.engine === "sqlite" ? fileNameOf(conn.path) : conn.database}</span>
+          <span className="truncate">{conn.engine === "sqlite" ? fileNameOf(conn.path) : conn.database || conn.host}</span>
         </div>
       </div>
       <div className="absolute right-1.5 flex items-center gap-0.5 rounded-md opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">

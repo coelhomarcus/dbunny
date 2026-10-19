@@ -2,10 +2,11 @@ import type { Engine } from "@/types";
 import type { SqlDialectName } from "./sqlStatements";
 
 /** The databases offered when creating a connection; the ones not ready yet show as coming soon. */
-export const ENGINE_CARDS: { id: "postgres" | "sqlite" | "mysql"; label: string; /** What kind of connection it is, under the name. */ kind: string; available: boolean }[] = [
+export const ENGINE_CARDS: { id: "postgres" | "sqlite" | "mysql" | "mariadb"; label: string; /** What kind of connection it is, under the name. */ kind: string; available: boolean }[] = [
   { id: "postgres", label: "PostgreSQL", kind: "Server connection", available: true },
   { id: "sqlite", label: "SQLite", kind: "Database file", available: true },
-  { id: "mysql", label: "MySQL / MariaDB", kind: "Server connection", available: false },
+  { id: "mysql", label: "MySQL", kind: "Server connection", available: true },
+  { id: "mariadb", label: "MariaDB", kind: "Server connection", available: false },
 ];
 
 export type EngineCardId = (typeof ENGINE_CARDS)[number]["id"];
@@ -22,7 +23,8 @@ export function notAvailableFor(engine: Engine): string {
 
 /** The SQL a database speaks: it decides how scripts are split, formatted and completed. */
 export function sqlDialectOf(engine: Engine | undefined): SqlDialectName {
-  return engine === "sqlite" ? "sqlite" : "postgres";
+  if (engine === "sqlite") return "sqlite";
+  return engine === "mysql" ? "mysql" : "postgres";
 }
 
 /**
@@ -46,8 +48,8 @@ export function locationOf(info: { engine: Engine; host: string; port: number; d
   return { where: `${info.host}:${info.port}`, database: info.database };
 }
 
-/** `host:port/database`, or the path of a file: the hint under a tab's title. */
+/** `host:port/database`, or the path of a file: the hint under a tab's title. A MySQL session may have no database. */
 export function addressOf(info: { engine: Engine; host: string; port: number; database: string }): string {
   const { where, database } = locationOf(info);
-  return database === null ? where : `${where}/${database}`;
+  return database ? `${where}/${database}` : where;
 }

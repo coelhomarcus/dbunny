@@ -1,6 +1,6 @@
-import type { Engine, SavedConnection, SavedConnectionInput, SavedTag, SshConfig } from "@/types";
+import type { Engine, MysqlConnectParams, SavedConnection, SavedConnectionInput, SavedTag, SshConfig } from "@/types";
 // With the extension, so Node's test runner can load it too
-import { type ConnectionFields, buildConnectionUrl, isSocketHost, parseConnectionUrl, tlsFieldsOf, tlsSettingsOf } from "./connectionUrl.ts";
+import { type ConnectionFields, buildConnectionUrl, isSocketHost, parseConnectionUrl, parseMysqlUrl, tlsFieldsOf, tlsSettingsOf } from "./connectionUrl.ts";
 
 /**
  * What the connection modal edits: who the connection is (name, colour, icon) and how to
@@ -65,7 +65,8 @@ export function newDraft(engine: Engine): ConnectionDraft {
     id: null,
     engine,
     identity: { name: "", color: DEFAULT_COLOR, icon: "" },
-    fields: EMPTY_FIELDS,
+    // MySQL shows its port filled in; PostgreSQL leaves it to the placeholder
+    fields: engine === "mysql" ? { ...EMPTY_FIELDS, port: "3306" } : EMPTY_FIELDS,
     sshEnabled: false,
     ssh: EMPTY_SSH,
     sqlitePath: "",
@@ -97,13 +98,17 @@ export function draftFromSaved(conn: SavedConnection): ConnectionDraft {
   };
 }
 
-/** Fills the server details from a postgres:// URL, keeping who the connection is. Null if it isn't one. */
+/**
+ * Fills the server details from a postgres:// URL (or a mysql:// one for a MySQL draft), keeping
+ * who the connection is. Null if the URL isn't one of this draft's database.
+ */
 export function applyUrl(draft: ConnectionDraft, url: string): ConnectionDraft | null {
-  // A URL only fills the PostgreSQL form; it never changes what kind of connection this is
-  if (draft.engine !== "postgres") return null;
+  // A URL only fills the form of its own database; it never changes what kind of connection this is
   const text = url.trim();
-  if (!/^postgres(ql)?:\/\//i.test(text)) return null;
-  const parsed = parseConnectionUrl(text);
+  let parsed: Partial<ConnectionFields>;
+  if (draft.engine === "postgres" && /^postgres(ql)?:\/\//i.test(text)) parsed = parseConnectionUrl(text);
+  else if (draft.engine === "mysql" && /^mysql:\/\//i.test(text)) parsed = parseMysqlUrl(text);
+  else return null;
   if (!parsed.host) return null;
   return { ...draft, fields: { ...draft.fields, ...parsed } };
 }
@@ -111,6 +116,7 @@ export function applyUrl(draft: ConnectionDraft, url: string): ConnectionDraft |
 export function tabsFor(engine: Engine): ConnectionTab[] {
   switch (engine) {
     case "postgres":
+    case "mysql":
       return ["connection", "ssl", "ssh", "options"];
     case "sqlite":
       return ["file", "options"];
@@ -141,7 +147,8 @@ export function missingFields(draft: ConnectionDraft, purpose: "connect" | "save
     return missing;
   }
   if (!fields.host.trim()) missing.push({ tab: "connection", fieldId: "conn-host" });
-  if (!fields.database.trim()) missing.push({ tab: "connection", fieldId: "conn-db" });
+  // A MySQL session opens the first database it finds when none is named
+  if (draft.engine !== "mysql" && !fields.database.trim()) missing.push({ tab: "connection", fieldId: "conn-db" });
   if (draft.sshEnabled && !isSocketHost(fields.host)) {
     if (!ssh.host.trim()) missing.push({ tab: "ssh", fieldId: "ssh-host" });
     if (!ssh.user.trim()) missing.push({ tab: "ssh", fieldId: "ssh-user" });
@@ -152,7 +159,7 @@ export function missingFields(draft: ConnectionDraft, purpose: "connect" | "save
 
 /** The SSH settings to connect with, or null for a direct connection. */
 export function sshConfigOf(draft: ConnectionDraft): SshConfig | null {
-  if (draft.engine !== "postgres" || !draft.sshEnabled || isSocketHost(draft.fields.host)) return null;
+  if (draft.engine === "sqlite" || !draft.sshEnabled || isSocketHost(draft.fields.host)) return null;
   const { ssh } = draft;
   return { ...ssh, host: ssh.host.trim(), user: ssh.user.trim(), port: parseInt(ssh.port || "22", 10) };
 }
@@ -161,15 +168,31 @@ export function connectionUrlOf(draft: ConnectionDraft): string {
   return buildConnectionUrl(draft.fields);
 }
 
-/** What to open a session with: a URL (and SSH) for PostgreSQL, a file for SQLite. */
+/** What to open a session with: a URL (and SSH) for PostgreSQL, the fields for MySQL, a file for SQLite. */
 export type ConnectArgs =
   | { kind: "postgres"; url: string; ssh: SshConfig | null }
+  | { kind: "mysql"; params: MysqlConnectParams; ssh: SshConfig | null }
   | { kind: "sqlite"; path: string; readOnly: boolean; create: boolean };
+
+/** The form of a MySQL draft as `connect_mysql` takes it. SSL means nothing over a local socket. */
+export function mysqlParamsOf(draft: ConnectionDraft): MysqlConnectParams {
+  const { fields } = draft;
+  return {
+    host: fields.host.trim(),
+    port: parseInt(fields.port || "3306", 10),
+    database: fields.database.trim(),
+    user: fields.user.trim(),
+    password: fields.password,
+    readOnly: fields.readOnly,
+    tls: isSocketHost(fields.host) ? null : tlsSettingsOf(fields),
+  };
+}
 
 export function connectArgsOf(draft: ConnectionDraft): ConnectArgs {
   if (draft.engine === "sqlite") {
     return { kind: "sqlite", path: draft.sqlitePath.trim(), readOnly: draft.fields.readOnly, create: draft.sqliteCreate };
   }
+  if (draft.engine === "mysql") return { kind: "mysql", params: mysqlParamsOf(draft), ssh: sshConfigOf(draft) };
   return { kind: "postgres", url: connectionUrlOf(draft), ssh: sshConfigOf(draft) };
 }
 
@@ -201,7 +224,7 @@ export function saveInputOf(draft: ConnectionDraft): SavedConnectionInput {
     name: identity.name.trim(),
     engine: draft.engine,
     host: fields.host.trim(),
-    port: parseInt(fields.port || "5432", 10),
+    port: parseInt(fields.port || (draft.engine === "mysql" ? "3306" : "5432"), 10),
     database: fields.database.trim(),
     user: fields.user.trim(),
     password: fields.password,
