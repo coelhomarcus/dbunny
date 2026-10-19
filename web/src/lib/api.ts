@@ -24,6 +24,12 @@ import type {
   Diagram,
   DatabaseInfo,
   RoleList,
+  AgentStatus,
+  ApprovalRequest,
+  ConversationOptions,
+  Decision,
+  OpenedConversation,
+  SessionSummary,
 } from "@/types";
 
 /** Relation kinds as the explorer names them. */
@@ -69,6 +75,67 @@ export const api = {
     return invoke<boolean>("delete_saved_connection", { id });
   },
 };
+
+/** The assistant: the agent that answers, and the conversations held with it. */
+export const assistantApi = {
+  async status() {
+    return invoke<AgentStatus>("assistant_status");
+  },
+
+  /** Starts the agent unless it is up; `command` is the person's own command, if any. */
+  async start(command?: string) {
+    return invoke<AgentStatus>("assistant_start", { command: command || null });
+  },
+
+  async restart(command?: string) {
+    return invoke<AgentStatus>("assistant_restart", { command: command || null });
+  },
+
+  async newConversation(sessionId: string, savedId: string | null, options: ConversationOptions) {
+    return invoke<OpenedConversation>("assistant_new_conversation", { sessionId, savedId, options });
+  },
+
+  async listConversations(sessionId: string, savedId: string | null) {
+    return invoke<SessionSummary[]>("assistant_list_conversations", { sessionId, savedId });
+  },
+
+  async loadConversation(sessionId: string, savedId: string | null, acpSessionId: string, options: ConversationOptions) {
+    return invoke<OpenedConversation>("assistant_load_conversation", { sessionId, savedId, acpSessionId, options });
+  },
+
+  /** Sends a message; answers when the agent's turn is over, with why it ended. */
+  async prompt(conversationId: string, text: string) {
+    return invoke<string>("assistant_prompt", { conversationId, text });
+  },
+
+  async cancel(conversationId: string) {
+    return invoke<void>("assistant_cancel", { conversationId });
+  },
+
+  async approve(approvalId: string, decision: Decision) {
+    return invoke<boolean>("assistant_approve", { approvalId, decision });
+  },
+
+  async setModel(conversationId: string, modelId: string) {
+    return invoke<void>("assistant_set_model", { conversationId, modelId });
+  },
+
+  async closeConversation(conversationId: string) {
+    return invoke<void>("assistant_close_conversation", { conversationId });
+  },
+
+  async log() {
+    return invoke<string[]>("assistant_log");
+  },
+
+  /** Signs out of Claude on this computer; every conversation ends. */
+  async signOut(command?: string) {
+    return invoke<void>("assistant_sign_out", { command: command || null });
+  },
+};
+
+/** An approval request, to refer to by id. */
+export type { ApprovalRequest };
 
 /**
  * Calls bound to one connection. Each window tab has its own session, so pages

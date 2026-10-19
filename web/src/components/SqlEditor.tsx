@@ -36,6 +36,11 @@ export type SqlEditorHandle = {
   getCurrentStatement(): string;
   /** Formats the selection, or the whole document, as one undoable edit. */
   format(): Promise<void>;
+  /** Writes `text` at the cursor, in place of the selection if there is one. */
+  insert(text: string): void;
+  /** Replaces the selection with `text`; nothing happens without a selection. */
+  replaceSelection(text: string): void;
+  hasSelection(): boolean;
 };
 
 type SqlEditorProps = {
@@ -184,6 +189,23 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun, onChan
         const view = viewRef.current;
         if (view) await formatView(view, dialect, onFormatErrorRef.current);
         view?.focus();
+      },
+      insert(text) {
+        const view = viewRef.current;
+        if (!view) return;
+        const { from, to } = view.state.selection.main;
+        view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length }, scrollIntoView: true });
+        view.focus();
+      },
+      replaceSelection(text) {
+        const view = viewRef.current;
+        if (!view || view.state.selection.main.empty) return;
+        const { from, to } = view.state.selection.main;
+        view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length }, scrollIntoView: true });
+        view.focus();
+      },
+      hasSelection() {
+        return viewRef.current ? !viewRef.current.state.selection.main.empty : false;
       },
     });
 

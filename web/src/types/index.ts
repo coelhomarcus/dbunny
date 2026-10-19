@@ -5,3 +5,4 @@ export type * from "./query";
 export type * from "./messages";
 export type * from "./saved";
 export type * from "./structure";
+export type * from "./assistant";

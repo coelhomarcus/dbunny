@@ -8,12 +8,18 @@ import { cn } from "../../lib/cn";
 export default function SideCard({
   open,
   widthClass,
+  width,
+  resizing = false,
   label,
   children,
 }: {
   open: boolean;
   /** Tailwind width, also used for the inner pane so the text doesn't reflow while it slides. */
   widthClass: string;
+  /** A width in pixels that replaces `widthClass`, for a card the person resizes. */
+  width?: number;
+  /** The width is being dragged: it follows the pointer at once instead of sliding. */
+  resizing?: boolean;
   label: string;
   children: ReactNode;
 }) {
@@ -46,15 +52,18 @@ export default function SideCard({
     <aside
       inert={!visible}
       aria-label={label}
+      style={width !== undefined && visible ? { width } : undefined}
       className={cn(
         "relative shrink-0 overflow-hidden rounded-lg bg-sidebar transition-[width,margin] duration-300 ease-in-out",
-        visible ? cn(widthClass, "border border-border") : "-ml-1.5 w-0",
+        resizing && "transition-none",
+        visible ? cn(width === undefined && widthClass, "border border-border") : "-ml-1.5 w-0",
       )}
     >
       <div
+        style={width !== undefined ? { width } : undefined}
         className={cn(
           "absolute inset-y-0 right-0 flex min-h-0 flex-col transition-opacity duration-200",
-          widthClass,
+          width === undefined && widthClass,
           visible ? "opacity-100 delay-75" : "opacity-0",
         )}
       >

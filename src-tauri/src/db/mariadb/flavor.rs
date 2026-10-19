@@ -31,6 +31,11 @@ impl Flavor for MariadbFlavor {
         Capabilities::mariadb(version)
     }
 
+    /// In seconds, with milliseconds.
+    fn statement_timeout_sql(&self, ms: u64) -> String {
+        format!("SET SESSION max_statement_time = {}.{:03}", ms / 1000, ms % 1000)
+    }
+
     fn system_databases(&self) -> &'static [&'static str] {
         &["mysql", "sys", "information_schema", "performance_schema"]
     }
@@ -106,8 +111,17 @@ impl Flavor for MariadbFlavor {
 
     /// `EXPLAIN FORMAT=JSON`, which doesn't run the statement, or `ANALYZE FORMAT=JSON`, which
     /// does; the plan is converted to the tree MySQL's comes as.
+    fn explain_sql(&self, statement: &str, analyze: bool) -> String {
+        if analyze { format!("ANALYZE FORMAT=JSON {statement}") } else { format!("EXPLAIN FORMAT=JSON {statement}") }
+    }
+
+    fn plan_of(&self, text: &str, analyze: bool) -> Result<ExplainResult, String> {
+        let json: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("The server returned a plan DBunny can't read: {e}"))?;
+        Ok(ExplainResult { plan: tree_from_json(&json)?, analyzed: analyze, format: ExplainFormat::MysqlTree })
+    }
+
     async fn explain(&self, driver: &ServerDriver, statement: &str, analyze: bool) -> Result<ExplainResult, String> {
-        let explain_sql = if analyze { format!("ANALYZE FORMAT=JSON {statement}") } else { format!("EXPLAIN FORMAT=JSON {statement}") };
+        let explain_sql = self.explain_sql(statement, analyze);
         let endpoint = driver.endpoint().clone();
         let text = driver
             .editor()
@@ -116,8 +130,7 @@ impl Flavor for MariadbFlavor {
             })
             .await?
             .ok_or("The server returned no plan")?;
-        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("The server returned a plan DBunny can't read: {e}"))?;
-        Ok(ExplainResult { plan: tree_from_json(&json)?, analyzed: analyze, format: ExplainFormat::MysqlTree })
+        self.plan_of(&text, analyze)
     }
 
     async fn accounts(&self, conn: &mut mysql_async::Conn) -> mysql_async::Result<Vec<RoleInfo>> {

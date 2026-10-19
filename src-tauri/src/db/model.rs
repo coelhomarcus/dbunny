@@ -1,5 +1,7 @@
 //! The serializable shapes the commands send and receive, shared by every driver.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -319,11 +321,94 @@ pub struct TableStructure {
 
 // Table data and query results
 
-#[derive(Serialize)]
+/// What a read for the assistant may fetch.
+#[derive(Clone, Copy, Debug)]
+pub struct ReadLimits {
+    /// Rows to return; one more is read to know there were more.
+    pub rows: usize,
+    pub timeout: Duration,
+}
+
+impl ReadLimits {
+    pub const DEFAULT: ReadLimits = ReadLimits { rows: 100, timeout: Duration::from_secs(30) };
+}
+
+/// The rows of a read for the assistant, at most `limits.rows`.
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadResult {
+    pub columns: Vec<QueryColumn>,
+    pub rows: Vec<Vec<JsonValue>>,
+    /// The statement had more rows than `limits.rows`.
+    pub more: bool,
+}
+
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryColumn {
     pub name: String,
     pub data_type: String,
+}
+
+/// The most characters of one cell that a read for the assistant keeps; the agent is shown far
+/// fewer, but a whole table of large documents must not be held to cut them afterwards.
+pub const MAX_CELL_CHARS: usize = 100_000;
+
+impl QueryColumn {
+    /// `value` as a read keeps it: text past `MAX_CELL_CHARS` cut on a character boundary and binary
+    /// past it described by its size (hex `\x…` in SQLite and MySQL, base64 in PostgreSQL).
+    pub fn capped(&self, value: JsonValue) -> JsonValue {
+        cap_cell(&self.data_type, value)
+    }
+}
+
+/// `value` of a column of type `data_type`, as `QueryColumn::capped` keeps it.
+pub fn cap_cell(data_type: &str, value: JsonValue) -> JsonValue {
+    {
+        let JsonValue::String(text) = &value else { return value };
+        let Some((end, _)) = text.char_indices().nth(MAX_CELL_CHARS) else { return value };
+        let kind = data_type.to_ascii_lowercase();
+        if ["bytea", "blob", "binary"].iter().any(|word| kind.contains(word)) {
+            let bytes = match text.strip_prefix("\\x") {
+                Some(hex) => hex.len() / 2,
+                None => text.len() / 4 * 3 - text.bytes().rev().take_while(|&b| b == b'=').count(),
+            };
+            return JsonValue::String(format!("<binary {bytes} bytes>"));
+        }
+        JsonValue::String(format!("{}…", &text[..end]))
+    }
+}
+
+#[cfg(test)]
+mod cell_tests {
+    use super::*;
+
+    fn column(data_type: &str) -> QueryColumn {
+        QueryColumn { name: "c".into(), data_type: data_type.into() }
+    }
+
+    #[test]
+    fn small_cells_stay_as_they_are() {
+        assert_eq!(column("text").capped(JsonValue::from("abc")), JsonValue::from("abc"));
+        assert_eq!(column("int4").capped(JsonValue::from(7)), JsonValue::from(7));
+    }
+
+    #[test]
+    fn long_text_is_cut_on_a_character_boundary() {
+        let cut = column("text").capped(JsonValue::from("日".repeat(MAX_CELL_CHARS + 5)));
+        let text = cut.as_str().unwrap();
+        assert_eq!(text.chars().count(), MAX_CELL_CHARS + 1);
+        assert!(text.ends_with('…'));
+    }
+
+    #[test]
+    fn long_binary_is_described_by_its_size() {
+        let hex = format!("\\x{}", "ab".repeat(MAX_CELL_CHARS));
+        assert_eq!(column("blob").capped(JsonValue::from(hex)), JsonValue::from(format!("<binary {} bytes>", MAX_CELL_CHARS)));
+        let base64 = "AAAA".repeat(MAX_CELL_CHARS / 2) + "AA==";
+        let size = MAX_CELL_CHARS / 2 * 3 + 1;
+        assert_eq!(column("bytea").capped(JsonValue::from(base64)), JsonValue::from(format!("<binary {size} bytes>")));
+    }
 }
 
 #[derive(Serialize)]

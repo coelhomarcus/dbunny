@@ -7,6 +7,7 @@ const NONE: Capabilities = {
   transactions: false,
   schemaEditing: false,
   admin: false,
+  assistant: false,
   roles: false,
   activity: false,
   schemas: false,

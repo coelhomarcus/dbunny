@@ -20,14 +20,15 @@ export default function ReleaseNotes({ markdown }: { markdown: string }) {
           );
         }
         if (block.kind === "list") {
+          const List = block.ordered ? "ol" : "ul";
           return (
-            <ul key={index} className="list-disc space-y-1.5 pl-4">
+            <List key={index} className={block.ordered ? "list-decimal space-y-1.5 pl-5" : "list-disc space-y-1.5 pl-4"}>
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex}>
                   <Inlines parts={item} />
                 </li>
               ))}
-            </ul>
+            </List>
           );
         }
         if (block.kind === "code") {

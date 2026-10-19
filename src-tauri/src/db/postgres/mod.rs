@@ -9,6 +9,7 @@ mod console;
 pub mod data;
 mod objects;
 mod params;
+mod reader;
 pub mod session;
 pub mod structure;
 pub mod text;
@@ -20,7 +21,8 @@ use tokio::sync::Mutex;
 pub use session::{Endpoint, Link, Notices, PgState};
 
 use super::{
-    Capabilities, Catalog, ConnectionInfo, Console, Data, Driver, Engine, SchemaEditor, ServerAdmin, Transactions,
+    Capabilities, Catalog, ConnectionInfo, Console, Data, Driver, Engine, ReadOnlyQueries, SchemaEditor, ServerAdmin,
+    Transactions,
 };
 
 /// One open session on a PostgreSQL server.
@@ -31,6 +33,8 @@ pub struct PostgresDriver {
     endpoint: Endpoint,
     /// Only one command reconnects at a time; the others wait and use its connection.
     reconnect_lock: Mutex<()>,
+    /// The assistant reads one statement at a time on its connection.
+    reading: Mutex<()>,
     info: ConnectionInfo,
     capabilities: Capabilities,
 }
@@ -78,6 +82,10 @@ impl Driver for PostgresDriver {
     }
 
     fn admin(&self) -> Option<&dyn ServerAdmin> {
+        Some(self)
+    }
+
+    fn reader(&self) -> Option<&dyn ReadOnlyQueries> {
         Some(self)
     }
 }

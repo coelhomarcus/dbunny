@@ -49,6 +49,7 @@ export function ConnectionProvider({
     initialSession ? infoOf(initialSession.response) : null,
   );
   const [savedConnectionName, setSavedConnectionName] = useState<string | null>(initialSession?.saved?.name ?? null);
+  const [savedConnectionId, setSavedConnectionId] = useState<string | null>(initialSession?.saved?.id ?? null);
 
   // The tab bar learns about a starting session once, when the tab opens
   useEffect(() => {
@@ -73,6 +74,7 @@ export function ConnectionProvider({
         setSessionId(response.sessionId);
         setConnectionInfo(infoOf(response));
         setSavedConnectionName(saved?.name || null);
+        setSavedConnectionId(saved?.id ?? null);
         onSessionChange(tabInfo(response, saved));
       } catch (err) {
         // An SSH host key to confirm isn't an error to show: the page asks the user instead
@@ -96,6 +98,7 @@ export function ConnectionProvider({
       setSessionId(null);
       setConnectionInfo(null);
       setSavedConnectionName(null);
+      setSavedConnectionId(null);
       onSessionChange(DISCONNECTED);
     }
   }, [sessionId, onSessionChange]);
@@ -108,13 +111,14 @@ export function ConnectionProvider({
       isConnecting,
       connectionInfo,
       savedConnectionName,
+      savedConnectionId,
       sessionId,
       api: sessionApi,
       error,
       connect,
       disconnect,
     }),
-    [sessionId, isConnecting, connectionInfo, savedConnectionName, sessionApi, error, connect, disconnect],
+    [sessionId, isConnecting, connectionInfo, savedConnectionName, savedConnectionId, sessionApi, error, connect, disconnect],
   );
 
   return <ConnectionContext.Provider value={value}>{children}</ConnectionContext.Provider>;

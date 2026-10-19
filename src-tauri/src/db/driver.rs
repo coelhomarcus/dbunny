@@ -7,7 +7,7 @@ use async_trait::async_trait;
 
 use super::capabilities::Capabilities;
 use super::model::{
-    ColumnInfo, CompletionSchema, ConnectionInfo, DatabaseInfo, Diagram, ExplainResult, ExplorerTree, ExtensionInfo,
+    ColumnInfo, CompletionSchema, ConnectionInfo, DatabaseInfo, Diagram, ExplainResult, ReadLimits, ReadResult, ExplorerTree, ExtensionInfo,
     FunctionDetail, JsonMap, NewTable, ObjectDefinition, QueryResult, RoleList, RowChange, ServerActivity,
     StructureChange, TableDataParams, TableDataResponse, TableStructure,
 };
@@ -33,6 +33,10 @@ pub trait Driver: Send + Sync {
         None
     }
     fn admin(&self) -> Option<&dyn ServerAdmin> {
+        None
+    }
+    /// Reading for the assistant, apart from the editor's connection and its transaction.
+    fn reader(&self) -> Option<&dyn ReadOnlyQueries> {
         None
     }
 }
@@ -79,6 +83,18 @@ pub trait Console: Send + Sync {
     async fn execute(&self, sql: &str) -> Result<QueryResult, String>;
     async fn cancel(&self) -> Result<(), String>;
     async fn explain(&self, sql: &str, analyze: bool) -> Result<ExplainResult, String>;
+}
+
+/// What the assistant may run: one statement that only reads, on a connection of its own.
+#[async_trait]
+pub trait ReadOnlyQueries: Send + Sync {
+    /// Runs one statement that only reads, outside the editor's connection, in a read-only
+    /// transaction that is always rolled back. Reads at most `limits.rows + 1` rows and stops.
+    async fn query(&self, sql: &str, limits: ReadLimits) -> Result<ReadResult, String>;
+
+    /// The plan of one statement that only reads, run for real (EXPLAIN ANALYZE) under the same
+    /// terms as `query`: a read-only transaction on a connection apart from the editor's.
+    async fn explain_analyzed(&self, sql: &str, limits: ReadLimits) -> Result<ExplainResult, String>;
 }
 
 /// A transaction kept open across runs of the SQL editor.
@@ -262,7 +278,7 @@ mod tests {
     #[tokio::test]
     async fn missing_pieces_report_unsupported() {
         let driver: Arc<dyn Driver> = Arc::new(FakeDriver::default());
-        assert!(driver.console().is_none() && driver.admin().is_none());
+        assert!(driver.console().is_none() && driver.admin().is_none() && driver.reader().is_none());
         let err = crate::commands::require(driver.admin(), driver.engine(), "Roles").err().unwrap();
         assert_eq!(err, "Roles isn't supported by PostgreSQL");
     }

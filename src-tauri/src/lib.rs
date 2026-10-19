@@ -1,3 +1,4 @@
+mod assistant;
 mod commands;
 mod db;
 
@@ -138,6 +139,9 @@ pub fn run() {
                 }
                 *state.saved_connections.blocking_lock() = connections;
             }
+            let data_dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("dbunny"));
+            let events = std::sync::Arc::new(commands::assistant::TauriEvents(app.handle().clone()));
+            app.manage(assistant::Assistant::new(data_dir, state.sessions.clone(), events));
             app.manage(state);
 
             // Windows and Linux: the title bar (tabs and window controls) is drawn by the app
@@ -200,9 +204,29 @@ pub fn run() {
             commands::saved::get_saved_connections,
             commands::saved::save_connection,
             commands::saved::delete_saved_connection,
+            commands::assistant::assistant_status,
+            commands::assistant::assistant_start,
+            commands::assistant::assistant_restart,
+            commands::assistant::assistant_new_conversation,
+            commands::assistant::assistant_list_conversations,
+            commands::assistant::assistant_load_conversation,
+            commands::assistant::assistant_prompt,
+            commands::assistant::assistant_cancel,
+            commands::assistant::assistant_approve,
+            commands::assistant::assistant_set_model,
+            commands::assistant::assistant_close_conversation,
+            commands::assistant::assistant_log,
+            commands::assistant::assistant_sign_out,
             #[cfg(debug_assertions)]
             open_devtools,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // The agent is a process of its own: it goes when the app does
+            if let tauri::RunEvent::Exit = event {
+                let assistant = app.state::<assistant::Assistant>();
+                tauri::async_runtime::block_on(assistant.shutdown());
+            }
+        });
 }

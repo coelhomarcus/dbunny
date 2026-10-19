@@ -150,6 +150,7 @@ pub async fn save_connection(
 pub async fn delete_saved_connection(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
+    assistant: State<'_, crate::assistant::Assistant>,
     id: String,
 ) -> Result<bool, String> {
     let mut connections = state.saved_connections.lock().await;
@@ -165,6 +166,7 @@ pub async fn delete_saved_connection(
         return Err(format!("The connection wasn't deleted: {e}"));
     }
 
+    assistant.forget_saved(&id);
     Ok(true)
 }
 

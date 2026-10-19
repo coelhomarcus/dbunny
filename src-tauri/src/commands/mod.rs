@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod assistant;
 pub mod catalog;
 pub mod connect;
 pub mod console;

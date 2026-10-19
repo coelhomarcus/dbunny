@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy } from "lucide-react";
+import { Copy, Sparkles } from "lucide-react";
 import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
 import { writeClipboardText } from "../lib/clipboard";
 import { rowsToJson, rowsToTsv, valueText } from "../lib/copyRows";
@@ -12,11 +12,14 @@ import {
 import type { QueryColumn, QueryResult } from "@/types";
 import { QueryResultsSkeleton } from "./Skeleton";
 import { isMac } from "../lib/platform";
+import Button from "./ui/Button";
 
 interface QueryResultsProps {
   result: QueryResult | null;
   error: string | null;
   running: boolean;
+  /** Asks the assistant to fix the statement that failed; the button shows only when it is given. */
+  onFix?: () => void;
 }
 
 type PgError = {
@@ -39,7 +42,7 @@ function parseError(raw: string): PgError {
   return { message: raw };
 }
 
-function ErrorDisplay({ raw }: { raw: string }) {
+function ErrorDisplay({ raw, onFix }: { raw: string; onFix?: () => void }) {
   const err = parseError(raw);
   const severity = err.severity?.toUpperCase() ?? "ERROR";
   const severityColor =
@@ -83,13 +86,21 @@ function ErrorDisplay({ raw }: { raw: string }) {
               <p className="font-mono text-xs mt-0.5 opacity-80">{err.hint}</p>
             </div>
           )}
+          {onFix && (
+            <div className="pt-1">
+              <Button variant="outline" size="xs" onClick={onFix}>
+                <Sparkles />
+                Fix with AI
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-export default function QueryResults({ result, error, running }: QueryResultsProps) {
+export default function QueryResults({ result, error, running, onFix }: QueryResultsProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const columns = useMemo<ColumnDef<unknown[], unknown>[]>(() => {
     if (!result) return [];
@@ -117,7 +128,7 @@ export default function QueryResults({ result, error, running }: QueryResultsPro
 
   return (
     <div className="flex-1 min-h-0 overflow-auto flex flex-col h-full">
-      {error && <ErrorDisplay raw={error} />}
+      {error && <ErrorDisplay raw={error} onFix={onFix} />}
 
       {result && result.columns.length > 0 && (
         <table

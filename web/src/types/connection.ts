@@ -82,6 +82,8 @@ export interface DatabaseInfo {
 
 /** How a saved connection presents itself: its name, colour and icon. */
 export interface SavedTag {
+  /** The id of the saved connection; missing for one that was never saved. */
+  id?: string;
   name: string;
   color?: string | null;
   icon?: string | null;

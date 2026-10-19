@@ -5,6 +5,7 @@ mod catalog;
 mod conn;
 mod console;
 mod data;
+mod reader;
 mod schema_edit;
 pub mod errors;
 pub(crate) mod split;
@@ -21,7 +22,7 @@ use async_trait::async_trait;
 
 pub(crate) use conn::SqliteConn;
 
-use super::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, SchemaEditor, Transactions};
+use super::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, ReadOnlyQueries, SchemaEditor, Transactions};
 
 /// How a file is opened.
 pub struct OpenOptions {
@@ -45,6 +46,10 @@ pub struct SqliteDriver {
     tables: SqliteConn,
     /// Runs the query editor and keeps its transaction.
     editor: SqliteConn,
+    /// The file, to open the assistant's connection on first use.
+    path: PathBuf,
+    /// Reads for the assistant, on a connection that can't write; opened on first use.
+    reader: tokio::sync::OnceCell<SqliteConn>,
     info: ConnectionInfo,
     capabilities: Capabilities,
 }
@@ -64,7 +69,7 @@ impl SqliteDriver {
                 server_version: rusqlite::version().to_string(),
                 read_only: tables.read_only() || editor.read_only(),
             };
-            Ok(Arc::new(SqliteDriver { tables, editor, info, capabilities: Capabilities::sqlite() }))
+            Ok(Arc::new(SqliteDriver { tables, editor, path, reader: tokio::sync::OnceCell::new(), info, capabilities: Capabilities::sqlite() }))
         })
         .await
         .map_err(|e| format!("Opening the file stopped unexpectedly: {e}"))?
@@ -101,6 +106,9 @@ impl Driver for SqliteDriver {
     async fn close(&self) {
         self.tables.close();
         self.editor.close();
+        if let Some(reader) = self.reader.get() {
+            reader.close();
+        }
     }
 
     fn catalog(&self) -> &dyn Catalog {
@@ -120,6 +128,10 @@ impl Driver for SqliteDriver {
     }
 
     fn schema_editor(&self) -> Option<&dyn SchemaEditor> {
+        Some(self)
+    }
+
+    fn reader(&self) -> Option<&dyn ReadOnlyQueries> {
         Some(self)
     }
 }

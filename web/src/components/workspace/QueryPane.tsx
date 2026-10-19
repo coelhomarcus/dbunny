@@ -19,6 +19,11 @@ import PlanView from "../query/PlanView";
 import NoticeList from "../query/NoticeList";
 import HistoryPanel, { type LibraryView } from "../query/HistoryPanel";
 import SideCard from "../layout/SideCard";
+import { registerEditor } from "../../lib/editorBridge";
+import { useAssistant } from "../../contexts/assistant";
+import { errorTextOf, explainPrompt, fixPrompt, optimizePrompt } from "../../lib/assistantPrompts";
+import { engineLabel } from "../../lib/engines";
+import AssistantActions from "../query/AssistantActions";
 import Dialog from "../ui/Dialog";
 import Input from "../ui/Input";
 import { loadSaved, removeSaved, saveQuery, savedKey, type SavedQuery } from "../../lib/savedQueries";
@@ -173,6 +178,10 @@ function QueryPaneBody({
   const [completionSchema, setCompletionSchema] = useState<CompletionSchema | null>(null);
 
   const editorRef = useRef<SqlEditorHandle | null>(null);
+  const assistant = useAssistant();
+  // The statement that failed, and the plan the person last asked for, to hand to the assistant
+  const lastRunRef = useRef("");
+  const lastPlanRef = useRef<{ sql: string; text: string } | null>(null);
 
   const loadCompletionSchema = useCallback(() => {
     api
@@ -314,6 +323,7 @@ function QueryPaneBody({
       await runTransaction(txCommand);
       return;
     }
+    lastRunRef.current = sql;
     setRunning(true);
     setRunningSince(Date.now());
     setError(null);
@@ -361,6 +371,7 @@ function QueryPaneBody({
     setError(null);
     try {
       const res = await api.explain(sql, analyze);
+      lastPlanRef.current = { sql, text: JSON.stringify(res.plan).slice(0, 6000) };
       setPlan(res);
       showView("plan");
     } catch (err) {
@@ -370,6 +381,32 @@ function QueryPaneBody({
       setRunningSince(null);
     }
   }, [api, notify]);
+
+  // What the assistant is asked about: the selection, or the statement at the cursor
+  const engine = connectionInfo ? engineLabel(connectionInfo.engine) : "SQL";
+  const askAbout = useCallback(
+    (build: (sql: string) => string) => {
+      const sql = editorRef.current?.getCurrentStatement() ?? "";
+      if (!sql.trim()) {
+        notify({ tone: "error", text: "Select a statement, or put the cursor in one, to ask about it" });
+        return;
+      }
+      assistant.ask(build(sql));
+    },
+    [assistant, notify],
+  );
+  const explainWithAssistant = useCallback(() => askAbout((sql) => explainPrompt({ engine, sql })), [askAbout, engine]);
+  const optimizeWithAssistant = useCallback(
+    () =>
+      askAbout((sql) => {
+        const plan = lastPlanRef.current;
+        return optimizePrompt({ engine, sql, plan: plan && plan.sql === sql ? plan.text : undefined });
+      }),
+    [askAbout, engine],
+  );
+  const fixWithAssistant = useCallback(() => {
+    if (error && lastRunRef.current) assistant.ask(fixPrompt({ engine, sql: lastRunRef.current, error: errorTextOf(error) }));
+  }, [assistant, engine, error]);
 
   const runQuery = useCallback(async (scope: RunScope = "current") => {
     const editor = editorRef.current;
@@ -412,6 +449,13 @@ function QueryPaneBody({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [active]);
+
+  // The assistant writes into the editor of the tab in front
+  useEffect(() => {
+    const handle = editorRef.current;
+    if (!active || !handle) return;
+    return registerEditor(documentId, handle);
+  }, [active, documentId]);
 
   // Esc stops the running query (only in the visible tab)
   useEffect(() => {
@@ -480,6 +524,7 @@ function QueryPaneBody({
           {/* Actions: run and save on the left, the rest quieter on the right */}
           <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-2.5 select-none">
             <RunButton disabled={running} explainAnalyze={capabilities.explainAnalyze} analyzeHint={explainAnalyzeHint(capabilities.explainFormat)} onRun={runQuery} onExplain={explain} />
+            <AssistantActions onExplain={explainWithAssistant} onOptimize={optimizeWithAssistant} />
             <Tooltip label={justSaved ? "Saved" : `Save the query (${MOD}S)`} side="top">
               <Button
                 variant="ghost-muted"
@@ -599,7 +644,7 @@ function QueryPaneBody({
                 <NoticeList notices={result?.notices ?? []} />
               </div>
             ) : (
-              <QueryResults result={result} error={error} running={running} />
+              <QueryResults result={result} error={error} running={running} onFix={assistant.available && assistant.enabled ? fixWithAssistant : undefined} />
             )}
           </div>
           <ResultsBar

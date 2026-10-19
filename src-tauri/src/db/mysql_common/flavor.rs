@@ -17,6 +17,9 @@ pub trait Flavor: Send + Sync {
     /// Reads `VERSION()`; refuses the other flavor and versions the flavor doesn't support.
     fn parse_version(&self, text: &str) -> Result<ServerVersion, String>;
     fn capabilities(&self, version: ServerVersion) -> Capabilities;
+    /// The statement that limits how long a SELECT of this session may run, in milliseconds
+    /// (0 for no limit).
+    fn statement_timeout_sql(&self, ms: u64) -> String;
     /// Databases every server has, never opened on their own.
     fn system_databases(&self) -> &'static [&'static str];
     /// A query for two flags, whether the server is read-only and whether even accounts with
@@ -44,6 +47,10 @@ pub trait Flavor: Send + Sync {
     async fn refine_columns(&self, _conn: &mut mysql_async::Conn, _database: &str, _table: &str, _columns: &mut Vec<StoredColumn>) -> mysql_async::Result<()> {
         Ok(())
     }
+    /// The statement that asks the server for the plan of `statement`.
+    fn explain_sql(&self, statement: &str, analyze: bool) -> String;
+    /// The plan the server answered with, as the tree the plan view draws.
+    fn plan_of(&self, text: &str, analyze: bool) -> Result<ExplainResult, String>;
     /// The plan of one statement that was already checked (a single statement, no EXPLAIN of
     /// its own, and, to analyze, one that only reads). It runs on the editor's connection.
     async fn explain(&self, driver: &ServerDriver, statement: &str, analyze: bool) -> Result<ExplainResult, String>;

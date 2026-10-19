@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-export type SettingsSection = "general" | "editor" | "updates" | "about";
+export type SettingsSection = "general" | "editor" | "assistant" | "updates" | "about";
 
 export interface SettingsDialogValue {
   /** Opens Settings, on a section (the last one seen when omitted). */

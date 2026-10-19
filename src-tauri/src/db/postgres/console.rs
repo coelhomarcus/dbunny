@@ -287,7 +287,7 @@ impl Console for PostgresDriver {
     }
 }
 
-fn plan_from_messages(messages: &[SimpleQueryMessage]) -> Result<JsonValue, String> {
+pub(super) fn plan_from_messages(messages: &[SimpleQueryMessage]) -> Result<JsonValue, String> {
     let text: String = messages
         .iter()
         .filter_map(|m| match m {

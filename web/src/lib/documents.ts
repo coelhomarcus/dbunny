@@ -15,7 +15,8 @@ export type DocumentKind =
   | "index"
   | "trigger"
   | "create-table"
-  | "diagram";
+  | "diagram"
+  | "assistant";
 
 export interface FilterRequest {
   id: number;
@@ -55,7 +56,8 @@ export type OpenTarget =
       detail?: string;
     }
   | { kind: "create-table"; schema: string }
-  | { kind: "diagram"; schema: string };
+  | { kind: "diagram"; schema: string }
+  | { kind: "assistant" };
 
 export function emptyDocuments(): DocumentsState {
   return { items: [], activeId: null, nextQuery: 1, nextId: 1 };
@@ -63,7 +65,7 @@ export function emptyDocuments(): DocumentsState {
 
 function sameIdentity(doc: Document, target: Exclude<OpenTarget, { kind: "query" } | { kind: "create-table" }>): boolean {
   if (doc.kind !== target.kind) return false;
-  if (target.kind === "activity" || target.kind === "roles") return true;
+  if (target.kind === "activity" || target.kind === "roles" || target.kind === "assistant") return true;
   if (target.kind === "diagram") return doc.schema === target.schema;
   if (doc.schema !== target.schema || doc.name !== target.name) return false;
   if (target.kind === "function" || target.kind === "procedure") return (doc.detail ?? "") === (target.detail ?? "");
@@ -102,6 +104,7 @@ export function openDocument(state: DocumentsState, target: OpenTarget): Documen
     : target.kind === "diagram" ? target.schema
     : target.kind === "activity" ? "Activity"
     : target.kind === "roles" ? "Roles"
+    : target.kind === "assistant" ? "Assistant"
     : target.name;
   const doc: Document = { id, kind: target.kind, title };
   if (target.kind === "query") {
@@ -109,7 +112,7 @@ export function openDocument(state: DocumentsState, target: OpenTarget): Documen
     if (target.savedId) doc.savedId = target.savedId;
   } else if (target.kind === "create-table" || target.kind === "diagram") {
     doc.schema = target.schema;
-  } else if (target.kind !== "activity" && target.kind !== "roles") {
+  } else if (target.kind !== "activity" && target.kind !== "roles" && target.kind !== "assistant") {
     doc.schema = target.schema;
     doc.name = target.name;
     if (target.kind === "function" || target.kind === "procedure") doc.detail = target.detail ?? "";

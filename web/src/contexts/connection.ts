@@ -8,6 +8,8 @@ export interface ConnectionContextValue {
   isConnecting: boolean;
   connectionInfo: ConnectionInfo | null;
   savedConnectionName: string | null;
+  /** The id of the saved connection this tab opened; null for one that wasn't saved. */
+  savedConnectionId: string | null;
   sessionId: string | null;
   /** API bound to this tab's session. */
   api: SessionApi;

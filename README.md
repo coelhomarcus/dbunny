@@ -38,7 +38,19 @@ Screens and actions adapt to what the connected engine supports (for example, sc
 - **Data:** paginated and sortable tables, filters, inline editing with a review of the SQL before saving, insert, delete, CSV import, and export to CSV or JSON.
 - **Queries:** a SQL editor with autocomplete, run the statement at the cursor or the whole script, query plans, transactions, formatting, history and saved queries. Safe mode asks before destructive statements.
 - **Structure:** columns, indexes, constraints, foreign keys, triggers, permissions and DDL where the engine allows it, with the SQL shown before it runs.
+- **Assistant:** ask about your data, write SQL, explain, fix and optimize it, with the database's tables, columns and relationships in view (see below).
 - **Server (PostgreSQL, MySQL and MariaDB):** create and drop databases (and schemas on PostgreSQL), see roles or accounts and live activity, and cancel or end sessions.
+
+## AI Assistant
+
+An assistant for the connected database, in a side panel (or a tab of its own) next to your queries. Ask about your data in plain language and it explores the schema, runs queries and checks its answers against the real rows. From the query editor, ask it to explain a statement, find why one failed, or look at a statement's plan and suggest an index or a rewrite.
+
+- **It runs Claude Code on your computer, with your Claude account.** DBunny keeps no API key. You need [Node.js](https://nodejs.org) 20 or newer and a Claude account. Claude Code itself doesn't have to be installed: when you aren't signed in, the panel shows a command to sign in with the one that comes with the adapter (or, if you already use Claude Code, `claude` then `/login` works too).
+- **It only reads.** Each query runs in a read-only transaction that is rolled back, and waits for your approval (once, or for the rest of the conversation). SQL that changes data is shown for you to open in the editor and run yourself.
+- **You decide what it sees.** It is told the engine, version and schema, never the host or the password. It sees the rows of the queries you allow, cut to a limit you set; for a saved connection you can turn on *Schema only* so it never sees a value.
+- **Conversations are kept per saved connection** by Claude Code, in `~/.claude/projects`, and can be reopened from the panel.
+
+Turn it on from the assistant button in the tab bar (Cmd/Ctrl+I) after reading what it sends. Settings has a section for it.
 
 ## Getting started
 
