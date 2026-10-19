@@ -68,6 +68,10 @@ impl Conversations {
         found
     }
 
+    pub fn all(&self) -> Vec<Arc<Conversation>> {
+        self.items.lock().unwrap().clone()
+    }
+
     pub fn get(&self, id: &str) -> Option<Arc<Conversation>> {
         self.items.lock().unwrap().iter().find(|c| c.id == id).cloned()
     }
