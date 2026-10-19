@@ -492,7 +492,7 @@ mod server_tests {
     use serde_json::{json, Map};
 
     use super::*;
-    use crate::db::mysql::tests_support::{exec, raw_conn, TestDb};
+    use crate::db::mysql_common::tests_support::{exec, raw_conn, TestDb};
     use crate::db::sql::dialect::Dialect;
     use crate::db::sql::edit::build_insert_in;
 

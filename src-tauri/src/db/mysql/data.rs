@@ -8,7 +8,7 @@ use mysql_async::{Conn, Row, Value};
 use serde_json::Value as JsonValue;
 
 use super::catalog::{column_definitions, number, qualified, quote, table_engine};
-use super::MysqlDriver;
+use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{JsonMap, QueryColumn, RowChange, TableDataParams, TableDataResponse};
 use crate::db::mysql_common::errors::error_message;
 use crate::db::mysql_common::values::{kind_of, type_name, value_to_json, MysqlBinder};
@@ -92,7 +92,7 @@ fn already_done(n: usize, total: usize, done: &str, engine: Option<&str>) -> Str
     format!("{n} of {total} rows were already {done}: the table uses {}, which can't undo changes.", engine.unwrap_or("an engine that"))
 }
 
-impl MysqlDriver {
+impl ServerDriver {
     /// An error of the server in the app's words.
     fn failure(&self, e: &mysql_async::Error) -> String {
         error_message(e, self.endpoint())
@@ -127,7 +127,7 @@ impl MysqlDriver {
 }
 
 #[async_trait]
-impl Data for MysqlDriver {
+impl Data for ServerDriver {
     async fn table_page(&self, schema: &str, table: &str, params: TableDataParams) -> Result<TableDataResponse, String> {
         let mut conn = self.conn().await?;
         let page = params.page.unwrap_or(1).max(1);
@@ -360,8 +360,8 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
     use serde_json::{json, Value as JsonValue};
 
-    use super::super::tests_support::{exec, query_one, TestDb};
-    use super::super::MysqlDriver;
+    use crate::db::mysql_common::tests_support::{exec, query_one, TestDb};
+    use crate::db::mysql_common::driver::ServerDriver;
     use crate::db::model::{JsonMap, RowChange, SortKey, TableDataParams, TableDataResponse};
     use crate::db::mysql_common::errors::LOCKED;
     use crate::db::sql::filter::TableFilter;
@@ -370,10 +370,10 @@ mod server_tests {
     const SHOP: &str = include_str!("fixtures/shop.sql");
 
     /// A database with the shop in it, and a session open on it.
-    async fn shop() -> (TestDb, Arc<MysqlDriver>) {
+    async fn shop() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
         exec(&db.endpoint, SHOP).await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 
@@ -397,7 +397,7 @@ mod server_tests {
         page.rows.iter().map(|r| r[0].clone()).collect()
     }
 
-    async fn page(driver: &MysqlDriver, db: &TestDb, table: &str, params: TableDataParams) -> TableDataResponse {
+    async fn page(driver: &ServerDriver, db: &TestDb, table: &str, params: TableDataParams) -> TableDataResponse {
         driver.data().table_page(&db.name, table, params).await.unwrap()
     }
 
@@ -769,7 +769,7 @@ mod server_tests {
         let (db, _) = shop().await;
         customers(&db, 1).await;
         let endpoint = crate::db::mysql_common::connect::MysqlEndpoint { read_only: true, ..db.endpoint.clone() };
-        let driver = MysqlDriver::open(endpoint, None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(endpoint).await.unwrap();
         let err = driver.data().save_rows(&db.name, "customers", vec![change(json!({"id": 1}), json!({"name": "x"}))]).await.err().unwrap();
         assert_eq!(err, "Nothing was saved. The row: This connection is read-only.");
         assert_eq!(driver.data().insert_row(&db.name, "customers", map(json!({"email": "z@z"}))).await.err().unwrap(), "This connection is read-only.");

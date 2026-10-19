@@ -6,7 +6,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Params, Row};
 
 use super::catalog::{non_empty, number, qualified, quote, show_create, string, table_columns, terminated, text};
-use super::version::MysqlVersion;
+use crate::db::mysql_common::version::ServerVersion;
 use crate::db::model::{
     ConstraintInfo, ForeignKeyInfo, IndexInfo, ReferencedBy, TableMeta, TablePrivilege, TableStructure, TriggerInfo,
 };
@@ -27,7 +27,7 @@ fn section<T: Default>(warnings: &mut Vec<String>, endpoint: &MysqlEndpoint, nam
 pub(super) async fn table_structure(
     conn: &mut Conn,
     endpoint: &MysqlEndpoint,
-    version: MysqlVersion,
+    version: ServerVersion,
     schema: &str,
     table: &str,
 ) -> Result<TableStructure, String> {
@@ -191,7 +191,7 @@ pub(super) async fn read_constraint_types(conn: &mut Conn, schema: &str, table: 
     Ok(rows.iter().map(|r| (string(r, "constraint_name"), string(r, "constraint_type"))).collect())
 }
 
-async fn table_indexes(conn: &mut Conn, schema: &str, table: &str, version: MysqlVersion) -> mysql_async::Result<Vec<IndexInfo>> {
+async fn table_indexes(conn: &mut Conn, schema: &str, table: &str, version: ServerVersion) -> mysql_async::Result<Vec<IndexInfo>> {
     // Functional key parts exist from 8.0.13
     let expression = if version.at_least(8, 0, 13) { "s.EXPRESSION" } else { "NULL" };
     let rows: Vec<Row> = conn
@@ -279,7 +279,7 @@ async fn table_constraints(
     conn: &mut Conn,
     schema: &str,
     table: &str,
-    version: MysqlVersion,
+    version: ServerVersion,
     indexes: &[IndexInfo],
     keys: &[ForeignKey],
 ) -> mysql_async::Result<Vec<ConstraintInfo>> {

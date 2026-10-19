@@ -7,7 +7,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Error as MysqlError, Row};
 
 use super::catalog::{number, quote, string, text};
-use super::MysqlDriver;
+use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{DatabaseInfo, RoleInfo, RoleList, ServerActivity, ServerSession};
 use crate::db::mysql_common::connect::MysqlEndpoint;
 use crate::db::mysql_common::errors::error_message;
@@ -209,7 +209,7 @@ fn database_name(name: &str) -> Result<&str, String> {
 /// DROP DATABASE waiting at most `wait` for the locks other sessions hold. With `force` the
 /// other sessions that use the database are ended first. The one the session itself is open
 /// on stays: its pool would lose it from under the app.
-pub(super) async fn drop_database_waiting(driver: &MysqlDriver, name: &str, force: bool, wait: Duration) -> Result<(), String> {
+pub(super) async fn drop_database_waiting(driver: &ServerDriver, name: &str, force: bool, wait: Duration) -> Result<(), String> {
     let name = database_name(name)?;
     if name == driver.database() {
         return Err(format!("This session is open on {name}: open another database first."));
@@ -239,7 +239,7 @@ pub(super) async fn drop_database_waiting(driver: &MysqlDriver, name: &str, forc
 }
 
 #[async_trait]
-impl ServerAdmin for MysqlDriver {
+impl ServerAdmin for ServerDriver {
     /// The databases the user can see, without the server's own.
     async fn databases(&self) -> Result<Vec<DatabaseInfo>, String> {
         let mut conn = self.conn().await?;
@@ -269,7 +269,7 @@ impl ServerAdmin for MysqlDriver {
             return Err("Choose a database".into());
         }
         let endpoint = MysqlEndpoint { database: Some(name.trim().to_string()), ..self.endpoint().clone() };
-        let driver: Arc<dyn Driver> = MysqlDriver::open(endpoint, None).await?;
+        let driver: Arc<dyn Driver> = ServerDriver::open(endpoint, None, self.flavor()).await?;
         Ok(driver)
     }
 
@@ -414,14 +414,14 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
     use mysql_async::Conn;
 
-    use super::super::tests_support::{exec, raw_conn, test_endpoint, TestDb};
-    use super::super::MysqlDriver;
+    use crate::db::mysql_common::tests_support::{exec, raw_conn, test_endpoint, TestDb};
+    use crate::db::mysql_common::driver::ServerDriver;
     use crate::db::mysql_common::connect::MysqlEndpoint;
     use crate::db::Driver;
 
-    async fn open() -> (TestDb, Arc<MysqlDriver>) {
+    async fn open() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 
@@ -595,7 +595,7 @@ mod server_tests {
         exec(&test_endpoint(), &format!("CREATE USER '{user}'@'%'; GRANT SELECT ON `{}`.* TO '{user}'@'%'", db.name)).await;
         // A session of someone else that the limited user must not see
         let (stranger_id, _stranger) = busy(&db.endpoint, "SELECT SLEEP(5)").await;
-        let d = MysqlDriver::open(MysqlEndpoint { user: user.clone(), password: String::new(), ..db.endpoint.clone() }, None).await.unwrap();
+        let d = crate::db::mysql_common::tests_support::open_server(MysqlEndpoint { user: user.clone(), password: String::new(), ..db.endpoint.clone() }).await.unwrap();
         let admin = d.admin().unwrap();
         tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -670,7 +670,7 @@ mod server_tests {
         let user = unique("dbunny_t_l");
         let _cleanup = Cleanup(format!("DROP USER IF EXISTS '{user}'@'%'"));
         exec(&test_endpoint(), &format!("CREATE USER '{user}'@'%'; GRANT SELECT ON `{}`.* TO '{user}'@'%'", db.name)).await;
-        let d = MysqlDriver::open(MysqlEndpoint { user: user.clone(), password: String::new(), ..db.endpoint.clone() }, None).await.unwrap();
+        let d = crate::db::mysql_common::tests_support::open_server(MysqlEndpoint { user: user.clone(), password: String::new(), ..db.endpoint.clone() }).await.unwrap();
         let list = d.admin().unwrap().roles().await.unwrap();
         assert!(list.limited_view);
         assert_eq!(list.roles.len(), 1);

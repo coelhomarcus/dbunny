@@ -13,8 +13,8 @@ use mysql_async::prelude::Queryable;
 
 use super::catalog::{column_definitions, constraint_kinds, qualified, quote, ColumnDefinition};
 use super::objects::{drop_sql, duplicate, rename_sql, truncate_sql};
-use super::version::MysqlVersion;
-use super::MysqlDriver;
+use crate::db::mysql_common::version::ServerVersion;
+use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{ColumnGeneration, NewColumn, NewTable, StructureChange};
 use crate::db::mysql_common::errors::error_message;
 use crate::db::{unsupported, Engine, SchemaEditor};
@@ -341,7 +341,7 @@ pub(crate) fn change_sql(
     change: &StructureChange,
     columns: &[ColumnDefinition],
     constraints: &HashMap<String, String>,
-    version: MysqlVersion,
+    version: ServerVersion,
 ) -> Result<String, String> {
     let alter = format!("ALTER TABLE {table}");
     Ok(match change {
@@ -511,7 +511,7 @@ pub(crate) fn create_table_sql(table: &str, spec: &NewTable) -> Result<String, S
     Ok(format!("CREATE TABLE {table} (\n    {}\n)", lines.join(",\n    ")))
 }
 
-impl MysqlDriver {
+impl ServerDriver {
     /// The statement for a change, reading the table's columns or constraints when the change needs them.
     async fn change_statement(&self, schema: &str, table: &str, change: &StructureChange) -> Result<String, String> {
         let restates_a_column = matches!(change, StructureChange::SetNullable { .. } | StructureChange::SetType { .. } | StructureChange::SetComment { .. });
@@ -536,7 +536,7 @@ impl MysqlDriver {
 }
 
 #[async_trait]
-impl SchemaEditor for MysqlDriver {
+impl SchemaEditor for ServerDriver {
     /// The SQL a change would run, for showing before running it.
     async fn preview_change(&self, schema: &str, table: &str, change: &StructureChange) -> Result<String, String> {
         Ok(format!("{};", self.change_statement(schema, table, change).await?))
@@ -592,7 +592,7 @@ mod tests {
     use crate::db::model::{ColumnGeneration, NewColumn, NewForeignKey};
 
     const TABLE: &str = "`shop`.`customers`";
-    const V84: MysqlVersion = MysqlVersion { major: 8, minor: 4, patch: 0 };
+    const V84: ServerVersion = ServerVersion { major: 8, minor: 4, patch: 0 };
 
     fn column(name: &str, column_type: &str) -> ColumnDefinition {
         let data_type = column_type.split(|c: char| c == '(' || c == ' ').next().unwrap_or("").to_lowercase();
@@ -615,7 +615,7 @@ mod tests {
         ColumnDefinition { charset: Some("utf8mb4".into()), collation: Some("utf8mb4_0900_ai_ci".into()), nullable, ..column(name, column_type) }
     }
 
-    fn sql_with(change: StructureChange, columns: &[ColumnDefinition], constraints: &[(&str, &str)], version: MysqlVersion) -> String {
+    fn sql_with(change: StructureChange, columns: &[ColumnDefinition], constraints: &[(&str, &str)], version: ServerVersion) -> String {
         let constraints = constraints.iter().map(|(n, k)| (n.to_string(), k.to_string())).collect();
         change_sql(TABLE, &change, columns, &constraints, version).unwrap_or_else(|e| format!("ERR {e}"))
     }
@@ -867,7 +867,7 @@ mod tests {
         assert_eq!(sql(StructureChange::AddUnique { name: Some("u".into()), columns: vec!["a".into()] }), format!("{alter} ADD CONSTRAINT `u` UNIQUE (`a`)"));
         assert_eq!(sql(StructureChange::AddCheck { name: Some("c".into()), expression: "age >= 0".into() }), format!("{alter} ADD CONSTRAINT `c` CHECK (age >= 0)"));
         assert_eq!(sql(StructureChange::AddCheck { name: None, expression: "age >= 0; --".into() }), "ERR The check must be a single expression, without ';'");
-        let old = MysqlVersion { major: 8, minor: 0, patch: 15 };
+        let old = ServerVersion { major: 8, minor: 0, patch: 15 };
         assert_eq!(
             sql_with(StructureChange::AddCheck { name: None, expression: "age >= 0".into() }, &[], &[], old),
             "ERR CHECK constraints need MySQL 8.0.16 or newer"
@@ -1039,8 +1039,8 @@ mod server_tests {
     use mysql_async::Conn;
 
     use super::super::catalog::{column_definitions, qualified, quote};
-    use super::super::tests_support::{exec, query_one, TestDb};
-    use super::super::MysqlDriver;
+    use crate::db::mysql_common::tests_support::{exec, query_one, TestDb};
+    use crate::db::mysql_common::driver::ServerDriver;
     use super::*;
     use crate::db::model::{NewColumn, NewForeignKey, StructureChange};
     use crate::db::Driver;
@@ -1074,10 +1074,10 @@ mod server_tests {
             PRIMARY KEY (id)
         )"#;
 
-    async fn open(setup: &str) -> (TestDb, Arc<MysqlDriver>) {
+    async fn open(setup: &str) -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
         exec(&db.endpoint, setup).await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 
@@ -1103,7 +1103,7 @@ mod server_tests {
             let sql = format!("DROP USER IF EXISTS {}", self.0);
             let _ = std::thread::spawn(move || {
                 let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-                runtime.block_on(exec(&super::super::tests_support::test_endpoint(), &sql));
+                runtime.block_on(exec(&crate::db::mysql_common::tests_support::test_endpoint(), &sql));
             })
             .join();
         }
@@ -1257,7 +1257,7 @@ mod server_tests {
         // Permissions
         let user = format!("dbunny_t_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         let _account = Account(format!("'{user}'@'%'"));
-        exec(&super::super::tests_support::test_endpoint(), &format!("CREATE USER '{user}'@'%'")).await;
+        exec(&crate::db::mysql_common::tests_support::test_endpoint(), &format!("CREATE USER '{user}'@'%'")).await;
         apply(StructureChange::Grant { grantee: user.clone(), privileges: vec!["select".into(), "update".into()], grant_option: true }).await;
         let granted = |privilege: &str| {
             let sql = format!(

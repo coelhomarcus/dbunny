@@ -12,7 +12,7 @@ use serde_json::Value as JsonValue;
 
 use super::editor::in_transaction_status;
 use super::plan::{is_reading_statement, parse_tree};
-use super::MysqlDriver;
+use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{ExplainResult, Notice, QueryColumn, QueryResult};
 use crate::db::mysql_common::connect::MysqlEndpoint;
 use crate::db::mysql_common::errors::error_message;
@@ -199,7 +199,7 @@ async fn run_script(conn: &mut Conn, statements: &[Statement], endpoint: &MysqlE
 }
 
 #[async_trait]
-impl Console for MysqlDriver {
+impl Console for ServerDriver {
     /// Runs the script's statements in order on the editor's connection. The rows of the last
     /// statement that returns rows are shown; the others only add to the affected count.
     async fn execute(&self, sql: &str) -> Result<QueryResult, String> {
@@ -265,24 +265,24 @@ mod server_tests {
 
     use serde_json::{json, Value as JsonValue};
 
-    use super::super::tests_support::{exec, query_one, TestDb};
-    use super::super::MysqlDriver;
+    use crate::db::mysql_common::tests_support::{exec, query_one, TestDb};
+    use crate::db::mysql_common::driver::ServerDriver;
     use crate::db::mysql_common::split::DELIMITER_IS_A_CLIENT_COMMAND;
     use crate::db::sqlite::errors::CANCELLED;
     use crate::db::{Driver, ExplainFormat};
 
     const SHOP: &str = include_str!("fixtures/shop.sql");
 
-    async fn open() -> (TestDb, Arc<MysqlDriver>) {
+    async fn open() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 
-    async fn shop() -> (TestDb, Arc<MysqlDriver>) {
+    async fn shop() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
         exec(&db.endpoint, SHOP).await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 

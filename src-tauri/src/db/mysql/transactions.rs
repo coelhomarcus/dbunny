@@ -3,11 +3,11 @@
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 
-use super::MysqlDriver;
+use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::mysql_common::errors::error_message;
 use crate::db::Transactions;
 
-impl MysqlDriver {
+impl ServerDriver {
     /// Runs `sql` on the editor's connection, which keeps the transaction.
     async fn on_editor(&self, sql: &'static str) -> Result<(), String> {
         let endpoint = self.endpoint().clone();
@@ -16,7 +16,7 @@ impl MysqlDriver {
 }
 
 #[async_trait]
-impl Transactions for MysqlDriver {
+impl Transactions for ServerDriver {
     async fn begin(&self) -> Result<(), String> {
         self.on_editor("START TRANSACTION").await
     }
@@ -42,16 +42,16 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
 
     use super::super::editor::ROLLED_BACK;
-    use super::super::tests_support::{exec, query_one, raw_conn, TestDb};
-    use super::super::MysqlDriver;
+    use crate::db::mysql_common::tests_support::{exec, query_one, raw_conn, TestDb};
+    use crate::db::mysql_common::driver::ServerDriver;
     use crate::db::Driver;
 
     const IMPLICIT_COMMIT: &str = "This statement committed the open transaction: MySQL commits before DDL.";
 
-    async fn open() -> (TestDb, Arc<MysqlDriver>) {
+    async fn open() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
         exec(&db.endpoint, "CREATE TABLE t (id INT PRIMARY KEY)").await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 

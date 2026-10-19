@@ -3,7 +3,7 @@
 use mysql_async::prelude::Queryable;
 
 use super::catalog::{column_definitions, qualified, quote};
-use super::MysqlDriver;
+use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::mysql_common::errors::error_message;
 use crate::db::{unsupported, Engine};
 
@@ -60,7 +60,7 @@ pub(super) fn duplicate_sql(schema: &str, name: &str, new_name: &str, columns: O
 }
 
 /// Copies a table, and its rows when `with_data`. A copy that fails halfway is dropped again.
-pub(super) async fn duplicate(driver: &MysqlDriver, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
+pub(super) async fn duplicate(driver: &ServerDriver, schema: &str, name: &str, new_name: &str, with_data: bool) -> Result<(), String> {
     let mut conn = driver.conn().await?;
     let columns = if with_data {
         // Computed columns can't be written
@@ -123,8 +123,7 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
     use serde_json::json;
 
-    use super::super::tests_support::{exec, query_one, TestDb};
-    use super::super::MysqlDriver;
+    use crate::db::mysql_common::tests_support::{exec, query_one, TestDb};
     use crate::db::Driver;
 
     const SHOP: &str = include_str!("fixtures/shop.sql");
@@ -140,7 +139,7 @@ mod server_tests {
              INSERT INTO orders (customer_id, total, tax_rate) VALUES (1, 100, 0.10), (2, 50, 0.20)",
         )
         .await;
-        let d = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let d = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         let editor = d.schema_editor().unwrap();
         let schema = db.name.as_str();
         let count = |table: &'static str| {

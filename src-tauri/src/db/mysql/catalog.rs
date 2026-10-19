@@ -11,7 +11,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Row, Value};
 
 use super::structure;
-use super::MysqlDriver;
+use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{
     ColumnInfo, CompletionColumn, CompletionRelation, CompletionSchema, Diagram, DiagramColumn, DiagramRelation, DiagramTable,
     ExplorerObject, ExplorerSchema, ExplorerTree, ExtensionInfo, ForeignKeyRef, FunctionDetail, FunctionInfo, ObjectDefinition,
@@ -23,7 +23,7 @@ use crate::db::sql::Dialect;
 use crate::db::{unsupported, Catalog, Engine};
 
 #[async_trait]
-impl Catalog for MysqlDriver {
+impl Catalog for ServerDriver {
     async fn explorer(&self) -> Result<ExplorerTree, String> {
         let database = self.database();
         if database.is_empty() {
@@ -89,7 +89,7 @@ impl Catalog for MysqlDriver {
     }
 }
 
-impl MysqlDriver {
+impl ServerDriver {
     /// An error of the server in the app's words.
     fn message(&self, e: &mysql_async::Error) -> String {
         error_message(e, self.endpoint())
@@ -758,7 +758,7 @@ mod tests {
 mod server_tests {
     use std::sync::Arc;
 
-    use super::super::tests_support::{exec, TestDb};
+    use crate::db::mysql_common::tests_support::{exec, TestDb};
     use super::*;
     use crate::db::model::{ColumnInfo, ExplorerTree};
     use crate::db::Driver;
@@ -766,10 +766,10 @@ mod server_tests {
     const SHOP: &str = include_str!("fixtures/shop.sql");
 
     /// A database with the shop in it, and a session open on it.
-    async fn shop() -> (TestDb, Arc<MysqlDriver>) {
+    async fn shop() -> (TestDb, Arc<ServerDriver>) {
         let db = TestDb::new().await;
         exec(&db.endpoint, SHOP).await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         (db, driver)
     }
 
@@ -1174,7 +1174,7 @@ mod server_tests {
     #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
     async fn extensions_are_unsupported() {
         let db = TestDb::new().await;
-        let driver = MysqlDriver::open(db.endpoint.clone(), None).await.unwrap();
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         assert_eq!(driver.catalog().extensions().await.err().unwrap(), "Extensions isn't supported by MySQL");
         driver.close().await;
         db.drop_now().await;

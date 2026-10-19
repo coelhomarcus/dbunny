@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use super::mysql::version::MysqlVersion;
+use super::mysql_common::version::ServerVersion;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -129,7 +129,7 @@ impl Capabilities {
     /// MySQL 8.0+: the console, transactions, schema editing and administration of
     /// databases, users and sessions, but no schemas, sequences or RETURNING. What
     /// changes with the version is EXPLAIN ANALYZE (8.0.18).
-    pub fn mysql(version: MysqlVersion) -> Self {
+    pub fn mysql(version: ServerVersion) -> Self {
         Self {
             console: true,
             transactions: true,
@@ -167,7 +167,7 @@ impl Capabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::mysql::version::MysqlVersion;
+    use crate::db::mysql_common::version::ServerVersion;
 
     #[test]
     fn capabilities_serialize_in_camel_case() {
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn mysql_capabilities_follow_the_version() {
-        let v = |major, minor, patch| MysqlVersion { major, minor, patch };
+        let v = |major, minor, patch| ServerVersion { major, minor, patch };
         let c = Capabilities::mysql(v(8, 4, 0));
         assert!(c.console && c.transactions && c.schema_editing && c.admin && c.databases && c.roles && c.activity);
         assert!(!c.schemas && !c.returning && !c.trigger_toggle && !c.cascade && !c.sequences);

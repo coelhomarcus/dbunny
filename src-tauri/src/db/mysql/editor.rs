@@ -128,7 +128,7 @@ impl EditorConn {
     }
 
     /// The options to reconnect with, once the session picked its database.
-    pub(super) fn set_opts(&self, opts: Opts) {
+    pub(crate) fn set_opts(&self, opts: Opts) {
         *lock(&self.opts) = opts;
     }
 
