@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { ArrowRight, Eye, EyeOff, Loader, Lock, Pencil, ShieldCheck, Trash2, TriangleAlert, Waypoints, X } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Lock, Pencil, ShieldCheck, Trash2, TriangleAlert, Waypoints, X } from "lucide-react";
+import Spinner from "../ui/Spinner";
 import type { SavedConnection } from "@/types";
 import { DEFAULT_COLOR } from "../../lib/connectionDraft";
 import { mask, summaryOf } from "../../lib/connectionSummary";
@@ -116,7 +117,7 @@ export default function ConnectionSummaryCard({
           <Button variant="primary" className="group px-4" onClick={onConnect} disabled={connecting}>
             {connecting ? (
               <>
-                <Loader className="animate-spin" />
+                <Spinner />
                 Connecting…
               </>
             ) : (

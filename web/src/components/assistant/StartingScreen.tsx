@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check } from "lucide-react";
+import Spinner from "../ui/Spinner";
 import type { AgentInfo } from "../../lib/assistantAgents";
 import { startupHint, startupRows, type StartStepId } from "../../lib/assistantStartup";
 import { cn } from "../../lib/cn";
@@ -23,7 +24,7 @@ export default function StartingScreen({ agent, step, detail }: { agent: AgentIn
         {startupRows(step, agent.name).map((row) => (
           <li key={row.id} className={cn("flex items-start gap-2.5 text-[13px]", row.state === "pending" && "text-muted-foreground/60", row.state === "done" && "text-muted-foreground")}>
             <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
-              {row.state === "done" ? <Check size={14} className="text-success-foreground" /> : row.state === "current" ? <Loader2 size={14} className="animate-spin" /> : <span className="size-1.5 rounded-full bg-current" />}
+              {row.state === "done" ? <Check size={14} className="text-success-foreground" /> : row.state === "current" ? <Spinner size={14} /> : <span className="size-1.5 rounded-full bg-current" />}
             </span>
             <span className="min-w-0 flex-1">
               <span className={cn(row.state === "current" && "font-medium text-foreground")}>{row.label}</span>

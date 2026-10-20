@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Check, Copy, Loader2, TriangleAlert } from "lucide-react";
+import { Check, Copy, TriangleAlert } from "lucide-react";
+import Spinner from "../ui/Spinner";
 import { assistantApi } from "../../lib/api";
 import { writeClipboardText } from "../../lib/clipboard";
 import { openExternal } from "../../lib/openExternal";
@@ -46,7 +47,7 @@ export default function AssistantStatusScreen({
   if (status.state === "idle" || status.state === "ready") {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-[13px] text-muted-foreground">
-        <Loader2 size={15} className="animate-spin" />
+        <Spinner size={15} />
         Starting the assistant…
       </div>
     );

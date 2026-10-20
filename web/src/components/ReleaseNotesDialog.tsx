@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Loader, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
+import Spinner from "./ui/Spinner";
 import { fetchReleaseNotes } from "../lib/releaseNotes";
 import Dialog from "./ui/Dialog";
 import Button from "./ui/Button";
@@ -66,7 +67,7 @@ export default function ReleaseNotesDialog({
       <div className="min-h-24">
         {!current && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader className="size-4 animate-spin" /> Loading the release notes…
+            <Spinner className="size-4" /> Loading the release notes…
           </p>
         )}
         {current && "error" in current && (

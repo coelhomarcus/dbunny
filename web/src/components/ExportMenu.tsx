@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { Download, Loader } from "lucide-react";
+import { Download } from "lucide-react";
+import Spinner from "./ui/Spinner";
 import { exportData, type ExportFormat } from "../lib/exportData";
 import type { QueryColumn } from "@/types";
 import Button from "./ui/Button";
@@ -68,7 +69,7 @@ export default function ExportMenu({
     <div ref={ref} className="relative">
       <Tooltip label="Export" side={side === "up" ? "top" : "bottom"}>
         <Button variant="ghost-muted" size={compact ? "icon-xs" : "icon-sm"} data-active={open} aria-expanded={open} onClick={() => setOpen((v) => !v)} aria-label="Export data">
-          {loading ? <Loader className="animate-spin" /> : <Download />}
+          {loading ? <Spinner /> : <Download />}
         </Button>
       </Tooltip>
 

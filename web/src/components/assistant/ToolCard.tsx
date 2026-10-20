@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Ban, Check, ChevronDown, ChevronUp, Database, Loader2, Network, Table2, TriangleAlert } from "lucide-react";
+import { Ban, Check, ChevronDown, ChevronUp, Database, Network, Table2, TriangleAlert } from "lucide-react";
+import Spinner from "../ui/Spinner";
 import { parseToolOutput, toolLabel, type ToolItem } from "../../lib/assistantConversation";
 import type { Decision } from "../../types/assistant";
 import ApprovalButtons from "./ApprovalButtons";
@@ -17,7 +18,7 @@ export default function ToolCard({ item, onDecide }: { item: ToolItem; onDecide:
   const running = item.status === "pending" || item.status === "in_progress";
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-      {running ? <Loader2 size={13} className="animate-spin" /> : item.status === "failed" ? <TriangleAlert size={13} /> : <Icon size={13} />}
+      {running ? <Spinner size={13} /> : item.status === "failed" ? <TriangleAlert size={13} /> : <Icon size={13} />}
       <span>{toolLabel(item)}</span>
     </div>
   );
@@ -48,7 +49,7 @@ function QueryCard({ item, onDecide }: { item: ToolItem; onDecide: (approvalId: 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card text-xs">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
-        {waiting || running ? <Loader2 size={13} className="animate-spin text-muted-foreground" /> : declined ? <Ban size={13} className="text-muted-foreground" /> : item.status === "failed" ? <TriangleAlert size={13} className="text-destructive-foreground" /> : <Check size={13} className="text-success-foreground" />}
+        {waiting || running ? <Spinner size={13} className="text-muted-foreground" /> : declined ? <Ban size={13} className="text-muted-foreground" /> : item.status === "failed" ? <TriangleAlert size={13} className="text-destructive-foreground" /> : <Check size={13} className="text-success-foreground" />}
         <span className="font-medium">{label}</span>
         <span className="flex-1" />
         {canShowRows && (
