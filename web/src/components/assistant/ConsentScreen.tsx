@@ -12,7 +12,7 @@ export default function ConsentScreen({ agent, onEnable }: { agent: AgentInfo; o
       <h2 className="mt-4 text-sm font-semibold">Ask your database</h2>
       <p className="mt-2 max-w-xs text-[13px] leading-relaxed text-muted-foreground">
         {agent.kind === "custom"
-          ? `The assistant runs the agent you chose on this computer. It can read this connection's schema and run queries that only read, after you allow them. Your schema and the results you allow are sent to the agent's provider, and the agent keeps the conversations where it likes. You need Node.js 20 or newer if the agent needs it.`
+          ? `The assistant runs the agent you chose on this computer. It can read this connection's schema and run queries that only read, after you allow them. Your schema and the results you allow are sent to the agent's provider, and the agent keeps the conversations where it likes. It may have tools of its own, such as a terminal or file access, which DBunny can't turn off: DBunny refuses what the agent asks permission for, but not what it is already allowed to do. Use only an agent you trust.`
           : `The assistant runs ${agent.name} on this computer with your ${agent.account} account. It can read this connection's schema and run queries that only read, after you allow them. Your schema and the results you allow are sent to ${agent.company}. ${agent.name} keeps the conversations in ${agent.folder}. You need Node.js 20 or newer and ${agent.kind === "codex" ? "to sign in to Codex the first time" : `to be signed in to ${agent.name}`}.`}
         {agent.kind === "codex" && " Codex runs with a folder and a sign-in of its own in DBunny, apart from your own Codex."}
       </p>

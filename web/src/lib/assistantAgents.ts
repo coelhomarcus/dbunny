@@ -47,7 +47,15 @@ export function agentFromStored(stored: unknown): AgentKind {
 /** What the agent uses and where things go, in two plain sentences for Settings. */
 export function agentSummary(info: AgentInfo): string {
   if (info.kind === "custom") {
-    return "Runs the agent you chose, on this computer. Your schema and the results you allow go to its provider.";
+    return "Runs the agent you chose, on this computer. Your schema and the results you allow go to its provider. It may have tools of its own, which DBunny can't turn off: use an agent you trust.";
   }
   return `${info.name} uses your ${info.account} account. Your schema and the results you allow go to ${info.company}. Chats are kept in ${info.folder}.`;
+}
+
+/** The ways of signing in that get a button, for an agent that signs in through the protocol (a browser opens). */
+export function signInMethods(kind: AgentKind, methods: { id: string; name: string }[]): { id: string; name: string }[] {
+  if (kind === "claude") return [];
+  // An API key is not something a button can give
+  if (kind === "codex") return methods.filter((method) => method.id === "chat-gpt");
+  return methods;
 }

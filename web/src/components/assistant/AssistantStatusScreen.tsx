@@ -4,7 +4,7 @@ import Spinner from "../ui/Spinner";
 import { assistantApi } from "../../lib/api";
 import { writeClipboardText } from "../../lib/clipboard";
 import { openExternal } from "../../lib/openExternal";
-import type { AgentInfo } from "../../lib/assistantAgents";
+import { signInMethods, type AgentInfo } from "../../lib/assistantAgents";
 import type { AgentStatus } from "../../types/assistant";
 import Button from "../ui/Button";
 import Dialog from "../ui/Dialog";
@@ -69,11 +69,13 @@ export default function AssistantStatusScreen({
       title = agent.loginTitle;
       command = status.command;
       detail = command ? "Run this in a terminal and follow the steps, then try again." : "Sign in with your agent, then try again.";
-      // An agent that signs in through the protocol (a browser opens) gets a button for each way it offers
-      for (const method of status.methods.filter((method) => !command && method.id === "chat-gpt")) {
-        title = agent.loginTitle;
-        detail = "A browser opens to sign in with your ChatGPT account.";
-        actions.push({ label: signingIn ? "Waiting for the browser…" : `Sign in with ${method.name}`, run: () => signIn(method.id), primary: true });
+      // An agent that signs in through the protocol (a browser may open) gets a button for each way it offers
+      if (!command) {
+        const methods = signInMethods(agent.kind, status.methods);
+        if (methods.length > 0) detail = agent.kind === "codex" ? "A browser opens to sign in with your ChatGPT account." : "The agent may open a browser to sign in.";
+        methods.forEach((method, index) =>
+          actions.push({ label: signingIn ? "Waiting for the browser…" : `Sign in with ${method.name}`, run: () => signIn(method.id), primary: index === 0 }),
+        );
       }
       if (actions.length === 0) actions.push({ label: "Retry", run: onRetry, primary: true });
       break;
