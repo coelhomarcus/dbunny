@@ -2,6 +2,7 @@ import { ChevronsUpDown, ChevronUp, ChevronDown, KeyRound, Link2, Sparkles } fro
 import type { ColumnInfo } from "@/types";
 import { columnFacts, shortType } from "../lib/columnMeta";
 import Tooltip from "./Tooltip";
+import { useT } from "../i18n";
 
 interface SortableColumnHeaderProps {
   id: string;
@@ -17,16 +18,18 @@ interface SortableColumnHeaderProps {
 }
 
 function ColumnIcon({ column, selected }: { column: ColumnInfo; selected: boolean }) {
+  const t = useT();
   const color = selected ? "text-zinc-950" : undefined;
-  if (column.isPrimaryKey) return <KeyRound size={12} className={`shrink-0 ${color ?? "text-warning-foreground"}`} aria-label="Primary key" />;
-  if (column.foreignKey) return <Link2 size={12} className={`shrink-0 ${color ?? "text-info-foreground"}`} aria-label="Foreign key" />;
-  if (column.isGenerated) return <Sparkles size={12} className={`shrink-0 ${color ?? "text-muted-foreground"}`} aria-label="Generated" />;
+  if (column.isPrimaryKey) return <KeyRound size={12} className={`shrink-0 ${color ?? "text-warning-foreground"}`} aria-label={t("ui.sortableColumnHeader.primaryKey")} />;
+  if (column.foreignKey) return <Link2 size={12} className={`shrink-0 ${color ?? "text-info-foreground"}`} aria-label={t("ui.sortableColumnHeader.foreignKey")} />;
+  if (column.isGenerated) return <Sparkles size={12} className={`shrink-0 ${color ?? "text-muted-foreground"}`} aria-label={t("ui.sortableColumnHeader.generated")} />;
   return null;
 }
 
 export default function SortableColumnHeader({
   id, columnInfo, sorted, sortIndex, selected, onSelect, onToggleSort, onResizeStart,
 }: SortableColumnHeaderProps) {
+  const t = useT();
   const isActive = sorted !== false;
   const facts = columnInfo ? columnFacts(columnInfo) : [];
 
@@ -64,7 +67,7 @@ export default function SortableColumnHeader({
         )}
         <button
           type="button"
-          aria-label={sorted ? `Sort ${id}, ${sorted === "asc" ? "ascending" : "descending"}` : `Sort by ${id}`}
+          aria-label={sorted ? t(sorted === "asc" ? "ui.sortableColumnHeader.sortedAscending" : "ui.sortableColumnHeader.sortedDescending", { name: id }) : t("ui.sortableColumnHeader.sortBy", { name: id })}
           onClick={(e) => {
             e.stopPropagation();
             onToggleSort(e);

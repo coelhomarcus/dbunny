@@ -2,11 +2,13 @@ import { useEffect } from "react";
 import { CircleAlert, CircleCheck, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import Button from "./Button";
+import { useT } from "../../i18n";
 
 export type Notice = { tone: "success" | "error"; text: string };
 
 /** A result card in the bottom-right, above the status bar. Errors stay until dismissed. */
 export default function NoticeToast({ notice, onDismiss }: { notice: Notice | null; onDismiss: () => void }) {
+  const t = useT();
   useEffect(() => {
     if (notice?.tone !== "success") return;
     const timer = setTimeout(onDismiss, 4000);
@@ -30,7 +32,7 @@ export default function NoticeToast({ notice, onDismiss }: { notice: Notice | nu
         <CircleCheck size={18} className="mt-0.5 shrink-0 text-success-foreground" />
       )}
       <p className="min-w-0 flex-1 select-text break-words text-[13px] leading-snug">{notice.text}</p>
-      <Button variant="ghost-muted" size="icon-xs" className="-mr-1 -mt-1" aria-label="Dismiss" onClick={onDismiss}>
+      <Button variant="ghost-muted" size="icon-xs" className="-mr-1 -mt-1" aria-label={t("ui.noticeToast.dismiss")} onClick={onDismiss}>
         <X />
       </Button>
     </div>

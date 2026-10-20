@@ -1,5 +1,6 @@
 import type { ApprovalRequest } from "../types/assistant";
 import { stripContext } from "./assistantContext.ts";
+import { t } from "../i18n/store.ts";
 
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
 
@@ -34,7 +35,7 @@ export interface Conversation {
 }
 
 /** The text the assistant is given when the person turns a query down. */
-export const DECLINED = "The user declined to run this query. Ask them how to continue.";
+export const DECLINED = "The user declined to run this query. Ask them how to continue."; // i18n-ignore: said to the agent, and matched as it is
 
 const OWN_TOOLS = "mcp__dbunny__";
 const OWN_SERVER = "dbunny";
@@ -211,17 +212,17 @@ export function toolLabel(item: Tool): string {
   const text = (key: string) => (typeof item.input[key] === "string" ? (item.input[key] as string) : "");
   switch (item.tool) {
     case "list_tables":
-      return text("schema") ? `Listed the tables of ${text("schema")}` : "Listed the tables";
+      return text("schema") ? t("assistant.tools.listedTablesOf", { schema: text("schema") }) : t("assistant.tools.listedTables");
     case "describe_table":
-      return `Read the structure of ${text("schema")}.${text("table")}`;
+      return t("assistant.tools.readStructure", { table: `${text("schema")}.${text("table")}` });
     case "relationships":
-      return `Read the relationships of ${text("schema")}`;
+      return t("assistant.tools.readRelationships", { schema: text("schema") });
     case "run_query":
-      return "Ran a query";
+      return t("assistant.tools.ranQuery");
     case "explain_query":
-      return item.input.analyze === true ? "Explained a query and ran it" : "Explained a query";
+      return item.input.analyze === true ? t("assistant.tools.explainedAndRan") : t("assistant.tools.explained");
     default:
-      return item.tool || "Used a tool";
+      return item.tool || t("assistant.tools.usedTool");
   }
 }
 

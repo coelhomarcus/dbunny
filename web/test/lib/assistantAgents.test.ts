@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agentFromStored, agentInfo, agentSummary } from "../../src/lib/assistantAgents.ts";
+import { agentFromStored, agentInfo, agentSummary, signInMethods } from "../../src/lib/assistantAgents.ts";
 
 test("each agent has its name, company and the folder it keeps conversations in", () => {
   assert.deepEqual(agentInfo("claude"), { kind: "claude", name: "Claude Code", account: "Claude", company: "Anthropic", folder: "~/.claude/projects", loginTitle: "Sign in to Claude", signOutScope: "on this computer, not only in DBunny" });
@@ -25,4 +25,19 @@ test("settings say in plain words what an agent uses and where things go", () =>
   );
   assert.match(agentSummary(agentInfo("claude")), /Anthropic.*~\/\.claude\/projects/);
   assert.match(agentSummary(agentInfo("custom")), /its provider/);
+});
+
+test("each agent offers the ways of signing in that fit it", () => {
+  const methods = [{ id: "chat-gpt", name: "ChatGPT" }, { id: "api-key", name: "API Key" }];
+  // Claude signs in from a terminal, so it has no button
+  assert.deepEqual(signInMethods("claude", methods), []);
+  // Codex: only the browser one; an API key is not something a button can give
+  assert.deepEqual(signInMethods("codex", methods), [{ id: "chat-gpt", name: "ChatGPT" }]);
+  // An agent of the person's own: every way it announced
+  assert.deepEqual(signInMethods("custom", methods), methods);
+  assert.deepEqual(signInMethods("custom", []), []);
+});
+
+test("settings warn that an agent of the person's own has tools DBunny can't turn off", () => {
+  assert.match(agentSummary(agentInfo("custom")), /tools of its own/);
 });

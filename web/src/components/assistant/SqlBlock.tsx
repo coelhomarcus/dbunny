@@ -6,9 +6,11 @@ import { writeClipboardText } from "../../lib/clipboard";
 import { useActiveEditor } from "../../lib/editorBridge";
 import Button from "../ui/Button";
 import SqlSnippet from "./SqlSnippet";
+import { useT } from "../../i18n";
 
 /** A statement the assistant wrote, and what to do with it: into the editor, a new tab, the clipboard. */
 export default function SqlBlock({ sql }: { sql: string }) {
+  const t = useT();
   const editor = useActiveEditor();
   const { openDocument } = useDocuments();
   const assistant = useAssistant();
@@ -29,13 +31,13 @@ export default function SqlBlock({ sql }: { sql: string }) {
         {editor && (
           <Button variant="ghost-muted" size="xs" onClick={() => editor.insert(sql)}>
             <TextCursorInput />
-            Insert at cursor
+            {t("assistant.sqlBlock.insertAtCursor")}
           </Button>
         )}
         {editor?.hasSelection() && (
           <Button variant="ghost-muted" size="xs" onClick={() => editor.replaceSelection(sql)}>
             <Replace />
-            Replace selection
+            {t("assistant.sqlBlock.replaceSelection")}
           </Button>
         )}
         <Button
@@ -48,11 +50,11 @@ export default function SqlBlock({ sql }: { sql: string }) {
           }}
         >
           <FilePlus2 />
-          Open in new tab
+          {t("assistant.sqlBlock.openInNewTab")}
         </Button>
         <Button variant="ghost-muted" size="xs" onClick={copy}>
           {copied ? <Check /> : <Copy />}
-          {copied ? "Copied" : "Copy"}
+          {copied ? t("common.copied") : t("common.copy")}
         </Button>
       </div>
     </div>

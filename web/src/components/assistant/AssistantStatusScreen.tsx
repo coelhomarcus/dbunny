@@ -4,12 +4,14 @@ import Spinner from "../ui/Spinner";
 import { assistantApi } from "../../lib/api";
 import { writeClipboardText } from "../../lib/clipboard";
 import { openExternal } from "../../lib/openExternal";
-import type { AgentInfo } from "../../lib/assistantAgents";
+import { signInMethods, type AgentInfo } from "../../lib/assistantAgents";
 import type { AgentStatus } from "../../types/assistant";
 import Button from "../ui/Button";
 import Dialog from "../ui/Dialog";
 import AgentMark from "./AgentMark";
 import StartingScreen from "./StartingScreen";
+import { useT } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 /** The assistant's agent is not ready: what is missing, and what to do about it. */
 export default function AssistantStatusScreen({
@@ -23,6 +25,7 @@ export default function AssistantStatusScreen({
   onRetry: () => void;
   onSignIn: (methodId: string) => Promise<void>;
 }) {
+  const t = useT();
   const [log, setLog] = useState<string[] | null>(null);
   const [signingIn, setSigningIn] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
@@ -33,7 +36,7 @@ export default function AssistantStatusScreen({
     try {
       await onSignIn(methodId);
     } catch (error) {
-      setSignInError(typeof error === "string" ? error : error instanceof Error ? error.message : "The login failed");
+      setSignInError(errorText(error, t("assistant.assistantStatusScreen.loginFailed")));
     } finally {
       setSigningIn(false);
     }
@@ -49,7 +52,7 @@ export default function AssistantStatusScreen({
     return (
       <div className="flex h-full flex-col items-center justify-center">
         <AgentMark agent={agent} />
-        <p className="mt-4 text-sm font-medium">Starting the assistant</p>
+        <p className="mt-4 text-sm font-medium">{t("assistant.assistantStatusScreen.startingTheAssistant")}</p>
         <Spinner size={15} className="mt-3 text-muted-foreground" />
       </div>
     );
@@ -61,32 +64,34 @@ export default function AssistantStatusScreen({
   const actions: { label: string; run: () => void; primary?: boolean }[] = [];
   switch (status.state) {
     case "needsNode":
-      title = "Node.js 20 or newer is needed";
-      detail = status.found ? `Found ${status.found}` : null;
-      actions.push({ label: "Get Node.js", run: () => openExternal("https://nodejs.org"), primary: true }, { label: "Retry", run: onRetry });
+      title = t("assistant.assistantStatusScreen.needsNode");
+      detail = status.found ? t("assistant.assistantStatusScreen.found", { version: status.found }) : null;
+      actions.push({ label: t("assistant.assistantStatusScreen.getNodeJs"), run: () => openExternal("https://nodejs.org"), primary: true }, { label: t("common.retry"), run: onRetry });
       break;
     case "needsSignIn":
       title = agent.loginTitle;
       command = status.command;
-      detail = command ? "Run this in a terminal and follow the steps, then try again." : "Sign in with your agent, then try again.";
-      // An agent that signs in through the protocol (a browser opens) gets a button for each way it offers
-      for (const method of status.methods.filter((method) => !command && method.id === "chat-gpt")) {
-        title = agent.loginTitle;
-        detail = "A browser opens to sign in with your ChatGPT account.";
-        actions.push({ label: signingIn ? "Waiting for the browser…" : `Sign in with ${method.name}`, run: () => signIn(method.id), primary: true });
+      detail = command ? t("assistant.assistantStatusScreen.runInTerminal") : t("assistant.assistantStatusScreen.signInThenRetry");
+      // An agent that signs in through the protocol (a browser may open) gets a button for each way it offers
+      if (!command) {
+        const methods = signInMethods(agent.kind, status.methods);
+        if (methods.length > 0) detail = agent.kind === "codex" ? t("assistant.assistantStatusScreen.browserOpensChatGpt") : t("assistant.assistantStatusScreen.browserMayOpen");
+        methods.forEach((method, index) =>
+          actions.push({ label: signingIn ? t("assistant.assistantStatusScreen.waitingForBrowser") : t("assistant.assistantStatusScreen.signInWith", { method: method.name }), run: () => signIn(method.id), primary: index === 0 }),
+        );
       }
-      if (actions.length === 0) actions.push({ label: "Retry", run: onRetry, primary: true });
+      if (actions.length === 0) actions.push({ label: t("common.retry"), run: onRetry, primary: true });
       break;
     case "unsupported":
       title = status.message;
       break;
     case "failed":
-      title = `Couldn't start ${agent.kind === "custom" ? "the agent" : agent.name}: ${status.message}`;
-      actions.push({ label: "Retry", run: onRetry, primary: true }, { label: "Show log", run: showLog });
+      title = t("assistant.assistantStatusScreen.couldntStart", { agent: agent.kind === "custom" ? t("assistant.assistantStatusScreen.theAgent") : agent.name, message: status.message });
+      actions.push({ label: t("common.retry"), run: onRetry, primary: true }, { label: t("assistant.assistantStatusScreen.showLog"), run: showLog });
       break;
     case "stopped":
-      title = "The assistant stopped";
-      actions.push({ label: "Restart", run: onRetry, primary: true }, { label: "Show log", run: showLog });
+      title = t("assistant.assistantStatusScreen.stopped");
+      actions.push({ label: t("assistant.assistantStatusScreen.restart"), run: onRetry, primary: true }, { label: t("assistant.assistantStatusScreen.showLog"), run: showLog });
       break;
   }
 
@@ -104,7 +109,7 @@ export default function AssistantStatusScreen({
             <Button
               variant="ghost-muted"
               size="icon-xs"
-              aria-label="Copy the command"
+              aria-label={t("assistant.assistantStatusScreen.copyTheCommand")}
               onClick={async () => {
                 await writeClipboardText(command);
                 setCopied(true);
@@ -114,7 +119,7 @@ export default function AssistantStatusScreen({
               {copied ? <Check /> : <Copy />}
             </Button>
           </div>
-          {agent.kind === "claude" && <p className="mt-2 max-w-xs text-xs leading-relaxed text-muted-foreground">Already use Claude Code? Run claude and use /login instead.</p>}
+          {agent.kind === "claude" && <p className="mt-2 max-w-xs text-xs leading-relaxed text-muted-foreground">{t("assistant.assistantStatusScreen.alreadyUseClaudeCodeRun")}</p>}
         </>
       )}
       {signInError && <p className="mt-3 max-w-xs text-xs leading-relaxed text-destructive-foreground">{signInError}</p>}
@@ -127,9 +132,9 @@ export default function AssistantStatusScreen({
           ))}
         </div>
       )}
-      <Dialog open={log !== null} onClose={() => setLog(null)} title="Assistant log" className="max-w-2xl">
+      <Dialog open={log !== null} onClose={() => setLog(null)} title={t("assistant.assistantStatusScreen.assistantLog")} className="max-w-2xl">
         <pre className="max-h-96 overflow-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap">
-          {log && log.length > 0 ? log.join("\n") : "Nothing was logged."}
+          {log && log.length > 0 ? log.join("\n") : t("assistant.assistantStatusScreen.nothingLogged")}
         </pre>
       </Dialog>
     </div>

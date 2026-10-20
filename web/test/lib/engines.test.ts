@@ -4,8 +4,8 @@ import { addressOf, dialectData, ENGINE_CARDS, engineLabel, explainAnalyzeHint, 
 
 test("mysql and mariadb are available", () => {
   const card = (id: string) => ENGINE_CARDS.find((c) => c.id === id);
-  assert.deepEqual([card("mysql")?.label, card("mysql")?.kind, card("mysql")?.available], ["MySQL", "Server connection", true]);
-  assert.deepEqual([card("mariadb")?.label, card("mariadb")?.kind, card("mariadb")?.available], ["MariaDB", "Server connection", true]);
+  assert.deepEqual([card("mysql")?.label, card("mysql")?.kindKey, card("mysql")?.available], ["MySQL", "connect.enginePicker.serverConnection", true]);
+  assert.deepEqual([card("mariadb")?.label, card("mariadb")?.kindKey, card("mariadb")?.available], ["MariaDB", "connect.enginePicker.serverConnection", true]);
   assert.equal(card("postgres")?.available, true);
   assert.equal(engineLabel("mysql"), "MySQL");
   assert.equal(engineLabel("mariadb"), "MariaDB");

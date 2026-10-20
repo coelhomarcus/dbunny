@@ -35,6 +35,7 @@ import { isMac } from "../../lib/platform";
 import Tooltip from "../Tooltip";
 import AiIcon from "../ui/AiIcon";
 import type { DataIcon, Document } from "../../lib/documents";
+import { useT } from "../../i18n";
 
 const DATA_ICON: Record<DataIcon, ComponentType<LucideProps>> = {
   table: Table2,
@@ -119,6 +120,7 @@ function iconClass(doc: Document): string {
 
 /** The connection's document tabs: icon, name, and close. */
 export default function DocumentTabBar() {
+  const t = useT();
   const { documents, openDocument, focusDocument, closeDocuments, renameQuery, dirtyIds } = useDocuments();
   const capabilities = useCapabilities();
   const assistant = useAssistant();
@@ -152,22 +154,22 @@ export default function DocumentTabBar() {
   const menuIndex = menuDoc ? documents.items.findIndex((doc) => doc.id === menuDoc.id) : -1;
   const menuItems: ContextMenuItem[] = menuDoc
     ? [
-        { label: "Close", icon: <X />, onSelect: () => askClose([menuDoc.id]) },
+        { label: t("common.close"), icon: <X />, onSelect: () => askClose([menuDoc.id]) },
         {
-          label: "Close others",
+          label: t("ui.documentTabBar.closeOthers"),
           icon: <X />,
           disabled: documents.items.length < 2,
           onSelect: () => askClose(documents.items.filter((doc) => doc.id !== menuDoc.id).map((doc) => doc.id)),
         },
         {
-          label: "Close tabs to the right",
+          label: t("ui.documentTabBar.closeTabsToTheRight"),
           icon: <ArrowRightToLine />,
           disabled: menuIndex < 0 || menuIndex === documents.items.length - 1,
           onSelect: () => askClose(documents.items.slice(menuIndex + 1).map((doc) => doc.id)),
         },
-        { label: "Close all", icon: <X />, onSelect: () => askClose(documents.items.map((doc) => doc.id)) },
+        { label: t("ui.documentTabBar.closeAll"), icon: <X />, onSelect: () => askClose(documents.items.map((doc) => doc.id)) },
         ...(menuDoc.kind === "query"
-          ? (["separator", { label: "Rename", icon: <PenLine />, onSelect: () => setRenamingId(menuDoc.id) }] as ContextMenuItem[])
+          ? (["separator", { label: t("common.rename"), icon: <PenLine />, onSelect: () => setRenamingId(menuDoc.id) }] as ContextMenuItem[])
           : []),
       ]
     : [];
@@ -196,7 +198,7 @@ export default function DocumentTabBar() {
                 key={doc.id}
                 autoFocus
                 defaultValue={doc.title}
-                aria-label="Tab name"
+                aria-label={t("ui.documentTabBar.tabName")}
                 onFocus={(e) => e.currentTarget.select()}
                 onBlur={(e) => {
                   renameQuery(doc.id, e.currentTarget.value);
@@ -247,10 +249,10 @@ export default function DocumentTabBar() {
               >
               <Icon size={14} className={cn("shrink-0", iconClass(doc))} />
               <span className="max-w-40 truncate">{doc.title}</span>
-              {dirtyIds.has(doc.id) && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="Unsaved changes" />}
+              {dirtyIds.has(doc.id) && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label={t("ui.documentTabBar.unsavedChanges")} />}
               <span
                 role="button"
-                aria-label={`Close ${doc.title}`}
+                aria-label={t("ui.documentTabBar.closeTab", { title: doc.title })}
                 onClick={(e) => {
                   e.stopPropagation();
                   askClose([doc.id]);
@@ -271,7 +273,7 @@ export default function DocumentTabBar() {
       <div className="mb-1.5 flex shrink-0 items-center pr-1">
       <button
         type="button"
-        aria-label="New query"
+        aria-label={t("ui.documentTabBar.newQuery")}
         onClick={() => openDocument({ kind: "query" })}
         className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
       >
@@ -279,10 +281,10 @@ export default function DocumentTabBar() {
       </button>
 
       {assistant.available && (
-        <Tooltip label="Assistant" shortcut={isMac ? "⌘I" : "Ctrl+I"} side="bottom">
+        <Tooltip label={t("ui.documentTabBar.assistant")} shortcut={isMac ? "⌘I" : "Ctrl+I"} side="bottom">
           <button
             type="button"
-            aria-label="Assistant"
+            aria-label={t("ui.documentTabBar.assistant")}
             aria-pressed={assistant.panelOpen}
             onClick={assistant.toggle}
             className={cn(
@@ -300,7 +302,7 @@ export default function DocumentTabBar() {
           <button
             ref={serverRef}
             type="button"
-            aria-label="Open a server screen"
+            aria-label={t("ui.documentTabBar.openAServerScreen")}
             aria-expanded={serverOpen}
             onClick={() => {
               setListOpen(false);
@@ -315,7 +317,7 @@ export default function DocumentTabBar() {
               <MenuItem
                 icon={Activity}
                 iconClass="text-emerald-500"
-                label="Activity"
+                label={t("ui.documentTabBar.activity")}
                 onSelect={() => {
                   openDocument({ kind: "activity" });
                   setServerOpen(false);
@@ -326,7 +328,7 @@ export default function DocumentTabBar() {
               <MenuItem
                 icon={Users}
                 iconClass="text-indigo-500"
-                label="Roles"
+                label={t("ui.documentTabBar.roles")}
                 onSelect={() => {
                   openDocument({ kind: "roles" });
                   setServerOpen(false);
@@ -340,7 +342,7 @@ export default function DocumentTabBar() {
       <button
         ref={listRef}
         type="button"
-        aria-label="Show open tabs"
+        aria-label={t("ui.documentTabBar.showOpenTabs")}
         aria-expanded={listOpen}
         onClick={() => {
           setServerOpen(false);
@@ -353,7 +355,7 @@ export default function DocumentTabBar() {
       </div>
       <Popover open={listOpen} onClose={() => setListOpen(false)} anchorRef={listRef} className="p-1">
         {documents.items.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-muted-foreground">Nothing is open.</div>
+          <div className="px-3 py-2 text-xs text-muted-foreground">{t("ui.documentTabBar.empty")}</div>
         ) : (
           documents.items.map((doc) => {
             const Icon = iconFor(doc);
@@ -384,13 +386,13 @@ export default function DocumentTabBar() {
         }}
         icon={<TriangleAlert />}
         tone="warning"
-        title={pendingTitles.length > 1 ? `Close ${pendingTitles.length} tabs without saving?` : "Close without saving?"}
+        title={t("ui.documentTabBar.closeWithoutSaving", { count: Math.max(1, pendingTitles.length) })}
         description={
           pendingTitles.length > 1
-            ? `${pendingTitles.join(", ")} have unsaved changes.`
-            : `${pendingTitles[0] ?? "This tab"} has unsaved changes.`
+            ? t("ui.documentTabBar.manyUnsaved", { titles: pendingTitles.join(", ") })
+            : t("ui.documentTabBar.oneUnsaved", { title: pendingTitles[0] ?? t("ui.documentTabBar.thisTab") })
         }
-        confirmLabel="Discard and close"
+        confirmLabel={t("ui.documentTabBar.discardAndClose")}
       />
     </div>
   );

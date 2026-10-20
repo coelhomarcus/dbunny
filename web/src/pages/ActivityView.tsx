@@ -19,6 +19,8 @@ import SideCard from "../components/layout/SideCard";
 import { useSqlDialect } from "../hooks/useSqlDialect";
 import { cn } from "../lib/cn";
 import { formatSqlCached } from "../lib/formatSql";
+import { useT, type StaticKey } from "../i18n";
+import { errorText } from "../lib/appError";
 
 const REFRESH_MS = 3000;
 
@@ -43,11 +45,11 @@ function durationCompact(seconds: number | null) {
   return `${hour}:${String(min % 60).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
-const STATE_LABEL: Record<string, string> = {
-  active: "active",
-  idle: "idle",
-  "idle in transaction": "idle tx",
-  "idle in transaction (aborted)": "aborted",
+const STATE_LABEL: Record<string, StaticKey> = {
+  active: "admin.activityView.stateActive",
+  idle: "admin.activityView.stateIdle",
+  "idle in transaction": "admin.activityView.stateIdleTx",
+  "idle in transaction (aborted)": "admin.activityView.stateAborted",
 };
 
 function oneLine(sql: string) {
@@ -62,6 +64,7 @@ const STATE_BADGE: Record<string, "success" | "warning" | "destructive" | "neutr
 
 /** The server's sessions, refreshed every few seconds, with cancel and terminate. */
 export default function ActivityView() {
+  const t = useT();
   const { api, connectionInfo } = useConnection();
   const { isActive } = useTab();
   const notify = useNotify();
@@ -86,7 +89,7 @@ export default function ActivityView() {
       reportedError.current = null;
       setLastRefresh(new Date());
     } catch (err) {
-      const text = typeof err === "string" ? err : "Couldn't read the server activity";
+      const text = errorText(err, t("admin.activityView.couldntReadTheServerActivity"));
       if (reportedError.current !== text) {
         reportedError.current = text;
         notify({ tone: "error", text });
@@ -95,7 +98,7 @@ export default function ActivityView() {
     } finally {
       setRefreshing(false);
     }
-  }, [api, notify, scope]);
+  }, [api, notify, scope, t]);
 
   useEffect(() => {
     const first = setTimeout(load, 0);
@@ -112,9 +115,9 @@ export default function ActivityView() {
     setConfirm(null);
     try {
       const sent = await api.signalBackend(session.pid, terminate);
-      setMessage(sent ? `${terminate ? "Ended session" : "Cancelled the query of"} ${session.pid}` : `Session ${session.pid} had already finished`);
+      setMessage(sent ? t(terminate ? "admin.activityView.endedSession" : "admin.activityView.cancelledQuery", { pid: session.pid }) : t("admin.activityView.alreadyFinished", { pid: session.pid }));
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : "It didn't work" });
+      notify({ tone: "error", text: errorText(err, t("admin.activityView.failed")) });
     }
     load();
   }
@@ -141,31 +144,31 @@ export default function ActivityView() {
     if (!lastRefresh) return null;
     void tick;
     const sec = Math.max(0, Math.floor((Date.now() - lastRefresh.getTime()) / 1000));
-    if (sec < 5) return "just now";
-    if (sec < 60) return `${sec}s ago`;
-    return `${Math.floor(sec / 60)}m ago`;
-  }, [lastRefresh, tick]);
+    if (sec < 5) return t("admin.activityView.justNow");
+    if (sec < 60) return t("admin.activityView.secondsAgo", { seconds: sec });
+    return t("admin.activityView.minutesAgo", { minutes: Math.floor(sec / 60) });
+  }, [lastRefresh, tick, t]);
 
   return (
     <div className="flex h-full flex-col">
       <PageHeader className="justify-between gap-2">
-        <HeaderTitle label="Server" icon={<Activity />}>
-          Activity
+        <HeaderTitle label={t("admin.activityView.server")} icon={<Activity />}>
+          {t("admin.activityView.activity")}
         </HeaderTitle>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <SegmentedTabs
             value={scope}
             onChange={setScope}
             options={[
-              { value: "database", label: "This database" },
-              { value: "all", label: "All databases" },
+              { value: "database", label: t("admin.activityView.thisDatabase") },
+              { value: "all", label: t("admin.activityView.allDatabases") },
             ]}
           />
           <Button variant="ghost-muted" size="sm" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
             {paused ? <Play /> : <Pause />}
-            {paused ? "Resume" : "Pause"}
+            {paused ? t("admin.activityView.resume") : t("admin.activityView.pause")}
           </Button>
-          <Button variant="ghost-muted" size="icon-sm" aria-label="Refresh now" onClick={load} disabled={refreshing}>
+          <Button variant="ghost-muted" size="icon-sm" aria-label={t("admin.activityView.refreshNow")} onClick={load} disabled={refreshing}>
             <RefreshCw className={cn(refreshing && "animate-spin")} />
           </Button>
         </div>
@@ -181,7 +184,7 @@ export default function ActivityView() {
           {activity?.limitedView && (
             <span className="flex items-center gap-1.5 text-warning-foreground">
               <TriangleAlert size={13} />
-              Your role sees only its own queries; others show as hidden (needs pg_read_all_stats).
+              {t("admin.activityView.limitedView")}
             </span>
           )}
         </div>
@@ -190,7 +193,7 @@ export default function ActivityView() {
       {!activity && !error ? (
         <TableSkeleton columns={6} rows={8} />
       ) : !activity ? (
-        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">Couldn't read the server activity.</div>
+        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">{t("admin.activityView.couldntReadTheServerActivity")}</div>
       ) : (
         <>
           <div className="min-h-0 flex-1 overflow-auto">
@@ -208,12 +211,12 @@ export default function ActivityView() {
                 <thead className="sticky top-0 z-[1] select-none">
                   <tr className="text-[13px] text-muted-foreground [&>th]:border-b [&>th]:border-border [&>th]:bg-card-header [&>th]:px-4 [&>th]:py-2.5 [&>th]:text-left [&>th]:font-medium [&>th]:whitespace-nowrap">
                     <th>PID</th>
-                    <th>State</th>
-                    <th>Query</th>
-                    <th>Duration</th>
-                    <th>User</th>
-                    {scope === "all" && <th>Database</th>}
-                    <th>Client</th>
+                    <th>{t("admin.activityView.state")}</th>
+                    <th>{t("admin.activityView.query")}</th>
+                    <th>{t("admin.activityView.duration")}</th>
+                    <th>{t("admin.activityView.user")}</th>
+                    {scope === "all" && <th>{t("admin.activityView.database")}</th>}
+                    <th>{t("admin.activityView.client")}</th>
                     <th className="px-2" aria-hidden />
                   </tr>
                 </thead>
@@ -227,12 +230,12 @@ export default function ActivityView() {
                         onContextMenu={(e) => {
                           e.preventDefault();
                           const items: ContextMenuItem[] = [];
-                          if (s.query) items.push({ label: "Copy query", icon: <Copy />, onSelect: () => writeClipboardText(s.query ?? "") });
+                          if (s.query) items.push({ label: t("admin.activityView.copyQuery"), icon: <Copy />, onSelect: () => writeClipboardText(s.query ?? "") });
                           if (!s.isSelf && !readOnly) {
                             if (items.length) items.push("separator");
                             items.push(
-                              { label: "Cancel query", icon: <Square />, disabled: s.state !== "active", onSelect: () => setConfirm({ session: s, terminate: false }) },
-                              { label: "End session", icon: <XCircle />, destructive: true, onSelect: () => setConfirm({ session: s, terminate: true }) },
+                              { label: t("admin.activityView.cancelQuery"), icon: <Square />, disabled: s.state !== "active", onSelect: () => setConfirm({ session: s, terminate: false }) },
+                              { label: t("admin.activityView.endSession"), icon: <XCircle />, destructive: true, onSelect: () => setConfirm({ session: s, terminate: true }) },
                             );
                           }
                           if (items.length) setMenu({ x: e.clientX, y: e.clientY, items });
@@ -245,12 +248,12 @@ export default function ActivityView() {
                       >
                         <td className="px-4 py-2 font-mono text-xs tabular-nums whitespace-nowrap">
                           {s.pid}
-                          {s.isSelf && <span className="ml-1.5 font-sans text-[11px] font-normal text-primary">you</span>}
+                          {s.isSelf && <span className="ml-1.5 font-sans text-[11px] font-normal text-primary">{t("admin.activityView.you")}</span>}
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1.5">
                             <Badge variant={STATE_BADGE[s.state ?? ""] ?? "neutral"}>
-                              {STATE_LABEL[s.state ?? ""] ?? s.state ?? "hidden"}
+                              {STATE_LABEL[s.state ?? ""] ? t(STATE_LABEL[s.state ?? ""]) : s.state ?? t("admin.activityView.stateHidden")}
                             </Badge>
                             {blocking.has(s.pid) && <span className="size-1.5 shrink-0 rounded-full bg-destructive" />}
                           </div>
@@ -271,7 +274,7 @@ export default function ActivityView() {
                         <td className="truncate px-4 py-2">{s.user ?? "—"}</td>
                         {scope === "all" && <td className="truncate px-4 py-2">{s.database ?? "—"}</td>}
                         <td className="truncate px-4 py-2 text-xs text-muted-foreground">
-                          {s.application ?? s.client ?? "local"}
+                          {s.application ?? s.client ?? t("admin.activityView.local")}
                         </td>
                         <td className="px-2 py-1.5">
                           {!s.isSelf && !readOnly && (
@@ -286,7 +289,7 @@ export default function ActivityView() {
                                   setConfirm({ session: s, terminate: false });
                                 }}
                               >
-                                <Square className="size-3" /> Cancel
+                                <Square className="size-3" /> {t("common.cancel")}
                               </Button>
                               <Button
                                 variant="destructive-ghost"
@@ -297,7 +300,7 @@ export default function ActivityView() {
                                   setConfirm({ session: s, terminate: true });
                                 }}
                               >
-                                <XCircle className="size-3" /> End
+                                <XCircle className="size-3" /> {t("admin.activityView.end")}
                               </Button>
                             </div>
                           )}
@@ -307,11 +310,11 @@ export default function ActivityView() {
                   })}
                 </tbody>
               </table>
-              {sessions.length === 0 && <p className="px-4 py-10 text-center text-sm text-muted-foreground">No sessions.</p>}
+              {sessions.length === 0 && <p className="px-4 py-10 text-center text-sm text-muted-foreground">{t("admin.activityView.noSessions")}</p>}
           </div>
 
           {rightPanel && createPortal(
-            <SideCard open={selected !== null && shown !== null} widthClass="w-96" label={shown ? `Session ${shown.pid}` : "Session"}>
+            <SideCard open={selected !== null && shown !== null} widthClass="w-96" label={shown ? t("admin.activityView.sessionN", { pid: shown.pid }) : t("admin.activityView.session")}>
               {shown && (
                 <SessionPanel
                   session={selectedSession ?? shown}
@@ -330,10 +333,10 @@ export default function ActivityView() {
           <footer className="flex h-9 shrink-0 items-center justify-between gap-3 border-t border-border bg-card-header px-4 text-[12px] text-muted-foreground">
             <button type="button" onClick={load} disabled={refreshing} className="flex items-center gap-1.5 cursor-pointer hover:text-foreground disabled:opacity-50">
               <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-              {sessions.length} session{sessions.length === 1 ? "" : "s"}
-              {statusLine && <span className="text-muted-foreground/80">· updated {statusLine}</span>}
+              {t("admin.activityView.sessions", { count: sessions.length })}
+              {statusLine && <span className="text-muted-foreground/80">· {t("admin.activityView.updated", { when: statusLine })}</span>}
             </button>
-            <span>{paused ? "Updates paused" : `Auto-refresh every ${REFRESH_MS / 1000}s`}</span>
+            <span>{paused ? t("admin.activityView.updatesPaused") : t("admin.activityView.autoRefresh", { seconds: REFRESH_MS / 1000 })}</span>
           </footer>
         </>
       )}
@@ -345,14 +348,14 @@ export default function ActivityView() {
         onConfirm={() => confirm && signal(confirm.session, confirm.terminate)}
         icon={confirm?.terminate ? <XCircle /> : <Square />}
         tone={confirm?.terminate ? "destructive" : "warning"}
-        title={confirm?.terminate ? `End session ${confirm.session.pid}?` : `Cancel the query of ${confirm?.session.pid}?`}
+        title={confirm?.terminate ? t("admin.activityView.endSessionTitle", { pid: confirm.session.pid }) : t("admin.activityView.cancelQueryTitle", { pid: confirm?.session.pid ?? "" })}
         description={
           confirm?.terminate
-            ? "Disconnects it from the server. An open transaction is rolled back."
-            : "Stops the running statement; the session stays connected and gets an error."
+            ? t("admin.activityView.endSessionNote")
+            : t("admin.activityView.cancelQueryNote")
         }
-        confirmLabel={confirm?.terminate ? "End session" : "Cancel query"}
-        cancelLabel="Keep it"
+        confirmLabel={confirm?.terminate ? t("admin.activityView.endSession") : t("admin.activityView.cancelQuery")}
+        cancelLabel={t("admin.activityView.keepIt")}
       />
     </div>
   );
@@ -375,6 +378,7 @@ function SessionPanel({
   onCancel: () => void;
   onEnd: () => void;
 }) {
+  const t = useT();
   const dialect = useSqlDialect();
   const [sql, setSql] = useState(session.query ?? "");
 
@@ -398,24 +402,24 @@ function SessionPanel({
       <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="font-mono text-sm tabular-nums">{session.pid}</span>
-          {session.isSelf && <span className="text-[11px] text-primary">you</span>}
-          <Badge variant={STATE_BADGE[session.state ?? ""] ?? "neutral"}>{session.state ?? "hidden"}</Badge>
-          {isBlocking && <Badge variant="destructive">blocking</Badge>}
+          {session.isSelf && <span className="text-[11px] text-primary">{t("admin.activityView.you")}</span>}
+          <Badge variant={STATE_BADGE[session.state ?? ""] ?? "neutral"}>{session.state ?? t("admin.activityView.stateHidden")}</Badge>
+          {isBlocking && <Badge variant="destructive">{t("admin.activityView.blocking")}</Badge>}
         </div>
-        <Button variant="ghost-muted" size="icon-sm" aria-label="Close" onClick={onClose}>
+        <Button variant="ghost-muted" size="icon-sm" aria-label={t("common.close")} onClick={onClose}>
           <X />
         </Button>
       </header>
 
       <dl className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 text-[12px]">
-        <Field label="User" value={session.user ?? "—"} />
-        <Field label="Duration" value={session.state === "active" ? duration(session.querySeconds) : `${duration(session.querySeconds)} ago`} />
-        {session.transactionSeconds !== null && <Field label="Transaction" value={duration(session.transactionSeconds)} />}
-        {showDatabase && <Field label="Database" value={session.database ?? "—"} />}
-        <Field label="Application" value={session.application ?? "—"} />
-        <Field label="Client" value={session.client ?? "local"} />
-        {session.waitingFor && <Field label="Waiting" value={session.waitingFor} />}
-        {session.blockedBy.length > 0 && <Field label="Blocked by" value={session.blockedBy.join(", ")} />}
+        <Field label={t("admin.activityView.user")} value={session.user ?? "—"} />
+        <Field label={t("admin.activityView.duration")} value={session.state === "active" ? duration(session.querySeconds) : `${duration(session.querySeconds)} ago`} />
+        {session.transactionSeconds !== null && <Field label={t("admin.activityView.transaction")} value={duration(session.transactionSeconds)} />}
+        {showDatabase && <Field label={t("admin.activityView.database")} value={session.database ?? "—"} />}
+        <Field label={t("admin.activityView.application")} value={session.application ?? "—"} />
+        <Field label={t("admin.activityView.client")} value={session.client ?? "local"} />
+        {session.waitingFor && <Field label={t("admin.activityView.waiting")} value={session.waitingFor} />}
+        {session.blockedBy.length > 0 && <Field label={t("admin.activityView.blockedBy")} value={session.blockedBy.join(", ")} />}
       </dl>
 
       <div className="min-h-0 flex-1 overflow-auto">
@@ -424,17 +428,17 @@ function SessionPanel({
             <SqlPreview source={sql} />
           </div>
         ) : (
-          <p className="px-3 py-6 text-sm text-muted-foreground">No query.</p>
+          <p className="px-3 py-6 text-sm text-muted-foreground">{t("admin.activityView.noQuery")}</p>
         )}
       </div>
 
       {!session.isSelf && !readOnly && (
         <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-3 py-2">
           <Button variant="ghost-muted" size="sm" disabled={session.state !== "active"} onClick={onCancel}>
-            <Square /> Cancel query
+            <Square /> {t("admin.activityView.cancelQuery")}
           </Button>
           <Button variant="destructive-ghost" size="sm" onClick={onEnd}>
-            <XCircle /> End session
+            <XCircle /> {t("admin.activityView.endSession")}
           </Button>
         </footer>
       )}

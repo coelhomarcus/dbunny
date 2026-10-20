@@ -3,9 +3,11 @@ import { Check, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/cn";
 import type { ModelChoice } from "../../types/assistant";
 import Popover from "../ui/Popover";
+import { useT } from "../../i18n";
 
 /** The model the conversation runs on: a small button under the text field that lists the others. */
 export default function ModelPicker({ models, onChange }: { models: ModelChoice; onChange: (modelId: string) => void }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   const current = models.available.find((model) => model.id === models.current);
@@ -14,7 +16,7 @@ export default function ModelPicker({ models, onChange }: { models: ModelChoice;
     <div ref={anchor}>
       <button
         type="button"
-        aria-label="Model"
+        aria-label={t("assistant.modelPicker.model")}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
         className="flex h-5 max-w-48 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"

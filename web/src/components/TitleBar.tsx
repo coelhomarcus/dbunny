@@ -10,6 +10,7 @@ import ConnectionGlyph from "./ConnectionGlyph";
 import Button from "./ui/Button";
 import Tooltip from "./Tooltip";
 import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
+import { t, useT } from "../i18n";
 
 function RestoreIcon() {
   return (
@@ -58,20 +59,21 @@ function useWindowState() {
 
 /** Minimize, maximize and close on the right, for Windows and Linux (macOS draws its own). */
 function WindowControls({ maximized }: { maximized: boolean }) {
+  const t = useT();
   const control = "h-full w-12 flex items-center justify-center text-muted-foreground transition-colors cursor-pointer";
   return (
     <div className="flex h-full shrink-0 self-stretch">
-      <button aria-label="Minimize" onClick={() => appWindow.minimize()} className={cn(control, "hover:bg-accent hover:text-foreground")}>
+      <button aria-label={t("ui.titleBar.minimize")} onClick={() => appWindow.minimize()} className={cn(control, "hover:bg-accent hover:text-foreground")}>
         <Minus size={14} />
       </button>
       <button
-        aria-label={maximized ? "Restore" : "Maximize"}
+        aria-label={maximized ? t("ui.titleBar.restore") : t("ui.titleBar.maximize")}
         onClick={() => appWindow.toggleMaximize()}
         className={cn(control, "hover:bg-accent hover:text-foreground")}
       >
         {maximized ? <RestoreIcon /> : <MaximizeIcon />}
       </button>
-      <button aria-label="Close" onClick={() => appWindow.close()} className={cn(control, "hover:bg-destructive hover:text-white")}>
+      <button aria-label={t("common.close")} onClick={() => appWindow.close()} className={cn(control, "hover:bg-destructive hover:text-white")}>
         <X size={14} />
       </button>
     </div>
@@ -91,7 +93,8 @@ function WindowTab({
   onClose: () => void;
   onMenu: (x: number, y: number) => void;
 }) {
-  const title = tab.title ?? "New Connection";
+  const t = useT();
+  const title = tab.title ?? t("ui.titleBar.newConnection");
   return (
     <div
       role="tab"
@@ -139,7 +142,7 @@ function WindowTab({
       <span className={cn("min-w-0 flex-1 truncate", active && "font-medium")}>{title}</span>
       <button
         type="button"
-        aria-label={`Close ${title}`}
+        aria-label={t("ui.titleBar.closeTab", { title })}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
@@ -163,6 +166,7 @@ function WindowTab({
  * the window has no native frame, so the controls are drawn here, on the right.
  */
 export default function TitleBar() {
+  const t = useT();
   const { tabs, activeTabId, activateTab, closeTab, closeTabs, openTab, cycleTab, sidebarOpen, toggleSidebar } = useWorkspace();
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const { maximized, fullscreen } = useWindowState();
@@ -217,13 +221,13 @@ export default function TitleBar() {
       {/* With the traffic lights: as far from them as the icons are apart, and 1px lower so
           their centres line up (the lights sit a little below the bar's middle) */}
       <div className={cn("flex shrink-0 items-center gap-0.5", trafficLights ? "w-[9rem] justify-end pt-0.5" : "pl-2")}>
-        <Tooltip label="Settings" shortcut={`${isMac ? "⌘" : "Ctrl+"},`} side="bottom">
-          <Button variant="ghost-muted" size="icon-sm" onClick={() => openSettings()} aria-label="Settings">
+        <Tooltip label={t("ui.titleBar.settings")} shortcut={`${isMac ? "⌘" : "Ctrl+"},`} side="bottom">
+          <Button variant="ghost-muted" size="icon-sm" onClick={() => openSettings()} aria-label={t("ui.titleBar.settings")}>
             <Settings />
           </Button>
         </Tooltip>
-        <Tooltip label={sidebarOpen ? "Hide sidebar" : "Show sidebar"} side="bottom">
-          <Button variant="ghost-muted" size="icon-sm" onClick={toggleSidebar} aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}>
+        <Tooltip label={sidebarOpen ? t("ui.titleBar.hideSidebar") : t("ui.titleBar.showSidebar")} side="bottom">
+          <Button variant="ghost-muted" size="icon-sm" onClick={toggleSidebar} aria-label={sidebarOpen ? t("ui.titleBar.hideSidebar") : t("ui.titleBar.showSidebar")}>
             <PanelLeft />
           </Button>
         </Tooltip>
@@ -242,7 +246,7 @@ export default function TitleBar() {
             onMenu={(x, y) => setMenu({ x, y, id: tab.id })}
           />
         ))}
-        <Button variant="ghost-muted" size="icon-xs" className="self-center ml-0.5" onClick={() => openTab()} aria-label="New tab">
+        <Button variant="ghost-muted" size="icon-xs" className="self-center ml-0.5" onClick={() => openTab()} aria-label={t("ui.titleBar.newTab")}>
           <Plus />
         </Button>
       </div>
@@ -261,19 +265,19 @@ function connectionMenuItems(
   if (index < 0) return [];
   const tab = tabs[index];
   return [
-    { label: "Close", icon: <X />, onSelect: () => closeTabs([tab.id]) },
+    { label: t("common.close"), icon: <X />, onSelect: () => closeTabs([tab.id]) },
     {
-      label: "Close others",
+      label: t("ui.documentTabBar.closeOthers"),
       icon: <X />,
       disabled: tabs.length < 2,
       onSelect: () => closeTabs(tabs.filter((item) => item.id !== tab.id).map((item) => item.id)),
     },
     {
-      label: "Close tabs to the right",
+      label: t("ui.documentTabBar.closeTabsToTheRight"),
       icon: <ArrowRightToLine />,
       disabled: index === tabs.length - 1,
       onSelect: () => closeTabs(tabs.slice(index + 1).map((item) => item.id)),
     },
-    { label: "Close all", icon: <X />, onSelect: () => closeTabs(tabs.map((item) => item.id)) },
+    { label: t("ui.documentTabBar.closeAll"), icon: <X />, onSelect: () => closeTabs(tabs.map((item) => item.id)) },
   ];
 }

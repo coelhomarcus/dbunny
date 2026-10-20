@@ -5,6 +5,7 @@ import type { QueryColumn } from "@/types";
 import Button from "../ui/Button";
 import Tooltip from "../Tooltip";
 import ExportMenu from "../ExportMenu";
+import { useT } from "../../i18n";
 
 /** Row count and the table's secondary tools, in the bar under the rows. */
 export default function TableTools({
@@ -49,12 +50,13 @@ export default function TableTools({
   rows?: unknown[][];
   onFetchAllRows?: () => Promise<{ columns: QueryColumn[]; rows: unknown[][] }>;
 }) {
-  const label = totalRows === undefined ? "" : `${totalRows.toLocaleString()} row${totalRows === 1 ? "" : "s"}`;
+  const t = useT();
+  const label = totalRows === undefined ? "" : t("table.tableTools.rows", { count: totalRows });
   return (
     <>
       {totalRows !== undefined &&
         (totalRowsEstimated ? (
-          <Tooltip label="An estimate. Click for the exact count" side="top">
+          <Tooltip label={t("table.tableTools.anEstimateClickForThe")} side="top">
             <button
               type="button"
               onClick={onCountExactly}
@@ -69,30 +71,30 @@ export default function TableTools({
           <span className="px-1.5 tabular-nums text-foreground">{label}</span>
         ))}
       <span className="mx-1 h-4 w-px bg-border" />
-      <Tooltip label="Refresh" side="top">
-        <Button variant="ghost-muted" size="icon-xs" onClick={onRefresh} disabled={refreshing || loading} aria-label="Refresh">
+      <Tooltip label={t("table.tableTools.refresh")} side="top">
+        <Button variant="ghost-muted" size="icon-xs" onClick={onRefresh} disabled={refreshing || loading} aria-label={t("table.tableTools.refresh")}>
           <RefreshCw
             key={spinKey}
             className={refreshing ? "animate-spin" : spinKey > 0 ? "animate-[spin_0.5s_ease-in-out]" : ""}
           />
         </Button>
       </Tooltip>
-      <Tooltip label="Structure" side="top">
-        <Button variant="ghost-muted" size="icon-xs" onClick={onOpenStructure} aria-label="Structure">
+      <Tooltip label={t("table.tableTools.structure")} side="top">
+        <Button variant="ghost-muted" size="icon-xs" onClick={onOpenStructure} aria-label={t("table.tableTools.structure")}>
           <TableProperties />
         </Button>
       </Tooltip>
       {columnsMenu}
       {hasCustomWidths && (
-        <Tooltip label="Reset column widths" side="top">
-          <Button variant="ghost-muted" size="icon-xs" onClick={onResetWidths} aria-label="Reset column widths">
+        <Tooltip label={t("table.tableTools.resetColumnWidths")} side="top">
+          <Button variant="ghost-muted" size="icon-xs" onClick={onResetWidths} aria-label={t("table.tableTools.resetColumnWidths")}>
             <MoveHorizontal />
           </Button>
         </Tooltip>
       )}
       {!readOnly && (
-        <Tooltip label="Import a CSV file" side="top">
-          <Button variant="ghost-muted" size="icon-xs" onClick={onImportCsv} aria-label="Import CSV">
+        <Tooltip label={t("table.tableTools.importACsvFile")} side="top">
+          <Button variant="ghost-muted" size="icon-xs" onClick={onImportCsv} aria-label={t("table.tableTools.importCsv")}>
             <FileUp />
           </Button>
         </Tooltip>

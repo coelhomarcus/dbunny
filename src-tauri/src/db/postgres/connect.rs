@@ -489,7 +489,7 @@ mod database_server_tests {
             passphrase: String::new(),
         };
         let err = open_session(&state, Endpoint { url, ssh: Some(ssh), known_hosts: None }, None).await.err().unwrap();
-        assert!(err.contains("SSH"), "{err}");
+        assert!(err.message().contains("SSH"), "{err}");
     }
 }
 

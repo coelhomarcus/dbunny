@@ -25,6 +25,8 @@ import { renderDiagramPng } from "../../lib/diagramPng";
 import Button from "../ui/Button";
 import RelationEdge from "./RelationEdge";
 import TableNode, { type TableNodeData } from "./TableNode";
+import { t, useT } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 const nodeTypes = { table: TableNode };
 const edgeTypes = { relation: RelationEdge };
@@ -72,15 +74,11 @@ function useDark(): boolean {
 }
 
 function failure(error: unknown): string {
-  if (typeof error === "string" && error.trim()) return error;
-  if (error instanceof Error && error.message) return error.message;
-  if (error && typeof error === "object" && "message" in error && typeof error.message === "string" && error.message) {
-    return error.message;
-  }
-  return "Couldn't export the diagram";
+  return errorText(error, t("diagram.diagramPage.exportFailed"));
 }
 
 function DiagramCanvas({ schema }: { schema: string }) {
+  const t = useT();
   const api = useApi();
   const capabilities = useCapabilities();
   const { openDocument } = useDocuments();
@@ -121,14 +119,14 @@ function DiagramCanvas({ schema }: { schema: string }) {
       })
       .catch((e) => {
         if (stale) return;
-        notify({ tone: "error", text: typeof e === "string" ? e : "Couldn't read the schema" });
-        setLoadError("Couldn't read the schema");
+        notify({ tone: "error", text: errorText(e, t("diagram.diagramPage.readFailed")) });
+        setLoadError(t("diagram.diagramPage.readFailed"));
         setLoading(false);
       });
     return () => {
       stale = true;
     };
-  }, [api, schema, capabilities.schemas, notify]);
+  }, [api, schema, capabilities.schemas, notify, t]);
 
   useEffect(() => {
     if (!graph) return;
@@ -225,38 +223,38 @@ function DiagramCanvas({ schema }: { schema: string }) {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Find a table"
+            placeholder={t("diagram.diagramPage.findATable")}
             spellCheck={false}
             className="h-7 w-44 rounded-md bg-muted pl-7 pr-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
         <Button variant="ghost-muted" size="xs" aria-pressed={hideUnrelated} onClick={() => setHideUnrelated((v) => !v)}>
-          {hideUnrelated ? "Show unrelated" : "Hide unrelated"}
+          {hideUnrelated ? t("diagram.diagramPage.showUnrelated") : t("diagram.diagramPage.hideUnrelated")}
         </Button>
         <span className="mx-1 h-4 w-px bg-border" />
         <Button variant="ghost-muted" size="xs" onClick={arrange} disabled={!graph || graph.nodes.length === 0}>
-          <Waypoints /> Arrange
+          <Waypoints /> {t("diagram.diagramPage.arrange")}
         </Button>
-        <Button variant="ghost-muted" size="icon-xs" aria-label="Zoom out" onClick={() => zoomOut()}>
+        <Button variant="ghost-muted" size="icon-xs" aria-label={t("diagram.diagramPage.zoomOut")} onClick={() => zoomOut()}>
           <Minus />
         </Button>
-        <Button variant="ghost-muted" size="icon-xs" aria-label="Zoom in" onClick={() => zoomIn()}>
+        <Button variant="ghost-muted" size="icon-xs" aria-label={t("diagram.diagramPage.zoomIn")} onClick={() => zoomIn()}>
           <Plus />
         </Button>
-        <Button variant="ghost-muted" size="icon-xs" aria-label="Fit" onClick={() => fitView({ padding: 0.2 })}>
+        <Button variant="ghost-muted" size="icon-xs" aria-label={t("diagram.diagramPage.fit")} onClick={() => fitView({ padding: 0.2 })}>
           <LocateFixed />
         </Button>
         <Button variant="ghost-muted" size="xs" className="ml-auto" onClick={exportPng} disabled={exporting || !graph || graph.nodes.length === 0}>
-          <Download /> {exporting ? "Exporting…" : "Export"}
+          <Download /> {exporting ? t("diagram.diagramPage.exporting") : t("ui.exportMenu.export")}
         </Button>
       </header>
       <div className="min-h-0 flex-1 bg-card">
         {loading ? (
-          <p className="flex h-full items-center justify-center text-sm text-muted-foreground">Reading the schema…</p>
+          <p className="flex h-full items-center justify-center text-sm text-muted-foreground">{t("diagram.diagramPage.readingTheSchema")}</p>
         ) : loadError ? (
           <p className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">{loadError}</p>
         ) : empty ? (
-          <p className="flex h-full items-center justify-center text-sm text-muted-foreground">This schema has no tables.</p>
+          <p className="flex h-full items-center justify-center text-sm text-muted-foreground">{t("diagram.diagramPage.thisSchemaHasNoTables")}</p>
         ) : (
           <ReactFlow
             nodes={nodes}

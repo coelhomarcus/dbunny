@@ -1,12 +1,13 @@
+import { t, type StaticKey } from "../i18n/store.ts";
 import type { ColumnGeneration, Engine, ExplainFormat } from "@/types";
 import type { SqlDialectName } from "./sqlStatements";
 
 /** The databases offered when creating a connection; one not ready would show as coming soon. */
-export const ENGINE_CARDS: { id: "postgres" | "sqlite" | "mysql" | "mariadb"; label: string; /** What kind of connection it is, under the name. */ kind: string; available: boolean }[] = [
-  { id: "postgres", label: "PostgreSQL", kind: "Server connection", available: true },
-  { id: "sqlite", label: "SQLite", kind: "Database file", available: true },
-  { id: "mysql", label: "MySQL", kind: "Server connection", available: true },
-  { id: "mariadb", label: "MariaDB", kind: "Server connection", available: true },
+export const ENGINE_CARDS: { id: "postgres" | "sqlite" | "mysql" | "mariadb"; label: string; /** What kind of connection it is, under the name. */ kindKey: StaticKey; available: boolean }[] = [
+  { id: "postgres", label: "PostgreSQL", kindKey: "connect.enginePicker.serverConnection", available: true },
+  { id: "sqlite", label: "SQLite", kindKey: "connect.enginePicker.databaseFile", available: true },
+  { id: "mysql", label: "MySQL", kindKey: "connect.enginePicker.serverConnection", available: true },
+  { id: "mariadb", label: "MariaDB", kindKey: "connect.enginePicker.serverConnection", available: true },
 ];
 
 export type EngineCardId = (typeof ENGINE_CARDS)[number]["id"];
@@ -18,7 +19,7 @@ export function engineLabel(engine: EngineCardId): string {
 
 /** Tooltip of an action the connected engine doesn't support. */
 export function notAvailableFor(engine: Engine): string {
-  return `Not available for ${engineLabel(engine)}`;
+  return t("ui.engines.notAvailableFor", { engine: engineLabel(engine) });
 }
 
 /** Whether the engine is one of the servers of the MySQL family (MySQL and MariaDB), which are reached the same way and speak the same SQL. */
@@ -150,5 +151,5 @@ export function addressOf(info: { engine: Engine; host: string; port: number; da
 
 /** What the menu says Explain analyze does: MySQL and MariaDB run only statements that read, the others run it and roll it back. */
 export function explainAnalyzeHint(format: ExplainFormat): string {
-  return format === "mysqlTree" ? "Runs it for real times. Only statements that read" : "Runs it for real times, then rolls it back";
+  return format === "mysqlTree" ? t("ui.engines.analyzeReadsOnly") : t("query.runButton.analyzeHint");
 }

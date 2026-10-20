@@ -9,9 +9,11 @@ import Input from "../ui/Input";
 import Popover from "../ui/Popover";
 import ColorPicker from "../ui/ColorPicker";
 import Tooltip from "../Tooltip";
+import { useT } from "../../i18n";
 
 /** A swatch per preset, then the custom colour: in a popover (`custom="popover"`) or opened below (`"inline"`). */
 function ColorChoices({ color, onChange, custom }: { color: string; onChange: (color: string) => void; custom: "popover" | "inline" }) {
+  const t = useT();
   const [pickerOpen, setPickerOpen] = useState(false);
   const customRef = useRef<HTMLButtonElement>(null);
   const isCustom = !COLOR_PRESETS.includes(color);
@@ -23,7 +25,7 @@ function ColorChoices({ color, onChange, custom }: { color: string; onChange: (c
           <button
             key={preset}
             type="button"
-            aria-label={`Color ${preset}`}
+            aria-label={t("connect.identityEditor.colorPreset", { preset })}
             aria-pressed={color === preset}
             onClick={() => onChange(preset)}
             className={cn(
@@ -37,7 +39,7 @@ function ColorChoices({ color, onChange, custom }: { color: string; onChange: (c
         <button
           ref={customRef}
           type="button"
-          aria-label="Custom color"
+          aria-label={t("connect.identityEditor.customColor")}
           aria-expanded={pickerOpen}
           onClick={() => setPickerOpen((v) => !v)}
           className={cn(
@@ -65,18 +67,19 @@ function ColorChoices({ color, onChange, custom }: { color: string; onChange: (c
 }
 
 function IconChoices({ icon, color, onChange }: { icon: string; color: string; onChange: (icon: string) => void }) {
+  const t = useT();
   return (
-    <div role="radiogroup" aria-label="Icon" className="flex flex-wrap gap-1">
-      {CONNECTION_ICONS.map(({ id, label, Icon }, i) => {
+    <div role="radiogroup" aria-label={t("connect.identityEditor.icon")} className="flex flex-wrap gap-1">
+      {CONNECTION_ICONS.map(({ id, labelKey, Icon }, i) => {
         // The first one is the default, stored as ""
         const value = i === 0 ? "" : id;
         const selected = icon === value;
         return (
-          <Tooltip key={id} label={label} side="top">
+          <Tooltip key={id} label={t(labelKey)} side="top">
             <button
               type="button"
               role="radio"
-              aria-label={label}
+              aria-label={t(labelKey)}
               aria-checked={selected}
               onClick={() => onChange(value)}
               className={cn(
@@ -120,6 +123,7 @@ export default function IdentityEditor({
   nameInvalid?: boolean;
   layout: "stacked" | "header";
 }) {
+  const t = useT();
   const [lookOpen, setLookOpen] = useState(false);
   const tileRef = useRef<HTMLButtonElement>(null);
   const set = (changes: Partial<Identity>) => onChange({ ...identity, ...changes });
@@ -127,21 +131,21 @@ export default function IdentityEditor({
   if (layout === "stacked") {
     return (
       <>
-        <Field label="Name" htmlFor="conn-name">
+        <Field label={t("connect.identityEditor.name")} htmlFor="conn-name">
           <Input
             ref={nameRef}
             id="conn-name"
             value={identity.name}
             onChange={(e) => set({ name: e.target.value })}
-            placeholder="e.g. Production"
+            placeholder={t("connect.identityEditor.namePlaceholder")}
             spellCheck={false}
             aria-invalid={nameInvalid || undefined}
           />
         </Field>
-        <Field label="Color" hint="Tag environments, e.g. red for production.">
+        <Field label={t("connect.identityEditor.color")} hint={t("connect.identityEditor.colorHint")}>
           <ColorChoices color={identity.color} onChange={(color) => set({ color })} custom="popover" />
         </Field>
-        <Field label="Icon" hint="Shown in the sidebar and on the tab, in the colour above.">
+        <Field label={t("connect.identityEditor.icon")} hint={t("connect.identityEditor.colorNote")}>
           <IconChoices icon={identity.icon} color={identity.color} onChange={(icon) => set({ icon })} />
         </Field>
       </>
@@ -150,11 +154,11 @@ export default function IdentityEditor({
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2.5">
-      <Tooltip label="Color and icon" side="bottom">
+      <Tooltip label={t("connect.identityEditor.colorAndIcon")} side="bottom">
         <button
           ref={tileRef}
           type="button"
-          aria-label="Color and icon"
+          aria-label={t("connect.identityEditor.colorAndIcon")}
           aria-expanded={lookOpen}
           onClick={() => setLookOpen((v) => !v)}
           className="group flex h-9 shrink-0 items-center gap-0.5 rounded-lg pl-2 pr-1 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&_svg]:shrink-0"
@@ -169,18 +173,18 @@ export default function IdentityEditor({
         </button>
       </Tooltip>
       <Popover open={lookOpen} onClose={() => setLookOpen(false)} anchorRef={tileRef} className="w-[19rem] p-3">
-        <div className="mb-2 text-xs font-medium text-muted-foreground">Color</div>
+        <div className="mb-2 text-xs font-medium text-muted-foreground">{t("connect.identityEditor.color")}</div>
         <ColorChoices color={identity.color} onChange={(color) => set({ color })} custom="inline" />
-        <div className="mb-2 mt-4 text-xs font-medium text-muted-foreground">Icon</div>
+        <div className="mb-2 mt-4 text-xs font-medium text-muted-foreground">{t("connect.identityEditor.icon")}</div>
         <IconChoices icon={identity.icon} color={identity.color} onChange={(icon) => set({ icon })} />
       </Popover>
       <input
         ref={nameRef}
         id="conn-name"
-        aria-label="Connection name"
+        aria-label={t("connect.identityEditor.connectionName")}
         value={identity.name}
         onChange={(e) => set({ name: e.target.value })}
-        placeholder="Untitled connection"
+        placeholder={t("connect.identityEditor.untitledConnection")}
         spellCheck={false}
         autoComplete="off"
         aria-invalid={nameInvalid || undefined}

@@ -22,9 +22,11 @@ import { isAssistantShortcut } from "../lib/assistantShortcut";
 import { isMac } from "../lib/platform";
 import { updateSettings, useSettings } from "../lib/settings";
 import type { AgentStatus, ApprovalRequest, Decision, ModelChoice, OpenedConversation, SessionSummary } from "../types/assistant";
+import { t, useLocale } from "../i18n";
+import { errorText } from "../lib/appError";
 
 function messageOf(error: unknown): string {
-  return typeof error === "string" ? error : error instanceof Error ? error.message : "Something went wrong";
+  return errorText(error, t("ui.assistantProvider.wentWrong"));
 }
 
 /** The assistant of one connection tab: its agent's status, and the conversation held in it. */
@@ -86,7 +88,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const options = useCallback(() => conversationOptions(settings, getConnectionPrefs(savedConnectionId)), [settings, savedConnectionId]);
+  const locale = useLocale();
+  const options = useCallback(() => conversationOptions(settings, getConnectionPrefs(savedConnectionId), locale), [settings, savedConnectionId, locale]);
 
   const forgetConversation = useCallback(() => {
     const id = idRef.current;

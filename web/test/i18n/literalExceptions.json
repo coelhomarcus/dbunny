@@ -1,0 +1,6 @@
+{
+  "files": [],
+  "keep": {
+    "src/lib/plan.ts": "PostgreSQL EXPLAIN vocabulary (node types, field names and the lines built from them), shown as the server names it"
+  }
+}

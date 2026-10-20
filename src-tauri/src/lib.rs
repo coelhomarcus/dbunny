@@ -1,6 +1,8 @@
 mod assistant;
 mod commands;
 mod db;
+mod error;
+mod menu;
 
 use commands::state::AppState;
 use commands::storage;
@@ -13,98 +15,22 @@ fn open_devtools(window: tauri::WebviewWindow) {
     window.open_devtools();
 }
 
-/// Menu item ids and the event the frontend listens to for Cmd+W.
-#[cfg(target_os = "macos")]
-const CLOSE_TAB_ID: &str = "close-tab";
-#[cfg(target_os = "macos")]
-const CLOSE_WINDOW_ID: &str = "close-window";
-#[cfg(target_os = "macos")]
-const CLOSE_TAB_EVENT: &str = "menu:close-tab";
-#[cfg(target_os = "macos")]
-const SETTINGS_ID: &str = "settings";
-#[cfg(target_os = "macos")]
-const CHECK_UPDATES_ID: &str = "check-updates";
-
-/// Tauri's default macOS menu, except Cmd+W closes the active connection tab
-/// (handled by the frontend) and Close Window moves to Cmd+Shift+W. The app menu also
-/// opens Settings (Cmd+,) and checks for updates; the frontend gets `menu:<id>`.
-#[cfg(target_os = "macos")]
-fn build_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
-    use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-
-    let pkg_info = app.package_info();
-    let about = AboutMetadata {
-        name: Some(pkg_info.name.clone()),
-        version: Some(pkg_info.version.to_string()),
-        ..Default::default()
-    };
-
-    let settings = MenuItemBuilder::with_id(SETTINGS_ID, "Settings…").accelerator("CmdOrCtrl+,").build(app)?;
-    let check_updates = MenuItemBuilder::with_id(CHECK_UPDATES_ID, "Check for Updates…").build(app)?;
-    let app_menu = SubmenuBuilder::new(app, &pkg_info.name)
-        .about(Some(about))
-        .item(&check_updates)
-        .separator()
-        .item(&settings)
-        .separator()
-        .services()
-        .separator()
-        .hide()
-        .hide_others()
-        .show_all()
-        .separator()
-        .quit()
-        .build()?;
-
-    let close_tab = MenuItemBuilder::with_id(CLOSE_TAB_ID, "Close Tab")
-        .accelerator("CmdOrCtrl+W")
-        .build(app)?;
-    let close_window = MenuItemBuilder::with_id(CLOSE_WINDOW_ID, "Close Window")
-        .accelerator("CmdOrCtrl+Shift+W")
-        .build(app)?;
-    let file_menu = SubmenuBuilder::new(app, "File")
-        .item(&close_tab)
-        .item(&close_window)
-        .build()?;
-
-    let edit_menu = SubmenuBuilder::new(app, "Edit")
-        .undo()
-        .redo()
-        .separator()
-        .cut()
-        .copy()
-        .paste()
-        .select_all()
-        .build()?;
-
-    let view_menu = SubmenuBuilder::new(app, "View").fullscreen().build()?;
-
-    let window_menu = SubmenuBuilder::new(app, "Window")
-        .minimize()
-        .maximize()
-        .build()?;
-
-    MenuBuilder::new(app)
-        .items(&[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu])
-        .build()
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
 
     #[cfg(target_os = "macos")]
     let builder = builder
-        .menu(build_menu)
+        .menu(|app| menu::build(app, "en"))
         .on_menu_event(|app, event| {
             use tauri::Emitter;
-            if event.id() == CLOSE_TAB_ID {
-                let _ = app.emit(CLOSE_TAB_EVENT, ());
-            } else if event.id() == CLOSE_WINDOW_ID {
+            if event.id() == menu::CLOSE_TAB_ID {
+                let _ = app.emit(menu::CLOSE_TAB_EVENT, ());
+            } else if event.id() == menu::CLOSE_WINDOW_ID {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.close();
                 }
-            } else if event.id() == SETTINGS_ID || event.id() == CHECK_UPDATES_ID {
+            } else if event.id() == menu::SETTINGS_ID || event.id() == menu::CHECK_UPDATES_ID {
                 let _ = app.emit(&format!("menu:{}", event.id().as_ref()), ());
             }
         });
@@ -155,6 +81,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            menu::set_menu_language,
             commands::connect::connect,
             commands::connect::connect_sqlite,
             commands::connect::connect_mysql,

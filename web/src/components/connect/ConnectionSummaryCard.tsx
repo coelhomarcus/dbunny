@@ -9,6 +9,7 @@ import Badge from "../ui/Badge";
 import ConfirmDialog from "../ui/ConfirmDialog";
 import Tooltip from "../Tooltip";
 import { ConnectionIcon } from "./ConnectionSidebar";
+import { useT } from "../../i18n";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -37,6 +38,7 @@ export default function ConnectionSummaryCard({
   onDelete: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   // The address is masked until asked for, like in the status bar
   const [revealed, setRevealed] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -46,7 +48,7 @@ export default function ConnectionSummaryCard({
   return (
     <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-10">
       <div className="relative w-full max-w-lg rounded-xl border border-border bg-card p-5 shadow-xs/5">
-        <Button variant="ghost-muted" size="icon-xs" className="absolute right-3 top-3" aria-label="Close" onClick={onClose}>
+        <Button variant="ghost-muted" size="icon-xs" className="absolute right-3 top-3" aria-label={t("common.close")} onClick={onClose}>
           <X />
         </Button>
 
@@ -59,13 +61,13 @@ export default function ConnectionSummaryCard({
         </div>
 
         <dl className="mt-5">
-          <Row label={conn.engine === "sqlite" ? "File" : "Address"}>
+          <Row label={conn.engine === "sqlite" ? t("connect.connectionSummaryCard.file") : t("connect.connectionSummaryCard.address")}>
             <span className="min-w-0 truncate font-mono text-xs">{revealed ? summary.address : mask(summary.address)}</span>
-            <Tooltip label={revealed ? "Hide the address" : "Show the address"} side="top">
+            <Tooltip label={revealed ? t("connect.connectionSummaryCard.hideAddress") : t("connect.connectionSummaryCard.showAddress")} side="top">
               <Button
                 variant="ghost-muted"
                 size="icon-xs"
-                aria-label={revealed ? "Hide address" : "Show address"}
+                aria-label={revealed ? t("connect.connectionSummaryCard.hideAddress") : t("connect.connectionSummaryCard.showAddress")}
                 onClick={() => setRevealed((v) => !v)}
               >
                 {revealed ? <EyeOff /> : <Eye />}
@@ -73,12 +75,12 @@ export default function ConnectionSummaryCard({
             </Tooltip>
           </Row>
           {conn.engine !== "sqlite" && (
-            <Row label="User">
-              <span className="truncate">{summary.user || <span className="text-muted-foreground">Default</span>}</span>
+            <Row label={t("connect.connectionSummaryCard.user")}>
+              <span className="truncate">{summary.user || <span className="text-muted-foreground">{t("connect.connectionSummaryCard.default")}</span>}</span>
             </Row>
           )}
           {(summary.ssl || summary.sshVia || summary.readOnly) && (
-            <Row label="Options">
+            <Row label={t("connect.connectionSummaryCard.options")}>
               <div className="flex flex-wrap gap-1.5">
                 {summary.ssl && (
                   <Badge>
@@ -95,7 +97,7 @@ export default function ConnectionSummaryCard({
                 {summary.readOnly && (
                   <Badge variant="warning">
                     <Lock />
-                    Read-only
+                    {t("connect.connectionSummaryCard.readOnly")}
                   </Badge>
                 )}
               </div>
@@ -118,23 +120,23 @@ export default function ConnectionSummaryCard({
             {connecting ? (
               <>
                 <Spinner />
-                Connecting…
+                {t("connect.connectionSummaryCard.connecting")}
               </>
             ) : (
               <>
-                Connect
+                {t("connect.connectionSummaryCard.connect")}
                 <ArrowRight className="transition-transform group-hover:translate-x-0.5" />
               </>
             )}
           </Button>
           <Button variant="outline" onClick={onEdit}>
             <Pencil />
-            Edit
+            {t("common.edit")}
           </Button>
           <div className="flex-1" />
           <Button variant="ghost-muted" className="hover:bg-destructive/10 hover:text-destructive-foreground" onClick={() => setConfirmDelete(true)}>
             <Trash2 />
-            Delete
+            {t("common.delete")}
           </Button>
         </div>
       </div>
@@ -148,10 +150,10 @@ export default function ConnectionSummaryCard({
         }}
         icon={<Trash2 />}
         tone="destructive"
-        title={`Delete “${name}”?`}
-        description="The saved connection is removed from this computer."
-        cancelLabel="Cancel"
-        confirmLabel="Delete"
+        title={t("connect.connectionSummaryCard.deleteTitle", { name })}
+        description={t("connect.connectionSummaryCard.removeNote")}
+        cancelLabel={t("common.cancel")}
+        confirmLabel={t("common.delete")}
       />
     </div>
   );

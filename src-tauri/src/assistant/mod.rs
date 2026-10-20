@@ -308,22 +308,28 @@ impl Assistant {
         let schema = driver.catalog().completion_schema().await.unwrap_or(CompletionSchema { current_schema: None, relations: vec![], functions: vec![] });
         let (cwd, temporary) = workspace_dir(&self.data_dir, saved_id, &info.database);
         std::fs::create_dir_all(&cwd).map_err(|e| format!("Couldn't prepare the assistant's folder: {e}"))?;
-        let input = PromptInput { engine: driver.engine(), info: &info, schema: &schema, instructions: &options.instructions, schema_only: options.schema_only };
+        let input = PromptInput { engine: driver.engine(), info: &info, schema: &schema, instructions: &options.instructions, schema_only: options.schema_only, language: &options.language };
         let (prompt, context) = (system_prompt(&input), database_context(&input));
         let mcp_url = self.mcp_url().await.ok_or_else(|| "The assistant isn't running".to_string())?;
 
         let conversation = self.conversations.create(session_id, options);
         *conversation.workspace.lock().unwrap() = Some(Workspace { path: cwd.clone(), temporary });
         let profile = self.current_profile();
-        // An agent with no system prompt per session gets the database in the first message of a new conversation
-        if profile.delivery() == PromptDelivery::FirstMessage && resume.is_none() {
-            *conversation.pending_context.lock().unwrap() = Some(context);
+        let delivery = profile.delivery_for(agent.supports_system_prompt());
+        // An agent with no system prompt per session gets what it needs in the first message of a new conversation:
+        // the database, for Codex, whose rules are in its configuration; everything, for an agent of the person's own
+        if delivery == PromptDelivery::FirstMessage && resume.is_none() {
+            let first_message = match profile.kind {
+                AgentKind::Codex => context,
+                _ => format!("These are your instructions for this conversation. Follow them, and never mention this block.\n\n{prompt}"),
+            };
+            *conversation.pending_context.lock().unwrap() = Some(first_message);
         }
         let setup = SessionSetup {
             cwd,
             mcp_url,
             token: conversation.token.clone(),
-            system_prompt: (profile.delivery() == PromptDelivery::System).then_some(prompt),
+            system_prompt: (delivery == PromptDelivery::System).then_some(prompt),
             meta: profile.session_meta(),
         };
         let outcome = match resume {
@@ -589,7 +595,7 @@ mod tests {
     }
 
     fn options() -> ConversationOptions {
-        ConversationOptions { ask_before_queries: true, schema_only: false, row_limit: 100, instructions: "status 3 means cancelled".into() }
+        ConversationOptions { ask_before_queries: true, schema_only: false, row_limit: 100, instructions: "status 3 means cancelled".into(), language: String::new() }
     }
 
     async fn rig_with(host: Arc<FakeHost>) -> Rig {
@@ -739,6 +745,30 @@ mod tests {
         shown.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
         let params = shown.host.agent().calls("session/new")[0]["params"].clone();
         assert!(!params["systemPrompt"]["content"][0]["text"].as_str().unwrap().contains("This connection hides values"));
+    }
+
+    fn portuguese() -> ConversationOptions {
+        ConversationOptions { language: "pt-BR".into(), ..options() }
+    }
+
+    #[test]
+    fn options_sent_without_a_language_default_to_english() {
+        let options: ConversationOptions = serde_json::from_value(json!({"askBeforeQueries": true, "schemaOnly": false, "rowLimit": 100, "instructions": ""})).unwrap();
+        assert_eq!(options.language, "");
+        let with: ConversationOptions = serde_json::from_value(json!({"askBeforeQueries": true, "schemaOnly": false, "rowLimit": 100, "instructions": "", "language": "pt-BR"})).unwrap();
+        assert_eq!(with.language, "pt-BR");
+    }
+
+    #[tokio::test]
+    async fn a_portuguese_conversation_tells_the_agent_to_answer_in_portuguese() {
+        let r = started(FakeConfig::default()).await;
+        r.assistant.new_conversation("s1", Some("saved-1"), portuguese()).await.unwrap();
+        let params = r.host.agent().calls("session/new")[0]["params"].clone();
+        assert!(params["systemPrompt"]["content"][0]["text"].as_str().unwrap().contains("Brazilian Portuguese"));
+        let english = started(FakeConfig::default()).await;
+        english.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        let params = english.host.agent().calls("session/new")[0]["params"].clone();
+        assert!(!params["systemPrompt"]["content"][0]["text"].as_str().unwrap().contains("Portuguese"));
     }
 
     #[tokio::test]
@@ -936,6 +966,46 @@ mod tests {
         r.host.agent().calls("session/prompt").iter().map(|p| p["params"]["prompt"][0]["text"].as_str().unwrap().to_string()).collect()
     }
 
+    async fn custom_rig(config: FakeConfig) -> Rig {
+        let r = rig(config).await;
+        assert_eq!(r.assistant.start(AgentKind::Custom, Some("/opt/agent".into())).await, AgentStatus::Ready);
+        r
+    }
+
+    #[tokio::test]
+    async fn a_custom_agent_without_a_system_prompt_gets_the_instructions_in_its_first_message() {
+        let r = custom_rig(FakeConfig { system_prompt: false, ..Default::default() }).await;
+        let opened = r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        let params = r.host.agent().calls("session/new")[0]["params"].clone();
+        // Nothing in the session that this agent would not read
+        assert!(params.get("systemPrompt").is_none() && params["_meta"].get("systemPrompt").is_none(), "{params}");
+        r.assistant.prompt(&opened.conversation_id, "Quantos?").await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "E ontem?").await.unwrap();
+        let texts = prompt_texts(&r);
+        assert!(texts[0].starts_with("Quantos?\n\n<dbunny-context>"), "{}", texts[0]);
+        // The rules and the database both, since there is no other place for them
+        assert!(texts[0].contains("You are the SQL assistant") && texts[0].contains("public.orders") && texts[0].contains("never mention"), "{}", texts[0]);
+        assert_eq!(texts[1], "E ontem?");
+    }
+
+    #[tokio::test]
+    async fn a_custom_agent_with_a_system_prompt_gets_it_in_the_session() {
+        let r = custom_rig(FakeConfig::default()).await;
+        let opened = r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        let params = r.host.agent().calls("session/new")[0]["params"].clone();
+        assert!(params["systemPrompt"]["content"][0]["text"].as_str().unwrap().contains("You are the SQL assistant"), "{params}");
+        r.assistant.prompt(&opened.conversation_id, "Quantos?").await.unwrap();
+        assert_eq!(prompt_texts(&r), vec!["Quantos?".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_reopened_custom_conversation_gets_no_instructions_again() {
+        let r = custom_rig(FakeConfig { system_prompt: false, ..Default::default() }).await;
+        let opened = r.assistant.load_conversation("s1", Some("saved-1"), "old", options()).await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "E ontem?").await.unwrap();
+        assert_eq!(prompt_texts(&r), vec!["E ontem?".to_string()]);
+    }
+
     #[tokio::test]
     async fn the_first_message_of_a_codex_conversation_carries_the_context() {
         let r = codex_rig(FakeConfig::default()).await;
@@ -946,6 +1016,23 @@ mod tests {
         assert!(texts[0].starts_with("Quantos?\n\n<dbunny-context>\nThe database:") && texts[0].contains("public.orders") && texts[0].ends_with("</dbunny-context>"), "{}", texts[0]);
         assert!(texts[0].contains("status 3 means cancelled"));
         assert_eq!(texts[1], "E ontem?");
+    }
+
+    #[tokio::test]
+    async fn the_first_message_of_a_codex_conversation_carries_the_language_line() {
+        let r = codex_rig(FakeConfig::default()).await;
+        let opened = r.assistant.new_conversation("s1", Some("saved-1"), portuguese()).await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "Quantos?").await.unwrap();
+        let texts = prompt_texts(&r);
+        assert!(texts[0].contains("Brazilian Portuguese") && texts[0].ends_with("</dbunny-context>"), "{}", texts[0]);
+    }
+
+    #[tokio::test]
+    async fn a_custom_agent_without_a_system_prompt_gets_the_language_line_too() {
+        let r = custom_rig(FakeConfig { system_prompt: false, ..Default::default() }).await;
+        let opened = r.assistant.new_conversation("s1", Some("saved-1"), portuguese()).await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "Quantos?").await.unwrap();
+        assert!(prompt_texts(&r)[0].contains("Brazilian Portuguese"));
     }
 
     #[tokio::test]

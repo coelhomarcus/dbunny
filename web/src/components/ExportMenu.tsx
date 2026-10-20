@@ -5,6 +5,7 @@ import { exportData, type ExportFormat } from "../lib/exportData";
 import type { QueryColumn } from "@/types";
 import Button from "./ui/Button";
 import Tooltip from "./Tooltip";
+import { useT } from "../i18n";
 
 interface ExportMenuProps {
   columns: QueryColumn[];
@@ -28,6 +29,7 @@ export default function ExportMenu({
   columns, rows, defaultName,
   side = "down", totalRows, totalRowsEstimated, onFetchAll, compact,
 }: ExportMenuProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -67,8 +69,8 @@ export default function ExportMenu({
 
   return (
     <div ref={ref} className="relative">
-      <Tooltip label="Export" side={side === "up" ? "top" : "bottom"}>
-        <Button variant="ghost-muted" size={compact ? "icon-xs" : "icon-sm"} data-active={open} aria-expanded={open} onClick={() => setOpen((v) => !v)} aria-label="Export data">
+      <Tooltip label={t("ui.exportMenu.export")} side={side === "up" ? "top" : "bottom"}>
+        <Button variant="ghost-muted" size={compact ? "icon-xs" : "icon-sm"} data-active={open} aria-expanded={open} onClick={() => setOpen((v) => !v)} aria-label={t("ui.exportMenu.exportData")}>
           {loading ? <Spinner /> : <Download />}
         </Button>
       </Tooltip>
@@ -78,7 +80,7 @@ export default function ExportMenu({
           {showAllOption && (
             <div className="px-2 pt-1.5 pb-1">
               <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                Current page
+                {t("ui.exportMenu.currentPage")}
               </span>
             </div>
           )}
@@ -97,7 +99,7 @@ export default function ExportMenu({
               <div className="-mx-1 my-1 border-t border-border" />
               <div className="px-2 pt-1.5 pb-1">
                 <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                  All rows ({totalRowsEstimated ? "~" : ""}{totalRows.toLocaleString()})
+                  {t(totalRowsEstimated ? "ui.exportMenu.allRowsEstimated" : "ui.exportMenu.allRows", { count: totalRows })}
                 </span>
               </div>
               {formats.map((f) => (

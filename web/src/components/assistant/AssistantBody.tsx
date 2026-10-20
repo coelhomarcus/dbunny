@@ -10,9 +10,11 @@ import ConsentScreen from "./ConsentScreen";
 import AssistantConversation from "./AssistantConversation";
 import HistoryMenu from "./HistoryMenu";
 import ConnectionOptionsDialog from "./ConnectionOptionsDialog";
+import { useT } from "../../i18n";
 
 /** The assistant, in the side panel or in a tab of its own: its header, then what the state of the agent allows. */
 export default function AssistantBody({ onClose, onBack }: { onClose?: () => void; onBack?: () => void }) {
+  const t = useT();
   const assistant = useAssistant();
   const { savedConnectionId } = useConnection();
   const [options, setOptions] = useState(false);
@@ -21,42 +23,42 @@ export default function AssistantBody({ onClose, onBack }: { onClose?: () => voi
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border px-3">
         <AgentIcon kind={assistant.agent.kind} />
-        <span className="shrink-0 text-[13px] font-medium">{assistant.agent.kind === "custom" ? "Agent" : assistant.agent.name}</span>
+        <span className="shrink-0 text-[13px] font-medium">{assistant.agent.kind === "custom" ? t("assistant.agentPicker.agent") : assistant.agent.name}</span>
         <span className="flex-1" />
         {ready && (
           <>
             <HistoryMenu />
             {savedConnectionId && (
-              <Tooltip label="Options for this connection" side="bottom">
-                <Button variant="ghost-muted" size="icon-xs" aria-label="Options for this connection" onClick={() => setOptions(true)}>
+              <Tooltip label={t("assistant.assistantBody.optionsForThisConnection")} side="bottom">
+                <Button variant="ghost-muted" size="icon-xs" aria-label={t("assistant.assistantBody.optionsForThisConnection")} onClick={() => setOptions(true)}>
                   <SlidersHorizontal />
                 </Button>
               </Tooltip>
             )}
-            <Tooltip label="New chat" side="bottom">
-              <Button variant="ghost-muted" size="icon-xs" aria-label="New chat" onClick={() => assistant.newChat()}>
+            <Tooltip label={t("assistant.assistantBody.newChat")} side="bottom">
+              <Button variant="ghost-muted" size="icon-xs" aria-label={t("assistant.assistantBody.newChat")} onClick={() => assistant.newChat()}>
                 <SquarePen />
               </Button>
             </Tooltip>
           </>
         )}
         {onClose && (
-          <Tooltip label="Open in a tab" side="bottom">
-            <Button variant="ghost-muted" size="icon-xs" aria-label="Open in a tab" onClick={assistant.expand}>
+          <Tooltip label={t("assistant.assistantBody.openInATab")} side="bottom">
+            <Button variant="ghost-muted" size="icon-xs" aria-label={t("assistant.assistantBody.openInATab")} onClick={assistant.expand}>
               <Maximize2 />
             </Button>
           </Tooltip>
         )}
         {onBack && (
-          <Tooltip label="Back to the side panel" side="bottom">
-            <Button variant="ghost-muted" size="icon-xs" aria-label="Back to the side panel" onClick={onBack}>
+          <Tooltip label={t("assistant.assistantBody.backToTheSidePanel")} side="bottom">
+            <Button variant="ghost-muted" size="icon-xs" aria-label={t("assistant.assistantBody.backToTheSidePanel")} onClick={onBack}>
               <Minimize2 />
             </Button>
           </Tooltip>
         )}
         {onClose && (
-          <Tooltip label="Close" side="bottom">
-            <Button variant="ghost-muted" size="icon-xs" aria-label="Close" onClick={onClose}>
+          <Tooltip label={t("common.close")} side="bottom">
+            <Button variant="ghost-muted" size="icon-xs" aria-label={t("common.close")} onClick={onClose}>
               <X />
             </Button>
           </Tooltip>

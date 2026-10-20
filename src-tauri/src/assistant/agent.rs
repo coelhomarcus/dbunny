@@ -429,8 +429,11 @@ impl AgentHandle {
             Err(_) => return Err(AgentStatus::Failed { message: "The agent didn't answer in time".into() }),
         };
         let abilities = &hello["agentCapabilities"];
-        if abilities["mcpCapabilities"]["http"] != true || abilities["loadSession"] != true {
-            return Err(AgentStatus::Unsupported { message: "This agent can't use DBunny's tools.".into() });
+        if abilities["mcpCapabilities"]["http"] != true {
+            return Err(AgentStatus::Unsupported { message: "This agent can't use DBunny's tools: it has to take MCP servers over HTTP.".into() });
+        }
+        if abilities["loadSession"] != true {
+            return Err(AgentStatus::Unsupported { message: "This agent can't reopen conversations: it has to support loading a session.".into() });
         }
         let methods = hello["authMethods"]
             .as_array()
@@ -451,7 +454,7 @@ impl AgentHandle {
         }))
     }
 
-    #[cfg(test)]
+    /// The agent said it takes a system prompt for each session.
     pub fn supports_system_prompt(&self) -> bool {
         self.capabilities.system_prompt
     }
@@ -665,7 +668,7 @@ mod tests {
     }
 
     fn options() -> ConversationOptions {
-        ConversationOptions { ask_before_queries: true, schema_only: false, row_limit: 100, instructions: String::new() }
+        ConversationOptions { ask_before_queries: true, schema_only: false, row_limit: 100, instructions: String::new(), language: String::new() }
     }
 
     fn update(session: &str, kind: &str) -> Value {
@@ -699,9 +702,9 @@ mod tests {
     #[tokio::test]
     async fn agent_without_http_mcp_is_unsupported() {
         let status = rig(FakeConfig { http_mcp: false, ..Default::default() }).await.err().unwrap();
-        assert_eq!(status, AgentStatus::Unsupported { message: "This agent can't use DBunny's tools.".into() });
+        assert_eq!(status, AgentStatus::Unsupported { message: "This agent can't use DBunny's tools: it has to take MCP servers over HTTP.".into() });
         let status = rig(FakeConfig { load_session: false, ..Default::default() }).await.err().unwrap();
-        assert!(matches!(status, AgentStatus::Unsupported { .. }));
+        assert_eq!(status, AgentStatus::Unsupported { message: "This agent can't reopen conversations: it has to support loading a session.".into() });
     }
 
     #[tokio::test]

@@ -3,6 +3,7 @@ import { useAssistant } from "../../contexts/assistant";
 import { clampPanelWidth, DEFAULT_PANEL_WIDTH, PANEL_WIDTH_KEY, storedPanelWidth } from "../../lib/assistantPanelWidth";
 import SideCard from "../layout/SideCard";
 import AssistantBody from "./AssistantBody";
+import { useT } from "../../i18n";
 
 function remembered(): number {
   try {
@@ -14,6 +15,7 @@ function remembered(): number {
 
 /** The assistant beside the page, opened from the tab bar or with Cmd/Ctrl+I. Its edge can be dragged to change its width. */
 export default function AssistantPanel() {
+  const t = useT();
   const assistant = useAssistant();
   const [width, setWidth] = useState(remembered);
   const [resizing, setResizing] = useState(false);
@@ -54,12 +56,12 @@ export default function AssistantPanel() {
 
   if (!assistant.available) return null;
   return (
-    <SideCard open={assistant.panelOpen && !assistant.inTab} widthClass="w-96" width={width} resizing={resizing} label="Assistant">
+    <SideCard open={assistant.panelOpen && !assistant.inTab} widthClass="w-96" width={width} resizing={resizing} label={t("assistant.assistantPanel.assistant")}>
       <div className="relative flex h-full min-h-0 flex-col">
         <div
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize the assistant"
+          aria-label={t("assistant.assistantPanel.resizeTheAssistant")}
           onPointerDown={startResize}
           onDoubleClick={resetWidth}
           className="absolute inset-y-0 left-0 z-10 w-2 cursor-col-resize after:absolute after:inset-y-0 after:left-0 after:w-0.5 after:bg-primary/60 after:opacity-0 after:transition-opacity hover:after:opacity-100"

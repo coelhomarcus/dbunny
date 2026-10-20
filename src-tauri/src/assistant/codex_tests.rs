@@ -68,7 +68,7 @@ impl Live {
     }
 
     fn options(schema_only: bool) -> ConversationOptions {
-        ConversationOptions { ask_before_queries: false, schema_only, row_limit: 100, instructions: String::new() }
+        ConversationOptions { ask_before_queries: false, schema_only, row_limit: 100, instructions: String::new(), language: String::new() }
     }
 
     /// The agent's updates for one conversation.

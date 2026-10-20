@@ -175,7 +175,7 @@ mod tests {
     use crate::db::Driver;
 
     fn options() -> ConversationOptions {
-        ConversationOptions { ask_before_queries: false, schema_only: false, row_limit: 100, instructions: String::new() }
+        ConversationOptions { ask_before_queries: false, schema_only: false, row_limit: 100, instructions: String::new(), language: String::new() }
     }
 
     fn headers(host: Option<&str>, origin: Option<&str>, token: Option<&str>) -> HeaderMap {

@@ -1,4 +1,5 @@
 import type { TableFilter } from "../types/query";
+import { t } from "../i18n/store.ts";
 
 export type DataIcon = "table" | "view" | "matview" | "partition";
 
@@ -99,12 +100,12 @@ export function openDocument(state: DocumentsState, target: OpenTarget): Documen
   const { id, nextId } = allocate(state);
   const titled = target.kind === "query" && target.title !== undefined;
   const title =
-    target.kind === "query" ? target.title ?? `Query ${state.nextQuery}`
-    : target.kind === "create-table" ? "New table"
+    target.kind === "query" ? target.title ?? t("ui.documents.query", { n: state.nextQuery })
+    : target.kind === "create-table" ? t("ui.documents.newTable")
     : target.kind === "diagram" ? target.schema
-    : target.kind === "activity" ? "Activity"
-    : target.kind === "roles" ? "Roles"
-    : target.kind === "assistant" ? "Assistant"
+    : target.kind === "activity" ? t("ui.documents.activity")
+    : target.kind === "roles" ? t("ui.documents.roles")
+    : target.kind === "assistant" ? t("ui.documents.assistant")
     : target.name;
   const doc: Document = { id, kind: target.kind, title };
   if (target.kind === "query") {
@@ -183,7 +184,7 @@ export function updateCreateTable(
       const next = { ...doc };
       if (patch.title !== undefined) {
         const trimmed = patch.title.trim();
-        next.title = trimmed || "New table";
+        next.title = trimmed || t("ui.documents.newTable");
       }
       if (patch.schema !== undefined && patch.schema.trim()) next.schema = patch.schema.trim();
       return next;

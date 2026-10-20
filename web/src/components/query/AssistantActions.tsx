@@ -5,9 +5,11 @@ import { useAssistant } from "../../contexts/assistant";
 import Button from "../ui/Button";
 import Popover from "../ui/Popover";
 import Tooltip from "../Tooltip";
+import { useT } from "../../i18n";
 
 /** Ask the assistant about the statement in the editor: what it does, or how to make it faster. */
 export default function AssistantActions({ onExplain, onOptimize }: { onExplain: () => void; onOptimize: () => void }) {
+  const t = useT();
   const assistant = useAssistant();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
@@ -20,8 +22,8 @@ export default function AssistantActions({ onExplain, onOptimize }: { onExplain:
 
   return (
     <div ref={anchor}>
-      <Tooltip label="Ask the assistant" side="top">
-        <Button variant="ghost-muted" size="icon-sm" aria-label="Ask the assistant" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <Tooltip label={t("query.assistantActions.askTheAssistant")} side="top">
+        <Button variant="ghost-muted" size="icon-sm" aria-label={t("query.assistantActions.askTheAssistant")} aria-expanded={open} onClick={() => setOpen(!open)}>
           <AiIcon />
         </Button>
       </Tooltip>
@@ -34,8 +36,8 @@ export default function AssistantActions({ onExplain, onOptimize }: { onExplain:
         >
           <BookOpenText />
           <span className="min-w-0 flex-1">
-            <span className="block text-[13px]">Explain</span>
-            <span className="block text-xs text-muted-foreground">What the statement does</span>
+            <span className="block text-[13px]">{t("query.assistantActions.explain")}</span>
+            <span className="block text-xs text-muted-foreground">{t("query.assistantActions.whatTheStatementDoes")}</span>
           </span>
         </button>
         <button
@@ -46,8 +48,8 @@ export default function AssistantActions({ onExplain, onOptimize }: { onExplain:
         >
           <Gauge />
           <span className="min-w-0 flex-1">
-            <span className="block text-[13px]">Optimize</span>
-            <span className="block text-xs text-muted-foreground">Read its plan, suggest changes</span>
+            <span className="block text-[13px]">{t("query.assistantActions.optimize")}</span>
+            <span className="block text-xs text-muted-foreground">{t("query.assistantActions.readItsPlanSuggestChanges")}</span>
           </span>
         </button>
       </Popover>

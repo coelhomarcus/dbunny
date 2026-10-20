@@ -18,6 +18,8 @@ import { dialectData } from "../../lib/engines";
 import { SqlPreviewBox } from "../schema/SqlPreview";
 import ForeignKeyEditor from "./ForeignKeyEditor";
 import { guessReference } from "../../lib/foreignKeyForm";
+import { useT, type StaticKey } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 /** Which form to show; fields not chosen yet come from the column being changed. */
 export type ChangeDraft =
@@ -30,12 +32,12 @@ export type ChangeDraft =
   | { kind: "dropConstraint"; constraint: string };
 
 /** How each way of producing a column is named when adding one. */
-const GENERATION_LABELS: Record<ColumnGeneration, string> = {
-  none: "None",
-  autoincrement: "Auto increment",
-  identityByDefault: "Identity, by default",
-  identityAlways: "Identity, always",
-  generated: "Generated",
+const GENERATION_LABELS: Record<ColumnGeneration, StaticKey> = {
+  none: "structure.structureChangeDialog.genNone",
+  autoincrement: "structure.structureChangeDialog.genAutoincrement",
+  identityByDefault: "structure.structureChangeDialog.genIdentityByDefault",
+  identityAlways: "structure.structureChangeDialog.genIdentityAlways",
+  generated: "structure.structureChangeDialog.genGenerated",
 };
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -89,6 +91,7 @@ function ChangeForm({
   onClose: () => void;
 }) {
   const api = useApi();
+  const t = useT();
   const { tabId } = useTab();
   const capabilities = useCapabilities();
   const data = dialectData(useSqlDialect());
@@ -199,13 +202,13 @@ function ChangeForm({
       api
         .previewStructureChange(schema, table, JSON.parse(changeKey))
         .then((text) => !stale && (setSql(text), setPreviewError(null)))
-        .catch((err) => !stale && (setSql(""), setPreviewError(typeof err === "string" ? err : "Invalid change")));
+        .catch((err) => !stale && (setSql(""), setPreviewError(errorText(err, t("structure.structureChangeDialog.invalidChange")))));
     }, 150);
     return () => {
       stale = true;
       clearTimeout(timer);
     };
-  }, [api, schema, table, changeKey]);
+  }, [api, schema, table, changeKey, t]);
 
   async function run() {
     setBusy(true);
@@ -214,25 +217,25 @@ function ChangeForm({
       onDone();
       onClose();
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : "The change failed" });
+      notify({ tone: "error", text: errorText(err, t("structure.structureChangeDialog.changeFailed")) });
       setBusy(false);
     }
   }
 
   const destructive = draft.kind === "dropColumn" || draft.kind === "dropIndex" || draft.kind === "dropConstraint";
   const title = {
-    addColumn: "Add column",
-    renameColumn: `Rename ${column?.name}`,
-    setDefault: `Default of ${column?.name}`,
-    setComment: `Comment on ${column?.name}`,
-    dropColumn: `Drop column ${column?.name}?`,
-    createIndex: "Create index",
-    dropIndex: `Drop index ${"index" in draft ? draft.index : ""}?`,
-    setType: `Type of ${column?.name}`,
-    addForeignKey: "Add foreign key",
-    addUnique: "Add unique constraint",
-    addCheck: "Add check constraint",
-    dropConstraint: `Drop constraint ${"constraint" in draft ? draft.constraint : ""}?`,
+    addColumn: t("structure.structureChangeDialog.titleAddColumn"),
+    renameColumn: t("structure.structureChangeDialog.titleRenameColumn", { name: column?.name ?? "" }),
+    setDefault: t("structure.structureChangeDialog.titleSetDefault", { name: column?.name ?? "" }),
+    setComment: t("structure.structureChangeDialog.titleSetComment", { name: column?.name ?? "" }),
+    dropColumn: t("structure.structureChangeDialog.titleDropColumn", { name: column?.name ?? "" }),
+    createIndex: t("structure.structureChangeDialog.titleCreateIndex"),
+    dropIndex: t("structure.structureChangeDialog.titleDropIndex", { name: "index" in draft ? draft.index : "" }),
+    setType: t("structure.structureChangeDialog.titleSetType", { name: column?.name ?? "" }),
+    addForeignKey: t("structure.structureChangeDialog.titleAddForeignKey"),
+    addUnique: t("structure.structureChangeDialog.titleAddUnique"),
+    addCheck: t("structure.structureChangeDialog.titleAddCheck"),
+    dropConstraint: t("structure.structureChangeDialog.titleDropConstraint", { name: "constraint" in draft ? draft.constraint : "" }),
   }[draft.kind];
   const icon = destructive ? (
     <Trash2 />
@@ -249,9 +252,9 @@ function ChangeForm({
   );
   const description =
     draft.kind === "dropColumn"
-      ? "Its data in every row is deleted. This can't be undone."
+      ? t("structure.structureChangeDialog.dropColumnNote")
       : draft.kind === "setType"
-        ? `Now ${column?.typeName}. Every row is converted, and the table is locked meanwhile.`
+        ? t("structure.structureChangeDialog.setTypeNote", { type: column?.typeName ?? "" })
         : `${schema}.${table}`;
 
   return (
@@ -266,30 +269,30 @@ function ChangeForm({
       footer={
         <>
           <Button variant="neutral" size="sm" onClick={onClose} autoFocus={destructive}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant={destructive ? "destructive" : "primary"} size="sm" onClick={run} disabled={!sql || busy}>
-            {destructive ? "Drop" : "Apply"}
+            {destructive ? t("structure.structureChangeDialog.drop") : t("structure.structureChangeDialog.apply")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3.5">
         {(draft.kind === "addColumn" || draft.kind === "renameColumn") && (
-          <Field label={draft.kind === "addColumn" ? "Name" : "New name"}>
+          <Field label={draft.kind === "addColumn" ? t("structure.structureChangeDialog.name") : t("structure.structureChangeDialog.newName")}>
             <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus spellCheck={false} className="font-mono" />
           </Field>
         )}
         {draft.kind === "setType" && (
           <>
-            <Field label="New type">
+            <Field label={t("structure.structureChangeDialog.newType")}>
               <Input value={dataType} onChange={(e) => setDataType(e.target.value)} autoFocus spellCheck={false} className="font-mono" list="dbunny-common-types" />
             </Field>
-            <Field label="Conversion (USING)">
+            <Field label={t("structure.structureChangeDialog.conversion")}>
               <Input
                 value={using}
                 onChange={(e) => setUsing(e.target.value)}
-                placeholder={`automatic, e.g. ${quoteName(column!.name)}::integer`}
+                placeholder={t("structure.structureChangeDialog.usingPlaceholder", { example: `${quoteName(column!.name)}::integer` })}
                 spellCheck={false}
                 className="font-mono"
               />
@@ -298,56 +301,56 @@ function ChangeForm({
         )}
         {draft.kind === "addColumn" && (
           <>
-            <Field label="Type">
+            <Field label={t("structure.structureChangeDialog.type")}>
               <Input value={dataType} onChange={(e) => setDataType(e.target.value)} spellCheck={false} className="font-mono" list="dbunny-common-types" />
             </Field>
             {data.addColumnGenerations.length > 0 && (
               <>
-                <Field label="Generation">
+                <Field label={t("structure.structureChangeDialog.generation")}>
                   <select value={generation} onChange={(e) => setGeneration(e.target.value as ColumnGeneration)} className={cn(selectClass, "w-full")}>
                     {data.addColumnGenerations.map((option) => (
                       <option key={option} value={option}>
-                        {GENERATION_LABELS[option]}
+                        {t(GENERATION_LABELS[option])}
                       </option>
                     ))}
                   </select>
                 </Field>
                 {generation === "generated" && (
-                  <Field label="Generated expression">
-                    <Input value={generatedExpr} onChange={(e) => setGeneratedExpr(e.target.value)} placeholder="e.g. price * 2" spellCheck={false} className="font-mono" />
+                  <Field label={t("structure.structureChangeDialog.generatedExpression")}>
+                    <Input value={generatedExpr} onChange={(e) => setGeneratedExpr(e.target.value)} placeholder={t("structure.structureChangeDialog.expressionExample")} spellCheck={false} className="font-mono" />
                   </Field>
                 )}
               </>
             )}
-            <CheckOption checked={!nullable} onChange={(v) => setNullable(!v)} label="NOT NULL" hint="Existing rows need a default to satisfy it" />
-            <CheckOption checked={columnUnique} onChange={setColumnUnique} label="Unique" hint="No two rows may share this value" />
-            <Field label="Check (SQL expression)">
-              <Input value={columnCheck} onChange={(e) => setColumnCheck(e.target.value)} placeholder="none, e.g. price >= 0" spellCheck={false} className="font-mono" />
+            <CheckOption checked={!nullable} onChange={(v) => setNullable(!v)} label="NOT NULL" hint={t("structure.structureChangeDialog.notNullHint")} />
+            <CheckOption checked={columnUnique} onChange={setColumnUnique} label={t("structure.structureChangeDialog.unique")} hint={t("structure.structureChangeDialog.uniqueColumnHint")} />
+            <Field label={t("structure.structureChangeDialog.check")}>
+              <Input value={columnCheck} onChange={(e) => setColumnCheck(e.target.value)} placeholder={t("structure.structureChangeDialog.checkPlaceholder")} spellCheck={false} className="font-mono" />
             </Field>
           </>
         )}
         {(draft.kind === "addColumn" || draft.kind === "setDefault") && (
-          <Field label="Default (SQL expression)">
-            <Input value={draft.kind === "addColumn" && generation !== "none" ? "" : defaultValue} onChange={(e) => setDefaultValue(e.target.value)} placeholder="none, e.g. 0, now(), 'text'" disabled={draft.kind === "addColumn" && generation !== "none"} spellCheck={false} className="font-mono" autoFocus={draft.kind === "setDefault"} />
+          <Field label={t("structure.structureChangeDialog.default")}>
+            <Input value={draft.kind === "addColumn" && generation !== "none" ? "" : defaultValue} onChange={(e) => setDefaultValue(e.target.value)} placeholder={t("structure.structureChangeDialog.defaultPlaceholder")} disabled={draft.kind === "addColumn" && generation !== "none"} spellCheck={false} className="font-mono" autoFocus={draft.kind === "setDefault"} />
           </Field>
         )}
         {((draft.kind === "addColumn" && capabilities.comments) || draft.kind === "setComment") && (
-          <Field label="Comment">
-            <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="optional" autoFocus={draft.kind === "setComment"} />
+          <Field label={t("structure.structureChangeDialog.comment")}>
+            <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder={t("structure.structureChangeDialog.optional")} autoFocus={draft.kind === "setComment"} />
           </Field>
         )}
         {draft.kind === "createIndex" && (
           <>
-            <ColumnPicker label="Columns, in order" columns={columns} value={indexColumns} onChange={setIndexColumns} />
-            <Field label="Or an expression">
-              <Input value={expression} onChange={(e) => setExpression(e.target.value)} placeholder="e.g. lower(email)" spellCheck={false} className="font-mono" />
+            <ColumnPicker label={t("structure.structureChangeDialog.columnsInOrder")} columns={columns} value={indexColumns} onChange={setIndexColumns} />
+            <Field label={t("structure.structureChangeDialog.orExpression")}>
+              <Input value={expression} onChange={(e) => setExpression(e.target.value)} placeholder={t("structure.structureChangeDialog.indexExpressionExample")} spellCheck={false} className="font-mono" />
             </Field>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Name">
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="automatic" spellCheck={false} className="font-mono" />
+              <Field label={t("structure.structureChangeDialog.name")}>
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("structure.structureChangeDialog.automatic")} spellCheck={false} className="font-mono" />
               </Field>
               {capabilities.indexMethods && (
-                <Field label="Method">
+                <Field label={t("structure.structureChangeDialog.method")}>
                   <select value={method} onChange={(e) => setMethod(e.target.value)} className={cn(selectClass, "w-full")}>
                     {data.indexMethods.map((m) => (
                       <option key={m} value={m}>
@@ -358,14 +361,14 @@ function ChangeForm({
                 </Field>
               )}
             </div>
-            <CheckOption checked={unique} onChange={setUnique} label="Unique" hint="Refuses rows that repeat these values" />
+            <CheckOption checked={unique} onChange={setUnique} label={t("structure.structureChangeDialog.unique")} hint={t("structure.structureChangeDialog.uniqueIndexHint")} />
             {capabilities.concurrentIndex && (
-              <CheckOption checked={concurrently} onChange={setConcurrently} label="Build concurrently" hint="Slower, but doesn't block writes to the table meanwhile" />
+              <CheckOption checked={concurrently} onChange={setConcurrently} label={t("structure.structureChangeDialog.concurrently")} hint={t("structure.structureChangeDialog.concurrentlyHint")} />
             )}
           </>
         )}
         {(draft.kind === "addUnique" || draft.kind === "addForeignKey") && (
-          <ColumnPicker label={draft.kind === "addUnique" ? "Columns that can't repeat together" : "Columns"} columns={columns} value={keyColumns} onChange={setKeyColumns} />
+          <ColumnPicker label={draft.kind === "addUnique" ? t("structure.structureChangeDialog.columnsUnique") : t("structure.structureChangeDialog.columns")} columns={columns} value={keyColumns} onChange={setKeyColumns} />
         )}
         {draft.kind === "addForeignKey" && (
           <ForeignKeyEditor
@@ -381,22 +384,22 @@ function ChangeForm({
           />
         )}
         {draft.kind === "addCheck" && (
-          <Field label="Rows must satisfy">
-            <Input value={expression} onChange={(e) => setExpression(e.target.value)} placeholder="e.g. price >= 0" autoFocus spellCheck={false} className="font-mono" />
+          <Field label={t("structure.structureChangeDialog.rowsMustSatisfy")}>
+            <Input value={expression} onChange={(e) => setExpression(e.target.value)} placeholder={t("structure.structureChangeDialog.checkExample")} autoFocus spellCheck={false} className="font-mono" />
           </Field>
         )}
         {(draft.kind === "addForeignKey" || draft.kind === "addUnique" || draft.kind === "addCheck") && (
-          <Field label="Name">
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="automatic" spellCheck={false} className="font-mono" />
+          <Field label={t("structure.structureChangeDialog.name")}>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("structure.structureChangeDialog.automatic")} spellCheck={false} className="font-mono" />
           </Field>
         )}
         {destructive && capabilities.cascade && (
-          <CheckOption checked={cascade} onChange={setCascade} label="Cascade" hint="Also drops views and constraints that depend on it" />
+          <CheckOption checked={cascade} onChange={setCascade} label={t("structure.structureChangeDialog.cascade")} hint={t("structure.structureChangeDialog.cascadeHint")} />
         )}
 
         <datalist id="dbunny-common-types">
-          {suggestedTypes.map((t) => (
-            <option key={t} value={t} />
+          {suggestedTypes.map((type) => (
+            <option key={type} value={type} />
           ))}
         </datalist>
         <SqlPreviewBox

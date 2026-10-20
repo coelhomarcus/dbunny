@@ -27,6 +27,8 @@ export interface ConversationOptions {
   rowLimit: number;
   /** What the person wrote about this connection. */
   instructions: string;
+  /** The language of the app, so the agent answers in it. */
+  language: string;
 }
 
 export interface ModelOption {

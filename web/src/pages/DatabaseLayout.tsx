@@ -15,8 +15,10 @@ import { RightPanelContext } from "../contexts/rightPanel";
 import { useCapabilities } from "../hooks/useCapabilities";
 import { AssistantProvider } from "../contexts/AssistantProvider";
 import AssistantPanel from "../components/assistant/AssistantPanel";
+import { useT } from "../i18n";
 
 export default function DatabaseLayout() {
+  const t = useT();
   const { isConnected, connectionInfo, disconnect, api } = useConnection();
   const navigate = useNavigate();
   const [revealed, setRevealed] = useState(false);
@@ -105,9 +107,9 @@ export default function DatabaseLayout() {
         }}
         icon={<GitCommitVertical />}
         tone="destructive"
-        title="Disconnect with a transaction open?"
-        description="Its changes haven't been committed, so disconnecting rolls them back."
-        confirmLabel="Roll back and disconnect"
+        title={t("schema.databaseLayout.disconnectWithATransactionOpen")}
+        description={t("schema.databaseLayout.itsChangesHaventBeenCommitted")}
+        confirmLabel={t("schema.databaseLayout.rollBackAndDisconnect")}
       />
     </div>
     </AssistantProvider>

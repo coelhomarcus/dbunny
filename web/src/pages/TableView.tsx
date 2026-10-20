@@ -38,6 +38,8 @@ import EditableCell from "../components/EditableCell";
 import Pagination from "../components/Pagination";
 import { TableSkeleton } from "../components/Skeleton";
 import { useNotify } from "../contexts/NoticeProvider";
+import { useT } from "../i18n";
+import { errorText } from "../lib/appError";
 
 /** Where a foreign key cell leads: the referenced table, filtered to the matching row. */
 function foreignKeyLink(column: ColumnInfo | undefined, row: unknown[], columns: QueryColumn[]) {
@@ -82,6 +84,7 @@ function TableViewContent({
   filterRequest?: FilterRequest;
   active: boolean;
 }) {
+  const t = useT();
   const api = useApi();
   const dialect = useSqlDialect();
   const { openDocument, registerDataRefresh, setQueryDirty } = useDocuments();
@@ -238,14 +241,14 @@ function TableViewContent({
         await api.insertRow(schema!, table!, values);
         setDraft(null);
         await tableData.refresh();
-        notify({ tone: "success", text: hadEdits ? "Changes saved" : "Row inserted" });
+        notify({ tone: "success", text: hadEdits ? t("table.tableView.changesSaved") : t("table.tableView.rowInserted") });
       } catch (err) {
-        notify({ tone: "error", text: typeof err === "string" ? err : "Couldn't insert the row" });
+        notify({ tone: "error", text: errorText(err, t("table.tableView.insertFailed")) });
       }
       return;
     }
-    if (hadEdits) notify({ tone: "success", text: "Changes saved" });
-  }, [api, draft, draftCol, draftIsNull, draftText, editing, notify, pending, schema, table, tableData]);
+    if (hadEdits) notify({ tone: "success", text: t("table.tableView.changesSaved") });
+  }, [api, draft, draftCol, draftIsNull, draftText, editing, notify, pending, schema, table, tableData, t]);
 
   const saveAllRef = useRef(saveAll);
   saveAllRef.current = saveAll;
@@ -368,25 +371,24 @@ function TableViewContent({
       selection.selectedRows.has(rowIndex) && selection.selectedRows.size > 1
         ? [...selection.selectedRows].sort((a, b) => a - b).map(shownRow)
         : [row];
-    const rowsLabel = targetRows.length > 1 ? `${targetRows.length} rows` : "row";
     const copy = (text: string) => writeClipboardText(text);
     const link = foreignKeyLink(column, row, data.columns);
     const editable = !editLocked && editorFor(column, value).kind !== "readonly";
 
     const items: ContextMenuItem[] = [
-      { label: "Copy value", icon: <Copy />, onSelect: () => copy(valueText(value)) },
+      { label: t("table.tableView.copyValue"), icon: <Copy />, onSelect: () => copy(valueText(value)) },
       {
-        label: `Copy ${rowsLabel} as`,
+        label: t("table.tableView.copyRowsAs", { count: targetRows.length }),
         icon: <Copy />,
         items: [
           { label: "JSON", icon: <Braces />, onSelect: () => copy(rowsToJson(data.columns, targetRows)) },
-          { label: "TSV (for spreadsheets)", icon: <Sheet />, onSelect: () => copy(rowsToTsv(data.columns, targetRows)) },
+          { label: t("table.tableView.tsvForSpreadsheets"), icon: <Sheet />, onSelect: () => copy(rowsToTsv(data.columns, targetRows)) },
           { label: "SQL INSERT", icon: <Database />, onSelect: () => copy(rowsToInsertSql(schema!, table!, data.columns, targetRows, dialect)) },
         ],
       },
       "separator",
       {
-        label: value === null ? `Filter: ${colName} is NULL` : "Filter by this value",
+        label: value === null ? t("table.tableView.filterIsNull", { column: colName }) : t("table.tableView.filterByValue"),
         icon: <Filter />,
         onSelect: guard(() => {
           const filter: TableFilter =
@@ -402,7 +404,7 @@ function TableViewContent({
     ];
     if (link) {
       items.push({
-        label: `Open referenced row in ${column!.foreignKey!.table}`,
+        label: t("table.tableView.openReferenced", { table: column!.foreignKey!.table }),
         icon: <ArrowUpRight />,
         onSelect: guard(() => openDocument({ kind: "data", schema: link.schema, name: link.name, icon: "table", filters: link.filters })),
       });
@@ -410,14 +412,14 @@ function TableViewContent({
     items.push("separator");
     if (editable && (column?.isNullable ?? true)) {
       items.push({
-        label: "Set to NULL",
+        label: t("table.tableView.setToNull"),
         icon: <Ban />,
         disabled: value === null,
         onSelect: () => editing.setCellValue(rowIndex, colName, true, ""),
       });
     }
     if (!readOnly) items.push({
-      label: "Clone row",
+      label: t("table.tableView.cloneRow"),
       icon: <CopyPlus />,
       onSelect: guard(() => {
         const initialValues: Record<string, string | null> = {};
@@ -446,7 +448,7 @@ function TableViewContent({
         onDelete={async () => {
           const count = selection.selectedRows.size;
           const err = await pending.handleDelete();
-          notify(err ? { tone: "error", text: err } : { tone: "success", text: `Deleted ${count} row${count === 1 ? "" : "s"}` });
+          notify(err ? { tone: "error", text: err } : { tone: "success", text: t("table.tableView.deleted", { count }) });
         }}
         hasPendingChanges={pending.hasPendingChanges || draft !== null}
         dirtyRowCount={pending.dirtyRowCount + (draft ? 1 : 0)}
@@ -479,7 +481,7 @@ function TableViewContent({
       )}
 
       {error && !data && (
-        <div className="select-text px-4 py-3 text-sm text-muted-foreground">Couldn't load this table.</div>
+        <div className="select-text px-4 py-3 text-sm text-muted-foreground">{t("table.tableView.couldntLoadThisTable")}</div>
       )}
 
       {loading && !data && <TableSkeleton columns={6} rows={14} />}
@@ -545,7 +547,7 @@ function TableViewContent({
                 {draft && (
                   <tr className="bg-success/15">
                     <td className="border-b border-r border-border px-3 py-1 text-success-foreground">
-                      <Plus size={14} aria-label="New row" />
+                      <Plus size={14} aria-label={t("table.tableView.newRow")} />
                     </td>
                     {layout.visible.map(({ column: col }) => {
                       const info = columnInfos.find((c) => c.name === col.name);
@@ -655,7 +657,7 @@ function TableViewContent({
                             onCommit={editing.commitEdit}
                             onCancel={editing.cancelEdit}
                             onExpand={() => setExpandedCell(editing.editingCell)}
-                            linkLabel={link ? `Open the referenced row in ${columnInfo!.foreignKey!.table}` : undefined}
+                            linkLabel={link ? t("table.tableView.openReferenced", { table: columnInfo!.foreignKey!.table }) : undefined}
                             menuOpen={menu?.rowIndex === rowIndex && menu.colName === col.name}
                             columnName={col.name}
                             columnSelected={selectedColumn === col.name}
@@ -675,11 +677,11 @@ function TableViewContent({
             {data.rows.length === 0 && !loading && (
               <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
                 <p className="text-sm font-medium">
-                  {tableData.filters.length > 0 ? "No rows match the filters" : "This table has no rows"}
+                  {tableData.filters.length > 0 ? t("table.tableView.noRowsMatch") : t("table.tableView.noRows")}
                 </p>
                 {tableData.filters.length > 0 && (
                   <Button variant="outline" size="sm" onClick={guard(() => tableData.applyFilters([], "all"))}>
-                    Clear filters
+                    {t("table.tableView.clearFilters")}
                   </Button>
                 )}
               </div>
@@ -728,8 +730,8 @@ function TableViewContent({
         open={reviewSql !== null}
         onClose={() => setReviewSql(null)}
         className="max-w-2xl"
-        title="Pending changes as SQL"
-        description="What saving will run. Values are sent as parameters; this text is for reviewing or reusing."
+        title={t("table.tableView.pendingChangesAsSql")}
+        description={t("table.tableView.whatSavingWillRunValues")}
         footer={
           <>
             <Button
@@ -741,10 +743,10 @@ function TableViewContent({
                 setSqlCopied(true);
               }}
             >
-              {sqlCopied ? "Copied" : "Copy SQL"}
+              {sqlCopied ? t("common.copied") : t("table.tableView.copySql")}
             </Button>
             <Button variant="neutral" size="sm" onClick={() => setReviewSql(null)}>
-              Close
+              {t("common.close")}
             </Button>
             <Button
               variant="primary"
@@ -754,7 +756,7 @@ function TableViewContent({
                 pending.handleSave();
               }}
             >
-              Save changes
+              {t("table.tableView.saveChanges")}
             </Button>
           </>
         }
@@ -798,7 +800,7 @@ function TableViewContent({
         onClose={() => setImportOpen(false)}
         onImport={async (columns, rows) => {
           const count = await api.importRows(schema!, table!, columns, rows);
-          notify({ tone: "success", text: `Imported ${count.toLocaleString()} row${count === 1 ? "" : "s"}` });
+          notify({ tone: "success", text: t("table.tableView.imported", { count }) });
           await tableData.refresh();
           return count;
         }}
@@ -810,10 +812,10 @@ function TableViewContent({
         onConfirm={discardGuard.confirm}
         icon={<TriangleAlert />}
         tone="destructive"
-        title="Discard unsaved changes?"
-        description={`${pending.dirtyRowCount} row${pending.dirtyRowCount > 1 ? "s have" : " has"} unsaved edits. Loading other rows would discard them.`}
-        cancelLabel="Keep editing"
-        confirmLabel="Discard changes"
+        title={t("table.tableView.discardUnsavedChanges")}
+        description={t("table.tableView.unsavedEdits", { count: pending.dirtyRowCount })}
+        cancelLabel={t("table.tableView.keepEditing")}
+        confirmLabel={t("table.tableView.discardChanges")}
       />
     </div>
   );

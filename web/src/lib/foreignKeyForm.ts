@@ -1,4 +1,5 @@
 import type { CompletionRelation, NewForeignKey } from "@/types";
+import { t } from "../i18n/store.ts";
 
 /** Draft foreign key in the create-table or structure dialogs. */
 export type ForeignKeyDraft = {
@@ -19,9 +20,9 @@ export function guessReference(column: string, target: CompletionRelation | unde
 
 /** Why this card cannot be sent yet, or null when it is complete. */
 export function foreignKeyDraftError(fk: ForeignKeyDraft, namedColumns: string[]): string | null {
-  if (!fk.refTable.trim()) return "Choose a table";
+  if (!fk.refTable.trim()) return t("structure.foreignKeyEditor.chooseATable");
   const locals = fk.columns.filter((c) => namedColumns.includes(c));
-  if (locals.length === 0) return "Choose at least one column";
+  if (locals.length === 0) return t("structure.foreignKeyEditor.chooseAColumn");
   return null;
 }
 

@@ -7,6 +7,9 @@ import Button from "../ui/Button";
 import Input from "../ui/Input";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useNotify } from "../../contexts/NoticeProvider";
+import { useT, type StaticKey } from "../../i18n";
+import { Rich } from "../../i18n/Rich";
+import { errorText } from "../../lib/appError";
 
 export type RelationAction = "rename" | "duplicate" | "truncate" | "drop";
 
@@ -16,7 +19,8 @@ export interface RelationTarget {
   kind: RelationKind;
 }
 
-const KIND_LABEL: Record<RelationKind, string> = { table: "table", view: "view", matview: "materialized view" };
+const RENAME_TITLE: Record<RelationKind, StaticKey> = { table: "schema.relationActionDialog.renameTable", view: "schema.relationActionDialog.renameView", matview: "schema.relationActionDialog.renameMatview" };
+const DROP_TITLE: Record<RelationKind, StaticKey> = { table: "schema.relationActionDialog.dropTable", view: "schema.relationActionDialog.dropView", matview: "schema.relationActionDialog.dropMatview" };
 
 function ActionForm({
   action,
@@ -30,6 +34,7 @@ function ActionForm({
   onRun: (options: { newName: string; withData: boolean; cascade: boolean; restartIdentity: boolean }) => Promise<void>;
   onClose: () => void;
 }) {
+  const t = useT();
   const [newName, setNewName] = useState(action === "duplicate" ? `${target.name}_copy` : target.name);
   const [withData, setWithData] = useState(true);
   const [cascade, setCascade] = useState(false);
@@ -39,7 +44,6 @@ function ActionForm({
   const notify = useNotify();
   const capabilities = useCapabilities();
 
-  const kind = KIND_LABEL[target.kind];
   const destructive = action === "drop" || action === "truncate";
   // Destructive actions need the name typed out, so a slip of the mouse can't cause them
   const canRun = destructive ? confirmText === target.name : newName.trim() !== "" && newName.trim() !== (action === "rename" ? target.name : "");
@@ -52,16 +56,16 @@ function ActionForm({
       await onRun({ newName: newName.trim(), withData, cascade, restartIdentity });
       onClose();
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : "It didn't work" });
+      notify({ tone: "error", text: errorText(err, t("schema.relationActionDialog.failed")) });
       setBusy(false);
     }
   }
 
   const config = {
-    rename: { icon: <PenLine />, tone: "neutral" as const, title: `Rename ${kind}`, button: "Rename", description: `${target.schema}.${target.name}` },
-    duplicate: { icon: <Copy />, tone: "neutral" as const, title: "Duplicate table", button: "Duplicate", description: `Copies the columns, constraints, indexes and defaults of ${target.schema}.${target.name}.` },
-    truncate: { icon: <Eraser />, tone: "destructive" as const, title: "Empty the table?", button: "Truncate", description: `Deletes every row of ${target.schema}.${target.name} at once. This can't be undone.` },
-    drop: { icon: <Trash2 />, tone: "destructive" as const, title: `Drop the ${kind}?`, button: "Drop", description: `Deletes ${target.schema}.${target.name}${target.kind === "table" ? " and all its rows" : ""}. This can't be undone.` },
+    rename: { icon: <PenLine />, tone: "neutral" as const, title: t(RENAME_TITLE[target.kind]), button: t("common.rename"), description: `${target.schema}.${target.name}` },
+    duplicate: { icon: <Copy />, tone: "neutral" as const, title: t("schema.relationActionDialog.duplicateTable"), button: t("common.duplicate"), description: t("schema.relationActionDialog.duplicateNote", { name: `${target.schema}.${target.name}` }) },
+    truncate: { icon: <Eraser />, tone: "destructive" as const, title: t("schema.relationActionDialog.emptyTheTable"), button: t("schema.relationActionDialog.truncate"), description: t("schema.relationActionDialog.truncateNote", { name: `${target.schema}.${target.name}` }) },
+    drop: { icon: <Trash2 />, tone: "destructive" as const, title: t(DROP_TITLE[target.kind]), button: t("schema.relationActionDialog.drop"), description: t(target.kind === "table" ? "schema.relationActionDialog.dropTableNote" : "schema.relationActionDialog.dropNote", { name: `${target.schema}.${target.name}` }) },
   }[action];
 
   return (
@@ -75,7 +79,7 @@ function ActionForm({
       footer={
         <>
           <Button variant="neutral" size="sm" onClick={onClose} autoFocus={destructive}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant={destructive ? "destructive" : "primary"} size="sm" onClick={() => submit()} disabled={!canRun || busy}>
             {config.button}
@@ -86,28 +90,28 @@ function ActionForm({
       <form onSubmit={submit} className="flex flex-col gap-3.5">
         {(action === "rename" || action === "duplicate") && (
           <label className="flex flex-col gap-1.5">
-            <span className="text-[13px] font-medium">{action === "rename" ? "New name" : "Name of the copy"}</span>
+            <span className="text-[13px] font-medium">{action === "rename" ? t("schema.relationActionDialog.newName") : t("schema.relationActionDialog.nameOfTheCopy")}</span>
             <Input value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus spellCheck={false} className="font-mono" />
           </label>
         )}
         {action === "duplicate" && (
-          <CheckOption checked={withData} onChange={setWithData} label="Copy the rows too" hint="Otherwise the copy starts empty" />
+          <CheckOption checked={withData} onChange={setWithData} label={t("schema.relationActionDialog.copyTheRowsToo")} hint={t("schema.relationActionDialog.otherwiseTheCopyStartsEmpty")} />
         )}
         {action === "truncate" && capabilities.truncateOptions && (
-          <CheckOption checked={restartIdentity} onChange={setRestartIdentity} label="Restart identity" hint="Serial and identity columns start counting from 1 again" />
+          <CheckOption checked={restartIdentity} onChange={setRestartIdentity} label={t("schema.relationActionDialog.restartIdentity")} hint={t("schema.relationActionDialog.serialAndIdentityColumnsStart")} />
         )}
         {destructive && capabilities.cascade && (action === "drop" || capabilities.truncateOptions) && (
           <CheckOption
             checked={cascade}
             onChange={setCascade}
-            label="Cascade"
-            hint={action === "drop" ? "Also drops views and foreign keys that depend on it" : "Also empties tables that reference it"}
+            label={t("schema.relationActionDialog.cascade")}
+            hint={action === "drop" ? t("schema.relationActionDialog.cascadeDropHint") : t("schema.relationActionDialog.cascadeTruncateHint")}
           />
         )}
         {destructive && (
           <label className="flex flex-col gap-1.5">
             <span className="text-[13px]">
-              Type <code className="rounded bg-muted px-1 font-mono text-xs">{target.name}</code> to confirm
+              <Rich id="schema.relationActionDialog.typeToConfirm" params={{ target: target.name }} tags={{ code: (text) => <code className="rounded bg-muted px-1 font-mono text-xs">{text}</code> }} />
             </span>
             <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} spellCheck={false} autoComplete="off" className="font-mono" />
           </label>

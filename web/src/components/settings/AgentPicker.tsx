@@ -4,21 +4,23 @@ import { agentInfo, type AgentKind } from "../../lib/assistantAgents";
 import { cn } from "../../lib/cn";
 import AgentIcon from "../assistant/AgentIcon";
 import Popover from "../ui/Popover";
+import { useT } from "../../i18n";
 
 const KINDS: AgentKind[] = ["claude", "codex", "custom"];
 
 /** The agent the assistant runs: a button with its mark and name that lists the others. */
 export default function AgentPicker({ value, onChange }: { value: AgentKind; onChange: (kind: AgentKind) => void }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
-  const label = (kind: AgentKind) => (kind === "custom" ? "Custom agent" : agentInfo(kind).name);
-  const maker = (kind: AgentKind) => (kind === "custom" ? "Your own command" : agentInfo(kind).company);
+  const label = (kind: AgentKind) => (kind === "custom" ? t("assistant.agentPicker.customAgent") : agentInfo(kind).name);
+  const maker = (kind: AgentKind) => (kind === "custom" ? t("assistant.agentPicker.ownCommand") : agentInfo(kind).company);
 
   return (
     <div ref={anchor}>
       <button
         type="button"
-        aria-label="Agent"
+        aria-label={t("assistant.agentPicker.agent")}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}

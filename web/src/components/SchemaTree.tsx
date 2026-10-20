@@ -53,13 +53,15 @@ import {
   Waypoints,
   type LucideProps,
 } from "lucide-react";
+import { useT, type StaticKey } from "../i18n";
+import { errorText } from "../lib/appError";
 
 type ObjectKind = ExplorerObject["kind"];
 
 /** How each kind of object is grouped, drawn and opened. */
 interface Category {
   id: string;
-  label: string;
+  labelKey: StaticKey;
   kinds: ObjectKind[];
   icon: ComponentType<LucideProps>;
   /** Text colour class for the icons. */
@@ -69,14 +71,14 @@ interface Category {
 }
 
 const CATEGORIES: Category[] = [
-  { id: "tables", label: "Tables", kinds: ["table"], icon: Table2, color: "text-success-foreground", openByDefault: true },
-  { id: "views", label: "Views", kinds: ["view"], icon: Eye, color: "text-info-foreground", openByDefault: true },
-  { id: "matviews", label: "Materialized views", kinds: ["matview"], icon: Layers, color: "text-cyan-500" },
-  { id: "functions", label: "Functions", kinds: ["function", "procedure"], icon: Braces, color: "text-purple-500" },
-  { id: "sequences", label: "Sequences", kinds: ["sequence"], icon: ListOrdered, color: "text-teal-500" },
-  { id: "types", label: "Types", kinds: ["type"], icon: Shapes, color: "text-pink-500" },
-  { id: "indexes", label: "Indexes", kinds: ["index"], icon: ListTree, color: "text-orange-500" },
-  { id: "triggers", label: "Triggers", kinds: ["trigger"], icon: Zap, color: "text-yellow-500" },
+  { id: "tables", labelKey: "ui.schemaTree.categoryTables", kinds: ["table"], icon: Table2, color: "text-success-foreground", openByDefault: true },
+  { id: "views", labelKey: "ui.schemaTree.categoryViews", kinds: ["view"], icon: Eye, color: "text-info-foreground", openByDefault: true },
+  { id: "matviews", labelKey: "ui.schemaTree.categoryMatviews", kinds: ["matview"], icon: Layers, color: "text-cyan-500" },
+  { id: "functions", labelKey: "ui.schemaTree.categoryFunctions", kinds: ["function", "procedure"], icon: Braces, color: "text-purple-500" },
+  { id: "sequences", labelKey: "ui.schemaTree.categorySequences", kinds: ["sequence"], icon: ListOrdered, color: "text-teal-500" },
+  { id: "types", labelKey: "ui.schemaTree.categoryTypes", kinds: ["type"], icon: Shapes, color: "text-pink-500" },
+  { id: "indexes", labelKey: "ui.schemaTree.categoryIndexes", kinds: ["index"], icon: ListTree, color: "text-orange-500" },
+  { id: "triggers", labelKey: "ui.schemaTree.categoryTriggers", kinds: ["trigger"], icon: Zap, color: "text-yellow-500" },
 ];
 
 /** Categories shown only when the engine has that kind of object. */
@@ -175,6 +177,7 @@ function GroupRow({
  * categories that only show when they have something, and columns under each table.
  */
 export default function SchemaTree() {
+  const t = useT();
   const { documents, openDocument, renameRelation, renameSchema, dropRelation, dropSchema, refreshData } = useDocuments();
   const { tabId } = useTab();
   const api = useApi();
@@ -220,14 +223,14 @@ export default function SchemaTree() {
           setExpanded(open);
         }
       } catch (err) {
-        const text = typeof err === "string" ? err : "Couldn't read the database's objects";
+        const text = errorText(err, t("ui.schemaTree.objectsFailed"));
         notify({ tone: "error", text });
         setError(text);
       } finally {
         setRefreshing(false);
       }
     },
-    [api, notify],
+    [api, notify, t],
   );
 
   useEffect(() => {
@@ -265,7 +268,7 @@ export default function SchemaTree() {
       .then((cols) => setColumns((prev) => ({ ...prev, [key]: cols })))
       .catch(() => {
         setColumns((prev) => ({ ...prev, [key]: "error" }));
-        notify({ tone: "error", text: `Couldn't read the columns of ${name}` });
+        notify({ tone: "error", text: t("ui.schemaTree.columnsOfFailed", { name }) });
       });
   }
 
@@ -364,12 +367,12 @@ export default function SchemaTree() {
 
   function schemaMenuItems(schema: string | null): ContextMenuItem[] {
     const diagramOf = (name: string): ContextMenuItem => ({
-      label: "Diagram",
+      label: t("ui.schemaTree.diagram"),
       icon: <Waypoints />,
       onSelect: () => openDocument({ kind: "diagram", schema: name }),
     });
     const newSchema: ContextMenuItem = {
-      label: "New schema…",
+      label: t("ui.schemaTree.newSchema"),
       icon: <FolderPlus />,
       onSelect: () => setContainer({ kind: "schema", action: "create", name: "" }),
     };
@@ -378,25 +381,25 @@ export default function SchemaTree() {
       if (readOnly) return [];
       if (multiSchema) return capabilities.schemas ? [newSchema] : [];
       return [
-        { label: "New table", icon: <Table2 />, onSelect: () => openDocument({ kind: "create-table", schema: defaultSchema }) },
+        { label: t("ui.schemaTree.newTable"), icon: <Table2 />, onSelect: () => openDocument({ kind: "create-table", schema: defaultSchema }) },
         ...(capabilities.schemas ? [newSchema] : []),
       ];
     }
     const items: ContextMenuItem[] = [
       diagramOf(schema),
-      { label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(schema)) },
+      { label: t("ui.schemaTree.copyName"), icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(schema)) },
     ];
     if (readOnly) return items;
     return [
       diagramOf(schema),
-      { label: "New table here", icon: <Table2 />, onSelect: () => openDocument({ kind: "create-table", schema }) },
+      { label: t("ui.schemaTree.newTableHere"), icon: <Table2 />, onSelect: () => openDocument({ kind: "create-table", schema }) },
       ...(capabilities.schemas ? [newSchema] : []),
       ...items.slice(1),
       ...(capabilities.schemas
         ? ([
             "separator",
-            { label: "Rename…", icon: <PenLine />, onSelect: () => setContainer({ kind: "schema", action: "rename", name: schema }) },
-            { label: "Drop…", icon: <Trash2 />, destructive: true, onSelect: () => setContainer({ kind: "schema", action: "drop", name: schema }) },
+            { label: t("ui.schemaTree.rename"), icon: <PenLine />, onSelect: () => setContainer({ kind: "schema", action: "rename", name: schema }) },
+            { label: t("ui.schemaTree.drop"), icon: <Trash2 />, destructive: true, onSelect: () => setContainer({ kind: "schema", action: "drop", name: schema }) },
           ] as ContextMenuItem[])
         : []),
     ];
@@ -407,35 +410,35 @@ export default function SchemaTree() {
     const object = { name: target.name, kind: target.kind as ObjectKind, detail: "" };
     const pinned = pins.some((p) => p.schema === target.schema && p.name === target.name && p.kind === target.kind);
     const items: ContextMenuItem[] = [
-      { label: "Open data", icon: <TableIcon />, onSelect: () => openDocument({ kind: "data", schema: target.schema, name: target.name, icon: target.kind === "view" ? "view" : target.kind === "matview" ? "matview" : "table" }) },
-      { label: "Open structure", icon: <Columns3 />, onSelect: () => openDocument({ kind: "structure", schema: target.schema, name: target.name }) },
-      { label: pinned ? "Unpin" : "Pin to the top", icon: pinned ? <PinOff /> : <Pin />, onSelect: () => togglePin(target.schema, object) },
+      { label: t("ui.schemaTree.openData"), icon: <TableIcon />, onSelect: () => openDocument({ kind: "data", schema: target.schema, name: target.name, icon: target.kind === "view" ? "view" : target.kind === "matview" ? "matview" : "table" }) },
+      { label: t("ui.schemaTree.openStructure"), icon: <Columns3 />, onSelect: () => openDocument({ kind: "structure", schema: target.schema, name: target.name }) },
+      { label: pinned ? t("ui.schemaTree.unpinShort") : t("ui.schemaTree.pinToTop"), icon: pinned ? <PinOff /> : <Pin />, onSelect: () => togglePin(target.schema, object) },
       "separator",
-      { label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(qualified) },
-      { label: "Copy SELECT", icon: <Copy />, onSelect: () => writeClipboardText(`SELECT * FROM ${qualified} LIMIT 100;`) },
+      { label: t("ui.schemaTree.copyName"), icon: <Copy />, onSelect: () => writeClipboardText(qualified) },
+      { label: t("ui.schemaTree.copySelect"), icon: <Copy />, onSelect: () => writeClipboardText(`SELECT * FROM ${qualified} LIMIT 100;`) },
     ];
     if (readOnly) return items;
-    items.push("separator", { label: "Rename…", icon: <PenLine />, onSelect: () => setAction({ action: "rename", target }) });
+    items.push("separator", { label: t("ui.schemaTree.rename"), icon: <PenLine />, onSelect: () => setAction({ action: "rename", target }) });
     if (target.kind === "table" && capabilities.duplicateTable) {
-      items.push({ label: "Duplicate…", icon: <CopyPlus />, onSelect: () => setAction({ action: "duplicate", target }) });
+      items.push({ label: t("ui.schemaTree.duplicate"), icon: <CopyPlus />, onSelect: () => setAction({ action: "duplicate", target }) });
     }
     if (target.kind === "matview" && capabilities.materializedViews) {
       items.push({
-        label: "Refresh data",
+        label: t("ui.schemaTree.refreshData"),
         icon: <RefreshCw />,
         onSelect: () => {
           api
             .refreshMaterializedView(target.schema, target.name)
             .then(() => refreshData(target.schema, target.name))
-            .catch((err) => notify({ tone: "error", text: typeof err === "string" ? err : "Refresh failed" }));
+            .catch((err) => notify({ tone: "error", text: errorText(err, t("ui.schemaTree.refreshFailed")) }));
         },
       });
     }
     items.push("separator");
     if (target.kind === "table") {
-      items.push({ label: "Truncate…", icon: <Eraser />, destructive: true, onSelect: () => setAction({ action: "truncate", target }) });
+      items.push({ label: t("ui.schemaTree.truncate"), icon: <Eraser />, destructive: true, onSelect: () => setAction({ action: "truncate", target }) });
     }
-    items.push({ label: "Drop…", icon: <Trash2 />, destructive: true, onSelect: () => setAction({ action: "drop", target }) });
+    items.push({ label: t("ui.schemaTree.drop"), icon: <Trash2 />, destructive: true, onSelect: () => setAction({ action: "drop", target }) });
     return items;
   }
 
@@ -448,9 +451,9 @@ export default function SchemaTree() {
   function columnRows(schema: string, name: string, depth: number) {
     const value = columns[`t:${schema}.${name}`];
     const pad = INDENT[Math.min(depth, INDENT.length - 1)];
-    if (value === undefined || value === "loading") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>Loading columns…</div>;
-    if (value === "error") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>Couldn't read the columns</div>;
-    if (value.length === 0) return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>No columns</div>;
+    if (value === undefined || value === "loading") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>{t("ui.schemaTree.loadingColumns")}</div>;
+    if (value === "error") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>{t("ui.schemaTree.columnsFailed")}</div>;
+    if (value.length === 0) return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>{t("ui.schemaTree.noColumns")}</div>;
     return value.map((col) => (
       <div
         key={col.name}
@@ -459,15 +462,15 @@ export default function SchemaTree() {
           setPlainMenu({
             x: e.clientX,
             y: e.clientY,
-            items: [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(col.name)) }],
+            items: [{ label: t("ui.schemaTree.copyName"), icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(col.name)) }],
           });
         }}
         className={cn("flex h-6 items-center gap-1.5 pr-2 text-xs text-muted-foreground", pad)}
       >
         {col.isPrimaryKey ? (
-          <KeyRound size={11} className="shrink-0 text-warning-foreground" aria-label="Primary key" />
+          <KeyRound size={11} className="shrink-0 text-warning-foreground" aria-label={t("ui.schemaTree.primaryKey")} />
         ) : col.foreignKey ? (
-          <Link2 size={11} className="shrink-0 text-info-foreground" aria-label="Foreign key" />
+          <Link2 size={11} className="shrink-0 text-info-foreground" aria-label={t("ui.schemaTree.foreignKey")} />
         ) : (
           <span className="size-2.75 shrink-0" />
         )}
@@ -488,13 +491,13 @@ export default function SchemaTree() {
       object.kind === "type"
         ? object.detail
         : object.kind === "index" || object.kind === "trigger"
-          ? `on ${object.detail}`
+          ? t("ui.schemaTree.hintOn", { detail: object.detail })
           : object.kind === "procedure"
-            ? "procedure"
+            ? t("ui.schemaTree.hintProcedure")
             : capabilities.partitions && object.partitions?.length
-              ? `${object.partitions.length} partition${object.partitions.length > 1 ? "s" : ""}`
+              ? t("ui.schemaTree.partitions", { count: object.partitions.length })
               : object.detail === "foreign"
-                ? "foreign"
+                ? t("ui.schemaTree.hintForeign")
                 : null;
     return (
       <div key={objectKey(schema, object)}>
@@ -517,8 +520,8 @@ export default function SchemaTree() {
                 x: e.clientX,
                 y: e.clientY,
                 items: [
-                  { label: "Open", onSelect: () => openExplorerObject(schema, object) },
-                  { label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(object.name)) },
+                  { label: t("common.open"), onSelect: () => openExplorerObject(schema, object) },
+                  { label: t("ui.schemaTree.copyName"), icon: <Copy />, onSelect: () => writeClipboardText(quoteIdent(object.name)) },
                 ],
               });
             }}
@@ -533,7 +536,7 @@ export default function SchemaTree() {
               <button
                 type="button"
                 tabIndex={-1}
-                aria-label={columnsOpen ? `Hide the columns of ${object.name}` : `Show the columns of ${object.name}`}
+                aria-label={t(columnsOpen ? "ui.schemaTree.hideColumnsOf" : "ui.schemaTree.showColumnsOf", { name: object.name })}
                 aria-expanded={columnsOpen}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -556,7 +559,7 @@ export default function SchemaTree() {
           {relation && (
             <button
               type="button"
-              aria-label={pinned ? `Unpin ${object.name}` : `Pin ${object.name}`}
+              aria-label={t(pinned ? "ui.schemaTree.unpin" : "ui.schemaTree.pin", { name: object.name })}
               onClick={() => togglePin(schema, object)}
               className={cn(
                 "absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-opacity cursor-pointer hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100",
@@ -616,7 +619,7 @@ export default function SchemaTree() {
     return (
       <button
         type="button"
-        aria-label={`New table in ${schema}`}
+        aria-label={t("ui.schemaTree.newTableIn", { schema })}
         onClick={() => openDocument({ kind: "create-table", schema })}
         className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer"
       >
@@ -640,7 +643,7 @@ export default function SchemaTree() {
             open={isOpen(key)}
             onToggle={() => toggle(key)}
             icon={<Icon size={14} className={cn("shrink-0 opacity-70", category.color)} />}
-            label={category.label}
+            label={t(category.labelKey)}
             action={category.id === "tables" ? newTableButton(schema) : undefined}
           />
           {isOpen(key) && items.map((object) => objectRow(schema, object, depth + 1, category))}
@@ -660,7 +663,7 @@ export default function SchemaTree() {
         p !== null && matches(p.object.name) && CATEGORIES.some((c) => c.kinds.includes(p.object.kind) && categoryShown(c)),
     );
   const defaultSchema = tree?.defaultSchema ?? tree?.schemas[0]?.name ?? "public";
-  const headerMenuLabel = multiSchema ? "New schema" : capabilities.schemas ? "New table or schema" : "New table";
+  const headerMenuLabel = multiSchema ? t("ui.schemaTree.headerNewSchema") : capabilities.schemas ? t("ui.schemaTree.headerNewTableOrSchema") : t("ui.schemaTree.headerNewTable");
   // Pinned uses its own flag; every other key is an open group.
   const allClosed = ![...expanded].some((key) => key !== "pinned-closed");
 
@@ -691,7 +694,7 @@ export default function SchemaTree() {
     <div className="flex h-full flex-col select-none">
       {/* Header: what's here, and the explorer's own actions */}
       <div className="flex h-8 shrink-0 items-center gap-1 pl-3 pr-1.5">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">Explorer</span>
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">{t("ui.schemaTree.explorer")}</span>
         <div className="ml-auto flex items-center">
           {tree && schemaMenuItems(null).length > 0 && (
             <Tooltip label={headerMenuLabel} side="bottom">
@@ -716,19 +719,19 @@ export default function SchemaTree() {
               </Button>
             </Tooltip>
           )}
-          <Tooltip label={allClosed ? "Expand all" : "Collapse all"} side="bottom">
+          <Tooltip label={t(allClosed ? "ui.schemaTree.expandAll" : "ui.schemaTree.collapseAll")} side="bottom">
             <Button
               variant="ghost-muted"
               size="icon-xs"
-              aria-label={allClosed ? "Expand all" : "Collapse all"}
+              aria-label={t(allClosed ? "ui.schemaTree.expandAll" : "ui.schemaTree.collapseAll")}
               onClick={toggleAll}
               disabled={!tree}
             >
               {allClosed ? <ChevronsUpDown /> : <ChevronsDownUp />}
             </Button>
           </Tooltip>
-          <Tooltip label="Refresh" side="bottom">
-            <Button variant="ghost-muted" size="icon-xs" aria-label="Refresh the explorer" onClick={() => load(false)} disabled={refreshing}>
+          <Tooltip label={t("ui.schemaTree.refresh")} side="bottom">
+            <Button variant="ghost-muted" size="icon-xs" aria-label={t("ui.schemaTree.refreshExplorer")} onClick={() => load(false)} disabled={refreshing}>
               <RefreshCw className={refreshing ? "animate-spin" : undefined} />
             </Button>
           </Tooltip>
@@ -744,15 +747,15 @@ export default function SchemaTree() {
           onKeyDown={(e) => {
             if (e.key === "Escape") setFilter("");
           }}
-          placeholder="Filter objects"
-          aria-label="Filter objects"
+          placeholder={t("ui.schemaTree.filterObjects")}
+          aria-label={t("ui.schemaTree.filterObjects")}
           spellCheck={false}
           className="h-7 w-full rounded-md border border-transparent bg-muted pl-7 pr-7 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring focus:bg-card"
         />
         {filter && (
           <button
             type="button"
-            aria-label="Clear the filter"
+            aria-label={t("ui.schemaTree.clearTheFilter")}
             onClick={() => setFilter("")}
             className="absolute right-3.5 top-1/2 flex size-4 -translate-y-[calc(50%+3px)] items-center justify-center rounded text-muted-foreground hover:text-foreground cursor-pointer"
           >
@@ -764,9 +767,9 @@ export default function SchemaTree() {
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {error ? (
           <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-            <p className="text-xs text-muted-foreground">Couldn't read the database's objects.</p>
+            <p className="text-xs text-muted-foreground">{t("ui.schemaTree.objectsFailed")}</p>
             <Button variant="outline" size="xs" onClick={() => load(true)}>
-              Try again
+              {t("ui.schemaTree.tryAgain")}
             </Button>
           </div>
         ) : !tree ? (
@@ -781,19 +784,19 @@ export default function SchemaTree() {
             <span className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
               <Database size={16} />
             </span>
-            <p className="text-[13px] font-medium">No tables yet</p>
-            <p className="text-xs text-muted-foreground">This database has no tables, views or functions of its own.</p>
+            <p className="text-[13px] font-medium">{t("ui.schemaTree.noTables")}</p>
+            <p className="text-xs text-muted-foreground">{t("ui.schemaTree.emptyHint")}</p>
             {!readOnly && (
               <Button variant="outline" size="xs" className="mt-1" onClick={() => openDocument({ kind: "create-table", schema: defaultSchema })}>
-                <Plus /> Create a table
+                <Plus /> {t("ui.schemaTree.createATable")}
               </Button>
             )}
           </div>
         ) : query && shown === 0 ? (
           <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-            <p className="text-xs text-muted-foreground">Nothing matches “{query}”.</p>
+            <p className="text-xs text-muted-foreground">{t("ui.schemaTree.nothingMatches", { query })}</p>
             <Button variant="ghost-muted" size="xs" onClick={() => setFilter("")}>
-              Clear the filter
+              {t("ui.schemaTree.clearTheFilter")}
             </Button>
           </div>
         ) : (
@@ -805,7 +808,7 @@ export default function SchemaTree() {
                   open={!expanded.has("pinned-closed")}
                   onToggle={() => toggle("pinned-closed")}
                   icon={<Pin size={13} className="shrink-0 text-primary/80" />}
-                  label="Pinned"
+                  label={t("ui.schemaTree.pinned")}
                 />
                 {!expanded.has("pinned-closed") &&
                   pinnedObjects.map(({ schema, object }) =>
@@ -835,7 +838,7 @@ export default function SchemaTree() {
                   />
                   {isOpen(key) &&
                     (schema.objects.length === 0 ? (
-                      <div className="py-1 pl-9 text-xs text-muted-foreground/70">Empty schema</div>
+                      <div className="py-1 pl-9 text-xs text-muted-foreground/70">{t("ui.schemaTree.emptySchema")}</div>
                     ) : (
                       categoryGroups(schema.name, schema.objects, 1)
                     ))}
@@ -853,13 +856,13 @@ export default function SchemaTree() {
               open={expanded.has("extensions")}
               onToggle={toggleExtensions}
               icon={<Puzzle size={14} className="shrink-0 text-orange-500/80" />}
-              label="Extensions"
+              label={t("ui.schemaTree.extensions")}
             />
             {expanded.has("extensions") &&
               (extensions === null ? (
-                <div className="py-1 pl-9 text-xs text-muted-foreground/70">Loading…</div>
+                <div className="py-1 pl-9 text-xs text-muted-foreground/70">{t("ui.schemaTree.loading")}</div>
               ) : extensions.length === 0 ? (
-                <div className="py-1 pl-9 text-xs text-muted-foreground/70">None installed</div>
+                <div className="py-1 pl-9 text-xs text-muted-foreground/70">{t("ui.schemaTree.noneInstalled")}</div>
               ) : (
                 extensions.map((ext) => (
                   <div key={ext.name} className="flex h-7 items-center gap-2 rounded-md pl-9 pr-2 text-sm text-muted-foreground">

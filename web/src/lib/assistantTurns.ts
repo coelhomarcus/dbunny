@@ -1,4 +1,5 @@
 import { DECLINED, type Item, type ToolItem } from "./assistantConversation.ts";
+import { t } from "../i18n/store.ts";
 
 /** A span of time as a person says it: 0.4s, 14s, 1m 5s. */
 export function formatDuration(ms: number): string {
@@ -8,10 +9,6 @@ export function formatDuration(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
-}
-
-function plural(count: number, one: string, many = `${one}s`): string {
-  return `${count} ${count === 1 ? one : many}`;
 }
 
 function json(text: string | undefined): Record<string, unknown> | null {
@@ -32,17 +29,17 @@ function found(item: ToolItem): string {
   switch (item.tool) {
     case "run_query": {
       if (typeof out.rowCount !== "number") return "";
-      const rows = plural(out.rowCount, "row");
-      return out.valuesHidden === true ? `${rows}, values hidden` : out.truncated === true ? `${rows} (cut)` : rows;
+      const rows = t("assistant.counts.rows", { count: out.rowCount });
+      return out.valuesHidden === true ? t("assistant.found.valuesHidden", { rows }) : out.truncated === true ? t("assistant.found.cut", { rows }) : rows;
     }
     case "list_tables":
       return Array.isArray(out.schemas)
-        ? plural(out.schemas.reduce((sum: number, schema) => sum + (Array.isArray((schema as { tables?: unknown[] }).tables) ? (schema as { tables: unknown[] }).tables.length : 0), 0), "table")
+        ? t("assistant.counts.tables", { count: out.schemas.reduce((sum: number, schema) => sum + (Array.isArray((schema as { tables?: unknown[] }).tables) ? (schema as { tables: unknown[] }).tables.length : 0), 0) })
         : "";
     case "describe_table":
-      return Array.isArray(out.columns) ? plural(out.columns.length, "column") : "";
+      return Array.isArray(out.columns) ? t("assistant.counts.columns", { count: out.columns.length }) : "";
     case "relationships":
-      return Array.isArray(out.relations) ? plural(out.relations.length, "relation") : "";
+      return Array.isArray(out.relations) ? t("assistant.counts.relations", { count: out.relations.length }) : "";
     default:
       return "";
   }
@@ -104,9 +101,9 @@ export function stepsSummary(steps: Item[], end: number | undefined): string {
   const first = (steps[0] as Item & { at?: number }).at;
   const finished = steps.reduce<number | undefined>((latest, step) => (step.kind === "tool" && step.endedAt !== undefined ? Math.max(latest ?? 0, step.endedAt) : latest), end);
   const took = first !== undefined && finished !== undefined && finished > first ? formatDuration(finished - first) : null;
-  if (steps.every((step) => step.kind === "thought")) return took ? `Thought for ${took}` : "Thought";
-  const count = plural(steps.length, "step");
-  return took ? `Worked for ${took} · ${count}` : count;
+  if (steps.every((step) => step.kind === "thought")) return took ? t("assistant.steps.thoughtFor", { took }) : t("assistant.steps.thought");
+  const count = t("assistant.counts.steps", { count: steps.length });
+  return took ? t("assistant.steps.workedFor", { took, steps: count }) : count;
 }
 
 /** The person turned this query down. */
@@ -120,23 +117,22 @@ export function toolTitle(item: ToolItem): string {
   const going = item.status === "pending" || item.status === "in_progress";
   const failed = item.status === "failed";
   const table = `${text("schema")}.${text("table")}`;
+  const schema = text("schema");
   switch (item.tool) {
-    case "list_tables": {
-      const of = text("schema") ? ` of ${text("schema")}` : "";
-      return going ? `Listing the tables${of}` : failed ? `Couldn't list the tables${of}` : `Listed the tables${of}`;
-    }
+    case "list_tables":
+      return t(going ? (schema ? "assistant.tools.listingTablesOf" : "assistant.tools.listingTables") : failed ? (schema ? "assistant.tools.couldntListTablesOf" : "assistant.tools.couldntListTables") : schema ? "assistant.tools.listedTablesOf" : "assistant.tools.listedTables", { schema });
     case "describe_table":
-      return going ? `Reading the structure of ${table}` : failed ? `Couldn't read the structure of ${table}` : `Read the structure of ${table}`;
+      return t(going ? "assistant.tools.readingStructure" : failed ? "assistant.tools.couldntReadStructure" : "assistant.tools.readStructure", { table });
     case "relationships":
-      return going ? `Reading the relationships of ${text("schema")}` : failed ? `Couldn't read the relationships of ${text("schema")}` : `Read the relationships of ${text("schema")}`;
+      return t(going ? "assistant.tools.readingRelationships" : failed ? "assistant.tools.couldntReadRelationships" : "assistant.tools.readRelationships", { schema });
     case "run_query":
-      return going ? "Running a query" : failed ? (isDeclined(item) ? "Query declined" : "Query failed") : "Ran a query";
+      return going ? t("assistant.tools.runningQuery") : failed ? (isDeclined(item) ? t("assistant.tools.queryDeclined") : t("assistant.tools.queryFailed")) : t("assistant.tools.ranQuery");
     case "explain_query":
-      if (going) return "Explaining a query";
-      if (failed) return isDeclined(item) ? "Explain declined" : "Couldn't explain the query";
-      return item.input.analyze === true ? "Explained a query and ran it" : "Explained a query";
+      if (going) return t("assistant.tools.explainingQuery");
+      if (failed) return isDeclined(item) ? t("assistant.tools.explainDeclined") : t("assistant.tools.couldntExplain");
+      return item.input.analyze === true ? t("assistant.tools.explainedAndRan") : t("assistant.tools.explained");
     default:
-      return item.tool || "Used a tool";
+      return item.tool || t("assistant.tools.usedTool");
   }
 }
 

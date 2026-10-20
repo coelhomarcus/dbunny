@@ -5,6 +5,7 @@ import Button from "../ui/Button";
 import { cn } from "../../lib/cn";
 import { inputClass } from "../ui/styles";
 import { datePart, fromDateText, nowText, timePart, toDateText, withDate, withTime, type DateMode } from "../../lib/dateValue";
+import { useT, fmt } from "../../i18n";
 
 const WEEKDAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
@@ -27,6 +28,7 @@ export default function DateTimeEditor({
   onCommit: (isNull: boolean, text: string) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const initial = toDateText(value, mode);
   const [text, setText] = useState(initial);
   const selected = datePart(text);
@@ -55,7 +57,7 @@ export default function DateTimeEditor({
     onCommit(false, fromDateText(text, mode));
   }
 
-  const monthName = new Date(Date.UTC(view.year, view.month - 1, 1)).toLocaleString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+  const monthName = fmt().date(Date.UTC(view.year, view.month - 1, 1), { dateStyle: undefined, month: "long", year: "numeric", timeZone: "UTC" });
   const isToday = (day: number) => day === today.getDate() && view.month === today.getMonth() + 1 && view.year === today.getFullYear();
 
   return (
@@ -72,7 +74,7 @@ export default function DateTimeEditor({
         <div className="flex items-center gap-1.5">
           <input
             autoFocus
-            aria-label="Value"
+            aria-label={t("table.dateTimeEditor.value")}
             value={text}
             placeholder={value === null ? "NULL" : ""}
             onChange={(e) => setText(e.target.value)}
@@ -85,11 +87,11 @@ export default function DateTimeEditor({
         {mode !== "time" && (
           <div className="mt-2 select-none">
             <div className="flex items-center justify-between">
-              <Button variant="ghost-muted" size="icon-xs" aria-label="Previous month" onClick={() => shiftMonth(-1)}>
+              <Button variant="ghost-muted" size="icon-xs" aria-label={t("table.dateTimeEditor.previousMonth")} onClick={() => shiftMonth(-1)}>
                 <ChevronLeft />
               </Button>
               <span className="text-[13px] font-medium capitalize">{monthName}</span>
-              <Button variant="ghost-muted" size="icon-xs" aria-label="Next month" onClick={() => shiftMonth(1)}>
+              <Button variant="ghost-muted" size="icon-xs" aria-label={t("table.dateTimeEditor.nextMonth")} onClick={() => shiftMonth(1)}>
                 <ChevronRight />
               </Button>
             </div>
@@ -122,9 +124,9 @@ export default function DateTimeEditor({
 
         {mode !== "date" && (
           <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-            Time
+            {t("table.dateTimeEditor.time")}
             <input
-              aria-label="Time"
+              aria-label={t("table.dateTimeEditor.time")}
               value={text ? timePart(text, mode) : ""}
               placeholder="HH:MM:SS"
               onChange={(e) => setText((t) => withTime(t || nowText(mode), mode, e.target.value))}
@@ -136,7 +138,7 @@ export default function DateTimeEditor({
 
         <div className="mt-2 flex items-center gap-1 border-t border-border pt-2">
           <Button variant="ghost-muted" size="xs" onClick={() => setText(nowText(mode))}>
-            {mode === "date" ? "Today" : "Now"}
+            {mode === "date" ? t("table.dateTimeEditor.today") : t("table.dateTimeEditor.now")}
           </Button>
           {nullable && (
             <Button variant="ghost-muted" size="xs" onClick={() => onCommit(true, "")}>
@@ -145,10 +147,10 @@ export default function DateTimeEditor({
           )}
           <div className="flex-1" />
           <Button variant="neutral" size="xs" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" size="xs" onClick={apply}>
-            Set
+            {t("table.dateTimeEditor.set")}
           </Button>
         </div>
       </div>

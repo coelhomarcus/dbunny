@@ -1,4 +1,5 @@
 import type { ConversationOptions } from "../types/assistant";
+import type { Locale } from "../i18n/messages.ts";
 
 /** What the person set for the assistant on one saved connection, kept in this computer's local storage. */
 export interface ConnectionAssistantPrefs {
@@ -49,6 +50,7 @@ export function setConnectionPrefs(savedId: string | null, prefs: ConnectionAssi
 export function conversationOptions(
   settings: { assistantAskBeforeQueries: boolean; assistantRowLimit: number },
   prefs: ConnectionAssistantPrefs,
+  language: Locale,
 ): ConversationOptions {
   const rows = Number.isFinite(settings.assistantRowLimit) ? Math.round(settings.assistantRowLimit) : DEFAULT_ROWS;
   return {
@@ -56,5 +58,6 @@ export function conversationOptions(
     schemaOnly: prefs.schemaOnly,
     rowLimit: Math.min(MAX_ROWS, Math.max(MIN_ROWS, rows)),
     instructions: prefs.instructions,
+    language,
   };
 }

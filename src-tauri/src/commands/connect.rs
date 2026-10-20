@@ -10,6 +10,7 @@ use crate::db::net::tls::TlsSettings;
 use crate::db::postgres::{Endpoint, PostgresDriver};
 use crate::db::sqlite::{OpenOptions, SqliteDriver};
 use crate::db::{Capabilities, Driver, Engine};
+use crate::error::AppError;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,6 +45,36 @@ impl ConnectResponse {
     }
 }
 
+/// The URL of a PostgreSQL connection must be there and use a PostgreSQL protocol.
+fn check_connection_url(connection_url: &str) -> Result<(), AppError> {
+    if connection_url.is_empty() {
+        return Err(AppError::coded("connection.urlRequired", "connectionUrl is required"));
+    }
+    if !connection_url.starts_with("postgres://") && !connection_url.starts_with("postgresql://") {
+        return Err(AppError::coded("connection.invalidProtocol", "Invalid protocol. Must be postgres:// or postgresql://"));
+    }
+    Ok(())
+}
+
+fn parse_connection_url(connection_url: &str) -> Result<url::Url, AppError> {
+    check_connection_url(connection_url)?;
+    url::Url::parse(connection_url).map_err(|e| AppError::coded("connection.invalidUrl", format!("Invalid URL: {e}")).param("detail", e.to_string()))
+}
+
+fn check_path(path: &str) -> Result<(), AppError> {
+    if path.is_empty() {
+        return Err(AppError::coded("connection.pathRequired", "path is required"));
+    }
+    Ok(())
+}
+
+fn check_host(host: &str) -> Result<(), AppError> {
+    if host.trim().is_empty() {
+        return Err(AppError::coded("connection.hostRequired", "host is required"));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn connect(
     app_handle: tauri::AppHandle,
@@ -51,16 +82,8 @@ pub async fn connect(
     connection_url: String,
     ssh: Option<SshConfig>,
     trust_host_key: Option<String>,
-) -> Result<ConnectResponse, String> {
-    if connection_url.is_empty() {
-        return Err("connectionUrl is required".into());
-    }
-
-    if !connection_url.starts_with("postgres://") && !connection_url.starts_with("postgresql://") {
-        return Err("Invalid protocol. Must be postgres:// or postgresql://".into());
-    }
-
-    let url = url::Url::parse(&connection_url).map_err(|e| format!("Invalid URL: {}", e))?;
+) -> Result<ConnectResponse, AppError> {
+    let url = parse_connection_url(&connection_url)?;
 
     let known_hosts = known_hosts_for(&app_handle, &ssh)?;
     let endpoint = Endpoint { url, ssh, known_hosts };
@@ -87,7 +110,7 @@ pub(crate) async fn open_session(
     state: &AppState,
     endpoint: Endpoint,
     trust_host_key: Option<String>,
-) -> Result<ConnectResponse, String> {
+) -> Result<ConnectResponse, AppError> {
     let driver = PostgresDriver::open(endpoint, trust_host_key).await?;
     let session_id = state.register(driver.clone()).await?;
     Ok(ConnectResponse::new(session_id, driver.as_ref()))
@@ -101,10 +124,8 @@ pub async fn connect_sqlite(
     path: String,
     read_only: bool,
     create: bool,
-) -> Result<ConnectResponse, String> {
-    if path.is_empty() {
-        return Err("path is required".into());
-    }
+) -> Result<ConnectResponse, AppError> {
+    check_path(&path)?;
     let opts = OpenOptions { read_only, create, ..Default::default() };
     let driver = SqliteDriver::open(path.into(), opts).await?;
     let session_id = state.register(driver.clone()).await?;
@@ -125,10 +146,8 @@ pub struct MysqlConnectParams {
 }
 
 /// The endpoint a server connection form describes.
-fn server_endpoint(app_handle: &tauri::AppHandle, params: MysqlConnectParams, ssh: Option<SshConfig>) -> Result<MysqlEndpoint, String> {
-    if params.host.trim().is_empty() {
-        return Err("host is required".into());
-    }
+fn server_endpoint(app_handle: &tauri::AppHandle, params: MysqlConnectParams, ssh: Option<SshConfig>) -> Result<MysqlEndpoint, AppError> {
+    check_host(&params.host)?;
     let known_hosts = known_hosts_for(app_handle, &ssh)?;
     let database = params.database.trim();
     Ok(MysqlEndpoint {
@@ -154,7 +173,7 @@ pub async fn connect_mysql(
     params: MysqlConnectParams,
     ssh: Option<SshConfig>,
     trust_host_key: Option<String>,
-) -> Result<ConnectResponse, String> {
+) -> Result<ConnectResponse, AppError> {
     let endpoint = server_endpoint(&app_handle, params, ssh)?;
     let driver = MysqlDriver::open(endpoint, trust_host_key).await?;
     let session_id = state.register(driver.clone()).await?;
@@ -169,7 +188,7 @@ pub async fn connect_mariadb(
     params: MysqlConnectParams,
     ssh: Option<SshConfig>,
     trust_host_key: Option<String>,
-) -> Result<ConnectResponse, String> {
+) -> Result<ConnectResponse, AppError> {
     let endpoint = server_endpoint(&app_handle, params, ssh)?;
     let driver = MariadbDriver::open(endpoint, trust_host_key).await?;
     let session_id = state.register(driver.clone()).await?;
@@ -193,6 +212,41 @@ pub async fn disconnect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_url_is_a_coded_error() {
+        let error = check_connection_url("").unwrap_err();
+        assert_eq!((error.code(), error.message()), (Some("connection.urlRequired"), "connectionUrl is required"));
+    }
+
+    #[test]
+    fn another_protocol_is_a_coded_error() {
+        let error = check_connection_url("mysql://localhost").unwrap_err();
+        assert_eq!((error.code(), error.message()), (Some("connection.invalidProtocol"), "Invalid protocol. Must be postgres:// or postgresql://"));
+        assert!(check_connection_url("postgres://u@h/db").is_ok() && check_connection_url("postgresql://u@h/db").is_ok());
+    }
+
+    #[test]
+    fn a_url_that_does_not_parse_says_why() {
+        let error = parse_connection_url("postgres://exa mple.com:notaport/db").unwrap_err();
+        assert_eq!(error.code(), Some("connection.invalidUrl"));
+        assert!(error.message().starts_with("Invalid URL: "));
+        assert!(serde_json::to_value(&error).unwrap()["params"]["detail"].is_string());
+    }
+
+    #[test]
+    fn an_empty_path_is_a_coded_error() {
+        let error = check_path("").unwrap_err();
+        assert_eq!((error.code(), error.message()), (Some("connection.pathRequired"), "path is required"));
+        assert!(check_path("/tmp/a.db").is_ok());
+    }
+
+    #[test]
+    fn a_blank_host_is_a_coded_error() {
+        let error = check_host("   ").unwrap_err();
+        assert_eq!((error.code(), error.message()), (Some("connection.hostRequired"), "host is required"));
+        assert!(check_host("db.local").is_ok());
+    }
 
     /// What the connection modal sends for `connect_mysql` (see `mysqlParamsOf` in the frontend).
     #[test]

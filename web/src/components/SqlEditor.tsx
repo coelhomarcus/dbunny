@@ -22,6 +22,7 @@ import type { SqlDialectName } from "../lib/sqlStatements";
 import { currentStatementHighlight, currentStatementRange, statementDialect } from "../lib/codemirror/currentStatement";
 import { formatSql } from "../lib/formatSql";
 import type { CompletionSchema } from "@/types";
+import { t } from "../i18n";
 
 /** "current": the selection, or the statement at the cursor; "all": the whole script. */
 export type RunScope = "current" | "all";
@@ -66,7 +67,7 @@ async function formatView(view: EditorView, dialect: SqlDialectName, onError?: (
   try {
     after = await formatSql(before, dialect);
   } catch (err) {
-    onError?.(err instanceof Error ? err.message.split("\n")[0] : "Couldn't format this SQL");
+    onError?.(err instanceof Error ? err.message.split("\n")[0] : t("ui.sqlEditor.formatFailed"));
     return;
   }
   // The text may have changed while the formatter loaded

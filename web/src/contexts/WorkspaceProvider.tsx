@@ -5,6 +5,7 @@ import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { disposeTabState } from "../lib/tabState";
 import { WorkspaceContext, type TabSessionInfo, type WorkspaceTab } from "./workspace";
 import type { InitialSession } from "@/types";
+import { useT } from "../i18n";
 
 const SIDEBAR_KEY = "dbunny-sidebar-open";
 
@@ -21,6 +22,7 @@ function newTab(initialSession?: InitialSession): WorkspaceTab {
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const t = useT();
   const [tabs, setTabs] = useState<WorkspaceTab[]>(() => [newTab()]);
   const [activeTabId, setActiveTabId] = useState(() => tabs[0].id);
   const [sidebarOpen, setSidebarOpenState] = useState(readSidebarOpen);
@@ -150,13 +152,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }}
         icon={<GitCommitVertical />}
         tone="destructive"
-        title="Close with a transaction open?"
+        title={t("ui.workspaceProvider.closeWithTransaction")}
         description={
           confirmClose && confirmClose.length > 1
-            ? "One of these connections has a transaction open. Closing them rolls it back."
-            : "Its changes haven't been committed, so closing the tab rolls them back."
+            ? t("ui.workspaceProvider.manyOpenTransactions")
+            : t("ui.workspaceProvider.oneOpenTransaction")
         }
-        confirmLabel="Roll back and close"
+        confirmLabel={t("ui.workspaceProvider.rollBackAndClose")}
       />
     </WorkspaceContext.Provider>
   );

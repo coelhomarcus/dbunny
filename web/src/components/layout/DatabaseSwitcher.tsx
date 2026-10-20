@@ -10,6 +10,8 @@ import { cn } from "../../lib/cn";
 import Popover from "../ui/Popover";
 import ContainerDialog, { type ContainerOptions, type ContainerRequest } from "../schema/ContainerDialog";
 import { useCapabilities } from "../../hooks/useCapabilities";
+import { useT } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 /**
  * The connection name at the top of the sidebar, with the database in use under it; opens
@@ -17,6 +19,7 @@ import { useCapabilities } from "../../hooks/useCapabilities";
  * login, SSL, SSH and read-only settings.
  */
 export default function DatabaseSwitcher() {
+  const t = useT();
   const { api, connectionInfo, savedConnectionName, savedConnectionId } = useConnection();
   const { tabs, openTab } = useWorkspace();
   const { tabId } = useTab();
@@ -34,7 +37,7 @@ export default function DatabaseSwitcher() {
     setListFailed(false);
     api.getDatabases().then(setDatabases).catch((err) => {
       setListFailed(true);
-      notify({ tone: "error", text: typeof err === "string" ? err : "Couldn't list databases" });
+      notify({ tone: "error", text: errorText(err, t("ui.databaseSwitcher.listFailedNotice")) });
     });
   }
 
@@ -70,7 +73,7 @@ export default function DatabaseSwitcher() {
       });
       setOpen(false);
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : "Couldn't open the database" });
+      notify({ tone: "error", text: errorText(err, t("ui.databaseSwitcher.openFailed")) });
     } finally {
       setOpening(null);
     }
@@ -87,7 +90,7 @@ export default function DatabaseSwitcher() {
     return (
       <div className="flex min-w-0 flex-1 items-center rounded-md border border-border px-2 py-1">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium leading-tight">{connectionName || "Connection"}</div>
+          <div className="truncate text-sm font-medium leading-tight">{connectionName || t("ui.databaseSwitcher.connection")}</div>
           <div className="flex min-w-0 items-center gap-1 text-[11px] leading-tight text-muted-foreground">
             <Database size={10} className="shrink-0" />
             <span className="truncate">{database}</span>
@@ -105,11 +108,11 @@ export default function DatabaseSwitcher() {
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        aria-label="Switch database"
+        aria-label={t("ui.databaseSwitcher.switchDatabase")}
         className="group flex w-full min-w-0 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-left cursor-pointer transition-colors hover:bg-accent aria-expanded:bg-accent"
       >
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium leading-tight">{connectionName || "Connection"}</div>
+          <div className="truncate text-sm font-medium leading-tight">{connectionName || t("ui.databaseSwitcher.connection")}</div>
           <div className="flex min-w-0 items-center gap-1 text-[11px] leading-tight text-muted-foreground">
             <Database size={10} className="shrink-0" />
             <span className="truncate">{database}</span>
@@ -118,7 +121,7 @@ export default function DatabaseSwitcher() {
         <ChevronsUpDown size={12} className="shrink-0 text-muted-foreground/70 group-hover:text-muted-foreground" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} dock className="p-1">
-        <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Databases on this server</div>
+        <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t("ui.databaseSwitcher.databasesOnThisServer")}</div>
         {databases === null && !listFailed ? (
           <div className="flex justify-center py-3">
             <Spinner size={14} className="text-muted-foreground" />
@@ -154,7 +157,7 @@ export default function DatabaseSwitcher() {
                 {!readOnly && !db.isCurrent && (
                   <button
                     type="button"
-                    aria-label={`Drop database ${db.name}`}
+                    aria-label={t("ui.databaseSwitcher.dropDatabase", { name: db.name })}
                     onClick={() => ask({ kind: "database", action: "drop", name: db.name })}
                     className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity cursor-pointer hover:bg-destructive/10 hover:text-destructive-foreground group-hover:opacity-100 focus-visible:opacity-100"
                   >
@@ -165,16 +168,16 @@ export default function DatabaseSwitcher() {
             ))}
           </div>
         )}
-        {listFailed && databases === null && <p className="px-2 py-1.5 text-xs text-muted-foreground">Couldn't list databases.</p>}
+        {listFailed && databases === null && <p className="px-2 py-1.5 text-xs text-muted-foreground">{t("ui.databaseSwitcher.listFailed")}</p>}
         <div className="mt-1 flex items-center gap-2 border-t border-border px-2 pb-0.5 pt-1.5">
-          <p className="flex-1 text-[11px] text-muted-foreground">Opens in a new tab, with the same login.</p>
+          <p className="flex-1 text-[11px] text-muted-foreground">{t("ui.databaseSwitcher.opensInANewTab")}</p>
           {!readOnly && (
             <button
               type="button"
               onClick={() => ask({ kind: "database", action: "create", name: "" })}
               className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground"
             >
-              <Plus size={11} /> New
+              <Plus size={11} /> {t("common.new")}
             </button>
           )}
         </div>

@@ -5,6 +5,7 @@ import { fetchReleaseNotes } from "../lib/releaseNotes";
 import Dialog from "./ui/Dialog";
 import Button from "./ui/Button";
 import ReleaseNotes from "./ReleaseNotes";
+import { useT } from "../i18n";
 
 /**
  * The changelog of one release, loaded when the dialog opens and drawn from its Markdown.
@@ -18,6 +19,7 @@ export default function ReleaseNotesDialog({
   version: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const [notes, setNotes] = useState<{ version: string; markdown: string } | { version: string; error: string } | null>(null);
 
   useEffect(() => {
@@ -40,13 +42,13 @@ export default function ReleaseNotesDialog({
         if (!cancelled) setNotes({ version, markdown });
       },
       (err) => {
-        if (!cancelled) setNotes({ version, error: err instanceof Error ? err.message : "Couldn't load the release notes." });
+        if (!cancelled) setNotes({ version, error: err instanceof Error ? err.message : t("ui.releaseNotesDialog.loadFailed") });
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [open, version]);
+  }, [open, version, t]);
 
   const current = notes?.version === version ? notes : null;
 
@@ -54,20 +56,20 @@ export default function ReleaseNotesDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title="What's new"
+      title={t("ui.releaseNotesDialog.whatsNew")}
       description={`DBunny ${version.replace(/^v/, "")}`}
       className="max-w-2xl"
       overlayClassName="z-[70]"
       footer={
         <Button variant="outline" size="sm" onClick={onClose}>
-          Close
+          {t("common.close")}
         </Button>
       }
     >
       <div className="min-h-24">
         {!current && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner className="size-4" /> Loading the release notes…
+            <Spinner className="size-4" /> {t("ui.releaseNotesDialog.loading")}
           </p>
         )}
         {current && "error" in current && (

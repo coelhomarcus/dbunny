@@ -35,6 +35,8 @@ import { isMac } from "../../lib/platform";
 import { getSettings } from "../../lib/settings";
 import { explainAnalyzeHint, notAvailableFor } from "../../lib/engines";
 import { useCapabilities } from "../../hooks/useCapabilities";
+import { useT, t } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 const MOD = isMac ? "⌘" : "Ctrl+";
 const SHIFT = isMac ? "⇧" : "Shift+";
@@ -74,19 +76,19 @@ function detectDangerousStatements(sql: string): DangerInfo[] {
 
   for (const stmt of stmts) {
     if (/\bDROP\s+DATABASE\b/.test(stmt)) {
-      dangers.push({ rule: "DROP DATABASE", detail: "Deletes the entire database permanently." });
+      dangers.push({ rule: "DROP DATABASE", detail: t("ui.queryPane.dangerDropDatabase") });
     } else if (/\bDROP\s+SCHEMA\b/.test(stmt)) {
-      dangers.push({ rule: "DROP SCHEMA", detail: "Deletes the schema and all its objects permanently." });
+      dangers.push({ rule: "DROP SCHEMA", detail: t("ui.queryPane.dangerDropSchema") });
     } else if (/\bDROP\s+TABLE\b/.test(stmt)) {
-      dangers.push({ rule: "DROP TABLE", detail: "Deletes the table and all its data permanently." });
+      dangers.push({ rule: "DROP TABLE", detail: t("ui.queryPane.dangerDropTable") });
     } else if (/\bTRUNCATE\b/.test(stmt)) {
-      dangers.push({ rule: "TRUNCATE", detail: "Deletes all rows from the table instantly." });
+      dangers.push({ rule: "TRUNCATE", detail: t("ui.queryPane.dangerTruncate") });
     } else if (/\bDELETE\b/.test(stmt) && !/\bWHERE\b/.test(stmt)) {
-      dangers.push({ rule: "DELETE without WHERE", detail: "Deletes every row in the table, no filter applied." });
+      dangers.push({ rule: "DELETE without WHERE", detail: t("ui.queryPane.dangerDelete") });
     } else if (/\bUPDATE\b/.test(stmt) && /\bSET\b/.test(stmt) && !/\bWHERE\b/.test(stmt)) {
-      dangers.push({ rule: "UPDATE without WHERE", detail: "Updates every row in the table, no filter applied." });
+      dangers.push({ rule: "UPDATE without WHERE", detail: t("ui.queryPane.dangerUpdate") });
     } else if (/\bALTER\s+TABLE\b/.test(stmt) && /\bDROP\s+COLUMN\b/.test(stmt)) {
-      dangers.push({ rule: "ALTER TABLE DROP COLUMN", detail: "Removes the column and its data permanently." });
+      dangers.push({ rule: "ALTER TABLE DROP COLUMN", detail: t("ui.queryPane.dangerDropColumn") });
     }
   }
 
@@ -107,12 +109,13 @@ export default function QueryPane({
   title: string;
   active: boolean;
 }) {
+  const t = useT();
   const { connectionInfo } = useConnection();
   const capabilities = useCapabilities();
   if (!capabilities.console) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
-        <p className="text-[13px] font-medium">SQL editor</p>
+        <p className="text-[13px] font-medium">{t("ui.queryPane.sqlEditor")}</p>
         <p className="text-xs text-muted-foreground">{connectionInfo ? notAvailableFor(connectionInfo.engine) : ""}</p>
       </div>
     );
@@ -133,6 +136,7 @@ function QueryPaneBody({
   title: string;
   active: boolean;
 }) {
+  const t = useT();
   const { openDocument, setQueryDirty, setQuerySaved } = useDocuments();
   const rightPanel = useRightPanel();
   const renderSidePanel = (panel: React.ReactNode) => (rightPanel ? createPortal(panel, rightPanel) : null);
@@ -149,8 +153,8 @@ function QueryPaneBody({
   const [justSaved, setJustSaved] = useState(false);
   const notify = useNotify();
   const showFormatError = useCallback((message: string) => {
-    notify({ tone: "error", text: `Couldn't format: ${message}` });
-  }, [notify]);
+    notify({ tone: "error", text: t("ui.queryPane.formatFailed", { message }) });
+  }, [notify, t]);
   const [linkedSavedId, setLinkedSavedId] = useState(savedIdProp);
   // Share of the height the editor takes over the results, remembered across sessions
   const [split, setSplit] = useState(() => {
@@ -310,13 +314,13 @@ function QueryPaneBody({
       else if (command === "commit") await api.commitTransaction();
       else await api.rollbackTransaction();
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : "Transaction failed" });
+      notify({ tone: "error", text: errorText(err, t("ui.queryPane.transactionFailed")) });
     } finally {
       // Commit and rollback close the transaction even when they fail
       setInTransaction(await api.transactionOpen().catch(() => false));
       setTxBusy(false);
     }
-  }, [api, notify]);
+  }, [api, notify, t]);
 
   const executeQuery = useCallback(async (sql: string) => {
     const txCommand = transactionCommand(sql);
@@ -348,7 +352,7 @@ function QueryPaneBody({
       if (DDL_PATTERN.test(sql)) loadCompletionSchema();
     } catch (err) {
       await delay;
-      const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "Query failed";
+      const msg = errorText(err, t("ui.queryPane.queryFailed"));
       setError(msg);
       if (historyStorageKey) {
         setHistory(addToHistory(historyStorageKey, { sql, durationMs: null, rows: null, error: errorSummary(msg) }));
@@ -361,7 +365,7 @@ function QueryPaneBody({
       setRunning(false);
       setRunningSince(null);
     }
-  }, [loadCompletionSchema, api, runTransaction, showView, historyStorageKey, inTransaction, capabilities.transactions]);
+  }, [loadCompletionSchema, api, runTransaction, showView, historyStorageKey, inTransaction, capabilities.transactions, t]);
 
   const explain = useCallback(async (analyze: boolean) => {
     // EXPLAIN takes one statement: the selection, or the one at the cursor
@@ -376,12 +380,12 @@ function QueryPaneBody({
       setPlan(res);
       showView("plan");
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : "EXPLAIN failed" });
+      notify({ tone: "error", text: errorText(err, t("ui.queryPane.explainFailed")) });
     } finally {
       setRunning(false);
       setRunningSince(null);
     }
-  }, [api, notify]);
+  }, [api, notify, t]);
 
   // What the assistant is asked about: the selection, or the statement at the cursor
   const engine = connectionInfo ? engineLabel(connectionInfo.engine) : "SQL";
@@ -389,12 +393,12 @@ function QueryPaneBody({
     (build: (sql: string) => string) => {
       const sql = editorRef.current?.getCurrentStatement() ?? "";
       if (!sql.trim()) {
-        notify({ tone: "error", text: "Select a statement, or put the cursor in one, to ask about it" });
+        notify({ tone: "error", text: t("ui.queryPane.selectAStatementOrPut") });
         return;
       }
       assistant.ask(build(sql));
     },
-    [assistant, notify],
+    [assistant, notify, t],
   );
   const explainWithAssistant = useCallback(() => askAbout((sql) => explainPrompt({ engine, sql })), [askAbout, engine]);
   const optimizeWithAssistant = useCallback(
@@ -489,14 +493,12 @@ function QueryPaneBody({
           onConfirm={confirmDangerousQuery}
           icon={<AlertTriangle />}
           tone="destructive"
-          title="Query blocked by Safe Mode"
+          title={t("ui.queryPane.blockedBySafeMode")}
           description={
-            pendingDangers?.length === 1
-              ? "A potentially destructive operation was detected."
-              : `${pendingDangers?.length ?? 0} potentially destructive operations were detected.`
+            t("ui.queryPane.dangersDetected", { count: pendingDangers?.length ?? 0 })
           }
-          cancelLabel="Cancel"
-          confirmLabel="Run anyway"
+          cancelLabel={t("common.cancel")}
+          confirmLabel={t("ui.queryPane.runAnyway")}
         >
           <div className="rounded-xl border border-border bg-muted divide-y divide-border">
             {(pendingDangers ?? []).map((d, i) => (
@@ -526,14 +528,14 @@ function QueryPaneBody({
           <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-2.5 select-none">
             <RunButton disabled={running} explainAnalyze={capabilities.explainAnalyze} analyzeHint={explainAnalyzeHint(capabilities.explainFormat)} onRun={runQuery} onExplain={explain} />
             <AssistantActions onExplain={explainWithAssistant} onOptimize={optimizeWithAssistant} />
-            <Tooltip label={justSaved ? "Saved" : "Save the query"} shortcut={justSaved ? undefined : `${MOD}S`} side="top">
+            <Tooltip label={justSaved ? t("ui.queryPane.saved") : t("ui.queryPane.saveTheQuery")} shortcut={justSaved ? undefined : `${MOD}S`} side="top">
               <Button
                 variant="ghost-muted"
                 size="icon-sm"
                 className={justSaved ? "text-success-foreground hover:text-success-foreground" : undefined}
                 onClick={() => saveActiveQuery()}
                 disabled={!savedStorageKey}
-                aria-label="Save the query"
+                aria-label={t("ui.queryPane.saveTheQuery")}
               >
                 {justSaved ? <Check /> : <Save />}
               </Button>
@@ -548,20 +550,20 @@ function QueryPaneBody({
                   onRollback={() => runTransaction("rollback")}
                 />
               )}
-              <Tooltip label={safeMode ? "Safe mode: asks before destructive statements" : "Safe mode off: destructive statements run directly"} side="top">
+              <Tooltip label={safeMode ? t("ui.queryPane.safeModeOn") : t("ui.queryPane.safeModeOff")} side="top">
                 <Button
                   variant="ghost-muted"
                   size="icon-sm"
                   className={safeMode ? "text-success-foreground hover:text-success-foreground" : undefined}
                   onClick={() => setSafeMode((v) => !v)}
                   aria-pressed={safeMode}
-                  aria-label="Safe mode"
+                  aria-label={t("ui.queryPane.safeMode")}
                 >
                   {safeMode ? <ShieldCheck /> : <ShieldOff />}
                 </Button>
               </Tooltip>
-              <Tooltip label="More actions" side="top">
-                <Button ref={moreButtonRef} variant="ghost-muted" size="icon-sm" onClick={() => setMoreOpen((v) => !v)} aria-label="More" aria-expanded={moreOpen}>
+              <Tooltip label={t("ui.queryPane.moreActions")} side="top">
+                <Button ref={moreButtonRef} variant="ghost-muted" size="icon-sm" onClick={() => setMoreOpen((v) => !v)} aria-label={t("ui.queryPane.more")} aria-expanded={moreOpen}>
                   <MoreHorizontal />
                 </Button>
               </Tooltip>
@@ -577,19 +579,19 @@ function QueryPaneBody({
                       setHistoryOpen((open) => !open);
                     }}
                   >
-                    <History /> {historyOpen ? "Hide history" : "History"}
+                    <History /> {historyOpen ? t("ui.queryPane.hideHistory") : t("ui.queryPane.history")}
                   </button>
                   <div className="mx-1 my-1 h-px bg-border" />
                   <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); editorRef.current?.format(); }}>
-                    <AlignLeft /> Format SQL
+                    <AlignLeft /> {t("ui.queryPane.formatSql")}
                     <Keys keys={`${SHIFT}${ALT}F`} className="ml-auto" />
                   </button>
                   <div className="mx-1 my-1 h-px bg-border" />
                   <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); importQuery(); }}>
-                    <Upload /> Open .sql file…
+                    <Upload /> {t("ui.queryPane.openSqlFile")}
                   </button>
                   <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); exportQuery(); }}>
-                    <Download /> Save as .sql file…
+                    <Download /> {t("ui.queryPane.saveSqlFile")}
                   </button>
                 </div>
               </Popover>
@@ -600,7 +602,7 @@ function QueryPaneBody({
         <div
           role="separator"
           aria-orientation="horizontal"
-          aria-label="Resize editor"
+          aria-label={t("ui.queryPane.resizeEditor")}
           onPointerDown={startResize}
           onDoubleClick={() => {
             setSplit(50);
@@ -621,16 +623,16 @@ function QueryPaneBody({
                 value={view}
                 onChange={showView}
                 options={[
-                  { value: "results", label: "Results" },
+                  { value: "results", label: t("ui.queryPane.results") },
                   {
                     value: "messages",
                     label: (
                       <>
-                        Messages <span className="text-xs tabular-nums text-muted-foreground">{result?.notices?.length ?? 0}</span>
+                        {t("ui.queryPane.messages")} <span className="text-xs tabular-nums text-muted-foreground">{result?.notices?.length ?? 0}</span>
                       </>
                     ),
                   },
-                  ...(plan ? [{ value: "plan" as const, label: "Plan" }] : []),
+                  ...(plan ? [{ value: "plan" as const, label: t("ui.queryPane.plan") }] : []),
                 ]}
               />
             </div>
@@ -656,7 +658,7 @@ function QueryPaneBody({
         </div>
       </div>
       {renderSidePanel(
-        <SideCard open={historyOpen} widthClass="w-80" label="Query library">
+        <SideCard open={historyOpen} widthClass="w-80" label={t("ui.queryPane.queryLibrary")}>
           <HistoryPanel
             view={libraryView}
             onViewChange={setLibraryView}
@@ -682,15 +684,15 @@ function QueryPaneBody({
         open={saveName !== null}
         onClose={() => setSaveName(null)}
         icon={<Save />}
-        title="Save query"
-        description="Kept for this database, in Saved next to the history."
+        title={t("ui.queryPane.saveQuery")}
+        description={t("ui.queryPane.saveHint")}
         footer={
           <>
             <Button variant="neutral" size="sm" onClick={() => setSaveName(null)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="primary" size="sm" disabled={!saveName?.trim()} onClick={() => saveActiveQuery(saveName ?? "")}>
-              Save
+              {t("common.save")}
             </Button>
           </>
         }
@@ -701,7 +703,7 @@ function QueryPaneBody({
             if (saveName?.trim()) saveActiveQuery(saveName);
           }}
         >
-          <Input value={saveName ?? ""} onChange={(e) => setSaveName(e.target.value)} placeholder="e.g. Orders this month" autoFocus aria-label="Name" />
+          <Input value={saveName ?? ""} onChange={(e) => setSaveName(e.target.value)} placeholder={t("ui.queryPane.namePlaceholder")} autoFocus aria-label={t("ui.queryPane.name")} />
         </form>
       </Dialog>
     </div>

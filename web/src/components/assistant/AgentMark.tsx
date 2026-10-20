@@ -1,11 +1,14 @@
 import type { AgentInfo } from "../../lib/assistantAgents";
 import AgentIcon from "./AgentIcon";
+import { useT } from "../../i18n";
 
-/** The mark of the agent in use, on a tile, for the screens that stand in for the conversation. */
+/** The mark of the agent in use, large and on its own, for the screens that stand in for the conversation. */
 export default function AgentMark({ agent }: { agent: AgentInfo }) {
+  const t = useT();
   return (
-    <span className="flex size-12 items-center justify-center rounded-2xl bg-muted" role="img" aria-label={agent.kind === "custom" ? "Your agent" : agent.name}>
-      <AgentIcon kind={agent.kind} size={24} />
+    <span role="img" aria-label={agent.kind === "custom" ? t("assistant.agentMark.yourAgent") : agent.name}>
+      {/* Claude's mark keeps its own color; the others take the text color, which reads on a light and on a dark window */}
+      <AgentIcon kind={agent.kind} size={48} className="text-foreground" />
     </span>
   );
 }

@@ -1,28 +1,31 @@
 import type { TableFilter } from "@/types";
+import type { StaticKey } from "../i18n/store.ts";
 
 export interface FilterOperator {
   value: string;
-  label: string;
+  labelKey: StaticKey;
   /** Null checks have no value to type. */
   noValue?: boolean;
   placeholder?: string;
+  /** A placeholder that is words, not a literal example. */
+  placeholderKey?: StaticKey;
 }
 
 export const FILTER_OPERATORS: FilterOperator[] = [
-  { value: "=", label: "equals" },
-  { value: "!=", label: "does not equal" },
-  { value: "like", label: "like", placeholder: "%text%" },
-  { value: "not like", label: "not like", placeholder: "%text%" },
-  { value: "ilike", label: "ilike", placeholder: "%text%" },
-  { value: "not ilike", label: "not ilike", placeholder: "%text%" },
-  { value: "<", label: "less than" },
-  { value: "<=", label: "less than or equal" },
-  { value: ">", label: "greater than" },
-  { value: ">=", label: "greater than or equal" },
-  { value: "in", label: "in list", placeholder: "1, 2, 3" },
-  { value: "not in", label: "not in list", placeholder: "1, 2, 3" },
-  { value: "is null", label: "is null", noValue: true },
-  { value: "is not null", label: "is not null", noValue: true },
+  { value: "=", labelKey: "table.operators.equals" },
+  { value: "!=", labelKey: "table.operators.notEquals" },
+  { value: "like", labelKey: "table.operators.like", placeholderKey: "table.operators.likePlaceholder" },
+  { value: "not like", labelKey: "table.operators.notLike", placeholderKey: "table.operators.likePlaceholder" },
+  { value: "ilike", labelKey: "table.operators.ilike", placeholderKey: "table.operators.likePlaceholder" },
+  { value: "not ilike", labelKey: "table.operators.notIlike", placeholderKey: "table.operators.likePlaceholder" },
+  { value: "<", labelKey: "table.operators.lessThan" },
+  { value: "<=", labelKey: "table.operators.lessOrEqual" },
+  { value: ">", labelKey: "table.operators.greaterThan" },
+  { value: ">=", labelKey: "table.operators.greaterOrEqual" },
+  { value: "in", labelKey: "table.operators.inList", placeholder: "1, 2, 3" },
+  { value: "not in", labelKey: "table.operators.notInList", placeholder: "1, 2, 3" },
+  { value: "is null", labelKey: "table.operators.isNull", noValue: true },
+  { value: "is not null", labelKey: "table.operators.isNotNull", noValue: true },
 ];
 
 export function operatorFor(value: string): FilterOperator {

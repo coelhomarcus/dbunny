@@ -15,6 +15,8 @@ import { QueryResultsSkeleton } from "./Skeleton";
 import { isMac } from "../lib/platform";
 import Button from "./ui/Button";
 import { Keys } from "./ui/Kbd";
+import { useT } from "../i18n";
+import { Rich } from "../i18n/Rich";
 
 interface QueryResultsProps {
   result: QueryResult | null;
@@ -45,6 +47,7 @@ function parseError(raw: string): PgError {
 }
 
 function ErrorDisplay({ raw, onFix }: { raw: string; onFix?: () => void }) {
+  const t = useT();
   const err = parseError(raw);
   const severity = err.severity?.toUpperCase() ?? "ERROR";
   const severityColor =
@@ -67,24 +70,25 @@ function ErrorDisplay({ raw, onFix }: { raw: string; onFix?: () => void }) {
           <p className="font-mono text-sm leading-relaxed">{err.message}</p>
           {err.statement != null && err.statementCount != null && (
             <p className="text-xs opacity-70">
-              Statement {err.statement} of {err.statementCount}
-              {err.statement > 1 && ". The statements before it already ran."}
+              {err.statement > 1
+                ? t("ui.queryResults.statementOfAfter", { statement: err.statement, total: err.statementCount })
+                : t("ui.queryResults.statementOf", { statement: err.statement, total: err.statementCount })}
             </p>
           )}
           {err.position != null && (
             <p className="text-xs opacity-70">
-              Position: <span className="font-mono">{err.position}</span>
+              <Rich id="ui.queryResults.position" params={{ position: err.position }} tags={{ value: (text) => <span className="font-mono">{text}</span> }} />
             </p>
           )}
           {err.detail && (
             <div className="pt-1 border-t border-current/20">
-              <span className="text-xs font-medium opacity-60 uppercase tracking-wider">Detail</span>
+              <span className="text-xs font-medium opacity-60 uppercase tracking-wider">{t("ui.queryResults.detail")}</span>
               <p className="font-mono text-xs mt-0.5 opacity-80">{err.detail}</p>
             </div>
           )}
           {err.hint && (
             <div className="pt-1 border-t border-current/20">
-              <span className="text-xs font-medium opacity-60 uppercase tracking-wider">Hint</span>
+              <span className="text-xs font-medium opacity-60 uppercase tracking-wider">{t("ui.queryResults.hint")}</span>
               <p className="font-mono text-xs mt-0.5 opacity-80">{err.hint}</p>
             </div>
           )}
@@ -92,7 +96,7 @@ function ErrorDisplay({ raw, onFix }: { raw: string; onFix?: () => void }) {
             <div className="pt-1">
               <Button variant="outline" size="xs" onClick={onFix}>
                 <AiIcon />
-                Fix with AI
+                {t("ui.queryResults.fixWithAi")}
               </Button>
             </div>
           )}
@@ -103,6 +107,7 @@ function ErrorDisplay({ raw, onFix }: { raw: string; onFix?: () => void }) {
 }
 
 export default function QueryResults({ result, error, running, onFix }: QueryResultsProps) {
+  const t = useT();
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const columns = useMemo<ColumnDef<unknown[], unknown>[]>(() => {
     if (!result) return [];
@@ -172,10 +177,10 @@ export default function QueryResults({ result, error, running, onFix }: QueryRes
                         x: e.clientX,
                         y: e.clientY,
                         items: [
-                          { label: "Copy value", icon: <Copy />, onSelect: () => writeClipboardText(valueText(value)) },
+                          { label: t("ui.queryResults.copyValue"), icon: <Copy />, onSelect: () => writeClipboardText(valueText(value)) },
                           "separator",
-                          { label: "Copy row as JSON", onSelect: () => writeClipboardText(rowsToJson(result.columns, [values])) },
-                          { label: "Copy row as TSV", onSelect: () => writeClipboardText(rowsToTsv(result.columns, [values])) },
+                          { label: t("ui.queryResults.copyRowAsJson"), onSelect: () => writeClipboardText(rowsToJson(result.columns, [values])) },
+                          { label: t("ui.queryResults.copyRowAsTsv"), onSelect: () => writeClipboardText(rowsToTsv(result.columns, [values])) },
                         ],
                       });
                     }}
@@ -191,7 +196,7 @@ export default function QueryResults({ result, error, running, onFix }: QueryRes
 
       {result && result.columns.length === 0 && (
         <div className="flex-1 flex items-center justify-center p-4 text-muted-foreground text-base">
-          Query executed successfully. {result.rowsAffected ?? result.rowCount} rows affected.
+          {t("ui.queryResults.executed", { count: result.rowsAffected ?? result.rowCount })}
         </div>
       )}
 
@@ -203,11 +208,11 @@ export default function QueryResults({ result, error, running, onFix }: QueryRes
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground select-none">
           <span className="flex items-center gap-2">
             <Keys keys={isMac ? "⌘↵" : "Ctrl+↵"} />
-            runs the statement at the cursor
+            {t("ui.queryResults.runsStatement")}
           </span>
           <span className="flex items-center gap-2">
             <Keys keys={isMac ? "⇧⌘↵" : "Shift+Ctrl+↵"} />
-            runs everything
+            {t("ui.queryResults.runsEverything")}
           </span>
         </div>
       )}

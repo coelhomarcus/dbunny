@@ -18,6 +18,7 @@ import ApprovalButtons from "./ApprovalButtons";
 import MarkdownView from "./MarkdownView";
 import ResultTable from "./ResultTable";
 import SqlSnippet from "./SqlSnippet";
+import { useT } from "../../i18n";
 
 const PREVIEW_ROWS = 10;
 
@@ -84,6 +85,7 @@ function Step({ item, thinking, onDecide }: { item: Item; thinking: boolean; onD
 
 /** What the assistant thought: a line that opens on it, open and shimmering while it is still thinking. */
 function Thought({ text, thinking }: { text: string; thinking: boolean }) {
+  const t = useT();
   // The reader's click wins over opening while it streams
   const [choice, setChoice] = useState<boolean | undefined>();
   return (
@@ -93,7 +95,7 @@ function Thought({ text, thinking }: { text: string; thinking: boolean }) {
           <TraceIcon>
             <Brain />
           </TraceIcon>
-          <TraceTitle>{thinking ? "Thinking…" : "Thought"}</TraceTitle>
+          <TraceTitle>{thinking ? t("assistant.messageList.thinking") : t("assistant.steps.thought")}</TraceTitle>
         </TraceLine>
       </TraceCollapsibleTrigger>
       <TraceCollapsibleContent>
@@ -121,6 +123,7 @@ function QueryRow({
   onDecide: (approvalId: string, decision: Decision) => void;
 }) {
   const [choice, setChoice] = useState<boolean | undefined>();
+  const t = useT();
   const [showAll, setShowAll] = useState(false);
   const [rowsOpen, setRowsOpen] = useState(false);
   const waiting = approval !== undefined;
@@ -131,7 +134,7 @@ function QueryRow({
   const canShowRows = rows !== null && !rows.valuesHidden && rows.rows.length > 0;
   const shown = rows && canShowRows ? (showAll ? rows.rows : rows.rows.slice(0, PREVIEW_ROWS)) : [];
 
-  const title = waiting ? (analyze ? "Run a query to explain it" : "Run a query") : tool ? toolTitle(tool) : "Run a query";
+  const title = waiting ? (analyze ? t("assistant.steps.runToExplain") : t("assistant.steps.runAQuery")) : tool ? toolTitle(tool) : t("assistant.steps.runAQuery");
   const status: TraceStatus | undefined = running ? "running" : failed ? "error" : undefined;
   const Icon = declined ? Ban : analyze ? Gauge : Database;
 
@@ -143,7 +146,7 @@ function QueryRow({
             <Icon />
           </TraceIcon>
           <TraceTitle>{title}</TraceTitle>
-          <TraceDescription>{waiting ? "Waiting for approval" : tool ? toolDescription(tool) : ""}</TraceDescription>
+          <TraceDescription>{waiting ? t("assistant.steps.waitingForApproval") : tool ? toolDescription(tool) : ""}</TraceDescription>
         </TraceLine>
       </TraceCollapsibleTrigger>
       <TraceCollapsibleContent className="space-y-2 pr-1">
@@ -162,7 +165,7 @@ function QueryRow({
               onClick={() => setRowsOpen(!rowsOpen)}
               className="flex h-6 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
             >
-              {rowsOpen ? "Hide rows" : "Show rows"}
+              {rowsOpen ? t("assistant.steps.hideRows") : t("assistant.steps.showRows")}
               {rowsOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
             </button>
             {rowsOpen && rows && shown.length > 0 && (
@@ -173,7 +176,7 @@ function QueryRow({
                 />
                 {rows.rows.length > PREVIEW_ROWS && !showAll && (
                   <button type="button" className="w-full cursor-pointer border-t border-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent" onClick={() => setShowAll(true)}>
-                    Show all {rows.rows.length} rows
+                    {t("assistant.steps.showAllRows", { count: rows.rows.length })}
                   </button>
                 )}
               </div>

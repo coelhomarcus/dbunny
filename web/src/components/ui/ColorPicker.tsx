@@ -2,6 +2,7 @@ import { useState, type KeyboardEvent, type PointerEvent } from "react";
 import { clamp, hexToHsv, hsvToHex, normalizeHex, type Hsv } from "../../lib/color";
 import { cn } from "../../lib/cn";
 import Input from "./Input";
+import { useT } from "../../i18n";
 
 /** Fraction (0..1) of the pointer position inside an element, per axis. */
 function pointerFraction(e: PointerEvent<HTMLElement>) {
@@ -33,6 +34,7 @@ export default function ColorPicker({
   onChange: (hex: string) => void;
   className?: string;
 }) {
+  const t = useT();
   // HSV kept locally: converting through hex would lose the hue on greys/black
   const [hsv, setHsv] = useState<Hsv>(() => hexToHsv(value));
   const [hexDraft, setHexDraft] = useState<string | null>(null);
@@ -95,7 +97,7 @@ export default function ColorPicker({
       <div
         role="slider"
         tabIndex={0}
-        aria-label="Saturation and brightness"
+        aria-label={t("ui.colorPicker.saturationAndBrightness")}
         aria-valuetext={`Saturation ${Math.round(hsv.s * 100)}%, brightness ${Math.round(hsv.v * 100)}%`}
         onPointerDown={onAreaPointer}
         onPointerMove={onAreaPointer}
@@ -114,7 +116,7 @@ export default function ColorPicker({
       <div
         role="slider"
         tabIndex={0}
-        aria-label="Hue"
+        aria-label={t("ui.colorPicker.hue")}
         aria-valuemin={0}
         aria-valuemax={360}
         aria-valuenow={Math.round(hsv.h)}
@@ -133,7 +135,7 @@ export default function ColorPicker({
       <div className="flex items-center gap-2">
         <span className="size-8 shrink-0 rounded-lg shadow-[inset_0_0_0_1px_rgb(0_0_0/0.1)]" style={{ backgroundColor: hex }} />
         <Input
-          aria-label="Hex color"
+          aria-label={t("ui.colorPicker.hexColor")}
           value={hexDraft ?? hex.toUpperCase()}
           onChange={(e) => {
             setHexDraft(e.target.value);

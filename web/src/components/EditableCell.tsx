@@ -4,6 +4,7 @@ import type { CellEditor } from "../lib/cellEdit";
 import { toEditText } from "../lib/cellEdit";
 import ChoiceList from "./table/ChoiceList";
 import DateTimeEditor from "./table/DateTimeEditor";
+import { t, useT } from "../i18n";
 
 interface EditableCellProps {
   value: unknown;
@@ -46,7 +47,7 @@ function renderValue(value: unknown) {
   if (value === null)
     return <span className="text-muted-foreground/70 italic">NULL</span>;
   const str = typeof value === "object" ? JSON.stringify(value) : String(value);
-  if (str === "") return <span className="text-muted-foreground/70 italic">empty</span>;
+  if (str === "") return <span className="text-muted-foreground/70 italic">{t("ui.editableCell.empty")}</span>;
   // Rows stay one line high: line breaks show as a return symbol
   const oneLine = str.length > MAX_PREVIEW ? str.slice(0, MAX_PREVIEW) + "…" : str;
   return oneLine.replace(/\r?\n/g, " ↵ ");
@@ -62,6 +63,7 @@ export default function EditableCell({
   onStartEdit, onEditValueChange, onSetNull, onConfirm, onCommit, onCancel, onExpand,
   onFollowLink, linkLabel, onContextMenu, menuOpen, columnName, columnSelected, columnSelectionEnd,
 }: EditableCellProps) {
+  const t = useT();
   const cellRef = useRef<HTMLTableCellElement>(null);
   const editable = !hasNoPk && editor.kind !== "readonly";
   const inlineEditing = isEditing && editor.kind === "text";
@@ -134,7 +136,7 @@ export default function EditableCell({
             value={editValue}
             onChange={(e) => onEditValueChange(e.target.value)}
             onBlur={onConfirm}
-            placeholder={editIsNull ? "NULL" : "empty"}
+            placeholder={editIsNull ? "NULL" : t("ui.editableCell.empty")}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -173,7 +175,7 @@ export default function EditableCell({
           <button
             type="button"
             tabIndex={-1}
-            aria-label="Open in a larger editor"
+            aria-label={t("ui.editableCell.openInALargerEditor")}
             onMouseDown={(e) => {
               e.preventDefault();
               onExpand();
