@@ -3,12 +3,16 @@ import { stripContext } from "./assistantContext.ts";
 
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
 
+/** `at` is when it began, in milliseconds, for what happens live; a replayed conversation has none. */
 export type Item =
-  | { kind: "user"; text: string }
-  | { kind: "agent"; text: string }
-  | { kind: "thought"; text: string }
+  | { kind: "user"; text: string; at?: number }
+  | { kind: "agent"; text: string; at?: number }
+  | { kind: "thought"; text: string; at?: number }
   | {
       kind: "tool";
+      at?: number;
+      /** When it ended, in milliseconds. */
+      endedAt?: number;
       id: string;
       /** The tool's name; for the database's own, without the server's prefix. */
       tool: string;
@@ -93,18 +97,18 @@ function statusOf(value: unknown): ToolStatus | null {
 }
 
 /** Adds text to the last item when it is of this kind, or starts a new one. */
-function append(items: Item[], kind: "agent" | "thought" | "user", text: string): Item[] {
+function append(items: Item[], kind: "agent" | "thought" | "user", text: string, now: number | null): Item[] {
   const last = items[items.length - 1];
   if (last && last.kind === kind) return [...items.slice(0, -1), { ...last, text: last.text + text }];
-  return [...items, { kind, text }];
+  return [...items, now === null ? { kind, text } : { kind, text, at: now }];
 }
 
 function matches(tool: Tool, request: ApprovalRequest): boolean {
   return tool.tool === request.tool && tool.input.sql === request.sql && tool.status !== "completed" && tool.status !== "failed";
 }
 
-/** What one `session/update` of the agent adds to the conversation. */
-export function applyUpdate(conversation: Conversation, raw: unknown): Conversation {
+/** What one `session/update` of the agent adds to the conversation; `now` is when it came, null for a replay. */
+export function applyUpdate(conversation: Conversation, raw: unknown, now: number | null = null): Conversation {
   const update = record(raw);
   if (!update) return conversation;
   const kind = update.sessionUpdate;
@@ -116,7 +120,7 @@ export function applyUpdate(conversation: Conversation, raw: unknown): Conversat
     // A thought that has said nothing yet and gets only blanks (agents send breaks between parts) is no Thinking block
     const last = conversation.items[conversation.items.length - 1];
     if (itemKind === "thought" && content.text.trim() === "" && last?.kind !== "thought") return conversation;
-    return { ...conversation, items: append(conversation.items, itemKind, content.text) };
+    return { ...conversation, items: append(conversation.items, itemKind, content.text, now) };
   }
 
   if (kind === "session_info_update") {
@@ -139,10 +143,11 @@ export function applyUpdate(conversation: Conversation, raw: unknown): Conversat
         input: input ?? current.input,
         status: status ?? current.status,
         output: text || current.output,
+        ...(now !== null && (status === "completed" || status === "failed") && current.endedAt === undefined ? { endedAt: now } : {}),
       };
       return { ...conversation, items: conversation.items.map((item, index) => (index === at ? next : item)) };
     }
-    const created: Tool = { kind: "tool", id, tool: name ?? "", input: input ?? {}, status: status ?? "pending", ...(text ? { output: text } : {}) };
+    const created: Tool = { kind: "tool", id, tool: name ?? "", input: input ?? {}, status: status ?? "pending", ...(text ? { output: text } : {}), ...(now !== null ? { at: now } : {}) };
     // An approval that came before the card takes its place in it
     const waiting = conversation.items.findIndex((item) => item.kind === "approval" && matches(created, item.approval));
     if (waiting >= 0) {

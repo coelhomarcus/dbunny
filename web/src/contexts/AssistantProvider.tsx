@@ -71,7 +71,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       listen<{ conversationId: string; update: unknown }>("assistant:update", (event) => {
         const { conversationId: id, update } = event.payload;
         if (idRef.current === id) {
-          setConversation((current) => applyUpdate(current, update));
+          setConversation((current) => applyUpdate(current, update, Date.now()));
         } else {
           opener.current?.receive(id, update);
         }
