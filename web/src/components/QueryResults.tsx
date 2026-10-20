@@ -177,10 +177,10 @@ export default function QueryResults({ result, error, running, onFix }: QueryRes
                         x: e.clientX,
                         y: e.clientY,
                         items: [
-                          { label: "Copy value", icon: <Copy />, onSelect: () => writeClipboardText(valueText(value)) },
+                          { label: t("ui.queryResults.copyValue"), icon: <Copy />, onSelect: () => writeClipboardText(valueText(value)) },
                           "separator",
-                          { label: "Copy row as JSON", onSelect: () => writeClipboardText(rowsToJson(result.columns, [values])) },
-                          { label: "Copy row as TSV", onSelect: () => writeClipboardText(rowsToTsv(result.columns, [values])) },
+                          { label: t("ui.queryResults.copyRowAsJson"), onSelect: () => writeClipboardText(rowsToJson(result.columns, [values])) },
+                          { label: t("ui.queryResults.copyRowAsTsv"), onSelect: () => writeClipboardText(rowsToTsv(result.columns, [values])) },
                         ],
                       });
                     }}

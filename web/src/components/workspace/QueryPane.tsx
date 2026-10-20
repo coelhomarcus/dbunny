@@ -35,7 +35,7 @@ import { isMac } from "../../lib/platform";
 import { getSettings } from "../../lib/settings";
 import { explainAnalyzeHint, notAvailableFor } from "../../lib/engines";
 import { useCapabilities } from "../../hooks/useCapabilities";
-import { useT } from "../../i18n";
+import { useT, t } from "../../i18n";
 
 const MOD = isMac ? "⌘" : "Ctrl+";
 const SHIFT = isMac ? "⇧" : "Shift+";
@@ -75,19 +75,19 @@ function detectDangerousStatements(sql: string): DangerInfo[] {
 
   for (const stmt of stmts) {
     if (/\bDROP\s+DATABASE\b/.test(stmt)) {
-      dangers.push({ rule: "DROP DATABASE", detail: "Deletes the entire database permanently." });
+      dangers.push({ rule: "DROP DATABASE", detail: t("ui.queryPane.dangerDropDatabase") });
     } else if (/\bDROP\s+SCHEMA\b/.test(stmt)) {
-      dangers.push({ rule: "DROP SCHEMA", detail: "Deletes the schema and all its objects permanently." });
+      dangers.push({ rule: "DROP SCHEMA", detail: t("ui.queryPane.dangerDropSchema") });
     } else if (/\bDROP\s+TABLE\b/.test(stmt)) {
-      dangers.push({ rule: "DROP TABLE", detail: "Deletes the table and all its data permanently." });
+      dangers.push({ rule: "DROP TABLE", detail: t("ui.queryPane.dangerDropTable") });
     } else if (/\bTRUNCATE\b/.test(stmt)) {
-      dangers.push({ rule: "TRUNCATE", detail: "Deletes all rows from the table instantly." });
+      dangers.push({ rule: "TRUNCATE", detail: t("ui.queryPane.dangerTruncate") });
     } else if (/\bDELETE\b/.test(stmt) && !/\bWHERE\b/.test(stmt)) {
-      dangers.push({ rule: "DELETE without WHERE", detail: "Deletes every row in the table, no filter applied." });
+      dangers.push({ rule: "DELETE without WHERE", detail: t("ui.queryPane.dangerDelete") });
     } else if (/\bUPDATE\b/.test(stmt) && /\bSET\b/.test(stmt) && !/\bWHERE\b/.test(stmt)) {
-      dangers.push({ rule: "UPDATE without WHERE", detail: "Updates every row in the table, no filter applied." });
+      dangers.push({ rule: "UPDATE without WHERE", detail: t("ui.queryPane.dangerUpdate") });
     } else if (/\bALTER\s+TABLE\b/.test(stmt) && /\bDROP\s+COLUMN\b/.test(stmt)) {
-      dangers.push({ rule: "ALTER TABLE DROP COLUMN", detail: "Removes the column and its data permanently." });
+      dangers.push({ rule: "ALTER TABLE DROP COLUMN", detail: t("ui.queryPane.dangerDropColumn") });
     }
   }
 
@@ -152,8 +152,8 @@ function QueryPaneBody({
   const [justSaved, setJustSaved] = useState(false);
   const notify = useNotify();
   const showFormatError = useCallback((message: string) => {
-    notify({ tone: "error", text: `Couldn't format: ${message}` });
-  }, [notify]);
+    notify({ tone: "error", text: t("ui.queryPane.formatFailed", { message }) });
+  }, [notify, t]);
   const [linkedSavedId, setLinkedSavedId] = useState(savedIdProp);
   // Share of the height the editor takes over the results, remembered across sessions
   const [split, setSplit] = useState(() => {
@@ -313,13 +313,13 @@ function QueryPaneBody({
       else if (command === "commit") await api.commitTransaction();
       else await api.rollbackTransaction();
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : "Transaction failed" });
+      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.queryPane.transactionFailed") });
     } finally {
       // Commit and rollback close the transaction even when they fail
       setInTransaction(await api.transactionOpen().catch(() => false));
       setTxBusy(false);
     }
-  }, [api, notify]);
+  }, [api, notify, t]);
 
   const executeQuery = useCallback(async (sql: string) => {
     const txCommand = transactionCommand(sql);
@@ -351,7 +351,7 @@ function QueryPaneBody({
       if (DDL_PATTERN.test(sql)) loadCompletionSchema();
     } catch (err) {
       await delay;
-      const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "Query failed";
+      const msg = typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.queryPane.queryFailed");
       setError(msg);
       if (historyStorageKey) {
         setHistory(addToHistory(historyStorageKey, { sql, durationMs: null, rows: null, error: errorSummary(msg) }));
@@ -364,7 +364,7 @@ function QueryPaneBody({
       setRunning(false);
       setRunningSince(null);
     }
-  }, [loadCompletionSchema, api, runTransaction, showView, historyStorageKey, inTransaction, capabilities.transactions]);
+  }, [loadCompletionSchema, api, runTransaction, showView, historyStorageKey, inTransaction, capabilities.transactions, t]);
 
   const explain = useCallback(async (analyze: boolean) => {
     // EXPLAIN takes one statement: the selection, or the one at the cursor
@@ -379,12 +379,12 @@ function QueryPaneBody({
       setPlan(res);
       showView("plan");
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : "EXPLAIN failed" });
+      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.queryPane.explainFailed") });
     } finally {
       setRunning(false);
       setRunningSince(null);
     }
-  }, [api, notify]);
+  }, [api, notify, t]);
 
   // What the assistant is asked about: the selection, or the statement at the cursor
   const engine = connectionInfo ? engineLabel(connectionInfo.engine) : "SQL";
@@ -392,12 +392,12 @@ function QueryPaneBody({
     (build: (sql: string) => string) => {
       const sql = editorRef.current?.getCurrentStatement() ?? "";
       if (!sql.trim()) {
-        notify({ tone: "error", text: "Select a statement, or put the cursor in one, to ask about it" });
+        notify({ tone: "error", text: t("ui.queryPane.selectAStatementOrPut") });
         return;
       }
       assistant.ask(build(sql));
     },
-    [assistant, notify],
+    [assistant, notify, t],
   );
   const explainWithAssistant = useCallback(() => askAbout((sql) => explainPrompt({ engine, sql })), [askAbout, engine]);
   const optimizeWithAssistant = useCallback(
@@ -622,7 +622,7 @@ function QueryPaneBody({
                 value={view}
                 onChange={showView}
                 options={[
-                  { value: "results", label: "Results" },
+                  { value: "results", label: t("ui.queryPane.results") },
                   {
                     value: "messages",
                     label: (
@@ -631,7 +631,7 @@ function QueryPaneBody({
                       </>
                     ),
                   },
-                  ...(plan ? [{ value: "plan" as const, label: "Plan" }] : []),
+                  ...(plan ? [{ value: "plan" as const, label: t("ui.queryPane.plan") }] : []),
                 ]}
               />
             </div>

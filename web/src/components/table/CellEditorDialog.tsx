@@ -6,6 +6,7 @@ import { toEditText, toJsonEditText } from "../../lib/cellEdit";
 import { isMac } from "../../lib/platform";
 import JsonValueEditor, { type JsonValueEditorHandle } from "./JsonValueEditor";
 import { Keys } from "../ui/Kbd";
+import { useT } from "../../i18n";
 
 function Editor({
   column,
@@ -24,6 +25,7 @@ function Editor({
   onApply: (isNull: boolean, text: string) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [text, setText] = useState(() => (json ? toJsonEditText(value) : toEditText(value)));
   const [isNull, setIsNull] = useState(value === null || value === undefined);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +38,7 @@ function Editor({
       // Saved compact; the server stores JSON its own way anyway
       onApply(false, JSON.stringify(JSON.parse(text)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid JSON");
+      setError(err instanceof Error ? err.message : t("table.cellEditorDialog.invalidJson"));
     }
   }
 
@@ -62,12 +64,12 @@ function Editor({
             <p className="mr-auto min-w-0 flex-1 select-text truncate text-xs text-destructive-foreground">{error}</p>
           ) : (
             <p className="mr-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Keys keys={isMac ? "⌘↵" : "Ctrl+↵"} /> to apply
+              <Keys keys={isMac ? "⌘↵" : "Ctrl+↵"} /> {t("table.cellEditorDialog.toApply")}
             </p>
           )}
           {json && (
             <Button variant="outline" size="sm" onClick={format} disabled={isNull}>
-              Format
+              {t("table.cellEditorDialog.format")}
             </Button>
           )}
           {nullable && (
@@ -80,14 +82,14 @@ function Editor({
                 setError(null);
               }}
             >
-              Set NULL
+              {t("table.cellEditorDialog.setNull")}
             </Button>
           )}
           <Button variant="neutral" size="sm" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" size="sm" onClick={apply}>
-            Apply
+            {t("table.cellEditorDialog.apply")}
           </Button>
         </>
       }
@@ -106,9 +108,9 @@ function Editor({
       ) : (
         <textarea
           autoFocus
-          aria-label={`Value of ${column}`}
+          aria-label={t("table.cellEditorDialog.valueOf", { column })}
           value={text}
-          placeholder={isNull ? "NULL" : "empty"}
+          placeholder={isNull ? "NULL" : t("ui.editableCell.empty")}
           spellCheck={false}
           onChange={(e) => {
             setText(e.target.value);

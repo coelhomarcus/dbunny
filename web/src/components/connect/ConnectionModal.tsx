@@ -31,7 +31,7 @@ import ImportUrlDialog from "./ImportUrlDialog";
 import OptionsTab from "./OptionsTab";
 import ServerTabs from "./server/ServerTabs";
 import SqliteFileTab from "./sqlite/SqliteFileTab";
-import { useT, type StaticKey } from "../../i18n";
+import { useT, type StaticKey, t } from "../../i18n";
 
 const TAB_LABELS: Record<ConnectionTab, StaticKey> = {
   connection: "connect.connectionModal.tabConnection",
@@ -44,7 +44,7 @@ const TAB_LABELS: Record<ConnectionTab, StaticKey> = {
 type TestState = { status: "idle" } | { status: "testing" } | { status: "ok"; version: string } | { status: "error"; message: string };
 
 function errorMessage(err: unknown) {
-  return typeof err === "string" ? err : err instanceof Error ? err.message : "Connection failed";
+  return typeof err === "string" ? err : err instanceof Error ? err.message : t("connect.connectionModal.connectionFailed");
 }
 
 /**

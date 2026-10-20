@@ -15,14 +15,15 @@ import SegmentedTabs from "../components/ui/SegmentedTabs";
 import { cn } from "../lib/cn";
 import { accountOf, hasHosts } from "../lib/roles";
 import { useNotify } from "../contexts/NoticeProvider";
+import { useT } from "../i18n";
 
 /** Attributes worth a badge, in the order they're shown. */
-const ATTRIBUTES: { key: keyof RoleInfo; label: string; variant: "destructive" | "warning" | "info" | "neutral" }[] = [
-  { key: "superuser", label: "superuser", variant: "destructive" },
-  { key: "createRole", label: "create role", variant: "warning" },
-  { key: "createDb", label: "create db", variant: "info" },
-  { key: "replication", label: "replication", variant: "neutral" },
-  { key: "bypassRls", label: "bypass RLS", variant: "neutral" },
+const ATTRIBUTES: { key: keyof RoleInfo; name: string; variant: "destructive" | "warning" | "info" | "neutral" }[] = [
+  { key: "superuser", name: "superuser", variant: "destructive" },
+  { key: "createRole", name: "create role", variant: "warning" },
+  { key: "createDb", name: "create db", variant: "info" },
+  { key: "replication", name: "replication", variant: "neutral" },
+  { key: "bypassRls", name: "bypass RLS", variant: "neutral" },
 ];
 
 function rightsOf(role: RoleInfo) {
@@ -31,6 +32,7 @@ function rightsOf(role: RoleInfo) {
 
 /** The server's roles: who can log in, what they may do and which groups they belong to. */
 export default function RolesView() {
+  const t = useT();
   const api = useApi();
   const rightPanel = useRightPanel();
   const notify = useNotify();
@@ -76,16 +78,16 @@ export default function RolesView() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader className="justify-between gap-2">
-        <HeaderTitle label="Server" icon={<Users />}>
-          Roles
+        <HeaderTitle label={t("admin.rolesView.server")} icon={<Users />}>
+          {t("admin.rolesView.roles")}
         </HeaderTitle>
         {builtinCount > 0 && (
           <SegmentedTabs
             value={showBuiltin ? "all" : "roles"}
             onChange={(value) => setShowBuiltin(value === "all")}
             options={[
-              { value: "roles", label: "Roles" },
-              { value: "all", label: "All" },
+              { value: "roles", label: t("admin.rolesView.roles") },
+              { value: "all", label: t("admin.rolesView.all") },
             ]}
           />
         )}
@@ -94,12 +96,12 @@ export default function RolesView() {
       {limitedView && (
         <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-4 py-2 text-[13px] text-warning-foreground">
           <TriangleAlert size={13} />
-          Only your own account is visible: listing the others needs SELECT on mysql.user.
+          {t("admin.rolesView.limitedView")}
         </div>
       )}
 
       {error ? (
-        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">Couldn't read the roles.</div>
+        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">{t("admin.rolesView.couldntReadTheRoles")}</div>
       ) : !roles ? (
         <TableSkeleton columns={4} rows={8} />
       ) : (
@@ -114,10 +116,10 @@ export default function RolesView() {
               </colgroup>
               <thead className="sticky top-0 z-[1] select-none">
                 <tr className="text-[13px] text-muted-foreground [&>th]:border-b [&>th]:border-border [&>th]:bg-card-header [&>th]:px-4 [&>th]:py-2.5 [&>th]:text-left [&>th]:font-medium [&>th]:whitespace-nowrap">
-                  <th>Role</th>
-                  <th>Login</th>
-                  <th>Rights</th>
-                  <th>Member of</th>
+                  <th>{t("admin.rolesView.role")}</th>
+                  <th>{t("admin.rolesView.login")}</th>
+                  <th>{t("admin.rolesView.rights")}</th>
+                  <th>{t("admin.rolesView.memberOf")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -141,10 +143,10 @@ export default function RolesView() {
                       <td className="truncate px-4 py-2 font-medium">
                         {role.name}
                         {withHosts && role.host && <span className="font-normal text-muted-foreground">@{role.host}</span>}
-                        {role.isCurrent && <span className="ml-2 text-[11px] font-normal text-primary">you</span>}
+                        {role.isCurrent && <span className="ml-2 text-[11px] font-normal text-primary">{t("admin.rolesView.you")}</span>}
                       </td>
                       <td className="px-4 py-2">
-                        <Badge variant={role.canLogin ? "success" : "neutral"}>{role.canLogin ? "login" : "group"}</Badge>
+                        <Badge variant={role.canLogin ? "success" : "neutral"}>{role.canLogin ? t("admin.rolesView.login").toLowerCase() : t("admin.rolesView.group")}</Badge>
                       </td>
                       <td className="px-4 py-2">
                         {rights.length === 0 ? (
@@ -152,8 +154,8 @@ export default function RolesView() {
                         ) : (
                           <div className="flex flex-nowrap gap-1 overflow-hidden">
                             {rights.map((attribute) => (
-                              <Badge key={attribute.label} variant={attribute.variant} className="shrink-0">
-                                {attribute.label}
+                              <Badge key={attribute.name} variant={attribute.variant} className="shrink-0">
+                                {attribute.name}
                               </Badge>
                             ))}
                           </div>
@@ -167,23 +169,23 @@ export default function RolesView() {
                 })}
               </tbody>
             </table>
-            {shown.length === 0 && <p className="px-4 py-10 text-center text-sm text-muted-foreground">No roles.</p>}
+            {shown.length === 0 && <p className="px-4 py-10 text-center text-sm text-muted-foreground">{t("admin.rolesView.noRoles")}</p>}
           </div>
 
           <footer className="flex h-9 shrink-0 items-center border-t border-border bg-card-header px-4 text-[12px] text-muted-foreground">
-            {shown.length} role{shown.length === 1 ? "" : "s"}
-            {!showBuiltin && builtinCount > 0 && <span className="text-muted-foreground/80"> · {builtinCount} built-in hidden</span>}
+            {t("admin.rolesView.count", { count: shown.length })}
+            {!showBuiltin && builtinCount > 0 && <span className="text-muted-foreground/80"> · {t("admin.rolesView.builtinHidden", { count: builtinCount })}</span>}
           </footer>
         </>
       )}
 
       <ContextMenu
         position={menu}
-        items={menu ? [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(menu.name) }] : []}
+        items={menu ? [{ label: t("admin.rolesView.copyName"), icon: <Copy />, onSelect: () => writeClipboardText(menu.name) }] : []}
         onClose={() => setMenu(null)}
       />
       {rightPanel && createPortal(
-        <SideCard open={selected !== null && shownRole !== null} widthClass="w-80" label={shownRole ? accountOf(shownRole) : "Role"}>
+        <SideCard open={selected !== null && shownRole !== null} widthClass="w-80" label={shownRole ? accountOf(shownRole) : t("admin.rolesView.role")}>
           {shownRole && <RolePanel role={shownRole} onClose={() => setSelected(null)} />}
         </SideCard>,
         rightPanel,
@@ -193,6 +195,7 @@ export default function RolesView() {
 }
 
 function RolePanel({ role, onClose }: { role: RoleInfo; onClose: () => void }) {
+  const t = useT();
   const rights = rightsOf(role);
 
   return (
@@ -200,37 +203,37 @@ function RolePanel({ role, onClose }: { role: RoleInfo; onClose: () => void }) {
       <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-medium">{accountOf(role)}</span>
-          {role.isCurrent && <span className="shrink-0 text-[11px] text-primary">you</span>}
+          {role.isCurrent && <span className="shrink-0 text-[11px] text-primary">{t("admin.rolesView.you")}</span>}
         </div>
-        <Button variant="ghost-muted" size="icon-sm" aria-label="Close" onClick={onClose}>
+        <Button variant="ghost-muted" size="icon-sm" aria-label={t("common.close")} onClick={onClose}>
           <X />
         </Button>
       </header>
 
       <dl className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-b border-border px-3 py-2.5 text-[12px]">
-        <dt className="text-muted-foreground">Login</dt>
-        <dd>{role.canLogin ? "Can log in" : "Group, cannot log in"}</dd>
-        <dt className="text-muted-foreground">Connections</dt>
-        <dd>{role.connectionLimit < 0 ? "No limit" : role.connectionLimit}</dd>
-        <dt className="text-muted-foreground">Valid until</dt>
+        <dt className="text-muted-foreground">{t("admin.rolesView.login")}</dt>
+        <dd>{role.canLogin ? t("admin.rolesView.canLogin") : t("admin.rolesView.groupCannotLogin")}</dd>
+        <dt className="text-muted-foreground">{t("admin.rolesView.connections")}</dt>
+        <dd>{role.connectionLimit < 0 ? t("admin.rolesView.noLimit") : role.connectionLimit}</dd>
+        <dt className="text-muted-foreground">{t("admin.rolesView.validUntil")}</dt>
         <dd>{role.validUntil ?? "—"}</dd>
         {role.isBuiltin && (
           <>
-            <dt className="text-muted-foreground">Kind</dt>
-            <dd>Built-in</dd>
+            <dt className="text-muted-foreground">{t("admin.rolesView.kind")}</dt>
+            <dd>{t("admin.rolesView.builtIn")}</dd>
           </>
         )}
       </dl>
 
       <div className="shrink-0 border-b border-border px-3 py-2.5">
-        <p className="mb-1.5 text-[12px] text-muted-foreground">Rights</p>
+        <p className="mb-1.5 text-[12px] text-muted-foreground">{t("admin.rolesView.rights")}</p>
         {rights.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">None</p>
+          <p className="text-[13px] text-muted-foreground">{t("admin.rolesView.none")}</p>
         ) : (
           <div className="flex flex-wrap gap-1">
             {rights.map((attribute) => (
-              <Badge key={attribute.label} variant={attribute.variant}>
-                {attribute.label}
+              <Badge key={attribute.name} variant={attribute.variant}>
+                {attribute.name}
               </Badge>
             ))}
           </div>
@@ -238,9 +241,9 @@ function RolePanel({ role, onClose }: { role: RoleInfo; onClose: () => void }) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-3 py-2.5">
-        <p className="mb-1.5 text-[12px] text-muted-foreground">Member of</p>
+        <p className="mb-1.5 text-[12px] text-muted-foreground">{t("admin.rolesView.memberOf")}</p>
         {role.memberOf.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">None</p>
+          <p className="text-[13px] text-muted-foreground">{t("admin.rolesView.none")}</p>
         ) : (
           <ul className="flex flex-col gap-1 text-[13px]">
             {role.memberOf.map((name) => (

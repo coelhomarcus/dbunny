@@ -1,4 +1,5 @@
 import type { AgentKind } from "./assistantAgents";
+import { t } from "../i18n/store.ts";
 
 export type StartStepId = "shell" | "node" | "tools" | "agent";
 
@@ -13,10 +14,10 @@ const ORDER: StartStepId[] = ["shell", "node", "tools", "agent"];
 /** What the assistant does while it starts, in order, with where it is now. `agentName` is how the agent is called. */
 export function startupRows(current: StartStepId, agentName: string): StartupRow[] {
   const labels: Record<StartStepId, string> = {
-    shell: "Reading your shell settings to find Node.js",
-    node: "Checking Node.js",
-    tools: "Starting DBunny's tool server",
-    agent: `Starting ${agentName}`,
+    shell: t("assistant.startup.shell"),
+    node: t("assistant.startup.node"),
+    tools: t("assistant.startup.tools"),
+    agent: t("assistant.startup.agent", { agent: agentName }),
   };
   const at = ORDER.indexOf(current);
   return ORDER.map((id, index) => ({ id, label: labels[id], state: index < at ? "done" : index === at ? "current" : "pending" }));
@@ -24,10 +25,10 @@ export function startupRows(current: StartStepId, agentName: string): StartupRow
 
 /** Something to say when a step takes longer than it should, so that a wait doesn't look like a hang. */
 export function startupHint(step: StartStepId, seconds: number, agent: AgentKind): string | null {
-  if (step === "shell" && seconds >= 6) return "Your shell is slow to start. DBunny waits for it a few seconds more.";
+  if (step === "shell" && seconds >= 6) return t("assistant.startup.shellSlow");
   if (step === "agent" && agent !== "custom") {
-    if (seconds >= 90) return "Still working. The download is slow, or the connection is. It keeps going while you wait.";
-    if (seconds >= 8) return "The first time, DBunny downloads the agent. This can take a few minutes.";
+    if (seconds >= 90) return t("assistant.startup.downloadSlow");
+    if (seconds >= 8) return t("assistant.startup.firstDownload");
   }
   return null;
 }

@@ -1,6 +1,7 @@
 import { Check, GitCommitVertical, Undo2 } from "lucide-react";
 import Button from "../ui/Button";
 import Tooltip from "../Tooltip";
+import { useT } from "../../i18n";
 
 /** Begins a transaction; while one is open, offers to end it: Commit, then Rollback. */
 export default function TransactionButton({
@@ -16,12 +17,13 @@ export default function TransactionButton({
   onCommit: () => void;
   onRollback: () => void;
 }) {
+  const t = useT();
   if (!open) {
     return (
-      <Tooltip label="Begin a transaction: runs join it until commit or rollback" side="top">
+      <Tooltip label={t("query.transactionButton.beginATransactionRunsJoin")} side="top">
         <Button variant="ghost-muted" size="sm" onClick={onBegin} disabled={disabled}>
           <GitCommitVertical />
-          Transaction
+          {t("query.transactionButton.transaction")}
         </Button>
       </Tooltip>
     );
@@ -29,23 +31,23 @@ export default function TransactionButton({
   return (
     <div className="mr-1 flex items-center gap-2">
       {/* Says a transaction is open; the buttons beside it end it */}
-      <Tooltip label="Transaction open: runs join it" side="top">
-        <span role="status" aria-label="In a transaction" className="flex size-7 items-center justify-center text-primary">
+      <Tooltip label={t("query.transactionButton.transactionOpenRunsJoinIt")} side="top">
+        <span role="status" aria-label={t("query.transactionButton.inATransaction")} className="flex size-7 items-center justify-center text-primary">
           <GitCommitVertical size={16} />
         </span>
       </Tooltip>
       {/* Joined like Run, each half in its own colour */}
       <div className="flex">
-        <Tooltip label="Undo the transaction's changes" side="top">
+        <Tooltip label={t("query.transactionButton.undoTheTransactionsChanges")} side="top">
           <Button variant="destructive" size="sm" className="rounded-r-none" onClick={onRollback} disabled={disabled}>
             <Undo2 />
-            Rollback
+            {t("query.transactionButton.rollback")}
           </Button>
         </Tooltip>
-        <Tooltip label="Keep the transaction's changes" side="top">
+        <Tooltip label={t("query.transactionButton.keepTheTransactionsChanges")} side="top">
           <Button variant="success" size="sm" className="rounded-l-none" onClick={onCommit} disabled={disabled}>
             <Check />
-            Commit
+            {t("query.transactionButton.commit")}
           </Button>
         </Tooltip>
       </div>

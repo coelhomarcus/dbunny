@@ -6,6 +6,7 @@ import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { appThemeExtension } from "../../lib/codemirror/theme";
+import { t } from "../../i18n";
 
 export type JsonValueEditorHandle = {
   /** Pretty-prints the document. Returns an error message when it isn't JSON. */
@@ -40,7 +41,7 @@ export default function JsonValueEditor({
       try {
         after = JSON.stringify(JSON.parse(before), null, 2);
       } catch (err) {
-        return err instanceof Error ? err.message : "Invalid JSON";
+        return err instanceof Error ? err.message : t("table.cellEditorDialog.invalidJson");
       }
       if (after !== before) {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: after } });

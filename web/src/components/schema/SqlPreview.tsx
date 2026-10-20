@@ -1,6 +1,7 @@
 import { language } from "@twinkleplop/sql";
 import { cn } from "../../lib/cn";
 import Button from "../ui/Button";
+import { useT } from "../../i18n";
 
 const highlight = language();
 
@@ -13,13 +14,14 @@ const boxClass = "mt-1 max-h-40 overflow-auto rounded-lg border border-border bg
 
 /** The labeled SQL block under a schema form. An error replaces the highlight. */
 export function SqlPreviewBox({ source, error, onOpen }: { source: string; error: string | null; onOpen?: () => void }) {
+  const t = useT();
   return (
     <div>
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">SQL</span>
         {onOpen && (
           <Button variant="ghost-muted" size="xs" disabled={!source || !!error} onClick={onOpen}>
-            Open in editor
+            {t("schema.sqlPreview.openInEditor")}
           </Button>
         )}
       </div>

@@ -5,9 +5,11 @@ import type { AgentInfo } from "../../lib/assistantAgents";
 import { startupHint, startupRows, type StartStepId } from "../../lib/assistantStartup";
 import { cn } from "../../lib/cn";
 import AgentMark from "./AgentMark";
+import { useT } from "../../i18n";
 
 /** The assistant is starting: each thing DBunny does, where it is now, and what the agent says while it works. */
 export default function StartingScreen({ agent, step, detail }: { agent: AgentInfo; step: StartStepId; detail: string | null }) {
+  const t = useT();
   // Seconds in the step, to say more when one takes long
   const [elapsed, setElapsed] = useState({ step, seconds: 0 });
   useEffect(() => {
@@ -21,7 +23,7 @@ export default function StartingScreen({ agent, step, detail }: { agent: AgentIn
   return (
     <div className="flex h-full flex-col items-center justify-center px-6">
       <AgentMark agent={agent} />
-      <p className="mt-4 text-sm font-medium">Starting the assistant</p>
+      <p className="mt-4 text-sm font-medium">{t("assistant.startingScreen.startingTheAssistant")}</p>
       <ul className="mt-4 w-full max-w-xs space-y-2">
         {startupRows(step, agent.name).map((row) => (
           <li key={row.id} className={cn("flex items-start gap-2.5 text-[13px]", row.state === "pending" && "text-muted-foreground/60", row.state === "done" && "text-muted-foreground")}>

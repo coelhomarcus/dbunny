@@ -7,14 +7,15 @@ import { cn } from "../../lib/cn";
 import Button from "../ui/Button";
 import Tooltip from "../Tooltip";
 import { inputClass } from "../ui/styles";
+import { useT, t, fmt } from "../../i18n";
 
 function dayLabel(date: Date) {
   const today = new Date();
   const yesterday = new Date();
   yesterday.setDate(today.getDate() - 1);
-  if (date.toDateString() === today.toDateString()) return "Today";
-  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: date.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+  if (date.toDateString() === today.toDateString()) return t("assistant.history.today");
+  if (date.toDateString() === yesterday.toDateString()) return t("assistant.history.yesterday");
+  return fmt().date(date, { dateStyle: undefined, day: "numeric", month: "short", year: date.getFullYear() === today.getFullYear() ? undefined : "numeric" });
 }
 
 export type LibraryView = "history" | "saved";
@@ -46,6 +47,7 @@ export default function HistoryPanel({
   onClear: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [search, setSearch] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
   const shownSaved = useMemo(() => {
@@ -65,14 +67,14 @@ export default function HistoryPanel({
   }, [entries, search]);
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col" aria-label="Query library">
+    <aside className="flex h-full min-h-0 w-full flex-col" aria-label={t("query.historyPanel.queryLibrary")}>
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 select-none">
         <SegmentedTabs
           value={view}
           onChange={onViewChange}
           options={[
-            { value: "saved", label: "Saved" },
-            { value: "history", label: "History" },
+            { value: "saved", label: t("query.historyPanel.saved") },
+            { value: "history", label: t("query.historyPanel.history") },
           ]}
         />
         <span className="flex-1" />
@@ -80,21 +82,21 @@ export default function HistoryPanel({
           (confirmClear ? (
             <>
               <Button variant="destructive-ghost" size="xs" onClick={() => { onClear(); setConfirmClear(false); }}>
-                Clear all
+                {t("query.historyPanel.clearAll")}
               </Button>
               <Button variant="ghost-muted" size="xs" onClick={() => setConfirmClear(false)}>
-                Keep
+                {t("query.historyPanel.keep")}
               </Button>
             </>
           ) : (
-            <Tooltip label="Clear history" side="bottom">
-              <Button variant="ghost-muted" size="icon-xs" aria-label="Clear history" onClick={() => setConfirmClear(true)}>
+            <Tooltip label={t("query.historyPanel.clearHistory")} side="bottom">
+              <Button variant="ghost-muted" size="icon-xs" aria-label={t("query.historyPanel.clearHistory")} onClick={() => setConfirmClear(true)}>
                 <Trash2 />
               </Button>
             </Tooltip>
           ))}
-        <Tooltip label="Close" side="bottom">
-          <Button variant="ghost-muted" size="icon-xs" aria-label="Close history" onClick={onClose}>
+        <Tooltip label={t("common.close")} side="bottom">
+          <Button variant="ghost-muted" size="icon-xs" aria-label={t("query.historyPanel.closeHistory")} onClick={onClose}>
             <X />
           </Button>
         </Tooltip>
@@ -106,8 +108,8 @@ export default function HistoryPanel({
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search queries"
-            aria-label="Search history"
+            placeholder={t("query.historyPanel.searchQueries")}
+            aria-label={t("query.historyPanel.searchHistory")}
             spellCheck={false}
             className={cn(inputClass, "h-7 pl-7 text-[13px]")}
           />
@@ -117,9 +119,9 @@ export default function HistoryPanel({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {view === "saved" ? (
           saved.length === 0 ? (
-            <p className="px-4 py-10 text-center text-sm text-muted-foreground">Save a query from the editor to keep it here.</p>
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">{t("query.historyPanel.saveAQueryFromThe")}</p>
           ) : shownSaved.length === 0 ? (
-            <p className="px-4 py-10 text-center text-sm text-muted-foreground">No query matches.</p>
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">{t("query.historyPanel.noQueryMatches")}</p>
           ) : (
             <ul className="py-1">
               {shownSaved.map((query) => (
@@ -135,7 +137,7 @@ export default function HistoryPanel({
                   <Button
                     variant="ghost-muted"
                     size="icon-xs"
-                    aria-label={`Delete saved query ${query.name}`}
+                    aria-label={t("query.historyPanel.deleteSaved", { name: query.name })}
                     onClick={() => onRemoveSaved(query.id)}
                     className="absolute right-1.5 top-1.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                   >
@@ -146,9 +148,9 @@ export default function HistoryPanel({
             </ul>
           )
         ) : entries.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-muted-foreground">Queries you run on this database show up here.</p>
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground">{t("query.historyPanel.queriesYouRunOnThis")}</p>
         ) : groups.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-muted-foreground">No query matches.</p>
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground">{t("query.historyPanel.noQueryMatches")}</p>
         ) : (
           groups.map(([day, list]) => (
             <section key={day}>
@@ -165,12 +167,12 @@ export default function HistoryPanel({
                     >
                       <code className="line-clamp-3 whitespace-pre-wrap break-words font-mono text-xs text-foreground">{entry.sql}</code>
                       <span className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground tabular-nums">
-                        {new Date(entry.ranAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                        {fmt().time(new Date(entry.ranAt))}
                         {entry.error ? (
                           <span className="select-text truncate text-destructive-foreground">{entry.error}</span>
                         ) : (
                           <>
-                            {entry.rows !== null && <span>{entry.rows.toLocaleString()} rows</span>}
+                            {entry.rows !== null && <span>{t("query.historyPanel.rows", { count: entry.rows })}</span>}
                             {entry.durationMs !== null && <span>{entry.durationMs} ms</span>}
                           </>
                         )}
@@ -179,7 +181,7 @@ export default function HistoryPanel({
                     <Button
                       variant="ghost-muted"
                       size="icon-xs"
-                      aria-label="Remove from history"
+                      aria-label={t("query.historyPanel.removeFromHistory")}
                       onClick={() => onRemove(entry.id)}
                       className="absolute right-1.5 top-1.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                     >

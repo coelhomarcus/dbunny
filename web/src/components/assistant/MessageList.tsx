@@ -8,6 +8,7 @@ import { Marker, MarkerContent, MarkerIcon } from "../chat/Marker";
 import Spinner from "../ui/Spinner";
 import MarkdownView from "./MarkdownView";
 import StepsView from "./Steps";
+import { useT } from "../../i18n";
 
 /** What was said in the conversation, and what the assistant did meanwhile. Follows the end while the person stays there. */
 export default function MessageList({
@@ -19,6 +20,7 @@ export default function MessageList({
   onDecide: (approvalId: string, decision: Decision) => void;
   renderCode?: (language: string, text: string) => ReactNode;
 }) {
+  const t = useT();
   const scroller = useRef<HTMLDivElement>(null);
   const blocks = groupItems(conversation.items, conversation.running);
   const atEnd = useRef(true);
@@ -86,7 +88,7 @@ export default function MessageList({
           <MarkerIcon>
             <Spinner />
           </MarkerIcon>
-          <MarkerContent shimmer>Thinking…</MarkerContent>
+          <MarkerContent shimmer>{t("assistant.messageList.thinking")}</MarkerContent>
         </Marker>
       )}
     </div>

@@ -10,9 +10,12 @@ import Switch from "../ui/Switch";
 import { inputClass } from "../ui/styles";
 import AgentPicker from "./AgentPicker";
 import { Group, Row, SectionTitle } from "./SettingsRows";
+import { useT } from "../../i18n";
+import { Rich } from "../../i18n/Rich";
 
 /** How the assistant is run and what it is told by default. */
 export default function AssistantSection() {
+  const t = useT();
   const [settings, update] = useSettings();
   const [command, setCommand] = useState(settings.assistantCommand);
   const [log, setLog] = useState<string[] | null>(null);
@@ -28,9 +31,9 @@ export default function AssistantSection() {
     setSignOutResult(null);
     try {
       await assistantApi.signOut(agent, agent === "custom" ? settings.assistantCommand || undefined : undefined);
-      setSignOutResult({ ok: true, text: "Signed out. Open the assistant to sign in again." });
+      setSignOutResult({ ok: true, text: t("assistant.assistantSection.signedOutOpenTheAssistant") });
     } catch (error) {
-      setSignOutResult({ ok: false, text: typeof error === "string" ? error : error instanceof Error ? error.message : "Couldn't sign out" });
+      setSignOutResult({ ok: false, text: typeof error === "string" ? error : error instanceof Error ? error.message : t("assistant.assistantSection.signOutFailed") });
     } finally {
       setSigningOut(false);
     }
@@ -45,53 +48,53 @@ export default function AssistantSection() {
 
   return (
     <>
-      <SectionTitle>AI Assistant</SectionTitle>
-      <Row title="Ask your database" hint="A chat that reads your data through an agent on this computer. It stays off until you turn it on.">
-        <Switch checked={settings.assistantEnabled} onChange={(v) => update({ assistantEnabled: v })} aria-label="Enable the assistant" />
+      <SectionTitle>{t("assistant.assistantSection.aiAssistant")}</SectionTitle>
+      <Row title={t("assistant.assistantSection.askYourDatabase")} hint={t("assistant.assistantSection.aChatThatReadsYour")}>
+        <Switch checked={settings.assistantEnabled} onChange={(v) => update({ assistantEnabled: v })} aria-label={t("assistant.assistantSection.enableTheAssistant")} />
       </Row>
 
-      <Group title="Agent">
+      <Group title={t("assistant.assistantSection.agent")}>
         <div className="space-y-3 border-b border-border py-3.5">
           <AgentPicker value={agent} onChange={(value) => update({ assistantAgent: value })} />
           <p className="text-xs leading-relaxed text-muted-foreground">{agentSummary(info)}</p>
           {agent === "custom" && (
             <label className="block">
-              <span className="text-[13px] font-medium">Command</span>
+              <span className="text-[13px] font-medium">{t("assistant.assistantSection.command")}</span>
               <input
                 className={`${inputClass} mt-1 w-full`}
                 value={command}
-                placeholder="/path/to/agent --flag"
-                aria-label="Agent command"
+                placeholder={t("assistant.assistantSection.pathToAgentFlag")}
+                aria-label={t("assistant.assistantSection.agentCommand")}
                 onChange={(event) => setCommand(event.target.value)}
                 onBlur={() => command.trim() !== settings.assistantCommand && applyCommand(command.trim())}
               />
-              <span className="mt-1 block text-xs text-muted-foreground">Any agent that speaks the Agent Client Protocol.</span>
+              <span className="mt-1 block text-xs text-muted-foreground">{t("assistant.assistantSection.anyAgentThatSpeaksThe")}</span>
             </label>
           )}
         </div>
         <Row
-          title={`Sign out of ${info.name === "your agent" ? "the agent" : info.name}`}
-          hint={signOutResult ? <span className={signOutResult.ok ? "text-success-foreground" : "text-destructive-foreground"}>{signOutResult.text}</span> : `Signs out ${info.signOutScope}.`}
+          title={agent === "custom" ? t("assistant.assistantSection.signOutOfTheAgent") : t("assistant.assistantSection.signOutOf", { name: info.name })}
+          hint={signOutResult ? <span className={signOutResult.ok ? "text-success-foreground" : "text-destructive-foreground"}>{signOutResult.text}</span> : t("assistant.assistantSection.signsOut", { scope: info.signOutScope })}
         >
           <Button variant="outline" size="sm" disabled={signingOut} onClick={() => setConfirmSignOut(true)}>
             <LogOut />
-            {signingOut ? "Signing out…" : "Sign out"}
+            {signingOut ? t("assistant.assistantSection.signingOut") : t("assistant.assistantSection.signOut")}
           </Button>
         </Row>
       </Group>
 
-      <Group title="Queries">
-        <Row title="Ask before each query" hint="You can allow reads for one conversation from the chat.">
-          <Switch checked={settings.assistantAskBeforeQueries} onChange={(v) => update({ assistantAskBeforeQueries: v })} aria-label="Ask before each query" />
+      <Group title={t("assistant.assistantSection.queries")}>
+        <Row title={t("assistant.assistantSection.askBeforeEachQuery")} hint={t("assistant.assistantSection.youCanAllowReadsFor")}>
+          <Switch checked={settings.assistantAskBeforeQueries} onChange={(v) => update({ assistantAskBeforeQueries: v })} aria-label={t("assistant.assistantSection.askBeforeEachQuery")} />
         </Row>
-        <Row title="Rows the assistant can see" hint="Per query, from 10 to 1000.">
+        <Row title={t("assistant.assistantSection.rowsTheAssistantCanSee")} hint={t("assistant.assistantSection.perQueryFrom10To")}>
           <input
             type="number"
             min={10}
             max={1000}
             className={`${inputClass} w-24`}
             value={settings.assistantRowLimit}
-            aria-label="Rows the assistant can see"
+            aria-label={t("assistant.assistantSection.rowsTheAssistantCanSee")}
             onChange={(event) => update({ assistantRowLimit: Number(event.target.value) })}
             onBlur={() => update({ assistantRowLimit: Math.min(1000, Math.max(10, Math.round(settings.assistantRowLimit) || 100)) })}
           />
@@ -99,13 +102,16 @@ export default function AssistantSection() {
       </Group>
 
       <p className="mt-6 text-xs leading-relaxed text-muted-foreground">
-        For a saved connection, <span className="font-medium text-foreground">Schema only</span> and notes about the database are in the chat&apos;s options button. Removing a saved
-        connection removes DBunny&apos;s folder for it, not what {info.name} kept in {info.folder}.
+        <Rich
+          id="assistant.assistantSection.savedNote"
+          params={{ schemaOnly: t("assistant.assistantSection.schemaOnly"), name: info.name, folder: info.folder }}
+          tags={{ strong: (text) => <span className="font-medium text-foreground">{text}</span> }}
+        />
       </p>
       <p className="mt-3 text-xs text-muted-foreground">
-        Agent not starting?{" "}
+        {t("assistant.assistantSection.notStarting")}{" "}
         <button type="button" className="cursor-pointer text-primary underline underline-offset-2" onClick={async () => setLog(await assistantApi.log().catch(() => []))}>
-          Show the agent log
+          {t("assistant.assistantSection.showTheAgentLog")}
         </button>
       </p>
       <ConfirmDialog
@@ -113,13 +119,13 @@ export default function AssistantSection() {
         onClose={() => setConfirmSignOut(false)}
         onConfirm={signOut}
         icon={<LogOut />}
-        title={`Sign out of ${info.name}?`}
-        description={`This signs out ${info.name} ${info.signOutScope}, and ends the conversations of the assistant. You sign in again from its panel.`}
-        confirmLabel="Sign out"
+        title={agent === "custom" ? t("assistant.assistantSection.signOutConfirmCustom") : t("assistant.assistantSection.signOutConfirm", { name: info.name })}
+        description={t("assistant.assistantSection.signOutNote", { name: info.name, scope: info.signOutScope })}
+        confirmLabel={t("assistant.assistantSection.signOut")}
       />
-      <Dialog open={log !== null} onClose={() => setLog(null)} title="Assistant log" className="max-w-2xl">
+      <Dialog open={log !== null} onClose={() => setLog(null)} title={t("assistant.assistantSection.assistantLog")} className="max-w-2xl">
         <pre className="max-h-96 overflow-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap">
-          {log && log.length > 0 ? log.join("\n") : "Nothing was logged."}
+          {log && log.length > 0 ? log.join("\n") : t("assistant.assistantStatusScreen.nothingLogged")}
         </pre>
       </Dialog>
     </>

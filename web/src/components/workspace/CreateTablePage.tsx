@@ -19,18 +19,18 @@ import Checkbox from "../Checkbox";
 import SegmentedTabs from "../ui/SegmentedTabs";
 import { selectClass } from "../ui/styles";
 import { SqlPreviewBox } from "../schema/SqlPreview";
-import { useT } from "../../i18n";
+import { useT, type StaticKey } from "../../i18n";
 import { Rich } from "../../i18n/Rich";
 
 const PARTITION_METHODS = ["RANGE", "LIST", "HASH"];
 
 /** How each way of producing a column is named in the generation menu. */
-const GENERATION_LABELS: Record<ColumnGeneration, string> = {
-  none: "None",
-  autoincrement: "Autoincrement",
-  identityByDefault: "Identity by default",
-  identityAlways: "Identity always",
-  generated: "Generated",
+const GENERATION_LABELS: Record<ColumnGeneration, StaticKey> = {
+  none: "ui.createTablePage.genNone",
+  autoincrement: "ui.createTablePage.genAutoincrement",
+  identityByDefault: "ui.createTablePage.genIdentityByDefault",
+  identityAlways: "ui.createTablePage.genIdentityAlways",
+  generated: "ui.createTablePage.genGenerated",
 };
 
 type ForeignKey = ForeignKeyDraft & { key: number };
@@ -143,13 +143,13 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
       api
         .previewCreateTable(schema.trim(), table, JSON.parse(specKey) as NewTable)
         .then((text) => !stale && (setSql(text), setPreviewError(null)))
-        .catch((err) => !stale && (setSql(""), setPreviewError(typeof err === "string" ? err : "Invalid table")));
+        .catch((err) => !stale && (setSql(""), setPreviewError(typeof err === "string" ? err : t("ui.createTablePage.invalidTable"))));
     }, 150);
     return () => {
       stale = true;
       clearTimeout(timer);
     };
-  }, [api, schema, table, specKey]);
+  }, [api, schema, table, specKey, t]);
 
   const update = (key: number, patch: Partial<NewColumn>) => setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const advanced = mode === "advanced";
@@ -173,7 +173,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
       openDocument({ kind: "data", schema: schemaName, name, icon: "table" });
       closeDocument(documentId);
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : "Couldn't create the table" });
+      notify({ tone: "error", text: typeof err === "string" ? err : t("ui.createTablePage.createFailed") });
       setBusy(false);
     }
   }
@@ -213,8 +213,8 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                 value={mode}
                 onChange={setMode}
                 options={[
-                  { value: "simple", label: "Simple" },
-                  { value: "advanced", label: "Advanced" },
+                  { value: "simple", label: t("ui.createTablePage.simple") },
+                  { value: "advanced", label: t("ui.createTablePage.advanced") },
                 ]}
               />
               <Button
@@ -288,7 +288,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                       >
                         {data.newTableGenerations.map((option) => (
                           <option key={option} value={option}>
-                            {GENERATION_LABELS[option]}
+                            {t(GENERATION_LABELS[option])}
                           </option>
                         ))}
                       </select>

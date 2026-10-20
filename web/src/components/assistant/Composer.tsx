@@ -3,6 +3,7 @@ import { ArrowUp, Square } from "lucide-react";
 import type { ModelChoice } from "../../types/assistant";
 import Button from "../ui/Button";
 import ModelPicker from "./ModelPicker";
+import { useT } from "../../i18n";
 
 /** Where the person writes to the assistant. Enter sends; Shift+Enter starts a new line. */
 export default function Composer({
@@ -22,6 +23,7 @@ export default function Composer({
   onStop: () => void;
   onModel: (modelId: string) => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState("");
   const field = useRef<HTMLTextAreaElement>(null);
 
@@ -47,7 +49,7 @@ export default function Composer({
           ref={field}
           value={draft}
           rows={1}
-          placeholder={locked ? "Opening the conversation…" : "Ask about your data…"}
+          placeholder={locked ? t("assistant.composer.opening") : t("assistant.composer.placeholder")}
           disabled={running || locked}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -59,11 +61,11 @@ export default function Composer({
           className="min-h-6 flex-1 resize-none bg-transparent text-[13px] leading-6 outline-none placeholder:text-muted-foreground disabled:opacity-60"
         />
         {running ? (
-          <Button variant="neutral" size="icon-xs" aria-label="Stop" onClick={onStop}>
+          <Button variant="neutral" size="icon-xs" aria-label={t("assistant.composer.stop")} onClick={onStop}>
             <Square />
           </Button>
         ) : (
-          <Button variant="primary" size="icon-xs" aria-label="Send" disabled={!draft.trim() || locked} onClick={submit}>
+          <Button variant="primary" size="icon-xs" aria-label={t("assistant.composer.send")} disabled={!draft.trim() || locked} onClick={submit}>
             <ArrowUp />
           </Button>
         )}

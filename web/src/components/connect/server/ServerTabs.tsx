@@ -205,7 +205,7 @@ export default function ServerTabs({
                   <Button
                     variant="outline"
                     onClick={async () => {
-                      const path = await pickFile("Choose a certificate or key file");
+                      const path = await pickFile(t("connect.serverTabs.chooseCertificate"));
                       if (path) setField(key, path);
                     }}
                     aria-label={t("connect.serverTabs.chooseFile", { label })}
@@ -277,7 +277,7 @@ export default function ServerTabs({
                     <Button
                       variant="outline"
                       onClick={async () => {
-                        const path = await pickFile("Choose a private key");
+                        const path = await pickFile(t("connect.serverTabs.choosePrivateKey"));
                         if (path) setSsh("keyPath", path);
                       }}
                     >

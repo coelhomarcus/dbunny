@@ -1,3 +1,5 @@
+import { t } from "../i18n/store.ts";
+
 export type AgentKind = "claude" | "codex" | "custom";
 
 /** What the interface says about an agent. */
@@ -15,22 +17,24 @@ export interface AgentInfo {
   signOutScope: string;
 }
 
-const AGENTS: Record<AgentKind, AgentInfo> = {
-  claude: { kind: "claude", name: "Claude Code", account: "Claude", company: "Anthropic", folder: "~/.claude/projects", loginTitle: "Sign in to Claude", signOutScope: "on this computer, not only in DBunny" },
-  codex: { kind: "codex", name: "Codex", account: "ChatGPT", company: "OpenAI", folder: "DBunny's own Codex folder", loginTitle: "Sign in to Codex", signOutScope: "in DBunny only; your own Codex stays signed in" },
-  custom: {
-    kind: "custom",
-    name: "your agent",
-    account: "its",
-    company: "the agent's provider",
-    folder: "the agent's own folder",
-    loginTitle: "Sign in to your agent",
-    signOutScope: "on this computer",
-  },
-};
-
+/** What the interface says about an agent, in the language of the app. */
 export function agentInfo(kind: AgentKind): AgentInfo {
-  return AGENTS[kind];
+  switch (kind) {
+    case "claude":
+      return { kind, name: "Claude Code", account: "Claude", company: "Anthropic", folder: "~/.claude/projects", loginTitle: t("assistant.agents.claudeLoginTitle"), signOutScope: t("assistant.agents.claudeSignOutScope") };
+    case "codex":
+      return { kind, name: "Codex", account: "ChatGPT", company: "OpenAI", folder: t("assistant.agents.codexFolder"), loginTitle: t("assistant.agents.codexLoginTitle"), signOutScope: t("assistant.agents.codexSignOutScope") };
+    case "custom":
+      return {
+        kind,
+        name: t("assistant.agents.customName"),
+        account: t("assistant.agents.customAccount"),
+        company: t("assistant.agents.customCompany"),
+        folder: t("assistant.agents.customFolder"),
+        loginTitle: t("assistant.agents.customLoginTitle"),
+        signOutScope: t("assistant.agents.customSignOutScope"),
+      };
+  }
 }
 
 function isAgent(value: unknown): value is AgentKind {
@@ -47,9 +51,9 @@ export function agentFromStored(stored: unknown): AgentKind {
 /** What the agent uses and where things go, in two plain sentences for Settings. */
 export function agentSummary(info: AgentInfo): string {
   if (info.kind === "custom") {
-    return "Runs the agent you chose, on this computer. Your schema and the results you allow go to its provider. It may have tools of its own, which DBunny can't turn off: use an agent you trust.";
+    return t("assistant.agents.summaryCustom");
   }
-  return `${info.name} uses your ${info.account} account. Your schema and the results you allow go to ${info.company}. Chats are kept in ${info.folder}.`;
+  return t("assistant.agents.summary", { name: info.name, account: info.account, company: info.company, folder: info.folder });
 }
 
 /** The ways of signing in that get a button, for an agent that signs in through the protocol (a browser opens). */

@@ -7,8 +7,10 @@ import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import type { FunctionDetail } from "@/types";
 import { writeClipboardText } from "../lib/clipboard";
 import { useNotify } from "../contexts/NoticeProvider";
+import { useT } from "../i18n";
 
 export default function FunctionView({ schema, name, detail: args }: { schema: string; name: string; detail: string }) {
+  const t = useT();
   const [detail, setDetail] = useState<FunctionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +53,7 @@ export default function FunctionView({ schema, name, detail: args }: { schema: s
   return (
     <div className="h-full flex flex-col">
       <PageHeader>
-        <HeaderTitle label={`Function · ${schema}`} icon={<Braces className="text-purple-500" />}>
+        <HeaderTitle label={t("schema.functionView.title", { schema })} icon={<Braces className="text-purple-500" />}>
           {name}
         </HeaderTitle>
       </PageHeader>
@@ -60,29 +62,29 @@ export default function FunctionView({ schema, name, detail: args }: { schema: s
         <DetailSkeleton />
       ) : error ? (
         <div className="flex-1 flex items-center justify-center p-4">
-          <span className="text-sm text-muted-foreground">Couldn't read this function.</span>
+          <span className="text-sm text-muted-foreground">{t("schema.functionView.couldntReadThisFunction")}</span>
         </div>
       ) : detail ? (
         <div className="flex-1 min-h-0 flex flex-col">
           {/* Properties */}
           <div className="px-4 py-4 border-b border-border shrink-0">
             <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm max-w-xl">
-              <Property label="Type" value={detail.kind} />
-              <Property label="Language" value={detail.language} />
-              <Property label="Returns" value={detail.returnType} />
+              <Property label={t("schema.functionView.type")} value={detail.kind} />
+              <Property label={t("schema.functionView.language")} value={detail.language} />
+              <Property label={t("schema.functionView.returns")} value={detail.returnType} />
               <Property
-                label="Arguments"
+                label={t("schema.functionView.arguments")}
                 value={detail.argumentTypes || "(none)"}
               />
-              <Property label="Volatility" value={detail.volatility} />
+              <Property label={t("schema.functionView.volatility")} value={detail.volatility} />
               <Property
-                label="Strict"
+                label={t("schema.functionView.strict")}
                 value={detail.isStrict ? "YES" : "NO"}
               />
-              <Property label="Owner" value={detail.owner} />
+              <Property label={t("schema.functionView.owner")} value={detail.owner} />
               {detail.description && (
                 <div className="col-span-2">
-                  <Property label="Description" value={detail.description} />
+                  <Property label={t("schema.functionView.description")} value={detail.description} />
                 </div>
               )}
             </div>
@@ -92,7 +94,7 @@ export default function FunctionView({ schema, name, detail: args }: { schema: s
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             <div className="flex h-9 shrink-0 items-center justify-between px-4 bg-muted border-b border-border">
               <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                Definition
+                {t("schema.functionView.definition")}
               </span>
               <button
                 onClick={copySource}
@@ -100,11 +102,11 @@ export default function FunctionView({ schema, name, detail: args }: { schema: s
               >
                 {copied ? (
                   <>
-                    <Check size={13} /> Copied
+                    <Check size={13} /> {t("common.copied")}
                   </>
                 ) : (
                   <>
-                    <Copy size={13} /> Copy
+                    <Copy size={13} /> {t("common.copy")}
                   </>
                 )}
               </button>

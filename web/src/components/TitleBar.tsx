@@ -10,7 +10,7 @@ import ConnectionGlyph from "./ConnectionGlyph";
 import Button from "./ui/Button";
 import Tooltip from "./Tooltip";
 import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
-import { useT } from "../i18n";
+import { t, useT } from "../i18n";
 
 function RestoreIcon() {
   return (
@@ -265,19 +265,19 @@ function connectionMenuItems(
   if (index < 0) return [];
   const tab = tabs[index];
   return [
-    { label: "Close", icon: <X />, onSelect: () => closeTabs([tab.id]) },
+    { label: t("common.close"), icon: <X />, onSelect: () => closeTabs([tab.id]) },
     {
-      label: "Close others",
+      label: t("ui.documentTabBar.closeOthers"),
       icon: <X />,
       disabled: tabs.length < 2,
       onSelect: () => closeTabs(tabs.filter((item) => item.id !== tab.id).map((item) => item.id)),
     },
     {
-      label: "Close tabs to the right",
+      label: t("ui.documentTabBar.closeTabsToTheRight"),
       icon: <ArrowRightToLine />,
       disabled: index === tabs.length - 1,
       onSelect: () => closeTabs(tabs.slice(index + 1).map((item) => item.id)),
     },
-    { label: "Close all", icon: <X />, onSelect: () => closeTabs(tabs.map((item) => item.id)) },
+    { label: t("ui.documentTabBar.closeAll"), icon: <X />, onSelect: () => closeTabs(tabs.map((item) => item.id)) },
   ];
 }

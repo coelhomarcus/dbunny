@@ -154,22 +154,22 @@ export default function DocumentTabBar() {
   const menuIndex = menuDoc ? documents.items.findIndex((doc) => doc.id === menuDoc.id) : -1;
   const menuItems: ContextMenuItem[] = menuDoc
     ? [
-        { label: "Close", icon: <X />, onSelect: () => askClose([menuDoc.id]) },
+        { label: t("common.close"), icon: <X />, onSelect: () => askClose([menuDoc.id]) },
         {
-          label: "Close others",
+          label: t("ui.documentTabBar.closeOthers"),
           icon: <X />,
           disabled: documents.items.length < 2,
           onSelect: () => askClose(documents.items.filter((doc) => doc.id !== menuDoc.id).map((doc) => doc.id)),
         },
         {
-          label: "Close tabs to the right",
+          label: t("ui.documentTabBar.closeTabsToTheRight"),
           icon: <ArrowRightToLine />,
           disabled: menuIndex < 0 || menuIndex === documents.items.length - 1,
           onSelect: () => askClose(documents.items.slice(menuIndex + 1).map((doc) => doc.id)),
         },
-        { label: "Close all", icon: <X />, onSelect: () => askClose(documents.items.map((doc) => doc.id)) },
+        { label: t("ui.documentTabBar.closeAll"), icon: <X />, onSelect: () => askClose(documents.items.map((doc) => doc.id)) },
         ...(menuDoc.kind === "query"
-          ? (["separator", { label: "Rename", icon: <PenLine />, onSelect: () => setRenamingId(menuDoc.id) }] as ContextMenuItem[])
+          ? (["separator", { label: t("common.rename"), icon: <PenLine />, onSelect: () => setRenamingId(menuDoc.id) }] as ContextMenuItem[])
           : []),
       ]
     : [];

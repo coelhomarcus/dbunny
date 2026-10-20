@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { Check } from "lucide-react";
 import Popover from "../ui/Popover";
 import { cn } from "../../lib/cn";
+import { useT } from "../../i18n";
 
 /**
  * Picker under a cell for columns with a fixed set of values (booleans, enums).
@@ -23,6 +24,7 @@ export default function ChoiceList({
   onPick: (value: string | null) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const items: (string | null)[] = nullable ? [...options, null] : options;
   const [active, setActive] = useState(() => Math.max(0, items.indexOf(current)));
   const listRef = useRef<HTMLDivElement>(null);
@@ -37,7 +39,7 @@ export default function ChoiceList({
         ref={listRef}
         role="listbox"
         tabIndex={-1}
-        aria-label="Values"
+        aria-label={t("table.choiceList.values")}
         className="max-h-64 overflow-y-auto outline-none"
         onKeyDown={(e) => {
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {

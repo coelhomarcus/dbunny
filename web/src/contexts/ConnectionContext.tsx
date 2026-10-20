@@ -6,6 +6,7 @@ import { hostKeyProblem } from "../lib/sshHostKey";
 import type { TabSessionInfo } from "./workspace";
 import { ConnectionContext } from "./connection";
 import { addressOf } from "../lib/engines";
+import { t } from "../i18n";
 
 const DISCONNECTED: TabSessionInfo = { title: null, subtitle: null, color: null, icon: null, sessionId: null };
 
@@ -79,7 +80,7 @@ export function ConnectionProvider({
       } catch (err) {
         // An SSH host key to confirm isn't an error to show: the page asks the user instead
         if (hostKeyProblem(err)) throw err;
-        const message = typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to connect";
+        const message = typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.connectionContext.connectFailed");
         setError(message);
         throw err;
       } finally {

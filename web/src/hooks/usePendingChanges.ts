@@ -3,6 +3,7 @@ import { type SortingState } from "@tanstack/react-table";
 import { useApi } from "../contexts/useConnection";
 import type { TableDataResponse, ColumnInfo, TableFilter, FilterMode } from "@/types";
 import type { PendingChanges } from "./useCellEditing";
+import { t } from "../i18n";
 
 interface UsePendingChangesOptions {
   data: TableDataResponse | null;
@@ -80,7 +81,7 @@ export function usePendingChanges({
       setPendingChanges({});
       return null;
     } catch (err) {
-      const message = typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to save";
+      const message = typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.pendingChanges.saveFailed");
       setSaveError(message);
       return message;
     } finally {
@@ -110,7 +111,7 @@ export function usePendingChanges({
       setPendingChanges({});
       return null;
     } catch (err) {
-      const message = typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to delete";
+      const message = typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.pendingChanges.deleteFailed");
       setSaveError(message);
       return message;
     } finally {

@@ -8,6 +8,7 @@ import Button from "../ui/Button";
 import Checkbox from "../Checkbox";
 import Popover from "../ui/Popover";
 import Tooltip from "../Tooltip";
+import { useT } from "../../i18n";
 
 const BASE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
 
@@ -51,6 +52,7 @@ export default function PermissionsEditor({
    * again; the parent remounts the editor with them (keyed by the permissions). */
   onDone: (error: string | null) => void;
 }) {
+  const t = useT();
   const api = useApi();
   const serverVersion = useConnection().connectionInfo?.serverVersion ?? "";
   const original = useMemo<Rights>(() => Object.fromEntries(privileges.map((p) => [p.grantee, p.privileges])), [privileges]);
@@ -77,7 +79,7 @@ export default function PermissionsEditor({
     let stale = false;
     Promise.all(changes.map((c) => api.previewStructureChange(schema, table, c)))
       .then((parts) => !stale && setSql(parts.join("\n")))
-      .catch((err) => !stale && setSql(typeof err === "string" ? err : "Invalid change"));
+      .catch((err) => !stale && setSql(typeof err === "string" ? err : t("structure.permissionsEditor.invalidChange")));
     return () => {
       stale = true;
     };
@@ -110,7 +112,7 @@ export default function PermissionsEditor({
     try {
       for (const change of changes) await api.applyStructureChange(schema, table, change);
     } catch (err) {
-      failure = typeof err === "string" ? err : "The change failed";
+      failure = typeof err === "string" ? err : t("structure.permissionsEditor.changeFailed");
     }
     setSaving(false);
     onDone(failure);
@@ -131,22 +133,22 @@ export default function PermissionsEditor({
           {changes.length > 0 ? (
             <>
               <span className="mr-auto text-xs tabular-nums text-muted-foreground">
-                {changes.length} statement{changes.length > 1 ? "s" : ""} to run
+                {t("structure.permissionsEditor.statementsToRun", { count: changes.length })}
               </span>
               <Button variant="ghost-muted" size="xs" data-active={showSql} onClick={() => setShowSql((v) => !v)}>
                 <FileCode /> SQL
               </Button>
               <Button variant="ghost-muted" size="xs" onClick={() => setRights(original)}>
-                <X /> Discard
+                <X /> {t("structure.permissionsEditor.discard")}
               </Button>
               <Button variant="primary" size="xs" onClick={apply} disabled={saving}>
-                <Save /> {saving ? "Applying…" : "Apply"}
+                <Save /> {saving ? t("structure.permissionsEditor.applying") : t("structure.permissionsEditor.apply")}
               </Button>
             </>
           ) : (
             <>
               <Button ref={addRef} variant="ghost-muted" size="xs" className="ml-auto" onClick={openAdd}>
-                <Plus /> Add role
+                <Plus /> {t("structure.permissionsEditor.addRole")}
               </Button>
             </>
           )}
@@ -157,19 +159,19 @@ export default function PermissionsEditor({
       )}
 
       {grantees.length === 0 ? (
-        <p className="px-4 py-10 text-center text-sm text-muted-foreground">Nobody has rights on it</p>
+        <p className="px-4 py-10 text-center text-sm text-muted-foreground">{t("structure.permissionsEditor.nobodyHasRightsOnIt")}</p>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full text-sm">
             <thead>
               <tr>
-                <th className={th}>Role</th>
+                <th className={th}>{t("structure.permissionsEditor.role")}</th>
                 {columns.map((p) => (
                   <th key={p} className={cn(th, "px-2 text-center text-[11px] tracking-wide")}>
                     {p}
                   </th>
                 ))}
-                <th className={th}>Can grant to others</th>
+                <th className={th}>{t("structure.permissionsEditor.canGrantToOthers")}</th>
               </tr>
             </thead>
             <tbody className="[&>tr:nth-child(even)]:bg-muted [&>tr]:bg-card">
@@ -180,8 +182,8 @@ export default function PermissionsEditor({
                 return (
                   <tr key={grantee}>
                     <td className={cn(td, "font-medium")}>
-                      {grantee === "PUBLIC" ? <span className="italic">everyone (PUBLIC)</span> : grantee}
-                      {isOwner && <span className="ml-2 text-[11px] font-normal text-muted-foreground">owner</span>}
+                      {grantee === "PUBLIC" ? <span className="italic">{t("structure.permissionsEditor.everyonePublic")}</span> : grantee}
+                      {isOwner && <span className="ml-2 text-[11px] font-normal text-muted-foreground">{t("structure.permissionsEditor.owner")}</span>}
                     </td>
                     {columns.map((p) => {
                       const checked = current.includes(p);
@@ -199,7 +201,7 @@ export default function PermissionsEditor({
                           <div className="flex justify-center">
                             {/* The owner's rights come with owning the table */}
                             {isOwner && canEdit ? (
-                              <Tooltip label="The owner's rights come with owning the table" side="top">
+                              <Tooltip label={t("structure.permissionsEditor.theOwnersRightsComeWith")} side="top">
                                 {box}
                               </Tooltip>
                             ) : (
@@ -223,9 +225,9 @@ export default function PermissionsEditor({
       <Popover open={addOpen} onClose={() => setAddOpen(false)} anchorRef={addRef} className="w-56 p-1">
         <div className="max-h-64 overflow-y-auto">
           {roles === null ? (
-            <p className="px-2 py-2 text-xs text-muted-foreground">Loading roles…</p>
+            <p className="px-2 py-2 text-xs text-muted-foreground">{t("structure.permissionsEditor.loadingRoles")}</p>
           ) : candidates.length === 0 ? (
-            <p className="px-2 py-2 text-xs text-muted-foreground">Every role is already listed</p>
+            <p className="px-2 py-2 text-xs text-muted-foreground">{t("structure.permissionsEditor.everyRoleIsAlreadyListed")}</p>
           ) : (
             candidates.map((name) => (
               <button
@@ -234,7 +236,7 @@ export default function PermissionsEditor({
                 onClick={() => addGrantee(name)}
                 className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-[13px] cursor-pointer hover:bg-accent"
               >
-                {name === "PUBLIC" ? <span className="italic">everyone (PUBLIC)</span> : name}
+                {name === "PUBLIC" ? <span className="italic">{t("structure.permissionsEditor.everyonePublic")}</span> : name}
               </button>
             ))
           )}

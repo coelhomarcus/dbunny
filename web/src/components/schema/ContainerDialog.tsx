@@ -6,6 +6,8 @@ import Button from "../ui/Button";
 import Input from "../ui/Input";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useNotify } from "../../contexts/NoticeProvider";
+import { useT } from "../../i18n";
+import { Rich } from "../../i18n/Rich";
 
 export type ContainerKind = "schema" | "database";
 export type ContainerAction = "create" | "rename" | "drop";
@@ -33,6 +35,7 @@ function ContainerForm({
   onRun: (options: ContainerOptions) => Promise<void>;
   onClose: () => void;
 }) {
+  const t = useT();
   const { kind, action, name: target } = request;
   const [name, setName] = useState(action === "rename" ? target : "");
   const [cascade, setCascade] = useState(false);
@@ -54,7 +57,7 @@ function ContainerForm({
       await onRun({ name: name.trim(), cascade, force });
       onClose();
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : "It didn't work" });
+      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : t("schema.containerDialog.failed") });
       setBusy(false);
     }
   }
@@ -62,19 +65,19 @@ function ContainerForm({
   const config = {
     create: {
       icon: kind === "schema" ? <FolderPlus /> : <Database />,
-      title: `New ${kind}`,
-      button: "Create",
-      description: kind === "schema" ? "An empty namespace for tables, views and functions." : "An empty database on this server. It opens in a new tab.",
+      title: kind === "schema" ? t("schema.containerDialog.newSchema") : t("schema.containerDialog.newDatabase"),
+      button: t("schema.containerDialog.create"),
+      description: kind === "schema" ? t("schema.containerDialog.newSchemaNote") : t("schema.containerDialog.newDatabaseNote"),
     },
-    rename: { icon: <PenLine />, title: `Rename ${kind}`, button: "Rename", description: target },
+    rename: { icon: <PenLine />, title: kind === "schema" ? t("schema.containerDialog.renameSchema") : t("schema.containerDialog.renameDatabase"), button: t("common.rename"), description: target },
     drop: {
       icon: <Trash2 />,
-      title: `Drop the ${kind}?`,
-      button: "Drop",
+      title: kind === "schema" ? t("schema.containerDialog.dropSchema") : t("schema.containerDialog.dropDatabase"),
+      button: t("schema.containerDialog.drop"),
       description:
         kind === "schema"
-          ? `Deletes the schema ${target}. This can't be undone.`
-          : `Deletes the database ${target} and everything in it. This can't be undone.`,
+          ? t("schema.containerDialog.dropSchemaNote", { target })
+          : t("schema.containerDialog.dropDatabaseNote", { target }),
     },
   }[action];
 
@@ -89,10 +92,10 @@ function ContainerForm({
       footer={
         <>
           <Button variant="neutral" size="sm" onClick={onClose} autoFocus={destructive}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant={destructive ? "destructive" : "primary"} size="sm" onClick={() => submit()} disabled={!canRun || busy}>
-            {busy && action === "create" ? "Creating…" : config.button}
+            {busy && action === "create" ? t("schema.containerDialog.creating") : config.button}
           </Button>
         </>
       }
@@ -100,20 +103,20 @@ function ContainerForm({
       <form onSubmit={submit} className="flex flex-col gap-3.5">
         {!destructive && (
           <label className="flex flex-col gap-1.5">
-            <span className="text-[13px] font-medium">{action === "rename" ? "New name" : "Name"}</span>
+            <span className="text-[13px] font-medium">{action === "rename" ? t("schema.containerDialog.newName") : t("schema.containerDialog.name")}</span>
             <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus spellCheck={false} autoComplete="off" className="font-mono" />
           </label>
         )}
         {destructive && kind === "schema" && capabilities.cascade && (
-          <CheckOption checked={cascade} onChange={setCascade} label="Cascade" hint="Also drops everything in it; without it, only an empty schema can go" />
+          <CheckOption checked={cascade} onChange={setCascade} label={t("schema.containerDialog.cascade")} hint={t("schema.containerDialog.alsoDropsEverythingInIt")} />
         )}
         {destructive && kind === "database" && (
-          <CheckOption checked={force} onChange={setForce} label="Disconnect its sessions" hint="Ends the connections still using it instead of failing (PostgreSQL 13+)" />
+          <CheckOption checked={force} onChange={setForce} label={t("schema.containerDialog.disconnectItsSessions")} hint={t("schema.containerDialog.endsTheConnectionsStillUsing")} />
         )}
         {destructive && (
           <label className="flex flex-col gap-1.5">
             <span className="text-[13px]">
-              Type <code className="rounded bg-muted px-1 font-mono text-xs">{target}</code> to confirm
+              <Rich id="schema.containerDialog.typeToConfirm" params={{ target }} tags={{ code: (text) => <code className="rounded bg-muted px-1 font-mono text-xs">{text}</code> }} />
             </span>
             <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} spellCheck={false} autoComplete="off" className="font-mono" />
           </label>

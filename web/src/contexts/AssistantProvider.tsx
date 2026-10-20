@@ -22,9 +22,10 @@ import { isAssistantShortcut } from "../lib/assistantShortcut";
 import { isMac } from "../lib/platform";
 import { updateSettings, useSettings } from "../lib/settings";
 import type { AgentStatus, ApprovalRequest, Decision, ModelChoice, OpenedConversation, SessionSummary } from "../types/assistant";
+import { t } from "../i18n";
 
 function messageOf(error: unknown): string {
-  return typeof error === "string" ? error : error instanceof Error ? error.message : "Something went wrong";
+  return typeof error === "string" ? error : error instanceof Error ? error.message : t("ui.assistantProvider.wentWrong");
 }
 
 /** The assistant of one connection tab: its agent's status, and the conversation held in it. */

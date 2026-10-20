@@ -1,4 +1,4 @@
-import type { StaticKey } from "../i18n/store.ts";
+import { t, type StaticKey } from "../i18n/store.ts";
 import type { ColumnGeneration, Engine, ExplainFormat } from "@/types";
 import type { SqlDialectName } from "./sqlStatements";
 
@@ -19,7 +19,7 @@ export function engineLabel(engine: EngineCardId): string {
 
 /** Tooltip of an action the connected engine doesn't support. */
 export function notAvailableFor(engine: Engine): string {
-  return `Not available for ${engineLabel(engine)}`;
+  return t("ui.engines.notAvailableFor", { engine: engineLabel(engine) });
 }
 
 /** Whether the engine is one of the servers of the MySQL family (MySQL and MariaDB), which are reached the same way and speak the same SQL. */
@@ -151,5 +151,5 @@ export function addressOf(info: { engine: Engine; host: string; port: number; da
 
 /** What the menu says Explain analyze does: MySQL and MariaDB run only statements that read, the others run it and roll it back. */
 export function explainAnalyzeHint(format: ExplainFormat): string {
-  return format === "mysqlTree" ? "Runs it for real times. Only statements that read" : "Runs it for real times, then rolls it back";
+  return format === "mysqlTree" ? t("ui.engines.analyzeReadsOnly") : t("query.runButton.analyzeHint");
 }

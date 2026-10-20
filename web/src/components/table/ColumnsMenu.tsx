@@ -6,9 +6,11 @@ import Popover from "../ui/Popover";
 import Checkbox from "../Checkbox";
 import Tooltip from "../Tooltip";
 import { cn } from "../../lib/cn";
+import { useT } from "../../i18n";
 
 /** Show, hide and reorder the table's columns. */
 export default function ColumnsMenu({ layout }: { layout: ColumnLayoutApi }) {
+  const t = useT();
   // Compact: an icon (with the hidden count) in the bar under the table
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -16,18 +18,18 @@ export default function ColumnsMenu({ layout }: { layout: ColumnLayoutApi }) {
 
   return (
     <>
-      <Tooltip label="Show, hide and reorder columns" side="top">
+      <Tooltip label={t("table.columnsMenu.showHideAndReorderColumns")} side="top">
         <Button
           ref={anchorRef}
           variant="ghost-muted"
           size={layout.hiddenCount > 0 ? "xs" : "icon-xs"}
           data-active={open || layout.hiddenCount > 0}
           aria-expanded={open}
-          aria-label="Show, hide and reorder columns"
+          aria-label={t("table.columnsMenu.showHideAndReorderColumns")}
           onClick={() => setOpen((v) => !v)}
         >
           <Columns3 />
-          {layout.hiddenCount > 0 && <span className="tabular-nums text-primary">{layout.hiddenCount} hidden</span>}
+          {layout.hiddenCount > 0 && <span className="tabular-nums text-primary">{t("table.columnsMenu.hidden", { count: layout.hiddenCount })}</span>}
         </Button>
       </Tooltip>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} className="w-64 p-1">
@@ -40,10 +42,10 @@ export default function ColumnsMenu({ layout }: { layout: ColumnLayoutApi }) {
                   <Checkbox checked={!hidden} onChange={() => layout.toggle(column.name)} />
                   <span className={cn("truncate font-mono text-xs", hidden && "text-muted-foreground")}>{column.name}</span>
                 </div>
-                <Button variant="ghost-muted" size="icon-xs" aria-label={`Move ${column.name} up`} disabled={i === 0} onClick={() => layout.move(column.name, -1)} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-0">
+                <Button variant="ghost-muted" size="icon-xs" aria-label={t("table.columnsMenu.moveUp", { name: column.name })} disabled={i === 0} onClick={() => layout.move(column.name, -1)} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-0">
                   <ArrowUp />
                 </Button>
-                <Button variant="ghost-muted" size="icon-xs" aria-label={`Move ${column.name} down`} disabled={i === last} onClick={() => layout.move(column.name, 1)} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-0">
+                <Button variant="ghost-muted" size="icon-xs" aria-label={t("table.columnsMenu.moveDown", { name: column.name })} disabled={i === last} onClick={() => layout.move(column.name, 1)} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-0">
                   <ArrowDown />
                 </Button>
               </div>
@@ -53,7 +55,7 @@ export default function ColumnsMenu({ layout }: { layout: ColumnLayoutApi }) {
         {layout.isCustom && (
           <div className="mt-1 border-t border-border px-1 pt-1">
             <Button variant="ghost-muted" size="xs" className="w-full" onClick={layout.reset}>
-              Show all in the original order
+              {t("table.columnsMenu.showAllInTheOriginal")}
             </Button>
           </div>
         )}

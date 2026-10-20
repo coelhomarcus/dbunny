@@ -14,9 +14,10 @@ import ConnectionSummaryCard from "../components/connect/ConnectionSummaryCard";
 import ImportUrlDialog from "../components/connect/ImportUrlDialog";
 import WelcomePanel from "../components/connect/WelcomePanel";
 import { IdleStatusBar } from "../components/layout/StatusBar";
+import { t } from "../i18n";
 
 function errorMessage(err: unknown) {
-  return typeof err === "string" ? err : err instanceof Error ? err.message : "Connection failed";
+  return typeof err === "string" ? err : err instanceof Error ? err.message : t("connect.connectionModal.connectionFailed");
 }
 
 /**

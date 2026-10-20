@@ -7,6 +7,7 @@ import SqlViewer from "../components/SqlViewer";
 import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { writeClipboardText } from "../lib/clipboard";
 import { useNotify } from "../contexts/NoticeProvider";
+import { useT } from "../i18n";
 
 /** A sequence, type, index or trigger: a few facts and its DDL. */
 export default function ObjectView({
@@ -18,6 +19,7 @@ export default function ObjectView({
   name: string;
   kind: "sequence" | "type" | "index" | "trigger";
 }) {
+  const t = useT();
   const api = useApi();
   const notify = useNotify();
   const key = `${kind}:${schema}.${name}`;
@@ -68,7 +70,7 @@ export default function ObjectView({
       {loading ? (
         <DetailSkeleton />
       ) : !definition ? (
-        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">Couldn't read this object.</div>
+        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">{t("schema.objectView.couldntReadThisObject")}</div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="shrink-0 border-b border-border px-4 py-4">
@@ -83,7 +85,7 @@ export default function ObjectView({
             {definition.comment && <p className="mt-3 select-text text-sm text-muted-foreground">{definition.comment}</p>}
           </div>
           <div className="flex h-9 shrink-0 items-center justify-between border-b border-border bg-muted px-4">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Definition</span>
+            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{t("schema.objectView.definition")}</span>
             <button
               onClick={async () => {
                 await writeClipboardText(definition.ddl);
@@ -92,7 +94,7 @@ export default function ObjectView({
               }}
               className="flex h-6 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground"
             >
-              {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Copy"}
+              {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? t("common.copied") : t("common.copy")}
             </button>
           </div>
           <div className="min-h-0 flex-1">

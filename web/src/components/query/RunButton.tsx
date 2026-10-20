@@ -5,6 +5,7 @@ import { Keys } from "../ui/Kbd";
 import Popover from "../ui/Popover";
 import { isMac } from "../../lib/platform";
 import type { RunScope } from "../SqlEditor";
+import { useT, t } from "../../i18n";
 
 const MOD = isMac ? "⌘" : "Ctrl+";
 const SHIFT = isMac ? "⇧" : "Shift+";
@@ -34,7 +35,7 @@ function MenuItem({ icon, label, hint, shortcut, onClick }: { icon: React.ReactN
 export default function RunButton({
   disabled,
   explainAnalyze,
-  analyzeHint = "Runs it for real times, then rolls it back",
+  analyzeHint = t("query.runButton.analyzeHint"),
   onRun,
   onExplain,
 }: {
@@ -46,6 +47,7 @@ export default function RunButton({
   onRun: (scope: RunScope) => void;
   onExplain: (analyze: boolean) => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const arrowRef = useRef<HTMLButtonElement>(null);
   const pick = (action: () => void) => () => {
@@ -57,7 +59,7 @@ export default function RunButton({
     <div className="flex">
       <Button variant="primary" size="sm" className="rounded-r-none pr-2.5" onClick={() => onRun("current")} disabled={disabled}>
         <Play className="fill-current" />
-        Run
+        {t("common.run")}
         <Keys keys={`${MOD}↵`} tone="inverse" className="ml-1" />
       </Button>
       <Button
@@ -67,19 +69,19 @@ export default function RunButton({
         className="rounded-l-none border-l-primary-foreground/25 px-1.5"
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
-        aria-label="More ways to run"
+        aria-label={t("query.runButton.moreWaysToRun")}
         aria-expanded={open}
       >
         <ChevronDown />
       </Button>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={arrowRef} className="w-max min-w-64 max-w-[min(28rem,calc(100vw-2rem))] p-1">
         <div role="menu">
-          <MenuItem icon={<Play />} label="Run statement" hint="The selection, or the statement at the cursor" shortcut={`${MOD}↵`} onClick={pick(() => onRun("current"))} />
-          <MenuItem icon={<Play />} label="Run all" hint="Every statement in the editor, in order" shortcut={`${SHIFT}${MOD}↵`} onClick={pick(() => onRun("all"))} />
+          <MenuItem icon={<Play />} label={t("query.runButton.runStatement")} hint={t("query.runButton.theSelectionOrTheStatement")} shortcut={`${MOD}↵`} onClick={pick(() => onRun("current"))} />
+          <MenuItem icon={<Play />} label={t("query.runButton.runAll")} hint={t("query.runButton.everyStatementInTheEditor")} shortcut={`${SHIFT}${MOD}↵`} onClick={pick(() => onRun("all"))} />
           <div className="mx-1 my-1 h-px bg-border" />
-          <MenuItem icon={<Workflow />} label="Explain" hint="The planner's estimate; nothing runs" onClick={pick(() => onExplain(false))} />
+          <MenuItem icon={<Workflow />} label={t("query.runButton.explain")} hint={t("query.runButton.thePlannersEstimateNothingRuns")} onClick={pick(() => onExplain(false))} />
           {explainAnalyze && (
-            <MenuItem icon={<Gauge />} label="Explain analyze" hint={analyzeHint} onClick={pick(() => onExplain(true))} />
+            <MenuItem icon={<Gauge />} label={t("query.runButton.explainAnalyze")} hint={analyzeHint} onClick={pick(() => onExplain(true))} />
           )}
         </div>
       </Popover>

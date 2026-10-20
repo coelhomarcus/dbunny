@@ -4,6 +4,7 @@ import { guessReference, REFERENTIAL_ACTIONS, type ForeignKeyDraft } from "../..
 import { cn } from "../../lib/cn";
 import Checkbox from "../Checkbox";
 import { selectClass } from "../ui/styles";
+import { useT } from "../../i18n";
 
 type Props = {
   relations: CompletionRelation[] | null;
@@ -25,8 +26,9 @@ export default function ForeignKeyEditor({
   localColumnNames,
   selectableLocalColumns = false,
   error,
-  matchingColumnsLabel = "Matching columns",
+  matchingColumnsLabel,
 }: Props) {
+  const t = useT();
   const target = relations?.find((r) => `${r.schema}.${r.name}` === value.refTable);
   const keyColumns = selectableLocalColumns ? value.columns.filter((c) => localColumnNames.includes(c)) : localColumnNames;
 
@@ -34,9 +36,9 @@ export default function ForeignKeyEditor({
     <div className="flex flex-col gap-2">
       {selectableLocalColumns && (
         <div className="flex flex-col gap-1">
-          <span className="text-[13px] font-medium">Columns</span>
+          <span className="text-[13px] font-medium">{t("structure.foreignKeyEditor.columns")}</span>
           {localColumnNames.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Name a column first.</p>
+            <p className="text-xs text-muted-foreground">{t("structure.foreignKeyEditor.nameAColumnFirst")}</p>
           ) : (
             <div className="flex flex-col gap-1">
               {localColumnNames.map((name) => {
@@ -55,13 +57,13 @@ export default function ForeignKeyEditor({
         </div>
       )}
       <label className="flex flex-col gap-1.5">
-        <span className="text-[13px] font-medium">References</span>
+        <span className="text-[13px] font-medium">{t("structure.foreignKeyEditor.references")}</span>
         <select
           value={value.refTable}
           onChange={(e) => onChange({ refTable: e.target.value, refColumns: {} })}
           className={cn(selectClass, "w-full")}
         >
-          <option value="">{relations === null ? "Loading…" : "Choose a table"}</option>
+          <option value="">{relations === null ? t("common.loading") : t("structure.foreignKeyEditor.chooseATable")}</option>
           {(relations ?? []).map((r) => (
             <option key={`${r.schema}.${r.name}`} value={`${r.schema}.${r.name}`}>
               {r.schema}.{r.name}
@@ -71,7 +73,7 @@ export default function ForeignKeyEditor({
       </label>
       {target && keyColumns.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <span className="text-[13px] font-medium">{matchingColumnsLabel}</span>
+          <span className="text-[13px] font-medium">{matchingColumnsLabel ?? t("structure.foreignKeyEditor.matchingColumns")}</span>
           {keyColumns.map((c) => (
             <div key={c} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
               <span className="truncate font-mono text-xs">{c}</span>
@@ -80,7 +82,7 @@ export default function ForeignKeyEditor({
                 value={value.refColumns[c] ?? guessReference(c, target)}
                 onChange={(e) => onChange({ refColumns: { ...value.refColumns, [c]: e.target.value } })}
                 className={cn(selectClass, "w-full font-mono text-xs")}
-                aria-label={`Column referenced by ${c}`}
+                aria-label={t("structure.foreignKeyEditor.referencedColumn", { column: c })}
               >
                 {target.columns.map((rc) => (
                   <option key={rc.name} value={rc.name}>
@@ -94,7 +96,7 @@ export default function ForeignKeyEditor({
       )}
       <div className={selectableLocalColumns ? "grid grid-cols-2 gap-2" : "grid grid-cols-2 gap-3"}>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[13px] font-medium">On delete</span>
+          <span className="text-[13px] font-medium">{t("structure.foreignKeyEditor.onDelete")}</span>
           <select value={value.onDelete} onChange={(e) => onChange({ onDelete: e.target.value })} className={cn(selectClass, "w-full")}>
             {REFERENTIAL_ACTIONS.map((a) => (
               <option key={a} value={a}>
@@ -104,7 +106,7 @@ export default function ForeignKeyEditor({
           </select>
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[13px] font-medium">On update</span>
+          <span className="text-[13px] font-medium">{t("structure.foreignKeyEditor.onUpdate")}</span>
           <select value={value.onUpdate} onChange={(e) => onChange({ onUpdate: e.target.value })} className={cn(selectClass, "w-full")}>
             {REFERENTIAL_ACTIONS.map((a) => (
               <option key={a} value={a}>

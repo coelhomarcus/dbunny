@@ -7,6 +7,7 @@ import Button from "../ui/Button";
 import Input from "../ui/Input";
 import SegmentedTabs from "../ui/SegmentedTabs";
 import { selectClass } from "../ui/styles";
+import { useT } from "../../i18n";
 
 const LABEL_W = "w-[3.25rem]";
 
@@ -39,6 +40,7 @@ export default function FilterBar({
   mode: FilterMode;
   onApply: (filters: TableFilter[], mode: FilterMode) => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState<TableFilter[]>(() =>
     applied.length > 0 ? applied : [emptyFilter(columns[0] ?? "")],
   );
@@ -73,9 +75,9 @@ export default function FilterBar({
     <div className="shrink-0 border-b border-border bg-card px-4 py-3">
       <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="text-[13px] font-medium text-foreground">Filters</span>
+          <span className="text-[13px] font-medium text-foreground">{t("table.filterBar.filters")}</span>
           {dirty && (
-            <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">Unapplied</span>
+            <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">{t("table.filterBar.unapplied")}</span>
           )}
         </div>
         {draft.length > 1 && (
@@ -83,17 +85,17 @@ export default function FilterBar({
             value={draftMode}
             onChange={setDraftMode}
             options={[
-              { value: "all", label: "Match all" },
-              { value: "any", label: "Match any" },
+              { value: "all", label: t("table.filterBar.matchAll") },
+              { value: "any", label: t("table.filterBar.matchAny") },
             ]}
           />
         )}
         <div className="flex flex-1 justify-end gap-1.5">
           <Button variant="ghost-muted" size="sm" onClick={clear}>
-            Clear
+            {t("table.filterBar.clear")}
           </Button>
           <Button variant="primary" size="sm" onClick={applyNow} disabled={!dirty}>
-            Apply
+            {t("table.filterBar.apply")}
           </Button>
         </div>
       </div>
@@ -103,7 +105,7 @@ export default function FilterBar({
           const operator = operatorFor(filter.operator);
           const logic =
             index === 0 ? (
-              <span className={cn(LABEL_W, "shrink-0 text-right text-[11px] font-medium text-muted-foreground")}>Where</span>
+              <span className={cn(LABEL_W, "shrink-0 text-right text-[11px] font-medium text-muted-foreground")}>{t("table.filterBar.where")}</span>
             ) : (
               <span
                 className={cn(
@@ -125,7 +127,7 @@ export default function FilterBar({
                 )}
               >
                 <select
-                  aria-label="Column"
+                  aria-label={t("table.filterBar.column")}
                   value={filter.column}
                   onChange={(e) => update(index, { column: e.target.value })}
                   className={cn(fieldSelectClass, "max-w-[11rem] flex-1 basis-32")}
@@ -138,7 +140,7 @@ export default function FilterBar({
                 </select>
                 <span className="h-5 w-px shrink-0 bg-border/80" aria-hidden />
                 <select
-                  aria-label="Operator"
+                  aria-label={t("table.filterBar.operator")}
                   value={filter.operator}
                   onChange={(e) =>
                     update(index, {
@@ -150,7 +152,7 @@ export default function FilterBar({
                 >
                   {FILTER_OPERATORS.map((op) => (
                     <option key={op.value} value={op.value}>
-                      {op.label}
+                      {t(op.labelKey)}
                     </option>
                   ))}
                 </select>
@@ -158,9 +160,9 @@ export default function FilterBar({
                   <>
                     <span className="h-5 w-px shrink-0 bg-border/80" aria-hidden />
                     <Input
-                      aria-label="Value"
+                      aria-label={t("table.filterBar.value")}
                       value={filter.value}
-                      placeholder={operator.placeholder ?? "Value"}
+                      placeholder={operator.placeholderKey ? t(operator.placeholderKey) : operator.placeholder ?? t("table.filterBar.value")}
                       spellCheck={false}
                       autoFocus={index === draft.length - 1 && draft.length > 1}
                       onChange={(e) => update(index, { value: e.target.value })}
@@ -177,7 +179,7 @@ export default function FilterBar({
                 <Button
                   variant="ghost-muted"
                   size="icon-xs"
-                  aria-label="Remove filter"
+                  aria-label={t("table.filterBar.removeFilter")}
                   className="ml-0.5 shrink-0 text-muted-foreground"
                   onClick={() => remove(index)}
                 >
@@ -193,7 +195,7 @@ export default function FilterBar({
         <span className={cn(LABEL_W, "shrink-0")} />
         <Button variant="ghost-muted" size="sm" onClick={() => setDraft((rows) => [...rows, emptyFilter(columns[0] ?? "")])}>
           <Plus />
-          Add condition
+          {t("table.filterBar.addCondition")}
         </Button>
       </div>
     </div>

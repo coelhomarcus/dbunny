@@ -1,5 +1,6 @@
 import {  } from "lucide-react";
 import Spinner from "../ui/Spinner";
+import { useT } from "../../i18n";
 
 function Bar({ className }: { className: string }) {
   return <div className={`h-3 animate-pulse rounded bg-muted ${className}`} />;
@@ -7,11 +8,12 @@ function Bar({ className }: { className: string }) {
 
 /** A past conversation on its way: its name and the shape of what is coming, from the click. */
 export default function OpeningConversation({ title }: { title: string }) {
+  const t = useT();
   return (
     <div className="min-h-0 flex-1 overflow-hidden px-3 py-3" aria-busy="true">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Spinner size={13} className="shrink-0" />
-        <span className="min-w-0 truncate">{title ? `Opening “${title}”…` : "Opening the conversation…"}</span>
+        <span className="min-w-0 truncate">{title ? t("assistant.openingConversation.opening", { title }) : t("assistant.composer.opening")}</span>
       </div>
       <div className="mt-5 space-y-5">
         <div className="flex justify-end">

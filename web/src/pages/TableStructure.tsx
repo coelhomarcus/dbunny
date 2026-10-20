@@ -20,6 +20,7 @@ import { writeClipboardText } from "../lib/clipboard";
 import { needsRebuild, notAvailableFor } from "../lib/engines";
 import { useCapabilities } from "../hooks/useCapabilities";
 import { useNotify } from "../contexts/NoticeProvider";
+import { useT, fmt } from "../i18n";
 
 type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "permissions" | "ddl";
 
@@ -110,10 +111,11 @@ function ColumnsSection({
   onDrop?: (column: ColumnInfo) => void;
   onColumnMenu?: (column: ColumnInfo, x: number, y: number) => void;
 }) {
+  const t = useT();
   return (
     <Grid
-      headers={heads(["Name", "Type", "Nullable", "Default value", ...(comments ? ["Comment"] : []), "Primary", ...((onDrop || onColumnMenu) ? [""] : [])], ["Nullable", "Primary"])}
-      empty="No columns"
+      headers={heads([t("structure.tableStructure.name"), t("structure.tableStructure.type"), t("structure.tableStructure.nullable"), t("structure.tableStructure.defaultValue"), ...(comments ? [t("structure.tableStructure.commentHeader")] : []), t("structure.tableStructure.primaryHeader"), ...((onDrop || onColumnMenu) ? [""] : [])], [t("structure.tableStructure.nullable"), t("structure.tableStructure.primaryHeader")])}
+      empty={t("structure.tableStructure.noColumns")}
     >
       {columns.map((col) => {
         const target = foreignKeyTarget(col);
@@ -133,7 +135,7 @@ function ColumnsSection({
           >
             <td className={td}>
               <span className="flex items-center gap-1.5 font-medium">
-                {!col.isPrimaryKey && col.foreignKey && <Link2 size={12} className="shrink-0 text-info-foreground" aria-label="Foreign key" />}
+                {!col.isPrimaryKey && col.foreignKey && <Link2 size={12} className="shrink-0 text-info-foreground" aria-label={t("structure.tableStructure.foreignKey")} />}
                 {col.name}
               </span>
               {col.foreignKey && target && (
@@ -162,7 +164,7 @@ function ColumnsSection({
                 <Mono className="text-muted-foreground">{col.defaultValue}</Mono>
               ) : col.isGenerated ? (
                 <Badge>
-                  <Sparkles /> generated
+                  <Sparkles /> {t("structure.tableStructure.generated")}
                 </Badge>
               ) : (
                 <span className="text-muted-foreground/70">(NULL)</span>
@@ -175,7 +177,7 @@ function ColumnsSection({
               <span className="inline-flex">
                 <Checkbox checked={col.isPrimaryKey} disabled onChange={() => {}} />
               </span>
-              {col.isPrimaryKey && <KeyRound size={12} className="sr-only" aria-label="Primary key" />}
+              {col.isPrimaryKey && <KeyRound size={12} className="sr-only" aria-label={t("structure.tableStructure.primaryKey")} />}
             </td>
             {(onDrop || onColumnMenu) && (
               <td className={cn(td, "w-px whitespace-nowrap")}>
@@ -184,7 +186,7 @@ function ColumnsSection({
                     <Button
                       variant="ghost-muted"
                       size="icon-xs"
-                      aria-label={`Change ${col.name}`}
+                      aria-label={t("structure.tableStructure.changeColumn", { name: col.name })}
                       className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                       onClick={(e) => {
                         const r = e.currentTarget.getBoundingClientRect();
@@ -195,7 +197,7 @@ function ColumnsSection({
                     </Button>
                   )}
                   {onDrop && (
-                    <Button variant="ghost-muted" size="icon-xs" aria-label={`Drop ${col.name}`} onClick={() => onDrop(col)}>
+                    <Button variant="ghost-muted" size="icon-xs" aria-label={t("structure.tableStructure.dropColumnNamed", { name: col.name })} onClick={() => onDrop(col)}>
                       <X />
                     </Button>
                   )}
@@ -210,15 +212,16 @@ function ColumnsSection({
 }
 
 function IndexesSection({ structure, onDrop, onMenu }: { structure: Structure; onDrop?: (index: string) => void; onMenu: (items: ContextMenuItem[], x: number, y: number) => void }) {
+  const t = useT();
   return (
-    <Grid headers={heads(["Index", "Columns", "Type", "Size", ...(onDrop ? [""] : [])])} empty="No indexes">
+    <Grid headers={heads([t("structure.tableStructure.indexHeader"), t("structure.tableStructure.columnsHeader"), t("structure.tableStructure.type"), t("structure.tableStructure.size"), ...(onDrop ? [""] : [])])} empty={t("structure.tableStructure.noIndexes")}>
       {structure.indexes.map((index) => (
         <tr
           key={index.name}
           onContextMenu={(e) => {
             e.preventDefault();
-            const items: ContextMenuItem[] = [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(index.name) }];
-            if (onDrop && !index.backsConstraint) items.push({ label: "Drop…", icon: <Trash2 />, destructive: true, onSelect: () => onDrop(index.name) });
+            const items: ContextMenuItem[] = [{ label: t("structure.tableStructure.copyName"), icon: <Copy />, onSelect: () => writeClipboardText(index.name) }];
+            if (onDrop && !index.backsConstraint) items.push({ label: t("structure.tableStructure.drop"), icon: <Trash2 />, destructive: true, onSelect: () => onDrop(index.name) });
             onMenu(items, e.clientX, e.clientY);
           }}
         >
@@ -226,9 +229,9 @@ function IndexesSection({ structure, onDrop, onMenu }: { structure: Structure; o
             <div className="flex flex-wrap items-center gap-1.5">
               <Mono className="text-foreground">{index.name}</Mono>
               {index.isPrimary ? (
-                <Badge variant="warning">primary</Badge>
+                <Badge variant="warning">{t("structure.tableStructure.primary")}</Badge>
               ) : index.isUnique ? (
-                <Badge variant="info">unique</Badge>
+                <Badge variant="info">{t("structure.tableStructure.unique")}</Badge>
               ) : null}
             </div>
             {index.predicate && <div className="mt-0.5 font-mono text-xs text-muted-foreground">WHERE {index.predicate}</div>}
@@ -250,7 +253,7 @@ function IndexesSection({ structure, onDrop, onMenu }: { structure: Structure; o
             <td className={cn(td, "w-px py-1.5")}>
               {/* Constraint indexes go away with their constraint */}
               {!index.backsConstraint && (
-                <Button variant="destructive-ghost" size="icon-xs" aria-label={`Drop index ${index.name}`} onClick={() => onDrop(index.name)}>
+                <Button variant="destructive-ghost" size="icon-xs" aria-label={t("structure.tableStructure.dropIndex", { name: index.name })} onClick={() => onDrop(index.name)}>
                   <Trash2 />
                 </Button>
               )}
@@ -292,15 +295,16 @@ function ConstraintsSection({
   onDrop?: (constraint: string) => void;
   onMenu: (items: ContextMenuItem[], x: number, y: number) => void;
 }) {
+  const t = useT();
   return (
-    <Grid headers={heads(["Constraint", "Kind", "Definition", ...(onDrop ? [""] : [])])} empty="No constraints">
+    <Grid headers={heads([t("structure.tableStructure.constraintHeader"), t("structure.tableStructure.kind"), t("structure.tableStructure.definitionHeader"), ...(onDrop ? [""] : [])])} empty={t("structure.tableStructure.noConstraints")}>
       {structure.constraints.map((c) => (
         <tr
           key={c.name}
           onContextMenu={(e) => {
             e.preventDefault();
-            const items: ContextMenuItem[] = [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(c.name) }];
-            if (onDrop) items.push({ label: "Drop…", icon: <Trash2 />, destructive: true, disabled: !!unavailable, onSelect: () => onDrop(c.name) });
+            const items: ContextMenuItem[] = [{ label: t("structure.tableStructure.copyName"), icon: <Copy />, onSelect: () => writeClipboardText(c.name) }];
+            if (onDrop) items.push({ label: t("structure.tableStructure.drop"), icon: <Trash2 />, destructive: true, disabled: !!unavailable, onSelect: () => onDrop(c.name) });
             onMenu(items, e.clientX, e.clientY);
           }}
         >
@@ -313,7 +317,7 @@ function ConstraintsSection({
           <td className={td}>
             <Mono className="text-muted-foreground">{c.definition}</Mono>
           </td>
-          {onDrop && <DropCell label={`Drop constraint ${c.name}`} unavailable={unavailable} onClick={() => onDrop(c.name)} />}
+          {onDrop && <DropCell label={t("structure.tableStructure.dropConstraint", { name: c.name })} unavailable={unavailable} onClick={() => onDrop(c.name)} />}
         </tr>
       ))}
     </Grid>
@@ -331,16 +335,17 @@ function KeysSection({
   onDrop?: (constraint: string) => void;
   onMenu: (items: ContextMenuItem[], x: number, y: number) => void;
 }) {
+  const t = useT();
   return (
     <div className="pb-6">
-      <Grid headers={heads(["Foreign key", "Columns", "References", "On update", "On delete", ...(onDrop ? [""] : [])])} empty="This table has no foreign keys">
+      <Grid headers={heads([t("structure.tableStructure.foreignKey"), t("structure.tableStructure.columnsHeader"), t("structure.tableStructure.referencesHeader"), t("structure.tableStructure.onUpdateHeader"), t("structure.tableStructure.onDeleteHeader"), ...(onDrop ? [""] : [])])} empty={t("structure.tableStructure.noForeignKeys")}>
         {structure.foreignKeys.map((fk) => (
           <tr
             key={fk.name}
             onContextMenu={(e) => {
               e.preventDefault();
-              const items: ContextMenuItem[] = [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(fk.name) }];
-              if (onDrop) items.push({ label: "Drop…", icon: <Trash2 />, destructive: true, disabled: !!unavailable, onSelect: () => onDrop(fk.name) });
+              const items: ContextMenuItem[] = [{ label: t("structure.tableStructure.copyName"), icon: <Copy />, onSelect: () => writeClipboardText(fk.name) }];
+              if (onDrop) items.push({ label: t("structure.tableStructure.drop"), icon: <Trash2 />, destructive: true, disabled: !!unavailable, onSelect: () => onDrop(fk.name) });
               onMenu(items, e.clientX, e.clientY);
             }}
           >
@@ -359,19 +364,19 @@ function KeysSection({
             <td className={cn(td, "text-xs", fk.onDelete === "CASCADE" ? "text-destructive-foreground" : "text-muted-foreground")}>
               {fk.onDelete}
             </td>
-            {onDrop && <DropCell label={`Drop foreign key ${fk.name}`} unavailable={unavailable} onClick={() => onDrop(fk.name)} />}
+            {onDrop && <DropCell label={t("structure.tableStructure.dropForeignKey", { name: fk.name })} unavailable={unavailable} onClick={() => onDrop(fk.name)} />}
           </tr>
         ))}
       </Grid>
 
-      <h3 className="px-4 pt-6 pb-2 text-[13px] font-medium text-muted-foreground">Referenced by</h3>
-      <Grid headers={heads(["Table", "Columns", "Constraint"])} empty="No other table points at this one">
+      <h3 className="px-4 pt-6 pb-2 text-[13px] font-medium text-muted-foreground">{t("structure.tableStructure.referencedBy")}</h3>
+      <Grid headers={heads([t("structure.tableStructure.tableHeader"), t("structure.tableStructure.columnsHeader"), t("structure.tableStructure.constraintHeader")])} empty={t("structure.tableStructure.noReferences")}>
         {structure.referencedBy.map((ref) => (
           <tr
             key={`${ref.schema}.${ref.table}.${ref.name}`}
             onContextMenu={(e) => {
               e.preventDefault();
-              onMenu([{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(ref.name) }], e.clientX, e.clientY);
+              onMenu([{ label: t("structure.tableStructure.copyName"), icon: <Copy />, onSelect: () => writeClipboardText(ref.name) }], e.clientX, e.clientY);
             }}
           >
             <td className={td}>
@@ -404,49 +409,50 @@ function TriggersSection({
   onToggle?: (trigger: string, enabled: boolean) => void;
   onMenu: (items: ContextMenuItem[], x: number, y: number) => void;
 }) {
+  const t = useT();
   return (
-    <Grid headers={heads(["Trigger", "When", "For each", "Function", "Status"])} empty="No triggers">
-      {structure.triggers.map((t) => (
+    <Grid headers={heads([t("structure.tableStructure.triggerHeader"), t("structure.tableStructure.when"), t("structure.tableStructure.forEach"), t("structure.tableStructure.functionHeader"), t("structure.tableStructure.status")])} empty={t("structure.tableStructure.noTriggers")}>
+      {structure.triggers.map((trigger) => (
         <tr
-          key={t.name}
+          key={trigger.name}
           onContextMenu={(e) => {
             e.preventDefault();
-            const items: ContextMenuItem[] = [{ label: "Copy name", icon: <Copy />, onSelect: () => writeClipboardText(t.name) }];
+            const items: ContextMenuItem[] = [{ label: t("structure.tableStructure.copyName"), icon: <Copy />, onSelect: () => writeClipboardText(trigger.name) }];
             if (onToggle) {
               items.push({
-                label: t.enabled ? "Disable" : "Enable",
+                label: trigger.enabled ? t("structure.tableStructure.disable") : t("structure.tableStructure.enable"),
                 disabled: !!unavailable,
-                onSelect: () => onToggle(t.name, !t.enabled),
+                onSelect: () => onToggle(trigger.name, !trigger.enabled),
               });
             }
             onMenu(items, e.clientX, e.clientY);
           }}
         >
           <td className={td}>
-            <Mono className="text-foreground">{t.name}</Mono>
+            <Mono className="text-foreground">{trigger.name}</Mono>
           </td>
           <td className={cn(td, "text-xs")}>
-            {t.timing} {t.events.join(" OR ")}
+            {trigger.timing} {trigger.events.join(" OR ")}
           </td>
-          <td className={cn(td, "text-xs text-muted-foreground")}>{t.level.toLowerCase()}</td>
+          <td className={cn(td, "text-xs text-muted-foreground")}>{trigger.level.toLowerCase()}</td>
           <td className={td}>
-            <Mono className="text-muted-foreground">{t.function}()</Mono>
+            <Mono className="text-muted-foreground">{trigger.function}()</Mono>
           </td>
           <td className={td}>
             {onToggle && unavailable ? (
               <Tooltip label={unavailable} side="left">
                 <button type="button" disabled className="rounded-md disabled:pointer-events-none disabled:opacity-55">
-                  <Badge variant={t.enabled ? "success" : "neutral"}>{t.enabled ? "enabled" : "disabled"}</Badge>
+                  <Badge variant={trigger.enabled ? "success" : "neutral"}>{trigger.enabled ? t("structure.tableStructure.enabled") : t("structure.tableStructure.disabled")}</Badge>
                 </button>
               </Tooltip>
             ) : onToggle ? (
-              <Tooltip label={t.enabled ? "Disable: it stops firing until enabled again" : "Enable: it fires again"} side="left">
-                <button type="button" onClick={() => onToggle(t.name, !t.enabled)} className="cursor-pointer rounded-md transition-opacity hover:opacity-80">
-                  <Badge variant={t.enabled ? "success" : "neutral"}>{t.enabled ? "enabled" : "disabled"}</Badge>
+              <Tooltip label={trigger.enabled ? t("structure.tableStructure.disableHint") : t("structure.tableStructure.enableHint")} side="left">
+                <button type="button" onClick={() => onToggle(trigger.name, !trigger.enabled)} className="cursor-pointer rounded-md transition-opacity hover:opacity-80">
+                  <Badge variant={trigger.enabled ? "success" : "neutral"}>{trigger.enabled ? t("structure.tableStructure.enabled") : t("structure.tableStructure.disabled")}</Badge>
                 </button>
               </Tooltip>
             ) : (
-              <Badge variant={t.enabled ? "success" : "neutral"}>{t.enabled ? "enabled" : "disabled"}</Badge>
+              <Badge variant={trigger.enabled ? "success" : "neutral"}>{trigger.enabled ? t("structure.tableStructure.enabled") : t("structure.tableStructure.disabled")}</Badge>
             )}
           </td>
         </tr>
@@ -456,6 +462,7 @@ function TriggersSection({
 }
 
 function DdlSection({ ddl }: { ddl: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex h-full flex-col">
@@ -469,7 +476,7 @@ function DdlSection({ ddl }: { ddl: string }) {
             setTimeout(() => setCopied(false), 2000);
           }}
         >
-          {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy"}
+          {copied ? <Check /> : <Copy />} {copied ? t("common.copied") : t("common.copy")}
         </Button>
       </div>
       <div className="min-h-0 flex-1">
@@ -489,6 +496,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export default function TableStructure({ schema, name: table }: { schema: string; name: string }) {
+  const t = useT();
   const api = useApi();
   const key = `${schema}.${table}`;
   const [result, setResult] = useState<{ key: string; structure?: Structure; error?: string } | null>(null);
@@ -541,44 +549,44 @@ export default function TableStructure({ schema, name: table }: { schema: string
     api
       .applyStructureChange(schema!, table!, change)
       .then(() => setVersion((v) => v + 1))
-      .catch((err) => notify({ tone: "error", text: typeof err === "string" ? err : "The change failed" }));
+      .catch((err) => notify({ tone: "error", text: typeof err === "string" ? err : t("structure.tableStructure.changeFailed") }));
   }
 
   function columnMenuItems(column: ColumnInfo): ContextMenuItem[] {
     return [
-      { label: "Rename…", icon: <PenLine />, onSelect: () => setDraft({ kind: "renameColumn", column }) },
+      { label: t("structure.tableStructure.rename"), icon: <PenLine />, onSelect: () => setDraft({ kind: "renameColumn", column }) },
       ...(capabilities.alterColumn
         ? ([
-            { label: "Change type…", icon: <Type />, onSelect: () => setDraft({ kind: "setType", column }) },
+            { label: t("structure.tableStructure.changeType"), icon: <Type />, onSelect: () => setDraft({ kind: "setType", column }) },
             {
-              label: column.isNullable ? "Make required (NOT NULL)" : "Allow NULL",
+              label: column.isNullable ? t("structure.tableStructure.makeRequired") : t("structure.tableStructure.allowNull"),
               icon: column.isNullable ? <Asterisk /> : <Ban />,
               disabled: column.isPrimaryKey,
               onSelect: () => applyNow({ kind: "setNullable", name: column.name, nullable: !column.isNullable }),
             },
-            { label: "Default…", icon: <Equal />, disabled: column.isGenerated, onSelect: () => setDraft({ kind: "setDefault", column }) },
+            { label: t("structure.tableStructure.default"), icon: <Equal />, disabled: column.isGenerated, onSelect: () => setDraft({ kind: "setDefault", column }) },
           ] as ContextMenuItem[])
         : []),
       ...(capabilities.comments
-        ? ([{ label: "Comment…", icon: <MessageSquare />, onSelect: () => setDraft({ kind: "setComment", column }) }] as ContextMenuItem[])
+        ? ([{ label: t("structure.tableStructure.comment"), icon: <MessageSquare />, onSelect: () => setDraft({ kind: "setComment", column }) }] as ContextMenuItem[])
         : []),
       "separator",
-      { label: "Drop column…", icon: <Trash2 />, destructive: true, onSelect: () => setDraft({ kind: "dropColumn", column }) },
+      { label: t("structure.tableStructure.dropColumn"), icon: <Trash2 />, destructive: true, onSelect: () => setDraft({ kind: "dropColumn", column }) },
     ];
   }
 
   const count = (n: number) => <span className="text-xs tabular-nums text-muted-foreground">{n}</span>;
   const sections: { value: Section; label: ReactNode }[] = structure
     ? [
-        { value: "columns", label: <>Columns {count(structure.columns.length)}</> },
+        { value: "columns", label: <>{t("structure.tableStructure.tabColumns")} {count(structure.columns.length)}</> },
         ...(isView
           ? []
           : ([
-              { value: "indexes", label: <>Indexes {count(structure.indexes.length)}</> },
-              { value: "constraints", label: <>Constraints {count(structure.constraints.length)}</> },
-              { value: "keys", label: <>Foreign keys {count(structure.foreignKeys.length + structure.referencedBy.length)}</> },
-              { value: "triggers", label: <>Triggers {count(structure.triggers.length)}</> },
-              ...(capabilities.permissions ? [{ value: "permissions", label: <>Permissions {count(structure.privileges.length)}</> }] : []),
+              { value: "indexes", label: <>{t("structure.tableStructure.tabIndexes")} {count(structure.indexes.length)}</> },
+              { value: "constraints", label: <>{t("structure.tableStructure.tabConstraints")} {count(structure.constraints.length)}</> },
+              { value: "keys", label: <>{t("structure.tableStructure.tabForeignKeys")} {count(structure.foreignKeys.length + structure.referencedBy.length)}</> },
+              { value: "triggers", label: <>{t("structure.tableStructure.tabTriggers")} {count(structure.triggers.length)}</> },
+              ...(capabilities.permissions ? [{ value: "permissions", label: <>{t("structure.tableStructure.tabPermissions")} {count(structure.privileges.length)}</> }] : []),
             ] as { value: Section; label: ReactNode }[])),
         { value: "ddl", label: "DDL" },
       ]
@@ -594,17 +602,17 @@ export default function TableStructure({ schema, name: table }: { schema: string
       {loading ? (
         <TableSkeleton columns={5} rows={10} />
       ) : !structure ? (
-        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">Couldn't read this table.</div>
+        <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">{t("structure.tableStructure.couldntReadThisTable")}</div>
       ) : (
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-3 pb-2 text-[13px]">
-            <Fact label="Kind">{meta!.kind}</Fact>
-            <Fact label="Owner">{meta!.owner}</Fact>
-            {meta!.rowEstimate !== null && <Fact label="Rows">~{meta!.rowEstimate.toLocaleString()}</Fact>}
+            <Fact label={t("structure.tableStructure.kind")}>{meta!.kind}</Fact>
+            <Fact label={t("structure.tableStructure.owner")}>{meta!.owner}</Fact>
+            {meta!.rowEstimate !== null && <Fact label={t("structure.tableStructure.rows")}>~{fmt().number(meta!.rowEstimate)}</Fact>}
             {meta!.totalBytes !== null && (
-              <Fact label="Size">
+              <Fact label={t("structure.tableStructure.size")}>
                 {formatBytes(meta!.totalBytes)}
-                {meta!.indexesBytes ? <span className="text-muted-foreground"> ({formatBytes(meta!.indexesBytes)} indexes)</span> : null}
+                {meta!.indexesBytes ? <span className="text-muted-foreground"> {t("structure.tableStructure.indexesSize", { size: formatBytes(meta!.indexesBytes) })}</span> : null}
               </Fact>
             )}
             {meta!.comment && <span className="min-w-0 truncate text-muted-foreground">{meta!.comment}</span>}
@@ -647,20 +655,20 @@ export default function TableStructure({ schema, name: table }: { schema: string
                     <Input
                       value={columnFilter}
                       onChange={(e) => setColumnFilter(e.target.value)}
-                      placeholder="Filter columns"
-                      aria-label="Filter columns"
+                      placeholder={t("structure.tableStructure.filterColumns")}
+                      aria-label={t("structure.tableStructure.filterColumns")}
                       spellCheck={false}
                       className="h-8 border-0 bg-foreground/[0.04] pl-8 shadow-none dark:bg-foreground/[0.04]"
                     />
                   </div>
                   {canEdit && (
                     <Button variant="primary" size="sm" className="ml-auto" onClick={() => setDraft({ kind: "addColumn" })}>
-                      <Plus /> Column
+                      <Plus /> {t("structure.tableStructure.newColumn")}
                     </Button>
                   )}
                 </div>
                 {structure.columns.length > 0 && visibleColumns.length === 0 ? (
-                  <p className="px-4 py-6 text-center text-sm text-muted-foreground">No columns match “{columnFilter.trim()}”.</p>
+                  <p className="px-4 py-6 text-center text-sm text-muted-foreground">{t("structure.tableStructure.noColumnMatch", { filter: columnFilter.trim() })}</p>
                 ) : (
                   <ColumnsSection
                     columns={visibleColumns}
@@ -682,7 +690,7 @@ export default function TableStructure({ schema, name: table }: { schema: string
                 {canEdit && (
                   <SectionBar>
                     <Button variant="ghost-muted" size="xs" onClick={() => setDraft({ kind: "createIndex" })}>
-                      <Plus /> Create index
+                      <Plus /> {t("structure.tableStructure.createIndex")}
                     </Button>
                   </SectionBar>
                 )}
@@ -698,10 +706,10 @@ export default function TableStructure({ schema, name: table }: { schema: string
                 {canEdit && (
                   <SectionBar>
                     <SectionAction unavailable={capabilities.constraints ? undefined : constraintsUnavailable} onClick={() => setDraft({ kind: "addUnique" })}>
-                      <Plus /> Add unique
+                      <Plus /> {t("structure.tableStructure.addUnique")}
                     </SectionAction>
                     <SectionAction unavailable={capabilities.constraints ? undefined : constraintsUnavailable} onClick={() => setDraft({ kind: "addCheck" })}>
-                      <Plus /> Add check
+                      <Plus /> {t("structure.tableStructure.addCheck")}
                     </SectionAction>
                   </SectionBar>
                 )}
@@ -718,7 +726,7 @@ export default function TableStructure({ schema, name: table }: { schema: string
                 {canEdit && (
                   <SectionBar>
                     <SectionAction unavailable={capabilities.constraints ? undefined : constraintsUnavailable} onClick={() => setDraft({ kind: "addForeignKey" })}>
-                      <Plus /> Add foreign key
+                      <Plus /> {t("structure.tableStructure.addForeignKey")}
                     </SectionAction>
                   </SectionBar>
                 )}

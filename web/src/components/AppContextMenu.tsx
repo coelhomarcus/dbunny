@@ -3,6 +3,7 @@ import { ClipboardPaste, Copy, Redo2, Scissors, TextSelect, Undo2 } from "lucide
 import ContextMenu, { type ContextMenuItem } from "./ui/ContextMenu";
 import { readClipboardText, writeClipboardText } from "../lib/clipboard";
 import { isMac } from "../lib/platform";
+import { t, useT } from "../i18n";
 
 const MOD = isMac ? "⌘" : "Ctrl+";
 const SHIFT = isMac ? "⇧" : "Shift+";
@@ -49,11 +50,11 @@ function textItems({ element, editable, secret, selected }: TextTarget): Context
   const items: ContextMenuItem[] = [];
   if (editable) {
     items.push(
-      { label: "Undo", icon: <Undo2 />, shortcut: `${MOD}Z`, onSelect: () => run(element, "undo") },
-      { label: "Redo", icon: <Redo2 />, shortcut: `${SHIFT}${MOD}Z`, onSelect: () => run(element, "redo") },
+      { label: t("ui.contextMenu.undo"), icon: <Undo2 />, shortcut: `${MOD}Z`, onSelect: () => run(element, "undo") },
+      { label: t("ui.contextMenu.redo"), icon: <Redo2 />, shortcut: `${SHIFT}${MOD}Z`, onSelect: () => run(element, "redo") },
       "separator",
       {
-        label: "Cut",
+        label: t("ui.contextMenu.cut"),
         icon: <Scissors />,
         shortcut: `${MOD}X`,
         disabled: !selected || secret,
@@ -65,10 +66,10 @@ function textItems({ element, editable, secret, selected }: TextTarget): Context
       },
     );
   }
-  items.push({ label: "Copy", icon: <Copy />, shortcut: `${MOD}C`, disabled: !selected || secret, onSelect: copy });
+  items.push({ label: t("common.copy"), icon: <Copy />, shortcut: `${MOD}C`, disabled: !selected || secret, onSelect: copy });
   if (editable) {
     items.push({
-      label: "Paste",
+      label: t("ui.contextMenu.paste"),
       icon: <ClipboardPaste />,
       shortcut: `${MOD}V`,
       onSelect: async () => {
@@ -80,7 +81,7 @@ function textItems({ element, editable, secret, selected }: TextTarget): Context
     });
   }
   items.push("separator", {
-    label: "Select all",
+    label: t("ui.contextMenu.selectAll"),
     icon: <TextSelect />,
     shortcut: `${MOD}A`,
     onSelect: () => {
@@ -99,6 +100,7 @@ function textItems({ element, editable, secret, selected }: TextTarget): Context
  * gets Copy; anywhere else a right-click does nothing.
  */
 export default function AppContextMenu() {
+  const t = useT();
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const close = useCallback(() => setMenu(null), []);
 
@@ -115,13 +117,13 @@ export default function AppContextMenu() {
       const items = field
         ? textItems(field)
         : selected
-          ? [{ label: "Copy", icon: <Copy />, shortcut: `${MOD}C`, onSelect: () => writeClipboardText(selected) }]
+          ? [{ label: t("common.copy"), icon: <Copy />, shortcut: `${MOD}C`, onSelect: () => writeClipboardText(selected) }]
           : [];
       setMenu(items.length ? { x: e.clientX, y: e.clientY, items } : null);
     }
     window.addEventListener("contextmenu", onContextMenu);
     return () => window.removeEventListener("contextmenu", onContextMenu);
-  }, []);
+  }, [t]);
 
   return <ContextMenu position={menu} items={menu?.items ?? []} onClose={close} />;
 }

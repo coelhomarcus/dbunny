@@ -91,12 +91,48 @@ test("object properties that carry words are text, in a tsx or a ts file", () =>
   assert.deepEqual(looseText('const a = { label: "NULL", description: "SQL" };', "x.ts"), []);
 });
 
-test("a ts file is read for those properties and nothing else", () => {
-  assert.deepEqual(looseText('export const x = "Some words"; function f() { return "More words"; }', "x.ts"), []);
+test("a ts file is read for words in those properties and for sentences, nothing else", () => {
+  assert.deepEqual(looseText('export const x = "some words"; function f() { return "more words"; }', "x.ts"), []);
 });
 
 test("identifiers are not text", () => {
   assert.deepEqual(lines('const a = <b>{["sslRootCert", t("a.b")].map((k) => k)}</b>;'), []);
   assert.deepEqual(lines('const a = <b>{cond ? "snake_case" : "kebab-case"}</b>;'), []);
   assert.deepEqual(lines('const a = <b>{cond ? "empty" : "Full"}</b>;'), ["empty", "Full"]);
+});
+
+test("colors are not text", () => {
+  assert.deepEqual(looseText('const theme = { text: "#f4f4f5", label: "#18181b" };', "x.ts"), []);
+});
+
+test("units are not text", () => {
+  assert.deepEqual(lines("const a = <b>{n} ms</b>;"), []);
+  assert.deepEqual(lines("const a = <b>{n} kB</b>;"), []);
+});
+
+test("a sentence kept anywhere in the code is text", () => {
+  assert.deepEqual(looseText('let title = "Sign in with your agent, then try again.";', "x.ts").map((found) => found.text), ["Sign in with your agent, then try again."]);
+  assert.deepEqual(looseText('const m = { a: ok ? "The assistant stopped" : "Nothing was logged." };', "x.ts").map((found) => found.text), ["The assistant stopped", "Nothing was logged."]);
+  assert.deepEqual(looseText('const s = `Sign out of ${name}?`;', "x.ts").map((found) => found.text), ["Sign out of "]);
+});
+
+test("logic and developer text are not user text", () => {
+  assert.deepEqual(looseText('if (kind === "Some Thing") {}\nconsole.warn("Something went wrong here");\nthrow new Error("It broke badly");', "x.ts"), []);
+  assert.deepEqual(looseText('import x from "Some Package";\nconst a = <b className="Foo bar baz" d="M 0 0" />;', "x.tsx"), []);
+  assert.deepEqual(looseText('const a = t("Some key here");', "x.ts"), []);
+  assert.deepEqual(looseText('const a = "Cancel";', "x.ts"), []);
+});
+
+test("names of languages are not translated", () => {
+  assert.deepEqual(looseText('const a = "Português (Brasil)";', "x.ts"), []);
+});
+
+test("a line marked i18n-ignore is left alone", () => {
+  assert.deepEqual(looseText('export const SENT = "Ask them how to continue."; // i18n-ignore: said to the agent', "x.ts"), []);
+  assert.deepEqual(looseText('export const SENT = "Ask them how to continue.";', "x.ts").map((found) => found.text), ["Ask them how to continue."]);
+});
+
+test("a string used as a key to read a value is not text", () => {
+  assert.deepEqual(looseText('const a = top["Execution Time"] ?? top["Planning Time"];', "x.ts"), []);
+  assert.deepEqual(lines('const a = <Keys keys="Esc" />;'), []);
 });

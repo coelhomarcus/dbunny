@@ -5,14 +5,14 @@ import Tooltip from "./Tooltip";
 import { HeaderTitle, PageHeader } from "./layout/PageHeader";
 import type { RelationType } from "../lib/api";
 import { Keys } from "./ui/Kbd";
-import { useT } from "../i18n";
+import { useT, type StaticKey } from "../i18n";
 
-const LABEL: Record<RelationType, string> = {
-  table: "Table",
-  partitioned: "Partitioned table",
-  foreign: "Foreign table",
-  view: "View",
-  matview: "Materialized view",
+const LABEL: Record<RelationType, StaticKey> = {
+  table: "ui.tableViewHeader.kindTable",
+  partitioned: "ui.tableViewHeader.kindPartitioned",
+  foreign: "ui.tableViewHeader.kindForeign",
+  view: "ui.tableViewHeader.kindView",
+  matview: "ui.tableViewHeader.kindMatview",
 };
 
 interface TableViewHeaderProps {
@@ -56,7 +56,7 @@ export default function TableViewHeader({
   return (
     <PageHeader className="justify-between">
       <div className="flex min-w-0 items-center gap-2.5">
-        <HeaderTitle label={relationType ? `${LABEL[relationType]} · ${schema}` : schema}>{table}</HeaderTitle>
+        <HeaderTitle label={relationType ? `${t(LABEL[relationType])} · ${schema}` : schema}>{table}</HeaderTitle>
         {isView ? (
           <Tooltip
             label={relationType === "matview" ? t("ui.tableViewHeader.matviewReadOnly") : t("ui.tableViewHeader.viewReadOnly")}

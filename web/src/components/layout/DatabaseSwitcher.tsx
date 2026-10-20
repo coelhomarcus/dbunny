@@ -36,7 +36,7 @@ export default function DatabaseSwitcher() {
     setListFailed(false);
     api.getDatabases().then(setDatabases).catch((err) => {
       setListFailed(true);
-      notify({ tone: "error", text: typeof err === "string" ? err : "Couldn't list databases" });
+      notify({ tone: "error", text: typeof err === "string" ? err : t("ui.databaseSwitcher.listFailedNotice") });
     });
   }
 
@@ -72,7 +72,7 @@ export default function DatabaseSwitcher() {
       });
       setOpen(false);
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : "Couldn't open the database" });
+      notify({ tone: "error", text: typeof err === "string" ? err : t("ui.databaseSwitcher.openFailed") });
     } finally {
       setOpening(null);
     }
