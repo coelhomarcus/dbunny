@@ -8,6 +8,13 @@ pub trait EventSink: Send + Sync {
     fn emit(&self, event: AssistantEvent);
 }
 
+/// A way the agent offers to sign in.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct AuthMethod {
+    pub id: String,
+    pub name: String,
+}
+
 /// Where the agent stands (§8.3 of the design).
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
@@ -17,7 +24,7 @@ pub enum AgentStatus {
     Ready,
     NeedsNode { found: Option<String> },
     /// `command` is what to type in a terminal to sign in, when the agent is the usual one.
-    NeedsSignIn { methods: Vec<String>, command: Option<String> },
+    NeedsSignIn { methods: Vec<AuthMethod>, command: Option<String> },
     Unsupported { message: String },
     Failed { message: String },
     Stopped,
@@ -73,7 +80,7 @@ mod tests {
         assert_eq!(status, serde_json::json!({"type": "status", "status": {"state": "needsNode", "found": "18.1.0"}}));
         let update = serde_json::to_value(AssistantEvent::Update { conversation_id: "c1".into(), update: serde_json::json!({"a": 1}) }).unwrap();
         assert_eq!(update, serde_json::json!({"type": "update", "conversationId": "c1", "update": {"a": 1}}));
-        let sign_in = serde_json::to_value(AgentStatus::NeedsSignIn { methods: vec!["Log in".into()], command: Some("npx x".into()) }).unwrap();
-        assert_eq!(sign_in, serde_json::json!({"state": "needsSignIn", "methods": ["Log in"], "command": "npx x"}));
+        let sign_in = serde_json::to_value(AgentStatus::NeedsSignIn { methods: vec![AuthMethod { id: "login".into(), name: "Log in".into() }], command: Some("npx x".into()) }).unwrap();
+        assert_eq!(sign_in, serde_json::json!({"state": "needsSignIn", "methods": [{"id": "login", "name": "Log in"}], "command": "npx x"}));
     }
 }

@@ -200,6 +200,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setStatus(status.state === "idle" ? await assistantApi.start(command) : await assistantApi.restart(command));
   }, [settings.assistantCommand, status.state]);
 
+  const signIn = useCallback(async (methodId: string) => {
+    // The status comes back as an event, ready, once the agent is signed in
+    await assistantApi.authenticate(methodId);
+  }, []);
+
   // The agent went away (stopped, or signed out): what was said to it can't go on
   const lastState = useRef(status.state);
   useEffect(() => {
@@ -301,8 +306,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       setModel,
       ask,
       retry,
+      signIn,
     }),
-    [available, status, enabled, panelOpen, inTab, expand, backToPanel, conversation, conversationId, models, history, refreshHistory, send, stop, approve, newChat, openConversation, setModel, ask, retry],
+    [available, status, enabled, panelOpen, inTab, expand, backToPanel, conversation, conversationId, models, history, refreshHistory, send, stop, approve, newChat, openConversation, setModel, ask, retry, signIn],
   );
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;

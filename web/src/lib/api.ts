@@ -128,6 +128,11 @@ export const assistantApi = {
     return invoke<string[]>("assistant_log");
   },
 
+  /** Signs in with one of the methods the agent offered; answers when the login is over. */
+  async authenticate(methodId: string) {
+    return invoke<void>("assistant_authenticate", { methodId });
+  },
+
   /** Signs out of Claude on this computer; every conversation ends. */
   async signOut(command?: string) {
     return invoke<void>("assistant_sign_out", { agent: command ? "custom" : "claude", command: command || null });

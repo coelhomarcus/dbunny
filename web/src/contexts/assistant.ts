@@ -34,6 +34,8 @@ export interface AssistantValue {
   ask: (text: string) => void;
   /** Starts the agent again after it stopped or could not start. */
   retry: () => Promise<void>;
+  /** Signs in with one of the methods the agent offered; rejects with the reason when the login fails. */
+  signIn: (methodId: string) => Promise<void>;
 }
 
 export const AssistantContext = createContext<AssistantValue | null>(null);

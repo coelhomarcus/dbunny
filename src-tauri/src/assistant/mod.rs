@@ -248,6 +248,15 @@ impl Assistant {
         }
     }
 
+    /// Signs in to the agent with one of the methods it offered. The agent is up, though not ready
+    /// until the person has signed in.
+    pub async fn authenticate(&self, method_id: &str) -> Result<(), String> {
+        let agent = self.running.lock().await.as_ref().map(|running| Arc::clone(&running.agent)).ok_or_else(|| "The assistant isn't running".to_string())?;
+        agent.authenticate(method_id).await.map_err(|e| e.to_string())?;
+        self.set_status(AgentStatus::Ready);
+        Ok(())
+    }
+
     pub async fn mcp_url(&self) -> Option<String> {
         self.running.lock().await.as_ref().map(|running| running.mcp.url())
     }
@@ -710,6 +719,33 @@ mod tests {
         assert_eq!(params["sessionId"], "old");
     }
 
+    fn claude_login() -> events::AuthMethod {
+        events::AuthMethod { id: "claude-login".into(), name: "Log in with Claude".into() }
+    }
+
+    fn chat_gpt() -> events::AuthMethod {
+        events::AuthMethod { id: "chat-gpt".into(), name: "ChatGPT".into() }
+    }
+
+    #[tokio::test]
+    async fn signing_in_with_a_method_makes_the_agent_ready_again() {
+        let r = codex_rig(FakeConfig { auth_required: true, ..Default::default() }).await;
+        assert!(r.assistant.new_conversation("s1", Some("saved-1"), options()).await.is_err());
+        assert!(matches!(r.assistant.status(), AgentStatus::NeedsSignIn { command: None, .. }));
+        r.assistant.authenticate("chat-gpt").await.unwrap();
+        assert_eq!(r.host.agent().calls("authenticate")[0]["params"], json!({"methodId": "chat-gpt"}));
+        assert_eq!(r.assistant.status(), AgentStatus::Ready);
+        assert!(r.assistant.new_conversation("s1", Some("saved-1"), options()).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_login_that_fails_says_why_and_keeps_asking() {
+        let r = codex_rig(FakeConfig { auth_required: true, fail_authenticate: true, ..Default::default() }).await;
+        assert!(r.assistant.new_conversation("s1", Some("saved-1"), options()).await.is_err());
+        assert_eq!(r.assistant.authenticate("chat-gpt").await.err().unwrap(), "The login was cancelled");
+        assert!(matches!(r.assistant.status(), AgentStatus::NeedsSignIn { .. }));
+    }
+
     #[tokio::test]
     async fn auth_required_sets_needs_sign_in() {
         let r = started(FakeConfig { auth_required: true, ..Default::default() }).await;
@@ -717,7 +753,7 @@ mod tests {
         assert!(err.contains("Sign in"), "{err}");
         assert_eq!(
             r.assistant.status(),
-            AgentStatus::NeedsSignIn { methods: vec!["Log in with Claude".into()], command: Some(launch::login_command()) }
+            AgentStatus::NeedsSignIn { methods: vec![claude_login(), chat_gpt()], command: Some(launch::login_command()) }
         );
         assert!(r.assistant.conversations.all().is_empty());
     }
@@ -727,7 +763,7 @@ mod tests {
         let r = rig(FakeConfig { auth_required: true, ..Default::default() }).await;
         assert_eq!(r.assistant.start(AgentKind::Custom, Some("/opt/agent".into())).await, AgentStatus::Ready);
         r.assistant.new_conversation("s1", Some("saved-1"), options()).await.err().unwrap();
-        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec!["Log in with Claude".into()], command: None });
+        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec![claude_login(), chat_gpt()], command: None });
     }
 
     #[tokio::test]

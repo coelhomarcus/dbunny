@@ -15,7 +15,7 @@ use tokio::sync::oneshot;
 
 use super::approvals::Approvals;
 use super::conversation::Conversations;
-use super::events::{AgentStatus, AssistantEvent, EventSink};
+use super::events::{AgentStatus, AssistantEvent, AuthMethod, EventSink};
 use super::launch::AgentCommand;
 
 /// How long the agent has to answer `initialize`: the first run may download the adapter.
@@ -75,7 +75,7 @@ pub struct SessionSummary {
 #[derive(Debug, PartialEq)]
 pub enum AgentError {
     /// The agent wants the person to sign in; these are the ways it offers.
-    AuthRequired(Vec<String>),
+    AuthRequired(Vec<AuthMethod>),
     NotFound,
     Stopped,
     Other(String),
@@ -84,7 +84,7 @@ pub enum AgentError {
 impl fmt::Display for AgentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AgentError::AuthRequired(_) => write!(f, "Sign in to Claude to use the assistant"),
+            AgentError::AuthRequired(_) => write!(f, "Sign in to use the assistant"),
             AgentError::NotFound => write!(f, "This conversation is no longer available"),
             AgentError::Stopped => write!(f, "The assistant stopped"),
             AgentError::Other(message) => write!(f, "{message}"),
@@ -171,7 +171,7 @@ struct Shared {
     next_id: AtomicU64,
     stopped: AtomicBool,
     shutting_down: AtomicBool,
-    auth_methods: OnceLock<Vec<String>>,
+    auth_methods: OnceLock<Vec<AuthMethod>>,
     /// The ids of the tool calls seen that are the database's own.
     own_calls: Mutex<std::collections::HashSet<String>>,
     /// Notifications of the agent's own extensions, kept for the tests that look at them.
@@ -421,7 +421,15 @@ impl AgentHandle {
         if abilities["mcpCapabilities"]["http"] != true || abilities["loadSession"] != true {
             return Err(AgentStatus::Unsupported { message: "This agent can't use DBunny's tools.".into() });
         }
-        let methods = hello["authMethods"].as_array().map(|m| m.iter().filter_map(|m| m["name"].as_str().map(str::to_string)).collect()).unwrap_or_default();
+        let methods = hello["authMethods"]
+            .as_array()
+            .map(|methods| {
+                methods
+                    .iter()
+                    .filter_map(|m| Some(AuthMethod { id: m["id"].as_str()?.to_string(), name: m["name"].as_str().unwrap_or_else(|| m["id"].as_str().unwrap_or_default()).to_string() }))
+                    .collect()
+            })
+            .unwrap_or_default();
         let _ = shared.auth_methods.set(methods);
         let sessions = &abilities["sessionCapabilities"];
         Ok(Arc::new(AgentHandle {
@@ -522,6 +530,13 @@ impl AgentHandle {
     pub async fn set_model(&self, acp_session: &str, model_id: &str) -> Result<(), AgentError> {
         let config_id = self.model_options.lock().unwrap().get(acp_session).cloned().ok_or_else(|| AgentError::Other("This conversation has no model to change".into()))?;
         self.shared.request("session/set_config_option", json!({"sessionId": acp_session, "configId": config_id, "value": model_id})).await?;
+        Ok(())
+    }
+
+    /// Signs in with one of the methods the agent offered; answers when the login is over (the
+    /// agent may wait for the person in a browser).
+    pub async fn authenticate(&self, method_id: &str) -> Result<(), AgentError> {
+        self.shared.request("authenticate", json!({"methodId": method_id})).await?;
         Ok(())
     }
 
@@ -896,10 +911,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn authenticate_sends_the_method_and_signs_in() {
+        let r = rig(FakeConfig { auth_required: true, ..Default::default() }).await.unwrap();
+        assert!(r.agent.new_session(&setup()).await.is_err());
+        r.agent.authenticate("chat-gpt").await.unwrap();
+        assert_eq!(r.fake.calls("authenticate")[0]["params"], json!({"methodId": "chat-gpt"}));
+        assert!(r.agent.new_session(&setup()).await.is_ok());
+        let failing = rig(FakeConfig { fail_authenticate: true, ..Default::default() }).await.unwrap();
+        assert_eq!(failing.agent.authenticate("chat-gpt").await.err().unwrap(), AgentError::Other("The login was cancelled".into()));
+    }
+
+    #[tokio::test]
     async fn auth_required_maps_to_sign_in() {
         let r = rig(FakeConfig { auth_required: true, ..Default::default() }).await.unwrap();
         let err = r.agent.new_session(&setup()).await.err().unwrap();
-        assert_eq!(err, AgentError::AuthRequired(vec!["Log in with Claude".into()]));
+        assert_eq!(err, AgentError::AuthRequired(vec![AuthMethod { id: "claude-login".into(), name: "Log in with Claude".into() }, AuthMethod { id: "chat-gpt".into(), name: "ChatGPT".into() }]));
         let err = r.agent.load_session("acp-1", &setup()).await.err().unwrap();
         assert!(matches!(err, AgentError::AuthRequired(_)));
     }

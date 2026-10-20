@@ -109,6 +109,12 @@ pub async fn assistant_sign_out(assistant: State<'_, Assistant>, agent: AgentKin
     assistant.sign_out(agent, command).await
 }
 
+/// Signs in to the agent with one of the methods it offered; answers when the login is over.
+#[tauri::command]
+pub async fn assistant_authenticate(assistant: State<'_, Assistant>, method_id: String) -> Result<(), String> {
+    assistant.authenticate(&method_id).await
+}
+
 #[tauri::command]
 pub async fn assistant_log(assistant: State<'_, Assistant>) -> Result<Vec<String>, String> {
     Ok(assistant.log().await)

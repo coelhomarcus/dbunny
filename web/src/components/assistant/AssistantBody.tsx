@@ -67,7 +67,7 @@ export default function AssistantBody({ onClose, onBack }: { onClose?: () => voi
         {!assistant.enabled ? (
           <ConsentScreen onEnable={assistant.enable} />
         ) : assistant.status.state !== "ready" ? (
-          <AssistantStatusScreen status={assistant.status} onRetry={assistant.retry} />
+          <AssistantStatusScreen status={assistant.status} onRetry={assistant.retry} onSignIn={assistant.signIn} />
         ) : (
           <AssistantConversation />
         )}

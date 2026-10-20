@@ -25,6 +25,8 @@ pub struct FakeConfig {
     pub load_script: Vec<Value>,
     /// How many `session/prompt` calls, from the first, are answered with an error.
     pub fail_prompts: usize,
+    /// `authenticate` is answered with an error.
+    pub fail_authenticate: bool,
 }
 
 impl Default for FakeConfig {
@@ -40,6 +42,7 @@ impl Default for FakeConfig {
             sessions: vec![],
             load_script: vec![],
             fail_prompts: 0,
+            fail_authenticate: false,
         }
     }
 }
@@ -76,6 +79,8 @@ async fn run(config: FakeConfig, input: DuplexStream, mut out: DuplexStream, rec
     let mut lines = BufReader::new(input).lines();
     let mut sessions = 0;
     let mut prompts = 0;
+    // Signing in with `authenticate` ends "authentication required"
+    let mut signed_in = !config.auth_required;
     while let Ok(Some(line)) = lines.next_line().await {
         let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
         if message.get("method").is_none() {
@@ -95,9 +100,9 @@ async fn run(config: FakeConfig, input: DuplexStream, mut out: DuplexStream, rec
                         "systemPrompt": if config.system_prompt { json!({"mode": {"override": {}}}) } else { Value::Null },
                     },
                 },
-                "authMethods": [{"id": "claude-login", "name": "Log in with Claude"}],
+                "authMethods": [{"id": "claude-login", "name": "Log in with Claude"}, {"id": "chat-gpt", "name": "ChatGPT"}],
             })),
-            "session/new" | "session/load" if config.auth_required => Err(json!({"code": -32000, "message": "Authentication required"})),
+            "session/new" | "session/load" if !signed_in => Err(json!({"code": -32000, "message": "Authentication required"})),
             "session/new" => {
                 sessions += 1;
                 Ok(json!({
@@ -116,6 +121,11 @@ async fn run(config: FakeConfig, input: DuplexStream, mut out: DuplexStream, rec
                 Ok(json!({}))
             }
             "session/list" => Ok(json!({"sessions": config.sessions})),
+            "authenticate" if config.fail_authenticate => Err(json!({"code": -32603, "message": "The login was cancelled"})),
+            "authenticate" => {
+                signed_in = true;
+                Ok(json!({}))
+            }
             "session/set_config_option" | "logout" => Ok(json!({})),
             "session/prompt" if { prompts += 1; prompts <= config.fail_prompts } => Err(json!({"code": -32603, "message": "The model is busy"})),
             "session/prompt" => {

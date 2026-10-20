@@ -1,3 +1,9 @@
+/** A way the agent offers to sign in. */
+export interface AuthMethod {
+  id: string;
+  name: string;
+}
+
 /** Where the assistant's agent stands. */
 export type AgentStatus =
   | { state: "idle" }
@@ -5,7 +11,7 @@ export type AgentStatus =
   | { state: "ready" }
   | { state: "needsNode"; found: string | null }
   /** `command` is what to type in a terminal to sign in, when the agent is the usual one. */
-  | { state: "needsSignIn"; methods: string[]; command: string | null }
+  | { state: "needsSignIn"; methods: AuthMethod[]; command: string | null }
   | { state: "unsupported"; message: string }
   | { state: "failed"; message: string }
   | { state: "stopped" };

@@ -8,8 +8,30 @@ import Button from "../ui/Button";
 import Dialog from "../ui/Dialog";
 
 /** The assistant's agent is not ready: what is missing, and what to do about it. */
-export default function AssistantStatusScreen({ status, onRetry }: { status: AgentStatus; onRetry: () => void }) {
+export default function AssistantStatusScreen({
+  status,
+  onRetry,
+  onSignIn,
+}: {
+  status: AgentStatus;
+  onRetry: () => void;
+  onSignIn: (methodId: string) => Promise<void>;
+}) {
   const [log, setLog] = useState<string[] | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
+  const [signInError, setSignInError] = useState<string | null>(null);
+
+  async function signIn(methodId: string) {
+    setSigningIn(true);
+    setSignInError(null);
+    try {
+      await onSignIn(methodId);
+    } catch (error) {
+      setSignInError(typeof error === "string" ? error : error instanceof Error ? error.message : "The login failed");
+    } finally {
+      setSigningIn(false);
+    }
+  }
   const [copied, setCopied] = useState(false);
 
   async function showLog() {
@@ -39,7 +61,13 @@ export default function AssistantStatusScreen({ status, onRetry }: { status: Age
       title = "Sign in to Claude";
       command = status.command;
       detail = command ? "Run this in a terminal and follow the steps, then try again." : "Sign in with your agent, then try again.";
-      actions.push({ label: "Retry", run: onRetry, primary: true });
+      // An agent that signs in through the protocol (a browser opens) gets a button for each way it offers
+      for (const method of status.methods.filter((method) => !command && method.id === "chat-gpt")) {
+        title = "Sign in to Codex";
+        detail = "A browser opens to sign in with your ChatGPT account.";
+        actions.push({ label: signingIn ? "Waiting for the browser…" : `Sign in with ${method.name}`, run: () => signIn(method.id), primary: true });
+      }
+      if (actions.length === 0) actions.push({ label: "Retry", run: onRetry, primary: true });
       break;
     case "unsupported":
       title = status.message;
@@ -81,10 +109,11 @@ export default function AssistantStatusScreen({ status, onRetry }: { status: Age
           <p className="mt-2 max-w-xs text-xs leading-relaxed text-muted-foreground">Already use Claude Code? Run claude and use /login instead.</p>
         </>
       )}
+      {signInError && <p className="mt-3 max-w-xs text-xs leading-relaxed text-destructive-foreground">{signInError}</p>}
       {actions.length > 0 && (
         <div className="mt-5 flex gap-2">
           {actions.map((action) => (
-            <Button key={action.label} variant={action.primary ? "primary" : "outline"} size="sm" onClick={action.run}>
+            <Button key={action.label} variant={action.primary ? "primary" : "outline"} size="sm" disabled={signingIn} onClick={action.run}>
               {action.label}
             </Button>
           ))}
