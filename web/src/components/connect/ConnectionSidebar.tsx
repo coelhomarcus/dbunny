@@ -9,6 +9,8 @@ import { fileNameOf } from "../../lib/connectionSummary";
 import EngineLogo from "./engineLogos";
 import Button from "../ui/Button";
 import Badge from "../ui/Badge";
+import { useT } from "../../i18n";
+import { Rich } from "../../i18n/Rich";
 
 /** Rounded tile tinted with the connection colour: the row's visual anchor. */
 export function ConnectionIcon({ color, icon, size = "sm" }: { color: string; icon: string; size?: "sm" | "lg" }) {
@@ -43,23 +45,24 @@ function ConnectionRow({
   onConnect: () => void;
   onDelete: () => void;
 }) {
+  const t = useT();
   const [confirming, setConfirming] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const menuItems: ContextMenuItem[] = [
-    { label: "Connect", icon: <ArrowRight />, onSelect: onConnect },
-    { label: "Delete", icon: <Trash2 />, destructive: true, onSelect: () => setConfirming(true) },
+    { label: t("connect.connectionSidebar.connect"), icon: <ArrowRight />, onSelect: onConnect },
+    { label: t("common.delete"), icon: <Trash2 />, destructive: true, onSelect: () => setConfirming(true) },
   ];
 
   if (confirming) {
     return (
       <div className="flex h-12 items-center justify-between gap-2 rounded-lg bg-destructive/8 px-2.5">
-        <span className="truncate text-xs text-destructive-foreground">Delete “{conn.name || "Unnamed"}”?</span>
+        <span className="truncate text-xs text-destructive-foreground">{t("connect.connectionSidebar.deleteNamed", { name: conn.name || t("connect.connectionSidebar.unnamed") })}</span>
         <div className="flex shrink-0 gap-1">
           <Button variant="destructive" size="xs" onClick={() => { onDelete(); setConfirming(false); }}>
-            Delete
+            {t("common.delete")}
           </Button>
           <Button variant="ghost-muted" size="xs" onClick={() => setConfirming(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
       </div>
@@ -88,7 +91,7 @@ function ConnectionRow({
     >
       <ConnectionIcon color={conn.color || DEFAULT_COLOR} icon={conn.icon} />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium leading-snug">{conn.name || "Unnamed"}</div>
+        <div className="truncate text-[13px] font-medium leading-snug">{conn.name || t("connect.connectionSidebar.unnamed")}</div>
         <div className="flex min-w-0 items-center gap-1 text-xs leading-snug text-muted-foreground">
           <EngineLogo engine={conn.engine} bare />
           <span className="truncate">{conn.engine === "sqlite" ? fileNameOf(conn.path) : conn.database || conn.host}</span>
@@ -99,7 +102,7 @@ function ConnectionRow({
           variant="ghost-muted"
           size="icon-xs"
           className="bg-chrome"
-          aria-label="Connect"
+          aria-label={t("connect.connectionSidebar.connect")}
           onClick={(e) => { e.stopPropagation(); onConnect(); }}
         >
           <ArrowRight />
@@ -108,7 +111,7 @@ function ConnectionRow({
           variant="ghost-muted"
           size="icon-xs"
           className="bg-chrome hover:bg-destructive/10 hover:text-destructive-foreground"
-          aria-label="Delete"
+          aria-label={t("common.delete")}
           onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
         >
           <Trash2 />
@@ -138,6 +141,7 @@ export default function ConnectionSidebar({
   onDelete: (id: string) => void;
   onNew: () => void;
 }) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -165,10 +169,10 @@ export default function ConnectionSidebar({
       >
         <div className="flex h-10 shrink-0 items-center gap-1 pl-3 pr-2">
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="text-[13px] font-semibold">Connections</span>
+            <span className="text-[13px] font-semibold">{t("connect.connectionSidebar.connections")}</span>
             {count > 0 && <Badge>{count}</Badge>}
           </div>
-          <Button variant="ghost-muted" size="icon-sm" onClick={onNew} aria-label="New connection">
+          <Button variant="ghost-muted" size="icon-sm" onClick={onNew} aria-label={t("connect.connectionSidebar.newConnection")}>
             <Plus />
           </Button>
         </div>
@@ -180,7 +184,7 @@ export default function ConnectionSidebar({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-              placeholder="Search"
+              placeholder={t("connect.connectionSidebar.search")}
               spellCheck={false}
               className="h-8 w-full rounded-lg bg-muted pl-7 pr-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground transition-shadow focus-visible:ring-2 focus-visible:ring-ring/40"
             />
@@ -193,12 +197,12 @@ export default function ConnectionSidebar({
               <div className="mb-3 flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
                 <Database size={18} />
               </div>
-              <p className="text-sm font-medium">No saved connections</p>
-              <p className="mt-1 text-xs text-muted-foreground">Create one with New connection to reach it in one click.</p>
+              <p className="text-sm font-medium">{t("connect.connectionSidebar.noSaved")}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{t("connect.connectionSidebar.emptyHint")}</p>
             </div>
           ) : filtered.length === 0 ? (
             <p className="px-2 pt-6 text-center text-xs text-muted-foreground">
-              Nothing matches “<span className="text-foreground">{query}</span>”
+              <Rich id="connect.connectionSidebar.nothingMatches" params={{ query }} tags={{ query: (text) => <span className="text-foreground">{text}</span> }} />
             </p>
           ) : (
             <div className="flex flex-col gap-0.5">

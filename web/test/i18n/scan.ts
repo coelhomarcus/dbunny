@@ -12,6 +12,8 @@ const TEXT_ATTRIBUTES = new Set(["placeholder", "aria-label", "alt", "label", "d
 const HAS_LETTER = /\p{L}/u;
 /** Props that hold a name, a path or a style, not words for a person. */
 const NON_TEXT_ATTRIBUTES = new Set(["className", "class", "key", "id", "type", "role", "href", "src", "side", "variant", "size", "tone", "name", "value", "to", "htmlFor", "style", "rel", "target", "align", "mode", "kind", "d", "viewBox", "fill", "stroke", "transform", "points", "width", "height", "autoComplete", "inputMode", "spellCheck", "tabIndex", "lang", "dir", "xmlns", "ref", "list", "accept", "direction", "orientation", "icon"]);
+/** Object properties that hold words for a person: `{ label: "Connection" }`. */
+const TEXT_PROPERTIES = new Set(["label", "title", "description", "hint", "placeholder", "text", "message", "heading", "body", "confirmLabel", "cancelLabel", "subtitle", "caption", "tooltip", "emptyText"]);
 /** A capitalized word or sentence: "Close", "Discard and close". */
 const LOOKS_LIKE_TEXT = /^\p{Lu}\p{Ll}/u;
 /** Names that are never translated. */
@@ -21,6 +23,8 @@ const TECHNICAL_TAGS = new Set(["code", "kbd", "pre", "samp"]);
 
 /** Keywords and acronyms (no lowercase letter) and brand names say the same in every language. */
 function isTechnical(text: string): boolean {
+  // camelCase, snake_case and kebab-case names are identifiers
+  if (/^[a-z][a-z0-9]*([A-Z_-][a-z0-9]+)+$/.test(text)) return true;
   let rest = text;
   for (const brand of BRANDS) rest = rest.split(brand).join(" ");
   return !/\p{Ll}/u.test(rest);
@@ -28,7 +32,7 @@ function isTechnical(text: string): boolean {
 
 /** Text in a .tsx source that doesn't go through `t()`: JSX text, text attributes, and strings in expressions that are children. */
 export function looseText(source: string, fileName = "file.tsx"): Loose[] {
-  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX);
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.ES2022, true, fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const found: Loose[] = [];
   const inTechnicalTag = (node: ts.Node) => {
     for (let up = node.parent; up; up = up.parent) {
@@ -112,18 +116,26 @@ export function looseText(source: string, fileName = "file.tsx"): Loose[] {
     else ts.forEachChild(node, visitInside);
   }
 
+  // Words in data: the labels of tabs, the options of a menu, the text of a notice
+  function properties(node: ts.Node) {
+    if (ts.isPropertyAssignment(node) && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) && TEXT_PROPERTIES.has(node.name.text)) strings(node.initializer);
+    ts.forEachChild(node, properties);
+  }
+
   visit(file);
-  return found;
+  properties(file);
+  // The same text can be reached by both walks
+  return found.filter((hit, index) => found.findIndex((other) => other.line === hit.line && other.text === hit.text) === index);
 }
 
-/** Every .tsx file under a folder, by path relative to `root`, sorted. */
-export function tsxFiles(root: string, folder = "src"): string[] {
+/** Every source file under a folder that can hold interface text, by path relative to `root`, sorted. */
+export function sourceFiles(root: string, folder = "src"): string[] {
   const out: string[] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
       const path = `${dir}/${entry.name}`;
       if (entry.isDirectory()) walk(path);
-      else if (entry.name.endsWith(".tsx")) out.push(path);
+      else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".d.ts") && !path.startsWith("src/i18n/locales") && !path.startsWith("src/types")) out.push(path);
     }
   };
   walk(folder);
@@ -133,7 +145,7 @@ export function tsxFiles(root: string, folder = "src"): string[] {
 /** The files that still have loose text, with what they have. */
 export function filesWithLooseText(root: string): Map<string, Loose[]> {
   const out = new Map<string, Loose[]>();
-  for (const path of tsxFiles(root)) {
+  for (const path of sourceFiles(root)) {
     const found = looseText(readFileSync(join(root, path), "utf8"), path);
     if (found.length > 0) out.set(path, found);
   }

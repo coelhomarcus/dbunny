@@ -6,6 +6,7 @@ import type { Formatters } from "./format.ts";
 import type { Language, Locale } from "./messages.ts";
 
 export { activate, fmt, getLocale, has, loadLocale, raw, subscribe, t } from "./store.ts";
+export type { Key, StaticKey } from "./store.ts";
 export { LOCALES, isLanguage, resolveLocale } from "./resolve.ts";
 export type { Language, Locale, MessageKey } from "./messages.ts";
 

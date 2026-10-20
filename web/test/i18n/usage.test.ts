@@ -9,7 +9,7 @@ const ROOT = join(import.meta.dirname, "../..");
 /** Keys that are used through a typed map or a code from the backend, so no `t("…")` names them. */
 const DYNAMIC_KEYS: string[] = [];
 /** Keys written ahead of the screens that will use them; each leaves this list when it is used. */
-const PENDING_KEYS: string[] = ["common.back", "common.copy", "common.delete", "common.retry"];
+const PENDING_KEYS: string[] = ["common.copy", "common.retry"];
 
 function sources(dir: string): string[] {
   const out: string[] = [];

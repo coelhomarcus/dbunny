@@ -4,6 +4,7 @@ import { fileNameOf } from "../../../lib/connectionSummary";
 import Button from "../../ui/Button";
 import Field from "../../ui/Field";
 import Input from "../../ui/Input";
+import { useT } from "../../../i18n";
 
 /** The file name without its extension, to suggest as the connection's name. */
 function suggestedName(path: string) {
@@ -20,6 +21,7 @@ export default function SqliteFileTab({
   onChange: (draft: ConnectionDraft) => void;
   showErrors: boolean;
 }) {
+  const t = useT();
   const invalid = showErrors && missingFields(draft, "connect").some((m) => m.fieldId === "sqlite-path");
 
   /** Sets the file; a connection that still has no name takes the file's. */
@@ -32,10 +34,10 @@ export default function SqliteFileTab({
     const { open } = await import("@tauri-apps/plugin-dialog");
     const path = await open({
       multiple: false,
-      title: "Choose a SQLite database",
+      title: t("connect.sqliteFileTab.chooseTitle"),
       filters: [
-        { name: "SQLite database", extensions: ["db", "sqlite", "sqlite3", "db3"] },
-        { name: "All files", extensions: ["*"] },
+        { name: t("connect.sqliteFileTab.sqliteDatabase"), extensions: ["db", "sqlite", "sqlite3", "db3"] },
+        { name: t("connect.sqliteFileTab.allFiles"), extensions: ["*"] },
       ],
     });
     if (typeof path === "string") pick(path, false);
@@ -43,16 +45,16 @@ export default function SqliteFileTab({
 
   async function createFile() {
     const { save } = await import("@tauri-apps/plugin-dialog");
-    const path = await save({ title: "Create a SQLite database", defaultPath: "database.sqlite" });
+    const path = await save({ title: t("connect.sqliteFileTab.createTitle"), defaultPath: "database.sqlite" });
     if (typeof path === "string") pick(path, true);
   }
 
   return (
     <div className="flex flex-col gap-4">
       <Field
-        label="Database file"
+        label={t("connect.sqliteFileTab.databaseFile")}
         htmlFor="sqlite-path"
-        hint={draft.sqliteCreate ? "The file is created when you connect or test." : "Choose an existing file, or make a new database."}
+        hint={draft.sqliteCreate ? t("connect.sqliteFileTab.createdHint") : t("connect.sqliteFileTab.chooseHint")}
       >
         <Input
           id="sqlite-path"
@@ -61,7 +63,7 @@ export default function SqliteFileTab({
           // Typing a path means opening it: a new database comes from "Create new…", so a typo
           // never makes an empty file
           onChange={(e) => onChange({ ...draft, sqlitePath: e.target.value, sqliteCreate: false })}
-          placeholder="/path/to/database.sqlite"
+          placeholder={t("connect.sqliteFileTab.pathPlaceholder")}
           spellCheck={false}
           className="font-mono text-xs"
           aria-invalid={invalid || undefined}
@@ -70,11 +72,11 @@ export default function SqliteFileTab({
       <div className="flex gap-2">
         <Button variant="outline" onClick={openFile}>
           <FolderOpen />
-          Open…
+          {t("connect.sqliteFileTab.open")}
         </Button>
         <Button variant="outline" onClick={createFile}>
           <FilePlus />
-          Create new…
+          {t("connect.sqliteFileTab.createNew")}
         </Button>
       </div>
     </div>

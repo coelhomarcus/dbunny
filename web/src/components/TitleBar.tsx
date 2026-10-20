@@ -94,7 +94,7 @@ function WindowTab({
   onMenu: (x: number, y: number) => void;
 }) {
   const t = useT();
-  const title = tab.title ?? "New Connection";
+  const title = tab.title ?? t("ui.titleBar.newConnection");
   return (
     <div
       role="tab"

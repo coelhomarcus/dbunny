@@ -3,6 +3,7 @@ import type { SshHostKeyProblem } from "@/types";
 import ConfirmDialog from "../ui/ConfirmDialog";
 import Dialog from "../ui/Dialog";
 import Button from "../ui/Button";
+import { useT } from "../../i18n";
 
 /** An SSH server key waiting for the user's decision, and how to retry once trusted. */
 export interface HostKeyRequest {
@@ -23,6 +24,7 @@ function HostKeyFingerprint({ problem }: { problem: SshHostKeyProblem }) {
 
 /** The SSH server's key: first time, or different from before. */
 export default function HostKeyPrompt({ request, onClose }: { request: HostKeyRequest | null; onClose: () => void }) {
+  const t = useT();
   // A mismatch with ~/.ssh/known_hosts can't be accepted here: DBunny doesn't change that file
   if (request && request.problem.inUserKnownHosts) {
     return (
@@ -31,11 +33,11 @@ export default function HostKeyPrompt({ request, onClose }: { request: HostKeyRe
         onClose={onClose}
         icon={<ShieldAlert />}
         tone="destructive"
-        title="The SSH server's key changed"
-        description={`${request.problem.host} presented a different key than the one in ~/.ssh/known_hosts. Someone may be intercepting the connection. If the server was reinstalled, remove its old entry from known_hosts and try again.`}
+        title={t("connect.hostKeyPrompt.keyChanged")}
+        description={t("connect.hostKeyPrompt.mismatch", { host: request.problem.host })}
         footer={
           <Button variant="neutral" size="sm" onClick={onClose}>
-            Close
+            {t("common.close")}
           </Button>
         }
       >
@@ -52,14 +54,14 @@ export default function HostKeyPrompt({ request, onClose }: { request: HostKeyRe
       onConfirm={() => request?.retry()}
       icon={<ShieldAlert />}
       tone={changed ? "destructive" : "warning"}
-      title={changed ? "The SSH server's key changed" : "Trust this SSH server?"}
+      title={changed ? t("connect.hostKeyPrompt.keyChanged") : t("connect.hostKeyPrompt.trustThisServer")}
       description={
         changed
-          ? "It's different from the key accepted before. Someone may be intercepting the connection; trust the new key only if you know the server changed."
-          : "This is the first connection to this server. Check that the fingerprint matches the one your server administrator gives you."
+          ? t("connect.hostKeyPrompt.changedNote")
+          : t("connect.hostKeyPrompt.firstTimeNote")
       }
-      cancelLabel="Cancel"
-      confirmLabel={changed ? "Trust the new key" : "Trust and connect"}
+      cancelLabel={t("common.cancel")}
+      confirmLabel={changed ? t("connect.hostKeyPrompt.trustNewKey") : t("connect.hostKeyPrompt.trustAndConnect")}
     >
       {request && <HostKeyFingerprint problem={request.problem} />}
     </ConfirmDialog>

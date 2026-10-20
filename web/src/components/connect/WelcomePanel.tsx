@@ -2,6 +2,7 @@ import { Link, Plus } from "lucide-react";
 import { isMac } from "../../lib/platform";
 import Button from "../ui/Button";
 import { Keys } from "../ui/Kbd";
+import { useT } from "../../i18n";
 
 const mod = isMac ? "⌘" : "Ctrl+";
 
@@ -24,26 +25,27 @@ export default function WelcomePanel({
   onNew: () => void;
   onOpenUrl: () => void;
 }) {
+  const t = useT();
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center select-none">
       <img src="/icon.svg" className="size-14 invert dark:invert-0" alt="" />
       <h1 className="mt-4 text-xl font-semibold leading-tight">DBunny</h1>
       <p className="mt-3 max-w-sm text-sm text-muted-foreground">
-        {hasConnections ? "Pick a connection on the left, or create a new one." : "Create your first connection to get started."}
+        {hasConnections ? t("connect.welcomePanel.pickOrCreate") : t("connect.welcomePanel.createFirst")}
       </p>
       <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
         <Button variant="primary" onClick={onNew}>
           <Plus />
-          New connection
+          {t("connect.welcomePanel.newConnection")}
         </Button>
         <Button variant="outline" onClick={onOpenUrl}>
           <Link />
-          Open connection URL…
+          {t("connect.welcomePanel.openUrl")}
         </Button>
       </div>
       <div className="mt-8 flex items-center gap-4 text-xs text-muted-foreground">
-        <Shortcut keys={`${mod}T`} label="New tab" />
-        <Shortcut keys={`${mod},`} label="Settings" />
+        <Shortcut keys={`${mod}T`} label={t("connect.welcomePanel.newTab")} />
+        <Shortcut keys={`${mod},`} label={t("connect.welcomePanel.settings")} />
       </div>
     </div>
   );

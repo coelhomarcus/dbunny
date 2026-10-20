@@ -31,13 +31,14 @@ import ImportUrlDialog from "./ImportUrlDialog";
 import OptionsTab from "./OptionsTab";
 import ServerTabs from "./server/ServerTabs";
 import SqliteFileTab from "./sqlite/SqliteFileTab";
+import { useT, type StaticKey } from "../../i18n";
 
-const TAB_LABELS: Record<ConnectionTab, string> = {
-  connection: "Connection",
-  ssl: "SSL",
-  ssh: "SSH tunnel",
-  options: "Options",
-  file: "File",
+const TAB_LABELS: Record<ConnectionTab, StaticKey> = {
+  connection: "connect.connectionModal.tabConnection",
+  ssl: "connect.connectionModal.tabSsl",
+  ssh: "connect.connectionModal.tabSsh",
+  options: "connect.connectionModal.tabOptions",
+  file: "connect.connectionModal.tabFile",
 };
 
 type TestState = { status: "idle" } | { status: "testing" } | { status: "ok"; version: string } | { status: "error"; message: string };
@@ -74,6 +75,7 @@ function ModalBody({
   onSaved: (conn: SavedConnection) => void;
   onConnected: () => void;
 }) {
+  const t = useT();
   const isNew = initial === null || initial.id === null;
   const [step, setStep] = useState<"engine" | "form">(initial ? "form" : "engine");
   const [draft, setDraft] = useState<ConnectionDraft>(initial ?? newDraft("postgres"));
@@ -193,7 +195,7 @@ function ModalBody({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={isNew ? "New connection" : "Edit connection"}
+        aria-label={isNew ? t("connect.connectionModal.newConnection") : t("connect.connectionModal.editConnection")}
         className={cn(
           "relative flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl animate-dialog-in",
           // The tabs keep one height, so switching between them doesn't resize the window
@@ -204,8 +206,8 @@ function ModalBody({
           <div className="flex shrink-0 items-start gap-3 px-5 pt-5 pb-3">
             {step === "engine" ? (
               <div className="min-w-0 flex-1">
-                <h2 className="text-[15px] font-semibold leading-tight">New connection</h2>
-                <p className="mt-1 text-sm text-muted-foreground">Choose the database to connect to.</p>
+                <h2 className="text-[15px] font-semibold leading-tight">{t("connect.connectionModal.newConnection")}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{t("connect.connectionModal.chooseDatabase")}</p>
               </div>
             ) : (
               <>
@@ -213,7 +215,7 @@ function ModalBody({
                 <span className="mt-2 shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{engineLabel}</span>
               </>
             )}
-            <Button variant="ghost-muted" size="icon-xs" className="-mr-1.5 mt-0.5" aria-label="Close" onClick={onClose}>
+            <Button variant="ghost-muted" size="icon-xs" className="-mr-1.5 mt-0.5" aria-label={t("common.close")} onClick={onClose}>
               <X />
             </Button>
           </div>
@@ -242,10 +244,10 @@ function ModalBody({
                     return {
                       value: id,
                       disabled: off,
-                      hint: off ? "Not used with a Unix socket" : undefined,
+                      hint: off ? t("connect.connectionModal.notUsedWithSocket") : undefined,
                       label: (
                         <span className={cn("flex items-center gap-1.5", errorTabs.has(id) && "text-destructive-foreground")}>
-                          {TAB_LABELS[id]}
+                          {t(TAB_LABELS[id])}
                           {errorTabs.has(id) ? (
                             <span data-error className="size-1.5 rounded-full bg-destructive" />
                           ) : (
@@ -292,7 +294,7 @@ function ModalBody({
                   {isNew && (
                     <Button variant="ghost-muted" size="sm" onClick={() => setStep("engine")}>
                       <ArrowLeft />
-                      Back
+                      {t("common.back")}
                     </Button>
                   )}
                   {test.status === "ok" && (
@@ -304,27 +306,27 @@ function ModalBody({
                   {test.status === "error" && (
                     <Badge variant="destructive">
                       <X />
-                      Connection failed
+                      {t("connect.connectionModal.connectionFailed")}
                     </Badge>
                   )}
                   <div className="flex-1" />
                   <Button variant="outline" size="sm" onClick={handleTest} disabled={test.status === "testing"}>
                     {test.status === "testing" ? <Spinner /> : <PlugZap />}
-                    Test
+                    {t("connect.connectionModal.test")}
                   </Button>
                   <Button variant="outline" size="sm" onClick={handleSave} disabled={saving}>
                     {saving && <Spinner />}
-                    Save
+                    {t("common.save")}
                   </Button>
                   <Button type="submit" variant="primary" size="sm" className="group" disabled={isConnecting}>
                     {isConnecting ? (
                       <>
                         <Spinner />
-                        Connecting…
+                        {t("connect.connectionModal.connecting")}
                       </>
                     ) : (
                       <>
-                        Connect
+                        {t("connect.connectionModal.connect")}
                         <ArrowRight className="transition-transform group-hover:translate-x-0.5" />
                       </>
                     )}

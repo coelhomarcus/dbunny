@@ -4,6 +4,7 @@ import Button from "../ui/Button";
 import Input from "../ui/Input";
 import type { Engine } from "@/types";
 import { urlHints } from "../../lib/connectionDraft";
+import { useT } from "../../i18n";
 
 /**
  * Asks for a connection URL. `onImport` returns false when it isn't one, to say so. `engine` is the
@@ -20,6 +21,7 @@ export default function ImportUrlDialog({
   onImport: (url: string) => boolean;
   engine?: Engine;
 }) {
+  const t = useT();
   const hints = urlHints(engine);
   const [url, setUrl] = useState("");
   const [invalid, setInvalid] = useState(false);
@@ -43,15 +45,15 @@ export default function ImportUrlDialog({
     <Dialog
       open={open}
       onClose={close}
-      title="Import from URL"
+      title={t("connect.importUrlDialog.importFromUrl")}
       description={hints.description}
       footer={
         <>
           <Button variant="neutral" size="sm" onClick={close}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" size="sm" onClick={submit} disabled={!url.trim()}>
-            Import
+            {t("connect.importUrlDialog.import")}
           </Button>
         </>
       }

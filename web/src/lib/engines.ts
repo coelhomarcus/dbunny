@@ -1,12 +1,13 @@
+import type { StaticKey } from "../i18n/store.ts";
 import type { ColumnGeneration, Engine, ExplainFormat } from "@/types";
 import type { SqlDialectName } from "./sqlStatements";
 
 /** The databases offered when creating a connection; one not ready would show as coming soon. */
-export const ENGINE_CARDS: { id: "postgres" | "sqlite" | "mysql" | "mariadb"; label: string; /** What kind of connection it is, under the name. */ kind: string; available: boolean }[] = [
-  { id: "postgres", label: "PostgreSQL", kind: "Server connection", available: true },
-  { id: "sqlite", label: "SQLite", kind: "Database file", available: true },
-  { id: "mysql", label: "MySQL", kind: "Server connection", available: true },
-  { id: "mariadb", label: "MariaDB", kind: "Server connection", available: true },
+export const ENGINE_CARDS: { id: "postgres" | "sqlite" | "mysql" | "mariadb"; label: string; /** What kind of connection it is, under the name. */ kindKey: StaticKey; available: boolean }[] = [
+  { id: "postgres", label: "PostgreSQL", kindKey: "connect.enginePicker.serverConnection", available: true },
+  { id: "sqlite", label: "SQLite", kindKey: "connect.enginePicker.databaseFile", available: true },
+  { id: "mysql", label: "MySQL", kindKey: "connect.enginePicker.serverConnection", available: true },
+  { id: "mariadb", label: "MariaDB", kindKey: "connect.enginePicker.serverConnection", available: true },
 ];
 
 export type EngineCardId = (typeof ENGINE_CARDS)[number]["id"];

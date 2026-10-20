@@ -81,3 +81,22 @@ test("a prop with a capitalized sentence or word is text, whatever its name", ()
   assert.deepEqual(lines('const a = <Thing variant="primary" side="top" className="Foo bar" type="button" />;'), []);
   assert.deepEqual(lines('const a = <Thing data-state="Open" onClick={x} />;'), []);
 });
+
+test("object properties that carry words are text, in a tsx or a ts file", () => {
+  assert.deepEqual(lines('const tabs = [{ value: "a", label: "Connection" }, { value: "b", label: "SSH agent" }];'), ["Connection", "SSH agent"]);
+  assert.deepEqual(lines('const a = <Tabs options={[{ value: "require", label: "Required" }]} />;'), ["Required"]);
+  assert.deepEqual(looseText('notify({ text: "Saved the query", tone: "success" });', "x.ts").map((found) => found.text), ["Saved the query"]);
+  assert.deepEqual(looseText('const a = { label: t("a.b"), name: "Postgres", value: "x" };', "x.ts"), []);
+  assert.deepEqual(looseText('const a = { title: ok ? "Yes" : "No" };', "x.ts").map((found) => found.text), ["Yes", "No"]);
+  assert.deepEqual(looseText('const a = { label: "NULL", description: "SQL" };', "x.ts"), []);
+});
+
+test("a ts file is read for those properties and nothing else", () => {
+  assert.deepEqual(looseText('export const x = "Some words"; function f() { return "More words"; }', "x.ts"), []);
+});
+
+test("identifiers are not text", () => {
+  assert.deepEqual(lines('const a = <b>{["sslRootCert", t("a.b")].map((k) => k)}</b>;'), []);
+  assert.deepEqual(lines('const a = <b>{cond ? "snake_case" : "kebab-case"}</b>;'), []);
+  assert.deepEqual(lines('const a = <b>{cond ? "empty" : "Full"}</b>;'), ["empty", "Full"]);
+});

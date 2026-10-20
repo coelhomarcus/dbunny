@@ -1,4 +1,5 @@
 import { isMysqlFamily } from "./engines.ts";
+import { t } from "../i18n/store.ts";
 import type { Engine, MysqlConnectParams, SavedConnection, SavedConnectionInput, SavedTag, SshConfig } from "@/types";
 // With the extension, so Node's test runner can load it too
 import { type ConnectionFields, buildConnectionUrl, isSocketHost, parseConnectionUrl, parseMysqlUrl, tlsFieldsOf, tlsSettingsOf } from "./connectionUrl.ts";
@@ -124,33 +125,24 @@ export function draftFromUrl(url: string): ConnectionDraft | null {
   return null;
 }
 
+/** Example URLs for the import dialog; they are written the way the databases write them in every language. */
+const URL_EXAMPLE = {
+  mysql: "mysql://user:password@host:3306/database",
+  mariadb: "mariadb://user:password@host:3306/database",
+  postgres: "postgresql://user:password@host:5432/database",
+};
+
 /** What the import-from-URL dialog says: for one database, or (with none) for any server database. */
 export function urlHints(engine: Engine | undefined): { description: string; placeholder: string; invalid: string } {
   switch (engine) {
     case "mysql":
-      return {
-        description: "Paste a MySQL connection string to fill in the form.",
-        placeholder: "mysql://user:password@host:3306/database",
-        invalid: "That doesn't look like a mysql:// connection URL.",
-      };
+      return { description: t("connect.urlHints.mysqlDescription"), placeholder: URL_EXAMPLE.mysql, invalid: t("connect.urlHints.mysqlInvalid") };
     case "mariadb":
-      return {
-        description: "Paste a MariaDB connection string to fill in the form.",
-        placeholder: "mariadb://user:password@host:3306/database",
-        invalid: "That doesn't look like a mariadb:// connection URL.",
-      };
+      return { description: t("connect.urlHints.mariadbDescription"), placeholder: URL_EXAMPLE.mariadb, invalid: t("connect.urlHints.mariadbInvalid") };
     case "postgres":
-      return {
-        description: "Paste a PostgreSQL connection string to fill in the form.",
-        placeholder: "postgresql://user:password@host:5432/database",
-        invalid: "That doesn't look like a postgres:// connection URL.",
-      };
+      return { description: t("connect.urlHints.postgresDescription"), placeholder: URL_EXAMPLE.postgres, invalid: t("connect.urlHints.postgresInvalid") };
     default:
-      return {
-        description: "Paste a PostgreSQL, MySQL or MariaDB connection string to fill in the form.",
-        placeholder: "postgresql://user:password@host:5432/database",
-        invalid: "That doesn't look like a postgres://, mysql:// or mariadb:// connection URL.",
-      };
+      return { description: t("connect.urlHints.anyDescription"), placeholder: URL_EXAMPLE.postgres, invalid: t("connect.urlHints.anyInvalid") };
   }
 }
 

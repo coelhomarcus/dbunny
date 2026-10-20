@@ -1,7 +1,13 @@
 import { en } from "./locales/en.ts";
 import { makeFormatters, type Formatters } from "./format.ts";
 import { lookup, pick, translate } from "./translate.ts";
-import type { ArgsFor, Catalog, Locale, MessageAt, MessageKey, Params } from "./messages.ts";
+import type { ArgsFor, Catalog, Locale, MessageAt, MessageKey, Params, ParamNames } from "./messages.ts";
+
+/** A key of the catalog, for code that picks a message at run time (a table of keys). */
+export type Key = MessageKey<typeof en>;
+
+/** The keys whose message has no parameters: what a table of keys can hold and `t` can read without arguments. */
+export type StaticKey = { [K in Key]: [ParamNames<MessageAt<typeof en, K>>] extends [never] ? K : never }[Key];
 
 /** Catalogs by language; English is in the main bundle, the others load when they are asked for. */
 const LOADERS: Record<Locale, () => Promise<Catalog>> = {
