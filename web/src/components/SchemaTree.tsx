@@ -53,6 +53,7 @@ import {
   Waypoints,
   type LucideProps,
 } from "lucide-react";
+import { useT } from "../i18n";
 
 type ObjectKind = ExplorerObject["kind"];
 
@@ -175,6 +176,7 @@ function GroupRow({
  * categories that only show when they have something, and columns under each table.
  */
 export default function SchemaTree() {
+  const t = useT();
   const { documents, openDocument, renameRelation, renameSchema, dropRelation, dropSchema, refreshData } = useDocuments();
   const { tabId } = useTab();
   const api = useApi();
@@ -448,9 +450,9 @@ export default function SchemaTree() {
   function columnRows(schema: string, name: string, depth: number) {
     const value = columns[`t:${schema}.${name}`];
     const pad = INDENT[Math.min(depth, INDENT.length - 1)];
-    if (value === undefined || value === "loading") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>Loading columns…</div>;
-    if (value === "error") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>Couldn't read the columns</div>;
-    if (value.length === 0) return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>No columns</div>;
+    if (value === undefined || value === "loading") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>{t("ui.schemaTree.loadingColumns")}</div>;
+    if (value === "error") return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>{t("ui.schemaTree.columnsFailed")}</div>;
+    if (value.length === 0) return <div className={cn("py-1 text-xs text-muted-foreground/70", pad)}>{t("ui.schemaTree.noColumns")}</div>;
     return value.map((col) => (
       <div
         key={col.name}
@@ -465,9 +467,9 @@ export default function SchemaTree() {
         className={cn("flex h-6 items-center gap-1.5 pr-2 text-xs text-muted-foreground", pad)}
       >
         {col.isPrimaryKey ? (
-          <KeyRound size={11} className="shrink-0 text-warning-foreground" aria-label="Primary key" />
+          <KeyRound size={11} className="shrink-0 text-warning-foreground" aria-label={t("ui.schemaTree.primaryKey")} />
         ) : col.foreignKey ? (
-          <Link2 size={11} className="shrink-0 text-info-foreground" aria-label="Foreign key" />
+          <Link2 size={11} className="shrink-0 text-info-foreground" aria-label={t("ui.schemaTree.foreignKey")} />
         ) : (
           <span className="size-2.75 shrink-0" />
         )}
@@ -533,7 +535,7 @@ export default function SchemaTree() {
               <button
                 type="button"
                 tabIndex={-1}
-                aria-label={columnsOpen ? `Hide the columns of ${object.name}` : `Show the columns of ${object.name}`}
+                aria-label={t(columnsOpen ? "ui.schemaTree.hideColumnsOf" : "ui.schemaTree.showColumnsOf", { name: object.name })}
                 aria-expanded={columnsOpen}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -556,7 +558,7 @@ export default function SchemaTree() {
           {relation && (
             <button
               type="button"
-              aria-label={pinned ? `Unpin ${object.name}` : `Pin ${object.name}`}
+              aria-label={t(pinned ? "ui.schemaTree.unpin" : "ui.schemaTree.pin", { name: object.name })}
               onClick={() => togglePin(schema, object)}
               className={cn(
                 "absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-opacity cursor-pointer hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100",
@@ -616,7 +618,7 @@ export default function SchemaTree() {
     return (
       <button
         type="button"
-        aria-label={`New table in ${schema}`}
+        aria-label={t("ui.schemaTree.newTableIn", { schema })}
         onClick={() => openDocument({ kind: "create-table", schema })}
         className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer"
       >
@@ -691,7 +693,7 @@ export default function SchemaTree() {
     <div className="flex h-full flex-col select-none">
       {/* Header: what's here, and the explorer's own actions */}
       <div className="flex h-8 shrink-0 items-center gap-1 pl-3 pr-1.5">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">Explorer</span>
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">{t("ui.schemaTree.explorer")}</span>
         <div className="ml-auto flex items-center">
           {tree && schemaMenuItems(null).length > 0 && (
             <Tooltip label={headerMenuLabel} side="bottom">
@@ -716,19 +718,19 @@ export default function SchemaTree() {
               </Button>
             </Tooltip>
           )}
-          <Tooltip label={allClosed ? "Expand all" : "Collapse all"} side="bottom">
+          <Tooltip label={t(allClosed ? "ui.schemaTree.expandAll" : "ui.schemaTree.collapseAll")} side="bottom">
             <Button
               variant="ghost-muted"
               size="icon-xs"
-              aria-label={allClosed ? "Expand all" : "Collapse all"}
+              aria-label={t(allClosed ? "ui.schemaTree.expandAll" : "ui.schemaTree.collapseAll")}
               onClick={toggleAll}
               disabled={!tree}
             >
               {allClosed ? <ChevronsUpDown /> : <ChevronsDownUp />}
             </Button>
           </Tooltip>
-          <Tooltip label="Refresh" side="bottom">
-            <Button variant="ghost-muted" size="icon-xs" aria-label="Refresh the explorer" onClick={() => load(false)} disabled={refreshing}>
+          <Tooltip label={t("ui.schemaTree.refresh")} side="bottom">
+            <Button variant="ghost-muted" size="icon-xs" aria-label={t("ui.schemaTree.refreshExplorer")} onClick={() => load(false)} disabled={refreshing}>
               <RefreshCw className={refreshing ? "animate-spin" : undefined} />
             </Button>
           </Tooltip>
@@ -744,15 +746,15 @@ export default function SchemaTree() {
           onKeyDown={(e) => {
             if (e.key === "Escape") setFilter("");
           }}
-          placeholder="Filter objects"
-          aria-label="Filter objects"
+          placeholder={t("ui.schemaTree.filterObjects")}
+          aria-label={t("ui.schemaTree.filterObjects")}
           spellCheck={false}
           className="h-7 w-full rounded-md border border-transparent bg-muted pl-7 pr-7 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring focus:bg-card"
         />
         {filter && (
           <button
             type="button"
-            aria-label="Clear the filter"
+            aria-label={t("ui.schemaTree.clearTheFilter")}
             onClick={() => setFilter("")}
             className="absolute right-3.5 top-1/2 flex size-4 -translate-y-[calc(50%+3px)] items-center justify-center rounded text-muted-foreground hover:text-foreground cursor-pointer"
           >
@@ -764,9 +766,9 @@ export default function SchemaTree() {
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {error ? (
           <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-            <p className="text-xs text-muted-foreground">Couldn't read the database's objects.</p>
+            <p className="text-xs text-muted-foreground">{t("ui.schemaTree.objectsFailed")}</p>
             <Button variant="outline" size="xs" onClick={() => load(true)}>
-              Try again
+              {t("ui.schemaTree.tryAgain")}
             </Button>
           </div>
         ) : !tree ? (
@@ -781,19 +783,19 @@ export default function SchemaTree() {
             <span className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
               <Database size={16} />
             </span>
-            <p className="text-[13px] font-medium">No tables yet</p>
-            <p className="text-xs text-muted-foreground">This database has no tables, views or functions of its own.</p>
+            <p className="text-[13px] font-medium">{t("ui.schemaTree.noTables")}</p>
+            <p className="text-xs text-muted-foreground">{t("ui.schemaTree.emptyHint")}</p>
             {!readOnly && (
               <Button variant="outline" size="xs" className="mt-1" onClick={() => openDocument({ kind: "create-table", schema: defaultSchema })}>
-                <Plus /> Create a table
+                <Plus /> {t("ui.schemaTree.createATable")}
               </Button>
             )}
           </div>
         ) : query && shown === 0 ? (
           <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-            <p className="text-xs text-muted-foreground">Nothing matches “{query}”.</p>
+            <p className="text-xs text-muted-foreground">{t("ui.schemaTree.nothingMatches", { query })}</p>
             <Button variant="ghost-muted" size="xs" onClick={() => setFilter("")}>
-              Clear the filter
+              {t("ui.schemaTree.clearTheFilter")}
             </Button>
           </div>
         ) : (
@@ -805,7 +807,7 @@ export default function SchemaTree() {
                   open={!expanded.has("pinned-closed")}
                   onToggle={() => toggle("pinned-closed")}
                   icon={<Pin size={13} className="shrink-0 text-primary/80" />}
-                  label="Pinned"
+                  label={t("ui.schemaTree.pinned")}
                 />
                 {!expanded.has("pinned-closed") &&
                   pinnedObjects.map(({ schema, object }) =>
@@ -835,7 +837,7 @@ export default function SchemaTree() {
                   />
                   {isOpen(key) &&
                     (schema.objects.length === 0 ? (
-                      <div className="py-1 pl-9 text-xs text-muted-foreground/70">Empty schema</div>
+                      <div className="py-1 pl-9 text-xs text-muted-foreground/70">{t("ui.schemaTree.emptySchema")}</div>
                     ) : (
                       categoryGroups(schema.name, schema.objects, 1)
                     ))}
@@ -853,13 +855,13 @@ export default function SchemaTree() {
               open={expanded.has("extensions")}
               onToggle={toggleExtensions}
               icon={<Puzzle size={14} className="shrink-0 text-orange-500/80" />}
-              label="Extensions"
+              label={t("ui.schemaTree.extensions")}
             />
             {expanded.has("extensions") &&
               (extensions === null ? (
-                <div className="py-1 pl-9 text-xs text-muted-foreground/70">Loading…</div>
+                <div className="py-1 pl-9 text-xs text-muted-foreground/70">{t("ui.schemaTree.loading")}</div>
               ) : extensions.length === 0 ? (
-                <div className="py-1 pl-9 text-xs text-muted-foreground/70">None installed</div>
+                <div className="py-1 pl-9 text-xs text-muted-foreground/70">{t("ui.schemaTree.noneInstalled")}</div>
               ) : (
                 extensions.map((ext) => (
                   <div key={ext.name} className="flex h-7 items-center gap-2 rounded-md pl-9 pr-2 text-sm text-muted-foreground">

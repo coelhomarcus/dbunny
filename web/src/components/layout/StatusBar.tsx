@@ -4,9 +4,11 @@ import { showUpdate, useUpdate } from "../../lib/updater";
 import type { ConnectionInfo } from "@/types";
 import { mask } from "../../lib/connectionSummary";
 import { engineLabel, locationOf } from "../../lib/engines";
+import { useT } from "../../i18n";
 
 /** Brings back the update notice after "Later": an update is waiting or installed. */
 function UpdateIndicator() {
+  const t = useT();
   const { state, dismissed } = useUpdate();
   if (!dismissed || (state.status !== "available" && state.status !== "ready")) return null;
   return (
@@ -16,7 +18,7 @@ function UpdateIndicator() {
       className="mr-1 flex h-5 items-center gap-1.5 rounded-md px-1.5 font-medium text-primary transition-colors cursor-pointer hover:bg-primary/10"
     >
       <span className="size-1.5 rounded-full bg-primary" />
-      {state.status === "ready" ? "Restart to update" : `Update to ${state.version}`}
+      {state.status === "ready" ? t("ui.statusBar.restartToUpdate") : t("ui.statusBar.updateTo", { version: state.version })}
     </button>
   );
 }
@@ -34,25 +36,26 @@ export default function StatusBar({
   onToggleReveal: () => void;
   onDisconnect: () => void;
 }) {
+  const t = useT();
   const { where: host, database } = connectionInfo ? locationOf(connectionInfo) : { where: "", database: "" };
 
   return (
     <footer className="flex h-7 shrink-0 items-center gap-3 px-1.5 text-[11px] text-muted-foreground select-none">
       <span className="flex items-center gap-1.5 text-foreground">
         <span className="size-1.5 rounded-full bg-success" />
-        Connected
+        {t("ui.statusBar.connected")}
       </span>
       {connectionInfo?.readOnly && (
         <span className="flex items-center gap-1 rounded bg-warning/12 px-1.5 py-px font-medium text-warning-foreground">
           <Lock size={10} />
-          Read-only
+          {t("ui.statusBar.readOnly")}
         </span>
       )}
       {/* The toggle sits on the details it reveals */}
-      <Tooltip label={revealed ? "Hide the connection details" : "Show the connection details"} side="top">
+      <Tooltip label={revealed ? t("ui.statusBar.hideDetails") : t("ui.statusBar.showDetails")} side="top">
         <button
           onClick={onToggleReveal}
-          aria-label={revealed ? "Hide connection details" : "Show connection details"}
+          aria-label={revealed ? t("ui.statusBar.hideDetails") : t("ui.statusBar.showDetails")}
           className="group flex h-5 items-center gap-2 rounded-md px-1.5 font-mono transition-colors cursor-pointer hover:bg-accent hover:text-foreground"
         >
           <span>{revealed ? host : mask(host)}</span>
@@ -72,7 +75,7 @@ export default function StatusBar({
           className="flex h-5 items-center gap-1 rounded-md px-1.5 hover:bg-destructive/10 hover:text-destructive-foreground transition-colors cursor-pointer"
         >
           <LogOut size={11} />
-          Disconnect
+          {t("ui.statusBar.disconnect")}
         </button>
       </div>
     </footer>
@@ -81,11 +84,12 @@ export default function StatusBar({
 
 /** Bottom bar of a tab that isn't connected yet (the home screen). */
 export function IdleStatusBar({ version }: { version: string | null }) {
+  const t = useT();
   return (
     <footer className="flex h-7 shrink-0 items-center gap-3 px-1.5 text-[11px] text-muted-foreground select-none">
       <span className="flex items-center gap-1.5">
         <span className="size-1.5 rounded-full bg-muted-foreground/50" />
-        Not connected
+        {t("ui.statusBar.notConnected")}
       </span>
       <div className="ml-auto flex items-center gap-1">
         <UpdateIndicator />

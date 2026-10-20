@@ -71,3 +71,14 @@ test("parseRich keeps text that only looks like markup", () => {
   assert.deepEqual(parseRich("close</b>"), ["close</b>"]);
   assert.deepEqual(parseRich("Hi {name}"), ["Hi {name}"]);
 });
+
+test("count is written with the separators of the language", () => {
+  const cat = { rows: { one: "{count} row", other: "{count} rows" } };
+  assert.equal(translate([cat], "en", "rows", { count: 1234 }), "1,234 rows");
+  const pt = { rows: { one: "{count} linha", other: "{count} linhas" } };
+  assert.equal(translate([pt], "pt-BR", "rows", { count: 1234 }), "1.234 linhas");
+});
+
+test("other numbers are written as they are", () => {
+  assert.equal(translate([{ year: "Year {year}" }], "pt-BR", "year", { year: 2026 }), "Year 2026");
+});

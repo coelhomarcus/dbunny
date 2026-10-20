@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import Button from "./Button";
+import { useT } from "../../i18n";
 
 type Tone = "neutral" | "info" | "warning" | "destructive";
 
@@ -40,6 +41,7 @@ export default function Dialog({
   /** Extra classes on the backdrop, for example to sit above another dialog. */
   overlayClassName?: string;
 }) {
+  const t = useT();
   useEffect(() => {
     if (!open) return;
     function onKeyDown(e: KeyboardEvent) {
@@ -72,7 +74,7 @@ export default function Dialog({
             <h2 className="text-[15px] font-semibold leading-tight">{title}</h2>
             {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
           </div>
-          <Button variant="ghost-muted" size="icon-xs" className="-mr-1.5 -mt-1" aria-label="Close" onClick={onClose}>
+          <Button variant="ghost-muted" size="icon-xs" className="-mr-1.5 -mt-1" aria-label={t("common.close")} onClick={onClose}>
             <X />
           </Button>
         </div>

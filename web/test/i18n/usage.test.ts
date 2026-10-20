@@ -9,7 +9,7 @@ const ROOT = join(import.meta.dirname, "../..");
 /** Keys that are used through a typed map or a code from the backend, so no `t("…")` names them. */
 const DYNAMIC_KEYS: string[] = [];
 /** Keys written ahead of the screens that will use them; each leaves this list when it is used. */
-const PENDING_KEYS: string[] = ["common.back", "common.cancel", "common.close", "common.copy", "common.delete", "common.retry", "common.save"];
+const PENDING_KEYS: string[] = ["common.back", "common.copy", "common.delete", "common.retry"];
 
 function sources(dir: string): string[] {
   const out: string[] = [];
@@ -30,15 +30,18 @@ function keysOf(node: unknown, prefix = ""): string[] {
 }
 
 // t("a.b") and <Rich id="a.b" />, as written in the code
-const USED = /(?<![\w.])t\(\s*"([\w.]+)"|<Rich\s[^>]*?\bid="([\w.]+)"/g;
-const used = new Set<string>();
-for (const text of sources(join(ROOT, "src"))) {
-  for (const match of text.matchAll(USED)) used.add(match[1] ?? match[2]);
+const CALLED = /(?<![\w.])t\(\s*"([\w.]+)"|<Rich\s[^>]*?\bid="([\w.]+)"/g;
+const texts = sources(join(ROOT, "src"));
+const called = new Set<string>();
+for (const text of texts) {
+  for (const match of text.matchAll(CALLED)) called.add(match[1] ?? match[2]);
 }
 const known = new Set(keysOf(en));
+// A key is used when its name is written in the code: in a call, a condition between two keys, or a typed map
+const used = new Set([...known].filter((key) => texts.some((text) => text.includes(`"${key}"`))));
 
 test("every static t() key exists in english", () => {
-  assert.deepEqual([...used].filter((key) => !known.has(key)).sort(), []);
+  assert.deepEqual([...called].filter((key) => !known.has(key)).sort(), []);
 });
 
 test("every key of english is used, or is waiting for its screen", () => {

@@ -10,27 +10,80 @@ export interface Loose {
 /** JSX attributes whose value a person reads. */
 const TEXT_ATTRIBUTES = new Set(["placeholder", "aria-label", "alt", "label", "description", "title", "hint"]);
 const HAS_LETTER = /\p{L}/u;
+/** Props that hold a name, a path or a style, not words for a person. */
+const NON_TEXT_ATTRIBUTES = new Set(["className", "class", "key", "id", "type", "role", "href", "src", "side", "variant", "size", "tone", "name", "value", "to", "htmlFor", "style", "rel", "target", "align", "mode", "kind", "d", "viewBox", "fill", "stroke", "transform", "points", "width", "height", "autoComplete", "inputMode", "spellCheck", "tabIndex", "lang", "dir", "xmlns", "ref", "list", "accept", "direction", "orientation", "icon"]);
+/** A capitalized word or sentence: "Close", "Discard and close". */
+const LOOKS_LIKE_TEXT = /^\p{Lu}\p{Ll}/u;
+/** Names that are never translated. */
+const BRANDS = ["DBunny", "PostgreSQL", "Postgres", "MySQL", "MariaDB", "SQLite", "SQL Server", "Claude Code", "Claude", "Codex", "ChatGPT", "Anthropic", "OpenAI", "GitHub"];
+/** Elements whose text is code or a key, not language. */
+const TECHNICAL_TAGS = new Set(["code", "kbd", "pre", "samp"]);
+
+/** Keywords and acronyms (no lowercase letter) and brand names say the same in every language. */
+function isTechnical(text: string): boolean {
+  let rest = text;
+  for (const brand of BRANDS) rest = rest.split(brand).join(" ");
+  return !/\p{Ll}/u.test(rest);
+}
 
 /** Text in a .tsx source that doesn't go through `t()`: JSX text, text attributes, and strings in expressions that are children. */
 export function looseText(source: string, fileName = "file.tsx"): Loose[] {
   const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX);
   const found: Loose[] = [];
+  const inTechnicalTag = (node: ts.Node) => {
+    for (let up = node.parent; up; up = up.parent) {
+      if (ts.isJsxElement(up) && TECHNICAL_TAGS.has(up.openingElement.tagName.getText(file))) return true;
+    }
+    return false;
+  };
   const add = (node: ts.Node, text: string) => {
-    if (HAS_LETTER.test(text)) found.push({ line: ts.getLineAndCharacterOfPosition(file, node.getStart(file)).line + 1, text });
+    if (HAS_LETTER.test(text) && !isTechnical(text) && !inTechnicalTag(node)) found.push({ line: ts.getLineAndCharacterOfPosition(file, node.getStart(file)).line + 1, text });
   };
 
-  // Strings under an expression; `t("key")` is how text is meant to get here, so its argument is not text
-  function strings(node: ts.Node) {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "t") return;
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
-      add(node, node.text);
+  // Text an expression hands to the screen: the value itself, the branches of a condition, what a
+  // callback returns. Arguments of calls, comparisons and statements are logic, not text.
+  function strings(node: ts.Node | undefined): void {
+    if (!node) return;
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return add(node, node.text);
+    if (ts.isTemplateExpression(node)) {
+      add(node.head, node.head.text);
+      for (const span of node.templateSpans) {
+        strings(span.expression);
+        add(span.literal, span.literal.text);
+      }
       return;
     }
-    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) {
-      visit(node);
+    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) return visit(node);
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isNonNullExpression(node)) return strings(node.expression);
+    if (ts.isConditionalExpression(node)) {
+      strings(node.whenTrue);
+      strings(node.whenFalse);
       return;
     }
-    ts.forEachChild(node, strings);
+    if (ts.isBinaryExpression(node)) {
+      const op = node.operatorToken.kind;
+      if (op === ts.SyntaxKind.AmpersandAmpersandToken) return strings(node.right);
+      if (op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken) {
+        strings(node.left);
+        strings(node.right);
+      }
+      return;
+    }
+    if (ts.isArrayLiteralExpression(node)) return node.elements.forEach(strings);
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return ts.isBlock(node.body) ? returns(node.body) : strings(node.body);
+    if (ts.isCallExpression(node)) {
+      if (ts.isIdentifier(node.expression) && node.expression.text === "t") return;
+      // `["a", "b"].map(...)` shows the list; a callback shows what it returns
+      if (ts.isPropertyAccessExpression(node.expression)) strings(node.expression.expression);
+      node.arguments.forEach((argument) => (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument) ? strings(argument) : visitInside(argument)));
+    }
+  }
+
+  // The expressions a function body returns, not the ones it only computes with
+  function returns(node: ts.Node): void {
+    if (ts.isReturnStatement(node)) return strings(node.expression);
+    if (ts.isFunctionLike(node) || ts.isClassLike(node)) return;
+    ts.forEachChild(node, returns);
   }
 
   function visit(node: ts.Node) {
@@ -39,7 +92,10 @@ export function looseText(source: string, fileName = "file.tsx"): Loose[] {
       return;
     }
     if (ts.isJsxAttribute(node)) {
-      if (TEXT_ATTRIBUTES.has(node.name.getText(file)) && node.initializer) strings(node.initializer);
+      const attribute = node.name.getText(file);
+      if (!TEXT_ATTRIBUTES.has(attribute) && !NON_TEXT_ATTRIBUTES.has(attribute) && !attribute.startsWith("data-") && !/^on[A-Z]/.test(attribute) && node.initializer && ts.isStringLiteral(node.initializer) && LOOKS_LIKE_TEXT.test(node.initializer.text)) {
+        add(node.initializer, node.initializer.text);
+      } else if (TEXT_ATTRIBUTES.has(attribute) && node.initializer) strings(ts.isJsxExpression(node.initializer) ? node.initializer.expression : node.initializer);
       else if (node.initializer && ts.isJsxExpression(node.initializer) && node.initializer.expression) visitInside(node.initializer.expression);
       return;
     }

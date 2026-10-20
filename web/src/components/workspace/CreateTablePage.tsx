@@ -19,6 +19,8 @@ import Checkbox from "../Checkbox";
 import SegmentedTabs from "../ui/SegmentedTabs";
 import { selectClass } from "../ui/styles";
 import { SqlPreviewBox } from "../schema/SqlPreview";
+import { useT } from "../../i18n";
+import { Rich } from "../../i18n/Rich";
 
 const PARTITION_METHODS = ["RANGE", "LIST", "HASH"];
 
@@ -40,6 +42,7 @@ const cellClass =
 
 /** A full page for a new table: a short column list, or the full set of options. */
 export default function CreateTablePage({ documentId, schema: initialSchema }: { documentId: string; schema: string }) {
+  const t = useT();
   const api = useApi();
   const { tabId } = useTab();
   const { openDocument, closeDocument, updateCreateTable, setQueryDirty } = useDocuments();
@@ -180,24 +183,24 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
       <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
           <div className="flex flex-col gap-2">
-            <Field label="Schema">
+            <Field label={t("ui.createTablePage.schema")}>
               <Input
                 value={schema}
                 onChange={(e) => setSchema(e.target.value)}
                 readOnly={!capabilities.schemas}
                 spellCheck={false}
-                aria-label="Schema"
+                aria-label={t("ui.createTablePage.schema")}
                 className="h-9 border-0 bg-foreground/[0.04] font-medium shadow-none focus-visible:ring-1 dark:bg-foreground/[0.04]"
               />
             </Field>
-            <Field label="Table name">
+            <Field label={t("ui.createTablePage.tableName")}>
               <Input
                 value={table}
                 onChange={(e) => setTable(e.target.value)}
-                placeholder="untitled_table"
+                placeholder={t("ui.createTablePage.tableNamePlaceholder")}
                 autoFocus
                 spellCheck={false}
-                aria-label="Table name"
+                aria-label={t("ui.createTablePage.tableName")}
                 className="h-9 border-0 bg-foreground/[0.04] font-medium shadow-none focus-visible:ring-1 dark:bg-foreground/[0.04]"
               />
             </Field>
@@ -205,7 +208,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
 
           <div>
             <div className="mb-3 flex items-center gap-3">
-              <h2 className="text-sm font-semibold">Columns</h2>
+              <h2 className="text-sm font-semibold">{t("ui.createTablePage.columns")}</h2>
               <SegmentedTabs
                 value={mode}
                 onChange={setMode}
@@ -217,7 +220,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
               <Button
                 variant="primary"
                 size="icon-sm"
-                aria-label="Add column"
+                aria-label={t("ui.createTablePage.addColumn")}
                 className="ml-auto rounded-full"
                 onClick={() => setRows((prev) => [...prev, newRow()])}
               >
@@ -228,15 +231,15 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
             <div className={advanced ? "overflow-x-auto" : undefined}>
             <div className={advanced ? "min-w-[64rem]" : undefined}>
             <div className={cn("grid items-center px-1 pb-1 text-[11px] text-muted-foreground", grid)}>
-              <span className="px-2.5">Name</span>
-              <span className="px-2.5">Type</span>
-              <span className="text-center">Nullable</span>
-              <span className="px-2.5">Default value</span>
-              {capabilities.comments && <span className="px-2.5">Comment</span>}
-              <span className="text-center">Primary</span>
-              {advanced && <span className="text-center">Unique</span>}
-              {advanced && <span className="px-2.5">Generation</span>}
-              {advanced && <span className="px-2.5">Check</span>}
+              <span className="px-2.5">{t("ui.createTablePage.name")}</span>
+              <span className="px-2.5">{t("ui.createTablePage.type")}</span>
+              <span className="text-center">{t("ui.createTablePage.nullable")}</span>
+              <span className="px-2.5">{t("ui.createTablePage.defaultValue")}</span>
+              {capabilities.comments && <span className="px-2.5">{t("ui.createTablePage.comment")}</span>}
+              <span className="text-center">{t("ui.createTablePage.primary")}</span>
+              {advanced && <span className="text-center">{t("ui.createTablePage.unique")}</span>}
+              {advanced && <span className="px-2.5">{t("ui.createTablePage.generation")}</span>}
+              {advanced && <span className="px-2.5">{t("ui.createTablePage.check")}</span>}
               <span />
             </div>
 
@@ -244,8 +247,8 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
               {rows.map((r) => (
                 <div key={r.key} className="rounded-md bg-foreground/[0.045]">
                   <div className={cn("grid items-center", grid)}>
-                    <Input value={r.name} onChange={(e) => update(r.key, { name: e.target.value })} aria-label="Column name" placeholder="name" spellCheck={false} className={cn(cellClass, "font-mono text-[13px]")} />
-                    <Input value={r.dataType} onChange={(e) => update(r.key, { dataType: e.target.value })} aria-label="Type" spellCheck={false} list={`dbunny-new-table-types-${documentId}`} className={cn(cellClass, "font-mono text-[13px]")} />
+                    <Input value={r.name} onChange={(e) => update(r.key, { name: e.target.value })} aria-label={t("ui.createTablePage.columnName")} placeholder={t("ui.createTablePage.namePlaceholder")} spellCheck={false} className={cn(cellClass, "font-mono text-[13px]")} />
+                    <Input value={r.dataType} onChange={(e) => update(r.key, { dataType: e.target.value })} aria-label={t("ui.createTablePage.type")} spellCheck={false} list={`dbunny-new-table-types-${documentId}`} className={cn(cellClass, "font-mono text-[13px]")} />
                     <span className="flex justify-center">
                       <Checkbox
                         checked={r.nullable && !r.primaryKey}
@@ -256,14 +259,14 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                     <Input
                       value={r.generation === "none" ? (r.default ?? "") : ""}
                       onChange={(e) => update(r.key, { default: e.target.value })}
-                      aria-label="Default value"
+                      aria-label={t("ui.createTablePage.defaultValue")}
                       placeholder="(NULL)"
                       disabled={r.generation !== "none"}
                       spellCheck={false}
                       className={cn(cellClass, "font-mono text-[13px]")}
                     />
                     {capabilities.comments && (
-                      <Input value={r.comment ?? ""} onChange={(e) => update(r.key, { comment: e.target.value })} aria-label="Comment" placeholder="(NULL)" className={cn(cellClass, "text-[13px]")} />
+                      <Input value={r.comment ?? ""} onChange={(e) => update(r.key, { comment: e.target.value })} aria-label={t("ui.createTablePage.comment")} placeholder="(NULL)" className={cn(cellClass, "text-[13px]")} />
                     )}
                     <span className="flex justify-center">
                       <Checkbox
@@ -278,7 +281,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                     )}
                     {advanced && (
                       <select
-                        aria-label="Generation"
+                        aria-label={t("ui.createTablePage.generation")}
                         value={r.generation}
                         onChange={(e) => update(r.key, { generation: e.target.value as ColumnGeneration })}
                         className="h-9 w-full cursor-pointer bg-transparent px-2 text-[13px] outline-none"
@@ -291,18 +294,18 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                       </select>
                     )}
                     {advanced && (
-                      <Input value={r.check ?? ""} onChange={(e) => update(r.key, { check: e.target.value })} aria-label="Check" placeholder="price >= 0" spellCheck={false} className={cn(cellClass, "font-mono text-[13px]")} />
+                      <Input value={r.check ?? ""} onChange={(e) => update(r.key, { check: e.target.value })} aria-label={t("ui.createTablePage.check")} placeholder={t("ui.createTablePage.checkPlaceholder")} spellCheck={false} className={cn(cellClass, "font-mono text-[13px]")} />
                     )}
                     <span className="flex justify-center">
-                      <Button variant="ghost-muted" size="icon-xs" aria-label={`Remove ${r.name || "column"}`} onClick={() => setRows((prev) => prev.filter((p) => p.key !== r.key))} disabled={rows.length === 1}>
+                      <Button variant="ghost-muted" size="icon-xs" aria-label={t("ui.createTablePage.removeColumn", { name: r.name || t("ui.createTablePage.columnFallback") })} onClick={() => setRows((prev) => prev.filter((p) => p.key !== r.key))} disabled={rows.length === 1}>
                         <X />
                       </Button>
                     </span>
                   </div>
                   {advanced && r.generation === "generated" && (
                     <div className="grid grid-cols-[7.5rem_1fr] items-center border-t border-border/50">
-                      <span className="px-2.5 text-[11px] text-muted-foreground">Expression</span>
-                      <Input value={r.generated ?? ""} onChange={(e) => update(r.key, { generated: e.target.value })} aria-label="Generated expression" placeholder="e.g. price * 2" spellCheck={false} className={cn(cellClass, "font-mono text-[13px]")} />
+                      <span className="px-2.5 text-[11px] text-muted-foreground">{t("ui.createTablePage.expression")}</span>
+                      <Input value={r.generated ?? ""} onChange={(e) => update(r.key, { generated: e.target.value })} aria-label={t("ui.createTablePage.generatedExpression")} placeholder={t("ui.createTablePage.expressionPlaceholder")} spellCheck={false} className={cn(cellClass, "font-mono text-[13px]")} />
                     </div>
                   )}
                 </div>
@@ -311,8 +314,8 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
             </div>
             </div>
             <datalist id={`dbunny-new-table-types-${documentId}`}>
-              {suggestedTypes.map((t) => (
-                <option key={t} value={t} />
+              {suggestedTypes.map((type) => (
+                <option key={type} value={type} />
               ))}
             </datalist>
           </div>
@@ -321,11 +324,11 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
             <>
               <section>
                 <div className="mb-3 flex items-center">
-                  <h2 className="text-sm font-semibold">Foreign keys</h2>
+                  <h2 className="text-sm font-semibold">{t("ui.createTablePage.foreignKeys")}</h2>
                   <Button
                     variant="primary"
                     size="icon-sm"
-                    aria-label="Add foreign key"
+                    aria-label={t("ui.createTablePage.addForeignKey")}
                     className="ml-auto rounded-full"
                     onClick={() =>
                       setForeignKeys((prev) => [
@@ -350,7 +353,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                           <div className="mb-2 flex items-start gap-2">
                             <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
                               {named.length === 0 ? (
-                                <span className="text-[13px] text-muted-foreground">Name a column first.</span>
+                                <span className="text-[13px] text-muted-foreground">{t("ui.createTablePage.nameAColumn")}</span>
                               ) : (
                                 named.map((name) => {
                                   const on = fk.columns.includes(name);
@@ -371,35 +374,35 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                                 })
                               )}
                             </div>
-                            <Button variant="ghost-muted" size="icon-xs" aria-label="Remove foreign key" onClick={() => setForeignKeys((prev) => prev.filter((item) => item.key !== fk.key))}>
+                            <Button variant="ghost-muted" size="icon-xs" aria-label={t("ui.createTablePage.removeForeignKey")} onClick={() => setForeignKeys((prev) => prev.filter((item) => item.key !== fk.key))}>
                               <X />
                             </Button>
                           </div>
                           <div className="grid gap-2 sm:grid-cols-3">
                             <select
-                              aria-label="References"
+                              aria-label={t("ui.createTablePage.references")}
                               value={fk.refTable}
                               onChange={(e) => patch({ refTable: e.target.value, refColumns: {} })}
                               className={cn(selectClass, "w-full")}
                             >
-                              <option value="">{relations === null ? "Loading…" : "References"}</option>
+                              <option value="">{relations === null ? t("common.loading") : t("ui.createTablePage.references")}</option>
                               {(relations ?? []).map((r) => (
                                 <option key={`${r.schema}.${r.name}`} value={`${r.schema}.${r.name}`}>
                                   {r.schema}.{r.name}
                                 </option>
                               ))}
                             </select>
-                            <select aria-label="On delete" value={fk.onDelete} onChange={(e) => patch({ onDelete: e.target.value })} className={cn(selectClass, "w-full")}>
+                            <select aria-label={t("ui.createTablePage.onDelete")} value={fk.onDelete} onChange={(e) => patch({ onDelete: e.target.value })} className={cn(selectClass, "w-full")}>
                               {REFERENTIAL_ACTIONS.map((action) => (
                                 <option key={action} value={action}>
-                                  On delete {action.toLowerCase()}
+                                  {t("ui.createTablePage.onDeleteAction", { action: action.toLowerCase() })}
                                 </option>
                               ))}
                             </select>
-                            <select aria-label="On update" value={fk.onUpdate} onChange={(e) => patch({ onUpdate: e.target.value })} className={cn(selectClass, "w-full")}>
+                            <select aria-label={t("ui.createTablePage.onUpdate")} value={fk.onUpdate} onChange={(e) => patch({ onUpdate: e.target.value })} className={cn(selectClass, "w-full")}>
                               {REFERENTIAL_ACTIONS.map((action) => (
                                 <option key={action} value={action}>
-                                  On update {action.toLowerCase()}
+                                  {t("ui.createTablePage.onUpdateAction", { action: action.toLowerCase() })}
                                 </option>
                               ))}
                             </select>
@@ -410,7 +413,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                                 <label key={column} className="flex items-center gap-2">
                                   <span className="w-24 shrink-0 truncate font-mono text-xs">{column}</span>
                                   <select
-                                    aria-label={`Column referenced by ${column}`}
+                                    aria-label={t("ui.createTablePage.referencedColumn", { column })}
                                     value={fk.refColumns[column] ?? guessReference(column, target)}
                                     onChange={(e) => patch({ refColumns: { ...fk.refColumns, [column]: e.target.value } })}
                                     className={cn(selectClass, "min-w-0 flex-1 font-mono text-xs")}
@@ -433,14 +436,14 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                 )}
                 {!capabilities.schemas && (
                   <p className="mt-2 text-xs text-muted-foreground">
-                    Referenced tables must be in schema <span className="font-mono">{schema || initialSchema}</span> (same database).
+                    <Rich id="ui.createTablePage.sameSchema" params={{ schema: schema || initialSchema }} tags={{ schema: (text) => <span className="font-mono">{text}</span> }} />
                   </p>
                 )}
               </section>
 
               {data.createTableFlags.length > 0 && (
                 <section className="flex flex-col gap-2">
-                  <h2 className="text-sm font-semibold">Options</h2>
+                  <h2 className="text-sm font-semibold">{t("ui.createTablePage.options")}</h2>
                   {(hasFlag("withoutRowid") || hasFlag("strict")) && (
                     <div className="flex flex-wrap gap-x-6 gap-y-1">
                       {hasFlag("withoutRowid") && <CheckOption checked={withoutRowid} onChange={setWithoutRowid} label="WITHOUT ROWID" />}
@@ -451,8 +454,8 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                   {hasFlag("partition") && (
                     <>
                       <div className="grid grid-cols-[9rem_1fr] gap-2">
-                        <select aria-label="Partition method" value={partitionMethod} onChange={(e) => setPartitionMethod(e.target.value)} className={cn(selectClass, "h-8 w-full")}>
-                          <option value="">No partition</option>
+                        <select aria-label={t("ui.createTablePage.partitionMethod")} value={partitionMethod} onChange={(e) => setPartitionMethod(e.target.value)} className={cn(selectClass, "h-8 w-full")}>
+                          <option value="">{t("ui.createTablePage.noPartition")}</option>
                           {PARTITION_METHODS.map((method) => (
                             <option key={method} value={method}>
                               PARTITION BY {method}
@@ -462,14 +465,14 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                         <Input
                           value={partitionExpr}
                           onChange={(e) => setPartitionExpr(e.target.value)}
-                          aria-label="Partition key"
-                          placeholder="partition key, e.g. created_at"
+                          aria-label={t("ui.createTablePage.partitionKey")}
+                          placeholder={t("ui.createTablePage.partitionKeyPlaceholder")}
                           disabled={!partitionMethod}
                           spellCheck={false}
                           className={cn("h-8 font-mono text-xs", partitionIncomplete && "border-destructive")}
                         />
                       </div>
-                      {partitionIncomplete && <p className="select-text text-xs text-destructive-foreground">Enter a partition key</p>}
+                      {partitionIncomplete && <p className="select-text text-xs text-destructive-foreground">{t("ui.createTablePage.partitionKeyRequired")}</p>}
                     </>
                   )}
                 </section>
@@ -490,10 +493,10 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
 
       <div className="flex h-12 shrink-0 items-center gap-3 border-t border-border px-6">
         {mode === "simple" && (hasIncompleteForeignKey || partitionIncomplete) ? (
-          <p className="min-w-0 flex-1 text-xs text-muted-foreground">Finish the advanced options before creating.</p>
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("ui.createTablePage.finishAdvanced")}</p>
         ) : null}
         <Button variant="primary" size="sm" className="ml-auto" onClick={create} disabled={!sql || busy || hasIncompleteForeignKey || partitionIncomplete || !table.trim() || !schema.trim()}>
-          Create table
+          {t("ui.createTablePage.createTable")}
         </Button>
       </div>
     </div>

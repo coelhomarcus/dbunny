@@ -1,11 +1,13 @@
 import { parseReleaseMarkdown, type Inline } from "../lib/releaseMarkdown";
 import { openExternal } from "../lib/openExternal";
+import { useT } from "../i18n";
 
 /** Release notes, drawn from their Markdown. */
 export default function ReleaseNotes({ markdown }: { markdown: string }) {
+  const t = useT();
   const blocks = parseReleaseMarkdown(markdown);
   if (blocks.length === 0) {
-    return <p className="text-sm text-muted-foreground">These release notes are empty.</p>;
+    return <p className="text-sm text-muted-foreground">{t("ui.releaseNotes.empty")}</p>;
   }
 
   return (

@@ -12,9 +12,11 @@ import CreateTablePage from "./CreateTablePage";
 import DiagramPage from "../diagram/DiagramPage";
 import Button from "../ui/Button";
 import AssistantDocument from "../assistant/AssistantDocument";
+import { useT } from "../../i18n";
 
 /** Mounts every open document and shows only the one in front. */
 export default function DocumentHost() {
+  const t = useT();
   const { documents, openDocument } = useDocuments();
   const { isActive } = useTab();
   if (documents.items.length === 0) {
@@ -23,13 +25,13 @@ export default function DocumentHost() {
         <span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
           <PanelsTopLeft size={22} />
         </span>
-        <p className="mt-4 text-sm font-medium text-foreground">Nothing is open</p>
+        <p className="mt-4 text-sm font-medium text-foreground">{t("ui.documentHost.title")}</p>
         <p className="mt-1 max-w-xs text-[13px] leading-relaxed text-muted-foreground">
-          Open a table, view, or routine from the explorer, or start a query.
+          {t("ui.documentHost.hint")}
         </p>
         <Button variant="primary" size="sm" className="mt-5" onClick={() => openDocument({ kind: "query" })}>
           <Plus />
-          New query
+          {t("ui.documentHost.newQuery")}
         </Button>
       </div>
     );

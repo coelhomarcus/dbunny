@@ -11,10 +11,26 @@ function rulesOf(locale: Locale): Intl.PluralRules {
   return rules;
 }
 
+const NUMBER_FORMATS = new Map<Locale, Intl.NumberFormat>();
+
+function numberFormat(locale: Locale): Intl.NumberFormat {
+  let format = NUMBER_FORMATS.get(locale);
+  if (!format) {
+    format = new Intl.NumberFormat(locale);
+    NUMBER_FORMATS.set(locale, format);
+  }
+  return format;
+}
+
 /** Replaces `{name}` with `params.name`; a name without a value stays as written. */
-export function interpolate(template: string, params?: Params): string {
+export function interpolate(template: string, params?: Params, writeCount?: (count: number) => string): string {
   if (!params) return template;
-  return template.replace(/\{(\w+)\}/g, (whole, name: string) => (name in params ? String(params[name]) : whole));
+  return template.replace(/\{(\w+)\}/g, (whole, name: string) => {
+    if (!(name in params)) return whole;
+    const value = params[name];
+    // A count is a quantity, so it is written the way the language writes numbers
+    return name === "count" && typeof value === "number" && writeCount ? writeCount(value) : String(value);
+  });
 }
 
 /** The text of a message for a count: a plain string as it is, a plural by the rules of the language. */
@@ -46,7 +62,7 @@ export function translate(catalogs: readonly Catalog[], locale: Locale, key: str
   const message = lookup(catalogs, key);
   if (message === undefined) return key;
   const count = typeof params?.count === "number" ? params.count : undefined;
-  return interpolate(pick(message, count, locale), params);
+  return interpolate(pick(message, count, locale), params, (n) => numberFormat(locale).format(n));
 }
 
 interface Frame {

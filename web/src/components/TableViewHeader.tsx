@@ -5,6 +5,7 @@ import Tooltip from "./Tooltip";
 import { HeaderTitle, PageHeader } from "./layout/PageHeader";
 import type { RelationType } from "../lib/api";
 import { Keys } from "./ui/Kbd";
+import { useT } from "../i18n";
 
 const LABEL: Record<RelationType, string> = {
   table: "Table",
@@ -48,6 +49,7 @@ export default function TableViewHeader({
   hasPendingChanges, dirtyRowCount, saving, onSave, onDiscard, onReviewSql,
   onInsertRow, filterCount, filtersOpen, onToggleFilters,
 }: TableViewHeaderProps) {
+  const t = useT();
   const isView = relationType === "view" || relationType === "matview";
   const readOnly = connectionReadOnly || isView;
   const canDelete = selectedCount > 0 && !hasNoPk && !readOnly;
@@ -57,23 +59,23 @@ export default function TableViewHeader({
         <HeaderTitle label={relationType ? `${LABEL[relationType]} · ${schema}` : schema}>{table}</HeaderTitle>
         {isView ? (
           <Tooltip
-            label={relationType === "matview" ? "A materialized view's rows can't be edited" : "A view's rows can't be edited"}
+            label={relationType === "matview" ? t("ui.tableViewHeader.matviewReadOnly") : t("ui.tableViewHeader.viewReadOnly")}
             side="bottom"
           >
             <Badge variant="neutral">
-              <Lock /> Read-only
+              <Lock /> {t("ui.tableViewHeader.readOnly")}
             </Badge>
           </Tooltip>
         ) : connectionReadOnly ? (
-          <Tooltip label="Read-only connection: rows can't be changed" side="bottom">
+          <Tooltip label={t("ui.tableViewHeader.readOnlyHint")} side="bottom">
             <Badge variant="warning">
-              <Lock /> Read-only
+              <Lock /> {t("ui.tableViewHeader.readOnly")}
             </Badge>
           </Tooltip>
         ) : hasNoPk ? (
-          <Tooltip label="No primary key, so rows can't be edited" side="bottom">
+          <Tooltip label={t("ui.tableViewHeader.noPrimaryKeyHint")} side="bottom">
             <Badge variant="warning">
-              <KeyRound /> No primary key
+              <KeyRound /> {t("ui.tableViewHeader.noPrimaryKey")}
             </Badge>
           </Tooltip>
         ) : null}
@@ -83,17 +85,17 @@ export default function TableViewHeader({
         {hasPendingChanges ? (
           <>
             <span className="mr-1 text-xs text-muted-foreground tabular-nums">
-              {dirtyRowCount} row{dirtyRowCount > 1 ? "s" : ""} changed
+              {t("ui.tableViewHeader.rowsChanged", { count: dirtyRowCount })}
             </span>
             <Button variant="ghost-muted" size="sm" onClick={onReviewSql}>
               <FileCode /> SQL
             </Button>
             <Button variant="ghost-muted" size="sm" onClick={onDiscard}>
-              <X /> Discard
+              <X /> {t("ui.tableViewHeader.discard")}
             </Button>
             <Button variant="primary" size="sm" onClick={onSave} disabled={saving}>
               <Save />
-              {saving ? "Saving…" : "Save"}
+              {saving ? t("ui.tableViewHeader.saving") : t("common.save")}
               <Keys keys="⌘S" tone="inverse" />
             </Button>
           </>
@@ -101,21 +103,21 @@ export default function TableViewHeader({
           <>
             <Button variant="ghost-muted" size="sm" data-active={filtersOpen || filterCount > 0} onClick={onToggleFilters}>
               <ListFilter />
-              Filter
+              {t("ui.tableViewHeader.filter")}
               {filterCount > 0 && <Badge variant="info">{filterCount}</Badge>}
             </Button>
             {/* With rows selected, deleting them takes Insert's place */}
             {canDelete ? (
               <Button variant="destructive" size="sm" onClick={onDelete} disabled={deleting}>
                 <Trash2 />
-                {deleting ? "Deleting…" : `Delete ${selectedCount} row${selectedCount > 1 ? "s" : ""}`}
+                {deleting ? t("ui.tableViewHeader.deleting") : t("ui.tableViewHeader.deleteRows", { count: selectedCount })}
               </Button>
             ) : (
               // Waits for the kind, so it never flashes on a view
               !readOnly && relationType && (
                 <Button variant="ghost-muted" size="sm" onClick={onInsertRow}>
                   <Plus />
-                  Insert
+                  {t("ui.tableViewHeader.insert")}
                 </Button>
               )
             )}
