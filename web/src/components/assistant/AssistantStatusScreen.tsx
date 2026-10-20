@@ -3,16 +3,19 @@ import { Check, Copy, Loader2, TriangleAlert } from "lucide-react";
 import { assistantApi } from "../../lib/api";
 import { writeClipboardText } from "../../lib/clipboard";
 import { openExternal } from "../../lib/openExternal";
+import type { AgentInfo } from "../../lib/assistantAgents";
 import type { AgentStatus } from "../../types/assistant";
 import Button from "../ui/Button";
 import Dialog from "../ui/Dialog";
 
 /** The assistant's agent is not ready: what is missing, and what to do about it. */
 export default function AssistantStatusScreen({
+  agent,
   status,
   onRetry,
   onSignIn,
 }: {
+  agent: AgentInfo;
   status: AgentStatus;
   onRetry: () => void;
   onSignIn: (methodId: string) => Promise<void>;
@@ -58,12 +61,12 @@ export default function AssistantStatusScreen({
       actions.push({ label: "Get Node.js", run: () => openExternal("https://nodejs.org"), primary: true }, { label: "Retry", run: onRetry });
       break;
     case "needsSignIn":
-      title = "Sign in to Claude";
+      title = agent.loginTitle;
       command = status.command;
       detail = command ? "Run this in a terminal and follow the steps, then try again." : "Sign in with your agent, then try again.";
       // An agent that signs in through the protocol (a browser opens) gets a button for each way it offers
       for (const method of status.methods.filter((method) => !command && method.id === "chat-gpt")) {
-        title = "Sign in to Codex";
+        title = agent.loginTitle;
         detail = "A browser opens to sign in with your ChatGPT account.";
         actions.push({ label: signingIn ? "Waiting for the browser…" : `Sign in with ${method.name}`, run: () => signIn(method.id), primary: true });
       }
@@ -73,7 +76,7 @@ export default function AssistantStatusScreen({
       title = status.message;
       break;
     case "failed":
-      title = `Couldn't start the Claude agent: ${status.message}`;
+      title = `Couldn't start ${agent.kind === "custom" ? "the agent" : agent.name}: ${status.message}`;
       actions.push({ label: "Retry", run: onRetry, primary: true }, { label: "Show log", run: showLog });
       break;
     case "stopped":
@@ -106,7 +109,7 @@ export default function AssistantStatusScreen({
               {copied ? <Check /> : <Copy />}
             </Button>
           </div>
-          <p className="mt-2 max-w-xs text-xs leading-relaxed text-muted-foreground">Already use Claude Code? Run claude and use /login instead.</p>
+          {agent.kind === "claude" && <p className="mt-2 max-w-xs text-xs leading-relaxed text-muted-foreground">Already use Claude Code? Run claude and use /login instead.</p>}
         </>
       )}
       {signInError && <p className="mt-3 max-w-xs text-xs leading-relaxed text-destructive-foreground">{signInError}</p>}

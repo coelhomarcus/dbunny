@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { agentFromStored, type AgentKind } from "./assistantAgents";
 
 /** App preferences, kept in this computer's local storage. The theme has its own store (lib/theme). */
 export interface Settings {
@@ -12,7 +13,9 @@ export interface Settings {
   assistantAskBeforeQueries: boolean;
   /** Rows of a query the assistant sees, from 10 to 1000. */
   assistantRowLimit: number;
-  /** The person's own command for the agent; empty for the usual one. */
+  /** The agent the assistant runs. */
+  assistantAgent: AgentKind;
+  /** The person's own command, for a custom agent. */
   assistantCommand: string;
 }
 
@@ -22,6 +25,7 @@ const DEFAULTS: Settings = {
   assistantEnabled: false,
   assistantAskBeforeQueries: true,
   assistantRowLimit: 100,
+  assistantAgent: "claude",
   assistantCommand: "",
 };
 
@@ -32,7 +36,9 @@ function read(): Settings {
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
     // Settings added later fall back to their defaults
-    return { ...DEFAULTS, ...(stored && typeof stored === "object" ? stored : {}) };
+    const merged = { ...DEFAULTS, ...(stored && typeof stored === "object" ? stored : {}) };
+    // Before the agent was a choice, a command of the person's own made it a custom one
+    return { ...merged, assistantAgent: agentFromStored(stored) };
   } catch {
     return { ...DEFAULTS };
   }

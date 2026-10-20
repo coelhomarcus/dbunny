@@ -1,0 +1,19 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { agentFromStored, agentInfo } from "../../src/lib/assistantAgents.ts";
+
+test("each agent has its name, company and the folder it keeps conversations in", () => {
+  assert.deepEqual(agentInfo("claude"), { kind: "claude", name: "Claude Code", account: "Claude", company: "Anthropic", folder: "~/.claude/projects", loginTitle: "Sign in to Claude" });
+  assert.deepEqual(agentInfo("codex"), { kind: "codex", name: "Codex", account: "ChatGPT", company: "OpenAI", folder: "~/.codex", loginTitle: "Sign in to Codex" });
+  assert.equal(agentInfo("custom").name, "your agent");
+});
+
+test("the agent comes from the setting, or from the command a person had set before there was a choice", () => {
+  assert.equal(agentFromStored({ assistantAgent: "codex" }), "codex");
+  assert.equal(agentFromStored({ assistantAgent: "claude", assistantCommand: "/a" }), "claude");
+  assert.equal(agentFromStored({ assistantAgent: "nonsense", assistantCommand: "/a" }), "custom");
+  assert.equal(agentFromStored({ assistantCommand: "/a" }), "custom");
+  assert.equal(agentFromStored({ assistantCommand: "  " }), "claude");
+  assert.equal(agentFromStored({}), "claude");
+  assert.equal(agentFromStored(null), "claude");
+});

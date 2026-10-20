@@ -15,6 +15,7 @@ import {
   resolveApproval,
   type Conversation,
 } from "../lib/assistantConversation";
+import { agentInfo } from "../lib/assistantAgents";
 import { ConversationOpener } from "../lib/assistantOpener";
 import { conversationOptions, getConnectionPrefs } from "../lib/assistantPrefs";
 import { isAssistantShortcut } from "../lib/assistantShortcut";
@@ -55,6 +56,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const emptyRef = useRef(true);
 
   const available = capabilities.assistant;
+  // The agent chosen in Settings; the person's own command is for a custom one only
+  const agent = settings.assistantAgent;
+  const command = agent === "custom" ? settings.assistantCommand || undefined : undefined;
   const enabled = settings.assistantEnabled;
 
   // The agent's status and the conversation's updates come as events
@@ -196,9 +200,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const retry = useCallback(async () => {
-    const command = settings.assistantCommand || undefined;
-    setStatus(status.state === "idle" ? await assistantApi.start(command) : await assistantApi.restart(command));
-  }, [settings.assistantCommand, status.state]);
+    setStatus(status.state === "idle" ? await assistantApi.start(agent, command) : await assistantApi.restart(agent, command));
+  }, [agent, command, status.state]);
 
   const signIn = useCallback(async (methodId: string) => {
     // The status comes back as an event, ready, once the agent is signed in
@@ -227,8 +230,20 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   // The agent starts the first time the assistant is looked at
   const wanted = available && enabled && (panelOpen || inTab);
   useEffect(() => {
-    if (wanted && status.state === "idle") assistantApi.start(settings.assistantCommand || undefined).then(setStatus).catch((e) => setStatus({ state: "failed", message: messageOf(e) }));
-  }, [wanted, status.state, settings.assistantCommand]);
+    if (wanted && status.state === "idle") assistantApi.start(agent, command).then(setStatus).catch((e) => setStatus({ state: "failed", message: messageOf(e) }));
+  }, [wanted, status.state, agent, command]);
+
+  // Another agent was chosen: the one that is up gives way to it
+  const lastAgent = useRef(agent);
+  const stateRef = useRef(status.state);
+  useEffect(() => {
+    stateRef.current = status.state;
+  }, [status.state]);
+  useEffect(() => {
+    if (lastAgent.current === agent) return;
+    lastAgent.current = agent;
+    if (stateRef.current !== "idle") assistantApi.restart(agent, command).then(setStatus).catch((e) => setStatus({ state: "failed", message: messageOf(e) }));
+  }, [agent, command]);
 
   // A question asked from the editor goes once the assistant can take it
   useEffect(() => {
@@ -307,8 +322,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       ask,
       retry,
       signIn,
+      agent: agentInfo(agent),
     }),
-    [available, status, enabled, panelOpen, inTab, expand, backToPanel, conversation, conversationId, models, history, refreshHistory, send, stop, approve, newChat, openConversation, setModel, ask, retry, signIn],
+    [available, status, enabled, panelOpen, inTab, expand, backToPanel, conversation, conversationId, models, history, refreshHistory, send, stop, approve, newChat, openConversation, setModel, ask, retry, signIn, agent],
   );
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;

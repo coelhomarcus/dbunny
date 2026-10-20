@@ -1,8 +1,11 @@
 import { createContext, useContext } from "react";
+import type { AgentInfo } from "../lib/assistantAgents";
 import type { Conversation } from "../lib/assistantConversation";
 import type { AgentStatus, Decision, ModelChoice, SessionSummary } from "../types/assistant";
 
 export interface AssistantValue {
+  /** The agent the assistant runs, as the interface names it. */
+  agent: AgentInfo;
   /** The connected database can be read by the assistant. */
   available: boolean;
   status: AgentStatus;

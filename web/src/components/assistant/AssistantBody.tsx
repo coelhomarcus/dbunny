@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Maximize2, Minimize2, SlidersHorizontal, SquarePen, X } from "lucide-react";
+import { Bot, Maximize2, Minimize2, SlidersHorizontal, SquarePen, X } from "lucide-react";
 import { useAssistant } from "../../contexts/assistant";
 import { useConnection } from "../../contexts/useConnection";
 import Button from "../ui/Button";
@@ -20,8 +20,8 @@ export default function AssistantBody({ onClose, onBack }: { onClose?: () => voi
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border px-3">
-        <ClaudeCodeIcon size={15} className="shrink-0 text-[#d97757]" />
-        <span className="shrink-0 text-[13px] font-medium">Claude Code</span>
+        {assistant.agent.kind === "claude" ? <ClaudeCodeIcon size={15} className="shrink-0 text-[#d97757]" /> : <Bot size={15} className="shrink-0 text-muted-foreground" />}
+        <span className="shrink-0 text-[13px] font-medium">{assistant.agent.kind === "custom" ? "Agent" : assistant.agent.name}</span>
         <span className="flex-1" />
         {ready && (
           <>
@@ -65,9 +65,9 @@ export default function AssistantBody({ onClose, onBack }: { onClose?: () => voi
       {savedConnectionId && options && <ConnectionOptionsDialog savedId={savedConnectionId} open onClose={() => setOptions(false)} />}
       <div className="min-h-0 flex-1">
         {!assistant.enabled ? (
-          <ConsentScreen onEnable={assistant.enable} />
+          <ConsentScreen agent={assistant.agent} onEnable={assistant.enable} />
         ) : assistant.status.state !== "ready" ? (
-          <AssistantStatusScreen status={assistant.status} onRetry={assistant.retry} onSignIn={assistant.signIn} />
+          <AssistantStatusScreen agent={assistant.agent} status={assistant.status} onRetry={assistant.retry} onSignIn={assistant.signIn} />
         ) : (
           <AssistantConversation />
         )}
