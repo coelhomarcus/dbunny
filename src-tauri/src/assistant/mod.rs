@@ -437,14 +437,15 @@ impl Assistant {
                 _ => "The assistant isn't running".to_string(),
             });
         }
-        self.agent().await?.logout().await.map_err(|e| e.to_string())?;
+        let agent = self.agent().await?;
+        agent.logout().await.map_err(|e| e.to_string())?;
         // What was said is gone with the account: nothing of it can go on
         for conversation in self.conversations.all() {
             self.conversations.remove(&conversation.id);
             self.stop_turn(&conversation).await;
             self.forget_workspace(&conversation);
         }
-        self.set_status(AgentStatus::NeedsSignIn { methods: vec![], command: self.login_command() });
+        self.set_status(AgentStatus::NeedsSignIn { methods: agent.auth_methods(), command: self.login_command() });
         Ok(())
     }
 
@@ -948,7 +949,15 @@ mod tests {
         assert_eq!(r.host.agent().calls("logout").len(), 1);
         assert!(r.assistant.conversations.all().is_empty());
         assert!(r.assistant.prompt(&opened.conversation_id, "hi").await.is_err());
-        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec![], command: Some(launch::login_command()) });
+        // It offers the ways the agent has to sign in again
+        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec![claude_login(), chat_gpt()], command: Some(launch::login_command()) });
+    }
+
+    #[tokio::test]
+    async fn signing_out_of_codex_offers_the_login_again() {
+        let r = codex_rig(FakeConfig::default()).await;
+        r.assistant.sign_out(AgentKind::Codex, None).await.unwrap();
+        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec![claude_login(), chat_gpt()], command: None });
     }
 
     #[tokio::test]

@@ -533,6 +533,11 @@ impl AgentHandle {
         Ok(())
     }
 
+    /// The ways the agent offered to sign in.
+    pub fn auth_methods(&self) -> Vec<AuthMethod> {
+        self.shared.auth_methods.get().cloned().unwrap_or_default()
+    }
+
     /// Signs in with one of the methods the agent offered; answers when the login is over (the
     /// agent may wait for the person in a browser).
     pub async fn authenticate(&self, method_id: &str) -> Result<(), AgentError> {
