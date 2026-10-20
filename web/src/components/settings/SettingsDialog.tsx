@@ -14,6 +14,8 @@ import Button from "../ui/Button";
 import ReleaseNotesDialog from "../ReleaseNotesDialog";
 import Switch from "../ui/Switch";
 import AssistantSection from "./AssistantSection";
+import LanguagePicker from "./LanguagePicker";
+import { useT } from "../../i18n";
 import AiIcon from "../ui/AiIcon";
 import { Row, SectionTitle } from "./SettingsRows";
 import SegmentedTabs from "../ui/SegmentedTabs";
@@ -38,6 +40,7 @@ function useAppVersion() {
 
 function GeneralSection() {
   const { preference, setPreference } = useTheme();
+  const t = useT();
   return (
     <>
       <SectionTitle>General</SectionTitle>
@@ -51,6 +54,9 @@ function GeneralSection() {
             { value: "dark", label: <span className="flex items-center gap-1.5 [&_svg]:size-3.5"><Moon /> Dark</span> },
           ]}
         />
+      </Row>
+      <Row title={t("settings.language.label")} hint={t("settings.language.hint")}>
+        <LanguagePicker />
       </Row>
     </>
   );

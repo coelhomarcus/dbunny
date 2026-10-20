@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { activate, fmt, getLocale, loadLocale, subscribe, t } from "./store.ts";
 import { resolveLocale } from "./resolve.ts";
+import { updateSettings } from "../lib/settings";
 import type { Formatters } from "./format.ts";
 import type { Language, Locale } from "./messages.ts";
 
@@ -31,4 +32,10 @@ export async function initI18n(language: Language, systemLanguages: readonly str
   await loadLocale(locale);
   activate(locale);
   return locale;
+}
+
+/** Switches the app to a language and remembers the choice; screens that read `useT` follow at once. */
+export async function setLanguage(language: Language): Promise<void> {
+  await initI18n(language, navigator.languages);
+  updateSettings({ language });
 }

@@ -24,3 +24,9 @@ export function resolveLocale(language: Language, systemLanguages: readonly stri
   }
   return "en";
 }
+
+/** The language the settings stored; one this version doesn't know (an old file, a newer app) means the system's. */
+export function languageFromStored(stored: unknown): Language {
+  const language = stored !== null && typeof stored === "object" ? (stored as Record<string, unknown>).language : undefined;
+  return isLanguage(language) ? language : "system";
+}

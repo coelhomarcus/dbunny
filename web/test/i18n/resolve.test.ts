@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isLanguage, LOCALES, resolveLocale } from "../../src/i18n/resolve.ts";
+import { isLanguage, languageFromStored, LOCALES, resolveLocale } from "../../src/i18n/resolve.ts";
 
 test("an explicit language wins over the system", () => {
   assert.equal(resolveLocale("en", ["pt-BR"]), "en");
@@ -39,4 +39,17 @@ test("isLanguage rejects values it does not know", () => {
 
 test("the locales are the ones with a catalog", () => {
   assert.deepEqual([...LOCALES], ["en", "pt-BR"]);
+});
+
+test("a stored language that no longer exists falls back to system", () => {
+  assert.equal(languageFromStored({ language: "fr" }), "system");
+  assert.equal(languageFromStored({}), "system");
+  assert.equal(languageFromStored(null), "system");
+  assert.equal(languageFromStored("pt-BR"), "system");
+});
+
+test("a stored valid language is kept", () => {
+  assert.equal(languageFromStored({ language: "pt-BR" }), "pt-BR");
+  assert.equal(languageFromStored({ language: "en" }), "en");
+  assert.equal(languageFromStored({ language: "system" }), "system");
 });

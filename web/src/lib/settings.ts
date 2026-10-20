@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { agentFromStored, type AgentKind } from "./assistantAgents";
+import type { Language } from "../i18n/messages.ts";
+import { languageFromStored } from "../i18n/resolve.ts";
 
 /** App preferences, kept in this computer's local storage. The theme has its own store (lib/theme). */
 export interface Settings {
@@ -17,6 +19,8 @@ export interface Settings {
   assistantAgent: AgentKind;
   /** The person's own command, for a custom agent. */
   assistantCommand: string;
+  /** The language of the app; "system" follows the computer's. */
+  language: Language;
 }
 
 const DEFAULTS: Settings = {
@@ -27,6 +31,7 @@ const DEFAULTS: Settings = {
   assistantRowLimit: 100,
   assistantAgent: "claude",
   assistantCommand: "",
+  language: "system",
 };
 
 const STORAGE_KEY = "dbunny:settings";
@@ -38,7 +43,7 @@ function read(): Settings {
     // Settings added later fall back to their defaults
     const merged = { ...DEFAULTS, ...(stored && typeof stored === "object" ? stored : {}) };
     // Before the agent was a choice, a command of the person's own made it a custom one
-    return { ...merged, assistantAgent: agentFromStored(stored) };
+    return { ...merged, assistantAgent: agentFromStored(stored), language: languageFromStored(stored) };
   } catch {
     return { ...DEFAULTS };
   }
