@@ -279,7 +279,7 @@ export default function DocumentTabBar() {
       </button>
 
       {assistant.available && (
-        <Tooltip label={`Assistant (${isMac ? "⌘I" : "Ctrl+I"})`} side="bottom">
+        <Tooltip label="Assistant" shortcut={isMac ? "⌘I" : "Ctrl+I"} side="bottom">
           <button
             type="button"
             aria-label="Assistant"

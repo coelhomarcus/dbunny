@@ -5,6 +5,7 @@ import { cn } from "../../lib/cn";
 import { toEditText, toJsonEditText } from "../../lib/cellEdit";
 import { isMac } from "../../lib/platform";
 import JsonValueEditor, { type JsonValueEditorHandle } from "./JsonValueEditor";
+import { Keys } from "../ui/Kbd";
 
 function Editor({
   column,
@@ -60,7 +61,9 @@ function Editor({
           {error ? (
             <p className="mr-auto min-w-0 flex-1 select-text truncate text-xs text-destructive-foreground">{error}</p>
           ) : (
-            <p className="mr-auto text-xs text-muted-foreground">{isMac ? "⌘" : "Ctrl"} Enter to apply</p>
+            <p className="mr-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Keys keys={isMac ? "⌘↵" : "Ctrl+↵"} /> to apply
+            </p>
           )}
           {json && (
             <Button variant="outline" size="sm" onClick={format} disabled={isNull}>

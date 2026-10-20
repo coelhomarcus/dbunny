@@ -5,7 +5,9 @@ import type { ColumnInfo } from "@/types";
 import { detectDelimiter, looksLikeHeader, matchColumns, parseCsv } from "../../lib/csv";
 import { cn } from "../../lib/cn";
 import { useNotify } from "../../contexts/NoticeProvider";
+import { isMac } from "../../lib/platform";
 import Dialog from "../ui/Dialog";
+import { Keys } from "../ui/Kbd";
 import Button from "../ui/Button";
 import Checkbox from "../Checkbox";
 import { selectClass } from "../ui/styles";
@@ -164,7 +166,11 @@ function ImportForm({
             {file ? "Choose another file" : "Choose a CSV file"}
           </Button>
           {file && <span className="truncate font-mono text-xs text-muted-foreground">{file.name}</span>}
-          {!file && <span className="text-xs text-muted-foreground">or paste rows copied from a spreadsheet (⌘V / Ctrl+V)</span>}
+          {!file && (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              or paste rows copied from a spreadsheet <Keys keys={isMac ? "⌘V" : "Ctrl+V"} />
+            </span>
+          )}
         </div>
 
         {file && (

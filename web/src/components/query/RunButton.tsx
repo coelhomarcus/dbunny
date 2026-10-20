@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { ChevronDown, Play, Workflow, Gauge } from "lucide-react";
 import Button from "../ui/Button";
+import { Keys } from "../ui/Kbd";
 import Popover from "../ui/Popover";
 import { isMac } from "../../lib/platform";
 import type { RunScope } from "../SqlEditor";
@@ -21,7 +22,7 @@ function MenuItem({ icon, label, hint, shortcut, onClick }: { icon: React.ReactN
         <span className="block text-[13px]">{label}</span>
         {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
       </span>
-      {shortcut && <kbd className="shrink-0 font-sans text-[11px] text-muted-foreground">{shortcut}</kbd>}
+      {shortcut && <Keys keys={shortcut} className="shrink-0" />}
     </button>
   );
 }
@@ -57,7 +58,7 @@ export default function RunButton({
       <Button variant="primary" size="sm" className="rounded-r-none pr-2.5" onClick={() => onRun("current")} disabled={disabled}>
         <Play className="fill-current" />
         Run
-        <kbd className="ml-0.5 font-sans text-[11px] opacity-70">{MOD}↵</kbd>
+        <Keys keys={`${MOD}↵`} tone="inverse" className="ml-1" />
       </Button>
       <Button
         ref={arrowRef}

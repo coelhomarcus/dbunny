@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { createPortal } from "react-dom";
 import { ChevronRight } from "lucide-react";
 import { cn } from "../../lib/cn";
+import { Keys } from "./Kbd";
 
 export type ContextMenuItem =
   | {
@@ -176,7 +177,7 @@ function MenuPanel({
             >
               {item.icon}
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              {item.shortcut && <kbd className="ml-4 shrink-0 font-sans text-[11px] text-muted-foreground">{item.shortcut}</kbd>}
+              {item.shortcut && <Keys keys={item.shortcut} className="ml-4 shrink-0" />}
               {item.items && <ChevronRight className="ml-2 text-muted-foreground" />}
             </button>
           );
