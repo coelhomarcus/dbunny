@@ -26,10 +26,9 @@ export default function SideCard({
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
 
-  useEffect(() => {
-    if (open) setMounted(true);
-    else setVisible(false);
-  }, [open]);
+  // Opening mounts it, closing hides it: done while rendering, so the card is never one frame behind
+  if (open && !mounted) setMounted(true);
+  if (!open && visible) setVisible(false);
 
   useEffect(() => {
     if (!open || !mounted) return;
