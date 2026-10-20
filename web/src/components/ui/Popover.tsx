@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject, useEffectEvent } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../../lib/cn";
 
@@ -89,15 +89,17 @@ export default function Popover({
     };
   }, [open, anchorRef, dock, children]);
 
+  // The listeners below close with whatever onClose is now, without being set again each render
+  const close = useEffectEvent(onClose);
   useEffect(() => {
     if (!open) return;
     function onPointerDown(e: PointerEvent) {
       const target = e.target as Node;
       if (panelRef.current?.contains(target) || anchorRef.current?.contains(target)) return;
-      onClose();
+      close();
     }
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") close();
     }
     document.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("keydown", onKeyDown);
@@ -105,7 +107,7 @@ export default function Popover({
       document.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [open, onClose, anchorRef]);
+  }, [open, anchorRef]);
 
   if (!open) return null;
 

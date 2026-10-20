@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useEffectEvent } from "react";
 import { useConnection } from "../../contexts/useConnection";
 import { useNotify } from "../../contexts/NoticeProvider";
 import { useDocuments } from "../../contexts/DocumentsContext";
@@ -461,14 +461,15 @@ function QueryPaneBody({
   }, [active, documentId]);
 
   // Esc stops the running query (only in the visible tab)
+  const cancelOnEscape = useEffectEvent(cancelQuery);
   useEffect(() => {
     if (!running || !active) return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && !document.querySelector("[role=dialog][aria-modal]")) cancelQuery();
+      if (e.key === "Escape" && !document.querySelector("[role=dialog][aria-modal]")) cancelOnEscape();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [running, active, cancelQuery]);
+  }, [running, active]);
 
   function confirmDangerousQuery() {
     const sql = pendingSqlRef.current;
