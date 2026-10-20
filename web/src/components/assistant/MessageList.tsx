@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import type { Conversation } from "../../lib/assistantConversation";
+import { stripContext } from "../../lib/assistantContext";
 import type { Decision } from "../../types/assistant";
 import MarkdownView from "./MarkdownView";
 import ToolCard from "./ToolCard";
@@ -35,19 +36,22 @@ export default function MessageList({
     >
       {conversation.items.map((item, index) => {
         switch (item.kind) {
-          case "user":
+          case "user": {
+            // The database context some agents get in the first message is not for the person
+            const said = stripContext(item.text);
             return (
               <div key={index} className="flex justify-end">
-                {item.text.includes("```") ? (
+                {said.includes("```") ? (
                   // A request from the editor carries its statement in a fence
                   <div className="max-w-[90%] rounded-2xl rounded-br-md bg-muted px-3 py-2">
-                    <MarkdownView source={item.text} />
+                    <MarkdownView source={said} />
                   </div>
                 ) : (
-                  <p className="max-w-[85%] select-text whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-3 py-2 text-[13px] leading-relaxed">{item.text}</p>
+                  <p className="max-w-[85%] select-text whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-3 py-2 text-[13px] leading-relaxed">{said}</p>
                 )}
               </div>
             );
+          }
           case "agent":
             return <MarkdownView key={index} source={item.text} renderCode={renderCode} />;
           case "thought":
