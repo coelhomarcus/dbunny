@@ -74,7 +74,7 @@ function Inlines({ parts }: { parts: Inline[] }) {
   return parts.map((part, index) => {
     if (part.kind === "code") {
       return (
-        <code key={index} className="rounded-md bg-foreground/[0.07] px-1.5 py-px font-mono text-[0.92em] text-foreground/90">
+        <code key={index} className="rounded-md bg-primary/[0.08] px-1.5 py-px font-mono text-[0.92em] text-[color-mix(in_oklab,var(--primary)_60%,var(--foreground))]">
           {part.text}
         </code>
       );
