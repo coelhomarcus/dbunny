@@ -123,7 +123,8 @@ export default function ActivityView() {
   }
 
   const rightPanel = useRightPanel();
-  const sessions = activity?.sessions ?? [];
+  // The same list between renders, so what is worked out from it is not worked out again each time
+  const sessions = useMemo(() => activity?.sessions ?? [], [activity]);
   const blocking = useMemo(() => new Set(sessions.flatMap((s) => s.blockedBy)), [sessions]);
   const selectedSession = sessions.find((s) => s.pid === selected) ?? null;
   // Last session shown, so the card still has content while it slides shut.
