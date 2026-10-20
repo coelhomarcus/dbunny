@@ -113,6 +113,9 @@ export function applyUpdate(conversation: Conversation, raw: unknown): Conversat
     const content = record(update.content);
     if (content?.type !== "text" || typeof content.text !== "string") return conversation;
     const itemKind = kind === "agent_message_chunk" ? "agent" : kind === "agent_thought_chunk" ? "thought" : "user";
+    // A thought that has said nothing yet and gets only blanks (agents send breaks between parts) is no Thinking block
+    const last = conversation.items[conversation.items.length - 1];
+    if (itemKind === "thought" && content.text.trim() === "" && last?.kind !== "thought") return conversation;
     return { ...conversation, items: append(conversation.items, itemKind, content.text) };
   }
 

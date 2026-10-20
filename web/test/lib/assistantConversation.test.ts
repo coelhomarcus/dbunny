@@ -214,3 +214,11 @@ test("a title made of a first message that carried the database context is only 
   const title = "Quantos pedidos?\n\n<dbunny-context>\nThe database:\n- Engine: SQLite\n</dbunny-context>";
   assert.equal(play([{ sessionUpdate: "session_info_update", title }]).title, "Quantos pedidos?");
 });
+
+test("thought chunks with nothing in them make no Thinking block", () => {
+  assert.deepEqual(play([chunk("agent_thought_chunk", ""), chunk("agent_thought_chunk", "\n\n"), chunk("agent_message_chunk", "ok")]).items, [{ kind: "agent", text: "ok" }]);
+  // A break between two parts of a thought that has text stays in it
+  assert.deepEqual(play([chunk("agent_thought_chunk", "one"), chunk("agent_thought_chunk", "\n\n"), chunk("agent_thought_chunk", "two")]).items, [{ kind: "thought", text: "one\n\ntwo" }]);
+  // Text that comes after blank chunks is still a thought
+  assert.deepEqual(play([chunk("agent_thought_chunk", "\n"), chunk("agent_thought_chunk", "plan")]).items, [{ kind: "thought", text: "plan" }]);
+});
