@@ -1,0 +1,55 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { en } from "../../src/i18n/locales/en.ts";
+
+const ROOT = join(import.meta.dirname, "../..");
+
+/** Keys that are used through a typed map or a code from the backend, so no `t("…")` names them. */
+const DYNAMIC_KEYS: string[] = [];
+/** Keys written ahead of the screens that will use them; each leaves this list when it is used. */
+const PENDING_KEYS: string[] = ["common.back", "common.cancel", "common.close", "common.copy", "common.delete", "common.retry", "common.save"];
+
+function sources(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...sources(path));
+    else if (/\.tsx?$/.test(entry.name) && !path.includes(`${join("src", "i18n", "locales")}`)) out.push(readFileSync(path, "utf8"));
+  }
+  return out;
+}
+
+function keysOf(node: unknown, prefix = ""): string[] {
+  return Object.entries(node as Record<string, unknown>).flatMap(([key, value]) => {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (typeof value === "string" || typeof (value as { other?: unknown }).other === "string") return [path];
+    return keysOf(value, path);
+  });
+}
+
+// t("a.b") and <Rich id="a.b" />, as written in the code
+const USED = /(?<![\w.])t\(\s*"([\w.]+)"|<Rich\s[^>]*?\bid="([\w.]+)"/g;
+const used = new Set<string>();
+for (const text of sources(join(ROOT, "src"))) {
+  for (const match of text.matchAll(USED)) used.add(match[1] ?? match[2]);
+}
+const known = new Set(keysOf(en));
+
+test("every static t() key exists in english", () => {
+  assert.deepEqual([...used].filter((key) => !known.has(key)).sort(), []);
+});
+
+test("every key of english is used, or is waiting for its screen", () => {
+  const unused = [...known].filter((key) => !used.has(key) && !DYNAMIC_KEYS.includes(key) && !PENDING_KEYS.includes(key));
+  assert.deepEqual(unused.sort(), [], "a key nobody uses is dead text: remove it");
+});
+
+test("a key that waits for its screen is not used yet", () => {
+  assert.deepEqual(PENDING_KEYS.filter((key) => used.has(key)), [], "these are used now: take them off PENDING_KEYS");
+});
+
+test("the keys listed as dynamic or pending exist", () => {
+  assert.deepEqual([...DYNAMIC_KEYS, ...PENDING_KEYS].filter((key) => !known.has(key)), []);
+});
