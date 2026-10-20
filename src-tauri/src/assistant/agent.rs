@@ -26,6 +26,11 @@ const RESOURCE_NOT_FOUND: i64 = -32002;
 const METHOD_NOT_FOUND: i64 = -32601;
 /// The prefix of the names the agent gives the tools of the `dbunny` MCP server.
 const OWN_TOOLS: &str = "mcp__dbunny__";
+/// The name of DBunny's MCP server, as agents that say the server of a call give it.
+const OWN_SERVER: &str = "dbunny";
+/// How long a permission request waits for the tool call it asks about to be known: some agents
+/// do not name the tool in the request.
+const PERMISSION_WAIT: Duration = Duration::from_millis(if cfg!(test) { 400 } else { 2000 });
 pub const LOG_LINES: usize = 500;
 const LIST_PAGES: usize = 10;
 
@@ -137,13 +142,24 @@ pub enum PermissionAnswer {
 }
 
 /// Says yes to the database's own tools (whose approval is DBunny's) and no to anything else.
-pub fn permission_answer(tool_name: Option<&str>, options: &[PermissionOption]) -> PermissionAnswer {
-    let own = tool_name.is_some_and(|name| name.len() > OWN_TOOLS.len() && name.starts_with(OWN_TOOLS));
+pub fn permission_answer(own: bool, options: &[PermissionOption]) -> PermissionAnswer {
     let kinds: &[&str] = if own { &["allow_once"] } else { &["reject_once", "reject_always"] };
     kinds
         .iter()
         .find_map(|kind| options.iter().find(|option| option.kind == *kind))
         .map_or(PermissionAnswer::Cancelled, |option| PermissionAnswer::Selected(option.option_id.clone()))
+}
+
+fn is_own_name(name: Option<&str>) -> bool {
+    name.is_some_and(|name| name.len() > OWN_TOOLS.len() && name.starts_with(OWN_TOOLS))
+}
+
+/// Whether a `tool_call` update is a call of the database's own tools, in the shape of any agent:
+/// Claude names it `mcp__dbunny__…`, Codex says which MCP server it went to.
+pub fn is_own_tool_call(update: &Value) -> bool {
+    is_own_name(update["_meta"]["claudeCode"]["toolName"].as_str())
+        || update["rawInput"]["server"].as_str() == Some(OWN_SERVER)
+        || update["title"].as_str().is_some_and(|title| title.starts_with("mcp.dbunny."))
 }
 
 type Pending = Mutex<HashMap<u64, oneshot::Sender<Result<Value, AgentError>>>>;
@@ -156,6 +172,8 @@ struct Shared {
     stopped: AtomicBool,
     shutting_down: AtomicBool,
     auth_methods: OnceLock<Vec<String>>,
+    /// The ids of the tool calls seen that are the database's own.
+    own_calls: Mutex<std::collections::HashSet<String>>,
     /// Notifications of the agent's own extensions, kept for the tests that look at them.
     #[cfg(test)]
     extensions: Mutex<Vec<Value>>,
@@ -217,15 +235,22 @@ impl Shared {
             (Some(method), Some(id)) => {
                 let (shared, method, params) = (Arc::clone(self), method.to_string(), message.get("params").cloned().unwrap_or(Value::Null));
                 tokio::spawn(async move {
-                    let reply = match answer_agent_request(&method, &params) {
-                        Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-                        Err((code, text)) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": text}}),
+                    let reply = if method == "session/request_permission" {
+                        json!({"jsonrpc": "2.0", "id": id, "result": shared.permission_reply(&params).await})
+                    } else {
+                        json!({"jsonrpc": "2.0", "id": id, "error": {"code": METHOD_NOT_FOUND, "message": "Method not found"}})
                     };
                     let _ = shared.write(&reply).await;
                 });
             }
             (Some("session/update"), None) => {
                 let params = &message["params"];
+                let update = &params["update"];
+                if update["sessionUpdate"] == "tool_call" && is_own_tool_call(update) {
+                    if let Some(call) = update["toolCallId"].as_str() {
+                        self.own_calls.lock().unwrap().insert(call.to_string());
+                    }
+                }
                 let conversation = params["sessionId"].as_str().and_then(|session| self.conversations.by_acp_session(session));
                 if let Some(conversation) = conversation {
                     self.events.emit(AssistantEvent::Update { conversation_id: conversation.id.clone(), update: params["update"].clone() });
@@ -257,26 +282,37 @@ impl Shared {
     }
 }
 
-/// What DBunny answers when the agent asks something of it: permission for its own tools, and
-/// nothing for files or a terminal.
-fn answer_agent_request(method: &str, params: &Value) -> Result<Value, (i64, String)> {
-    if method != "session/request_permission" {
-        return Err((METHOD_NOT_FOUND, "Method not found".into()));
+impl Shared {
+    /// What DBunny answers when the agent asks for permission: yes to the database's own tools (whose
+    /// approval is DBunny's) and no to anything else, files and a terminal included.
+    async fn permission_reply(&self, params: &Value) -> Value {
+        let call = params["toolCall"]["toolCallId"].as_str();
+        let named = params["toolCall"]["_meta"]["claudeCode"]["toolName"].as_str();
+        let known = |call: Option<&str>| call.is_some_and(|call| self.own_calls.lock().unwrap().contains(call));
+        let mut own = is_own_name(named) || known(call);
+        // An agent that names no tool: the request says which call, and that call may be still on its way
+        if !own && named.is_none() {
+            let mut waited = Duration::ZERO;
+            while !own && waited < PERMISSION_WAIT {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                waited += Duration::from_millis(50);
+                own = known(call);
+            }
+        }
+        let options: Vec<PermissionOption> = params["options"]
+            .as_array()
+            .map(|options| {
+                options
+                    .iter()
+                    .filter_map(|o| Some(PermissionOption { option_id: o["optionId"].as_str()?.to_string(), kind: o["kind"].as_str()?.to_string() }))
+                    .collect()
+            })
+            .unwrap_or_default();
+        match permission_answer(own, &options) {
+            PermissionAnswer::Selected(option_id) => json!({"outcome": {"outcome": "selected", "optionId": option_id}}),
+            PermissionAnswer::Cancelled => json!({"outcome": {"outcome": "cancelled"}}),
+        }
     }
-    let name = params["toolCall"]["_meta"]["claudeCode"]["toolName"].as_str();
-    let options: Vec<PermissionOption> = params["options"]
-        .as_array()
-        .map(|options| {
-            options
-                .iter()
-                .filter_map(|o| Some(PermissionOption { option_id: o["optionId"].as_str()?.to_string(), kind: o["kind"].as_str()?.to_string() }))
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(match permission_answer(name, &options) {
-        PermissionAnswer::Selected(option_id) => json!({"outcome": {"outcome": "selected", "optionId": option_id}}),
-        PermissionAnswer::Cancelled => json!({"outcome": {"outcome": "cancelled"}}),
-    })
 }
 
 /// What the agent said it can do.
@@ -354,6 +390,7 @@ impl AgentHandle {
             stopped: AtomicBool::new(false),
             shutting_down: AtomicBool::new(false),
             auth_methods: OnceLock::new(),
+            own_calls: Default::default(),
             #[cfg(test)]
             extensions: Default::default(),
             events,
@@ -764,18 +801,84 @@ mod tests {
     }
 
     #[test]
-    fn permission_needs_the_exact_prefix() {
+    fn permission_goes_to_the_database_tools_only() {
         let options = vec![
             PermissionOption { option_id: "allow".into(), kind: "allow_once".into() },
             PermissionOption { option_id: "reject".into(), kind: "reject_once".into() },
         ];
-        for name in [Some("mcp__dbunny_evil__x"), Some("mcp__dbunnyx__run_query"), Some("mcp__dbunny_"), Some("dbunny__run_query"), None] {
-            assert_eq!(permission_answer(name, &options), PermissionAnswer::Selected("reject".into()), "{name:?}");
-        }
-        assert_eq!(permission_answer(Some("mcp__dbunny__list_tables"), &options), PermissionAnswer::Selected("allow".into()));
+        assert_eq!(permission_answer(true, &options), PermissionAnswer::Selected("allow".into()));
+        assert_eq!(permission_answer(false, &options), PermissionAnswer::Selected("reject".into()));
         // Without an option of the right kind there is nothing to select
         let only_allow = vec![PermissionOption { option_id: "a".into(), kind: "allow_always".into() }];
-        assert_eq!(permission_answer(Some("Bash"), &only_allow), PermissionAnswer::Cancelled);
+        assert_eq!(permission_answer(false, &only_allow), PermissionAnswer::Cancelled);
+    }
+
+    #[test]
+    fn database_tool_calls_are_told_in_the_shape_of_any_agent() {
+        for update in [
+            json!({"sessionUpdate": "tool_call", "_meta": {"claudeCode": {"toolName": "mcp__dbunny__run_query"}}}),
+            json!({"sessionUpdate": "tool_call", "title": "mcp.dbunny.run_query", "rawInput": {"server": "dbunny", "tool": "run_query", "arguments": {}}}),
+            json!({"sessionUpdate": "tool_call", "rawInput": {"server": "dbunny"}}),
+            json!({"sessionUpdate": "tool_call", "title": "mcp.dbunny.list_tables"}),
+        ] {
+            assert!(is_own_tool_call(&update), "{update}");
+        }
+        for update in [
+            json!({"_meta": {"claudeCode": {"toolName": "Bash"}}}),
+            json!({"_meta": {"claudeCode": {"toolName": "mcp__dbunny__"}}}),
+            json!({"_meta": {"claudeCode": {"toolName": "mcp__dbunny_evil__x"}}}),
+            json!({"rawInput": {"server": "other", "tool": "x"}}),
+            json!({"title": "Run command?"}),
+            json!({"title": "mcp.dbunnyx.run_query"}),
+            json!({}),
+        ] {
+            assert!(!is_own_tool_call(&update), "{update}");
+        }
+    }
+
+    fn codex_permission(id: u64, call: &str) -> Value {
+        json!({"jsonrpc": "2.0", "id": id, "method": "session/request_permission", "params": {
+            "sessionId": "acp-1", "toolCall": {"toolCallId": call, "kind": "execute", "status": "pending"}, "_meta": {"is_mcp_tool_approval": true},
+            "options": [{"optionId": "allow_once", "name": "Allow", "kind": "allow_once"}, {"optionId": "allow_always", "name": "Always", "kind": "allow_always"}, {"optionId": "cancel", "name": "Cancel", "kind": "reject_once"}],
+        }})
+    }
+
+    fn codex_tool_call(call: &str, title: &str, server: &str) -> Value {
+        json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "acp-1", "update": {
+            "sessionUpdate": "tool_call", "toolCallId": call, "kind": "execute", "title": title, "status": "in_progress",
+            "rawInput": {"server": server, "tool": "run_query", "arguments": {}},
+        }}})
+    }
+
+    #[tokio::test]
+    async fn a_permission_without_a_name_is_decided_by_its_tool_call() {
+        let script = vec![
+            codex_tool_call("own", "mcp.dbunny.run_query", "dbunny"),
+            codex_permission(300, "own"),
+            codex_tool_call("other", "mcp.github.create_issue", "github"),
+            codex_permission(301, "other"),
+            codex_permission(302, "never-seen"),
+        ];
+        let r = rig(FakeConfig { prompt_script: script, ..Default::default() }).await.unwrap();
+        r.agent.new_session(&setup()).await.unwrap();
+        r.agent.prompt("acp-1", "go").await.unwrap();
+        assert_eq!(answer_to(&r, 300)["result"]["outcome"], json!({"outcome": "selected", "optionId": "allow_once"}));
+        for id in [301, 302] {
+            assert_eq!(answer_to(&r, id)["result"]["outcome"], json!({"outcome": "selected", "optionId": "cancel"}), "{id}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_permission_that_comes_before_its_tool_call_waits_a_moment() {
+        let script = vec![
+            codex_permission(310, "late"),
+            json!({"_delay_ms": 100}),
+            codex_tool_call("late", "mcp.dbunny.run_query", "dbunny"),
+        ];
+        let r = rig(FakeConfig { prompt_script: script, ..Default::default() }).await.unwrap();
+        r.agent.new_session(&setup()).await.unwrap();
+        r.agent.prompt("acp-1", "go").await.unwrap();
+        assert_eq!(answer_to(&r, 310)["result"]["outcome"], json!({"outcome": "selected", "optionId": "allow_once"}));
     }
 
     #[tokio::test]

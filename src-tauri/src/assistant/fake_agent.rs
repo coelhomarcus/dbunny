@@ -117,6 +117,11 @@ async fn run(config: FakeConfig, input: DuplexStream, mut out: DuplexStream, rec
                 let before = answers.lock().unwrap().len();
                 let requests = config.prompt_script.iter().filter(|m| m.get("id").is_some()).count();
                 for item in &config.prompt_script {
+                    // A pause in the script, for what arrives out of order
+                    if let Some(ms) = item["_delay_ms"].as_u64() {
+                        tokio::time::sleep(Duration::from_millis(ms)).await;
+                        continue;
+                    }
                     send(&mut out, item).await;
                 }
                 for _ in 0..400 {
