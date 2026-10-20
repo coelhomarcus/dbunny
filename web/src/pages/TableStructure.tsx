@@ -21,6 +21,7 @@ import { needsRebuild, notAvailableFor } from "../lib/engines";
 import { useCapabilities } from "../hooks/useCapabilities";
 import { useNotify } from "../contexts/NoticeProvider";
 import { useT, fmt } from "../i18n";
+import { errorText } from "../lib/appError";
 
 type Section = "columns" | "indexes" | "constraints" | "keys" | "triggers" | "permissions" | "ddl";
 
@@ -529,7 +530,7 @@ export default function TableStructure({ schema, name: table }: { schema: string
       .then((structure) => !stale && setResult({ key: k, structure }))
       .catch((e) => {
         if (stale) return;
-        const text = typeof e === "string" ? e : String(e);
+        const text = errorText(e);
         notify({ tone: "error", text });
         setResult({ key: k, error: text });
       });
@@ -549,7 +550,7 @@ export default function TableStructure({ schema, name: table }: { schema: string
     api
       .applyStructureChange(schema!, table!, change)
       .then(() => setVersion((v) => v + 1))
-      .catch((err) => notify({ tone: "error", text: typeof err === "string" ? err : t("structure.tableStructure.changeFailed") }));
+      .catch((err) => notify({ tone: "error", text: errorText(err, t("structure.tableStructure.changeFailed")) }));
   }
 
   function columnMenuItems(column: ColumnInfo): ContextMenuItem[] {

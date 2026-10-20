@@ -54,6 +54,7 @@ import {
   type LucideProps,
 } from "lucide-react";
 import { useT, type StaticKey } from "../i18n";
+import { errorText } from "../lib/appError";
 
 type ObjectKind = ExplorerObject["kind"];
 
@@ -222,14 +223,14 @@ export default function SchemaTree() {
           setExpanded(open);
         }
       } catch (err) {
-        const text = typeof err === "string" ? err : "Couldn't read the database's objects";
+        const text = errorText(err, t("ui.schemaTree.objectsFailed"));
         notify({ tone: "error", text });
         setError(text);
       } finally {
         setRefreshing(false);
       }
     },
-    [api, notify],
+    [api, notify, t],
   );
 
   useEffect(() => {
@@ -429,7 +430,7 @@ export default function SchemaTree() {
           api
             .refreshMaterializedView(target.schema, target.name)
             .then(() => refreshData(target.schema, target.name))
-            .catch((err) => notify({ tone: "error", text: typeof err === "string" ? err : t("ui.schemaTree.refreshFailed") }));
+            .catch((err) => notify({ tone: "error", text: errorText(err, t("ui.schemaTree.refreshFailed")) }));
         },
       });
     }

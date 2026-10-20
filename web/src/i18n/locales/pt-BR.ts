@@ -529,6 +529,7 @@ export const ptBR: Translation<typeof en> = {
   diagram: {
     diagramPage: {
       arrange: "Organizar",
+      exportFailed: "Não foi possível exportar o diagrama",
       exporting: "Exportando…",
       findATable: "Buscar uma tabela",
       fit: "Ajustar",
@@ -539,6 +540,21 @@ export const ptBR: Translation<typeof en> = {
       thisSchemaHasNoTables: "Este schema não tem tabelas.",
       zoomIn: "Aumentar o zoom",
       zoomOut: "Diminuir o zoom",
+    },
+  },
+  errors: {
+    connection: {
+      hostRequired: "O host é obrigatório",
+      invalidProtocol: "Protocolo inválido. Use postgres:// ou postgresql://",
+      invalidUrl: "URL inválida: {detail}",
+      limitReached: "Há sessões demais abertas ao mesmo tempo",
+      pathRequired: "O caminho é obrigatório",
+      urlRequired: "A URL de conexão é obrigatória",
+    },
+    saved: {
+      notDeleted: "Não foi possível excluir a conexão: {detail}",
+      notFound: "Não foi encontrada a conexão com id {id}",
+      notSaved: "Não foi possível salvar a conexão: {detail}",
     },
   },
   query: {
@@ -1283,6 +1299,7 @@ export const ptBR: Translation<typeof en> = {
       empty: "Estas notas da versão estão vazias.",
     },
     releaseNotesDialog: {
+      loadFailed: "Não foi possível carregar as notas da versão.",
       loading: "Carregando as notas da versão…",
       whatsNew: "Novidades",
     },
@@ -1361,6 +1378,9 @@ export const ptBR: Translation<typeof en> = {
     },
     spinner: {
       loading: "Carregando",
+    },
+    sqlEditor: {
+      formatFailed: "Não foi possível formatar este SQL",
     },
     statusBar: {
       connected: "Conectado",

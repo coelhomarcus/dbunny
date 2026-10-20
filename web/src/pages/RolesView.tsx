@@ -16,6 +16,7 @@ import { cn } from "../lib/cn";
 import { accountOf, hasHosts } from "../lib/roles";
 import { useNotify } from "../contexts/NoticeProvider";
 import { useT } from "../i18n";
+import { errorText } from "../lib/appError";
 
 /** Attributes worth a badge, in the order they're shown. */
 const ATTRIBUTES: { key: keyof RoleInfo; name: string; variant: "destructive" | "warning" | "info" | "neutral" }[] = [
@@ -55,14 +56,14 @@ export default function RolesView() {
       })
       .catch((err) => {
         if (stale) return;
-        const text = typeof err === "string" ? err : "Couldn't read the roles";
+        const text = errorText(err, t("admin.rolesView.couldntReadTheRoles"));
         notify({ tone: "error", text });
         setError(text);
       });
     return () => {
       stale = true;
     };
-  }, [api, notify]);
+  }, [api, notify, t]);
 
   const shown = (roles ?? []).filter((role) => showBuiltin || !role.isBuiltin);
   const builtinCount = (roles ?? []).filter((role) => role.isBuiltin).length;

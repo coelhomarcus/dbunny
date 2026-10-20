@@ -8,6 +8,7 @@ import type { FunctionDetail } from "@/types";
 import { writeClipboardText } from "../lib/clipboard";
 import { useNotify } from "../contexts/NoticeProvider";
 import { useT } from "../i18n";
+import { errorText } from "../lib/appError";
 
 export default function FunctionView({ schema, name, detail: args }: { schema: string; name: string; detail: string }) {
   const t = useT();
@@ -33,7 +34,7 @@ export default function FunctionView({ schema, name, detail: args }: { schema: s
       })
       .catch((e) => {
         if (stale) return;
-        const text = typeof e === "string" ? e : String(e);
+        const text = errorText(e);
         notify({ tone: "error", text });
         setError(text);
         setLoading(false);

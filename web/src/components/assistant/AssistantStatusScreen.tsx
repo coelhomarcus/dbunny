@@ -11,6 +11,7 @@ import Dialog from "../ui/Dialog";
 import AgentMark from "./AgentMark";
 import StartingScreen from "./StartingScreen";
 import { useT } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 /** The assistant's agent is not ready: what is missing, and what to do about it. */
 export default function AssistantStatusScreen({
@@ -35,7 +36,7 @@ export default function AssistantStatusScreen({
     try {
       await onSignIn(methodId);
     } catch (error) {
-      setSignInError(typeof error === "string" ? error : error instanceof Error ? error.message : t("assistant.assistantStatusScreen.loginFailed"));
+      setSignInError(errorText(error, t("assistant.assistantStatusScreen.loginFailed")));
     } finally {
       setSigningIn(false);
     }

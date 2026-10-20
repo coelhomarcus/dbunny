@@ -11,6 +11,7 @@ import Popover from "../ui/Popover";
 import ContainerDialog, { type ContainerOptions, type ContainerRequest } from "../schema/ContainerDialog";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useT } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 /**
  * The connection name at the top of the sidebar, with the database in use under it; opens
@@ -36,7 +37,7 @@ export default function DatabaseSwitcher() {
     setListFailed(false);
     api.getDatabases().then(setDatabases).catch((err) => {
       setListFailed(true);
-      notify({ tone: "error", text: typeof err === "string" ? err : t("ui.databaseSwitcher.listFailedNotice") });
+      notify({ tone: "error", text: errorText(err, t("ui.databaseSwitcher.listFailedNotice")) });
     });
   }
 
@@ -72,7 +73,7 @@ export default function DatabaseSwitcher() {
       });
       setOpen(false);
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : t("ui.databaseSwitcher.openFailed") });
+      notify({ tone: "error", text: errorText(err, t("ui.databaseSwitcher.openFailed")) });
     } finally {
       setOpening(null);
     }

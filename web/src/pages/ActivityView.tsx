@@ -20,6 +20,7 @@ import { useSqlDialect } from "../hooks/useSqlDialect";
 import { cn } from "../lib/cn";
 import { formatSqlCached } from "../lib/formatSql";
 import { useT, type StaticKey } from "../i18n";
+import { errorText } from "../lib/appError";
 
 const REFRESH_MS = 3000;
 
@@ -88,7 +89,7 @@ export default function ActivityView() {
       reportedError.current = null;
       setLastRefresh(new Date());
     } catch (err) {
-      const text = typeof err === "string" ? err : "Couldn't read the server activity";
+      const text = errorText(err, t("admin.activityView.couldntReadTheServerActivity"));
       if (reportedError.current !== text) {
         reportedError.current = text;
         notify({ tone: "error", text });
@@ -97,7 +98,7 @@ export default function ActivityView() {
     } finally {
       setRefreshing(false);
     }
-  }, [api, notify, scope]);
+  }, [api, notify, scope, t]);
 
   useEffect(() => {
     const first = setTimeout(load, 0);
@@ -116,7 +117,7 @@ export default function ActivityView() {
       const sent = await api.signalBackend(session.pid, terminate);
       setMessage(sent ? t(terminate ? "admin.activityView.endedSession" : "admin.activityView.cancelledQuery", { pid: session.pid }) : t("admin.activityView.alreadyFinished", { pid: session.pid }));
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : t("admin.activityView.failed") });
+      notify({ tone: "error", text: errorText(err, t("admin.activityView.failed")) });
     }
     load();
   }

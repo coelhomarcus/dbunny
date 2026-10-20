@@ -12,6 +12,7 @@ import AgentPicker from "./AgentPicker";
 import { Group, Row, SectionTitle } from "./SettingsRows";
 import { useT } from "../../i18n";
 import { Rich } from "../../i18n/Rich";
+import { errorText } from "../../lib/appError";
 
 /** How the assistant is run and what it is told by default. */
 export default function AssistantSection() {
@@ -33,7 +34,7 @@ export default function AssistantSection() {
       await assistantApi.signOut(agent, agent === "custom" ? settings.assistantCommand || undefined : undefined);
       setSignOutResult({ ok: true, text: t("assistant.assistantSection.signedOutOpenTheAssistant") });
     } catch (error) {
-      setSignOutResult({ ok: false, text: typeof error === "string" ? error : error instanceof Error ? error.message : t("assistant.assistantSection.signOutFailed") });
+      setSignOutResult({ ok: false, text: errorText(error, t("assistant.assistantSection.signOutFailed")) });
     } finally {
       setSigningOut(false);
     }

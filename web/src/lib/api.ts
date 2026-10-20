@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { toAppError } from "./appError";
 import type { AgentKind } from "./assistantAgents";
 import type {
   ConnectResponse,
@@ -32,6 +33,15 @@ import type {
   OpenedConversation,
   SessionSummary,
 } from "@/types";
+
+/** A command of the backend; what it rejects with is an `AppError`, whatever form the backend sent it in. */
+async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await tauriInvoke<T>(command, args);
+  } catch (raw) {
+    throw toAppError(raw);
+  }
+}
 
 /** Relation kinds as the explorer names them. */
 export type RelationKind = "table" | "view" | "matview";

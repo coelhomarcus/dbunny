@@ -25,7 +25,8 @@ import { renderDiagramPng } from "../../lib/diagramPng";
 import Button from "../ui/Button";
 import RelationEdge from "./RelationEdge";
 import TableNode, { type TableNodeData } from "./TableNode";
-import { useT } from "../../i18n";
+import { t, useT } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 const nodeTypes = { table: TableNode };
 const edgeTypes = { relation: RelationEdge };
@@ -73,12 +74,7 @@ function useDark(): boolean {
 }
 
 function failure(error: unknown): string {
-  if (typeof error === "string" && error.trim()) return error;
-  if (error instanceof Error && error.message) return error.message;
-  if (error && typeof error === "object" && "message" in error && typeof error.message === "string" && error.message) {
-    return error.message;
-  }
-  return "Couldn't export the diagram";
+  return errorText(error, t("diagram.diagramPage.exportFailed"));
 }
 
 function DiagramCanvas({ schema }: { schema: string }) {
@@ -123,8 +119,8 @@ function DiagramCanvas({ schema }: { schema: string }) {
       })
       .catch((e) => {
         if (stale) return;
-        notify({ tone: "error", text: typeof e === "string" ? e : t("diagram.diagramPage.readFailed") });
-        setLoadError("Couldn't read the schema");
+        notify({ tone: "error", text: errorText(e, t("diagram.diagramPage.readFailed")) });
+        setLoadError(t("diagram.diagramPage.readFailed"));
         setLoading(false);
       });
     return () => {

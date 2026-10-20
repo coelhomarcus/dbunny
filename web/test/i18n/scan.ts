@@ -129,7 +129,7 @@ export function looseText(source: string, fileName = "file.tsx"): Loose[] {
   }
 
   // A capitalized phrase of two words or more is a sentence, wherever the code keeps it
-  const SENTENCE = /^\p{Lu}\p{Ll}+( [\p{L}'’.,;:!?()-]+)+/u;
+  const SENTENCE = /^\p{Lu}[\p{Ll}'’]+( [\p{L}'’.,;:!?()-]+)+/u;
   function sentences(node: ts.Node) {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "t") return;

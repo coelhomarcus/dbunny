@@ -9,6 +9,7 @@ import Checkbox from "../Checkbox";
 import Popover from "../ui/Popover";
 import Tooltip from "../Tooltip";
 import { useT } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 const BASE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
 
@@ -79,7 +80,7 @@ export default function PermissionsEditor({
     let stale = false;
     Promise.all(changes.map((c) => api.previewStructureChange(schema, table, c)))
       .then((parts) => !stale && setSql(parts.join("\n")))
-      .catch((err) => !stale && setSql(typeof err === "string" ? err : t("structure.permissionsEditor.invalidChange")));
+      .catch((err) => !stale && setSql(errorText(err, t("structure.permissionsEditor.invalidChange"))));
     return () => {
       stale = true;
     };
@@ -112,7 +113,7 @@ export default function PermissionsEditor({
     try {
       for (const change of changes) await api.applyStructureChange(schema, table, change);
     } catch (err) {
-      failure = typeof err === "string" ? err : t("structure.permissionsEditor.changeFailed");
+      failure = errorText(err, t("structure.permissionsEditor.changeFailed"));
     }
     setSaving(false);
     onDone(failure);

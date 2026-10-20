@@ -8,6 +8,7 @@ import { HeaderTitle, PageHeader } from "../components/layout/PageHeader";
 import { writeClipboardText } from "../lib/clipboard";
 import { useNotify } from "../contexts/NoticeProvider";
 import { useT } from "../i18n";
+import { errorText } from "../lib/appError";
 
 /** A sequence, type, index or trigger: a few facts and its DDL. */
 export default function ObjectView({
@@ -35,7 +36,7 @@ export default function ObjectView({
       .then((definition) => !stale && setResult({ key: k, definition }))
       .catch((e) => {
         if (stale) return;
-        const text = typeof e === "string" ? e : String(e);
+        const text = errorText(e);
         notify({ tone: "error", text });
         setResult({ key: k, error: text });
       });

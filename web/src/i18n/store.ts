@@ -72,7 +72,12 @@ export function t<K extends MessageKey<typeof en>>(key: K, ...args: ArgsFor<Mess
   return translate(chain, locale, key, args[0] as Params | undefined);
 }
 
-/** A message by a key that is only known at run time (an error code from the backend). */
+/** A message by a key that is only known at run time (an error code from the backend), with its parameters filled in. */
+export function tr(key: string, params?: Params): string {
+  return translate(chain, locale, key, params);
+}
+
+/** Whether a key that is only known at run time has a message. */
 export function has(key: string): boolean {
   return lookup(chain, key) !== undefined;
 }

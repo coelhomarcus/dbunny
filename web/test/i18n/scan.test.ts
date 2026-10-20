@@ -136,3 +136,7 @@ test("a string used as a key to read a value is not text", () => {
   assert.deepEqual(looseText('const a = top["Execution Time"] ?? top["Planning Time"];', "x.ts"), []);
   assert.deepEqual(lines('const a = <Keys keys="Esc" />;'), []);
 });
+
+test("a sentence whose first word has an apostrophe is text", () => {
+  assert.deepEqual(looseText('const m = "Couldn\'t read the roles";', "x.ts").map((found) => found.text), ["Couldn't read the roles"]);
+});

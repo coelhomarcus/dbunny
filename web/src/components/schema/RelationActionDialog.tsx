@@ -9,6 +9,7 @@ import { useCapabilities } from "../../hooks/useCapabilities";
 import { useNotify } from "../../contexts/NoticeProvider";
 import { useT, type StaticKey } from "../../i18n";
 import { Rich } from "../../i18n/Rich";
+import { errorText } from "../../lib/appError";
 
 export type RelationAction = "rename" | "duplicate" | "truncate" | "drop";
 
@@ -55,7 +56,7 @@ function ActionForm({
       await onRun({ newName: newName.trim(), withData, cascade, restartIdentity });
       onClose();
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : t("schema.relationActionDialog.failed") });
+      notify({ tone: "error", text: errorText(err, t("schema.relationActionDialog.failed")) });
       setBusy(false);
     }
   }

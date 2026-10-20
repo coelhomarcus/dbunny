@@ -527,6 +527,7 @@ export const en = {
   diagram: {
     diagramPage: {
       arrange: "Arrange",
+      exportFailed: "Couldn't export the diagram",
       exporting: "Exporting…",
       findATable: "Find a table",
       fit: "Fit",
@@ -537,6 +538,21 @@ export const en = {
       thisSchemaHasNoTables: "This schema has no tables.",
       zoomIn: "Zoom in",
       zoomOut: "Zoom out",
+    },
+  },
+  errors: {
+    connection: {
+      hostRequired: "host is required",
+      invalidProtocol: "Invalid protocol. Must be postgres:// or postgresql://",
+      invalidUrl: "Invalid URL: {detail}",
+      limitReached: "Maximum number of concurrent sessions reached",
+      pathRequired: "path is required",
+      urlRequired: "connectionUrl is required",
+    },
+    saved: {
+      notDeleted: "The connection wasn't deleted: {detail}",
+      notFound: "Connection with id {id} not found",
+      notSaved: "The connection wasn't saved: {detail}",
     },
   },
   query: {
@@ -1281,6 +1297,7 @@ export const en = {
       empty: "These release notes are empty.",
     },
     releaseNotesDialog: {
+      loadFailed: "Couldn't load the release notes.",
       loading: "Loading the release notes…",
       whatsNew: "What's new",
     },
@@ -1359,6 +1376,9 @@ export const en = {
     },
     spinner: {
       loading: "Loading",
+    },
+    sqlEditor: {
+      formatFailed: "Couldn't format this SQL",
     },
     statusBar: {
       connected: "Connected",

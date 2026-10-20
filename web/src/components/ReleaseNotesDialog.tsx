@@ -42,13 +42,13 @@ export default function ReleaseNotesDialog({
         if (!cancelled) setNotes({ version, markdown });
       },
       (err) => {
-        if (!cancelled) setNotes({ version, error: err instanceof Error ? err.message : "Couldn't load the release notes." });
+        if (!cancelled) setNotes({ version, error: err instanceof Error ? err.message : t("ui.releaseNotesDialog.loadFailed") });
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [open, version]);
+  }, [open, version, t]);
 
   const current = notes?.version === version ? notes : null;
 

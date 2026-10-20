@@ -21,6 +21,7 @@ import { selectClass } from "../ui/styles";
 import { SqlPreviewBox } from "../schema/SqlPreview";
 import { useT, type StaticKey } from "../../i18n";
 import { Rich } from "../../i18n/Rich";
+import { errorText } from "../../lib/appError";
 
 const PARTITION_METHODS = ["RANGE", "LIST", "HASH"];
 
@@ -143,7 +144,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
       api
         .previewCreateTable(schema.trim(), table, JSON.parse(specKey) as NewTable)
         .then((text) => !stale && (setSql(text), setPreviewError(null)))
-        .catch((err) => !stale && (setSql(""), setPreviewError(typeof err === "string" ? err : t("ui.createTablePage.invalidTable"))));
+        .catch((err) => !stale && (setSql(""), setPreviewError(errorText(err, t("ui.createTablePage.invalidTable")))));
     }, 150);
     return () => {
       stale = true;
@@ -173,7 +174,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
       openDocument({ kind: "data", schema: schemaName, name, icon: "table" });
       closeDocument(documentId);
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : t("ui.createTablePage.createFailed") });
+      notify({ tone: "error", text: errorText(err, t("ui.createTablePage.createFailed")) });
       setBusy(false);
     }
   }

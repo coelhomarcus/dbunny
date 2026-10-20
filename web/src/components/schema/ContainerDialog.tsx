@@ -8,6 +8,7 @@ import { useCapabilities } from "../../hooks/useCapabilities";
 import { useNotify } from "../../contexts/NoticeProvider";
 import { useT } from "../../i18n";
 import { Rich } from "../../i18n/Rich";
+import { errorText } from "../../lib/appError";
 
 export type ContainerKind = "schema" | "database";
 export type ContainerAction = "create" | "rename" | "drop";
@@ -57,7 +58,7 @@ function ContainerForm({
       await onRun({ name: name.trim(), cascade, force });
       onClose();
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : t("schema.containerDialog.failed") });
+      notify({ tone: "error", text: errorText(err, t("schema.containerDialog.failed")) });
       setBusy(false);
     }
   }

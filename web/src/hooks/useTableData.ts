@@ -5,6 +5,7 @@ import type { TableDataResponse, ColumnInfo, TableFilter, FilterMode, SortKey } 
 import { isActiveFilter } from "../lib/tableFilters";
 import type { RelationType } from "../lib/api";
 import { t } from "../i18n";
+import { errorText } from "../lib/appError";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const DEFAULT_PAGE_SIZE = 50;
@@ -100,7 +101,7 @@ export function useTableData(schema?: string, table?: string, initialFilters: Ta
         setData(tableData);
         setColumnInfos(cols);
       })
-      .catch((err) => setError(typeof err === "string" ? err : err.message))
+      .catch((err) => setError(errorText(err)))
       .finally(() => setLoading(false));
   }, [schema, table, page, pageSize, sorting, filters, filterMode, fetchData, api]);
 
@@ -119,7 +120,7 @@ export function useTableData(schema?: string, table?: string, initialFilters: Ta
       const total = await api.countTableRows(schema, table);
       setData((prev) => (prev ? { ...prev, totalRows: total, totalRowsEstimated: false } : prev));
     } catch (err) {
-      setError(typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.tableData.countFailed"));
+      setError(errorText(err, t("ui.tableData.countFailed")));
     } finally {
       setCounting(false);
     }
@@ -140,7 +141,7 @@ export function useTableData(schema?: string, table?: string, initialFilters: Ta
       const fresh = await fetchData(schema, table, page, pageSize, sorting, filters, filterMode);
       setData(fresh);
     } catch (err) {
-      setError(typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.tableData.refreshFailed"));
+      setError(errorText(err, t("ui.tableData.refreshFailed")));
     } finally {
       setRefreshing(false);
     }

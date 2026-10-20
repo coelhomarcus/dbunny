@@ -19,6 +19,7 @@ import { SqlPreviewBox } from "../schema/SqlPreview";
 import ForeignKeyEditor from "./ForeignKeyEditor";
 import { guessReference } from "../../lib/foreignKeyForm";
 import { useT, type StaticKey } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 /** Which form to show; fields not chosen yet come from the column being changed. */
 export type ChangeDraft =
@@ -201,7 +202,7 @@ function ChangeForm({
       api
         .previewStructureChange(schema, table, JSON.parse(changeKey))
         .then((text) => !stale && (setSql(text), setPreviewError(null)))
-        .catch((err) => !stale && (setSql(""), setPreviewError(typeof err === "string" ? err : t("structure.structureChangeDialog.invalidChange"))));
+        .catch((err) => !stale && (setSql(""), setPreviewError(errorText(err, t("structure.structureChangeDialog.invalidChange")))));
     }, 150);
     return () => {
       stale = true;
@@ -216,7 +217,7 @@ function ChangeForm({
       onDone();
       onClose();
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : t("structure.structureChangeDialog.changeFailed") });
+      notify({ tone: "error", text: errorText(err, t("structure.structureChangeDialog.changeFailed")) });
       setBusy(false);
     }
   }

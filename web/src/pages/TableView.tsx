@@ -39,6 +39,7 @@ import Pagination from "../components/Pagination";
 import { TableSkeleton } from "../components/Skeleton";
 import { useNotify } from "../contexts/NoticeProvider";
 import { useT } from "../i18n";
+import { errorText } from "../lib/appError";
 
 /** Where a foreign key cell leads: the referenced table, filtered to the matching row. */
 function foreignKeyLink(column: ColumnInfo | undefined, row: unknown[], columns: QueryColumn[]) {
@@ -242,7 +243,7 @@ function TableViewContent({
         await tableData.refresh();
         notify({ tone: "success", text: hadEdits ? t("table.tableView.changesSaved") : t("table.tableView.rowInserted") });
       } catch (err) {
-        notify({ tone: "error", text: typeof err === "string" ? err : t("table.tableView.insertFailed") });
+        notify({ tone: "error", text: errorText(err, t("table.tableView.insertFailed")) });
       }
       return;
     }

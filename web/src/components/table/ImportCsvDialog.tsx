@@ -12,6 +12,7 @@ import Button from "../ui/Button";
 import Checkbox from "../Checkbox";
 import { selectClass } from "../ui/styles";
 import { useT, type StaticKey } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 const DELIMITERS: { value: string; labelKey: StaticKey }[] = [
   { value: ",", labelKey: "table.importCsvDialog.delimiterComma" },
@@ -94,7 +95,7 @@ function ImportForm({
       setDelimiter(detected);
       remap(parseCsv(text, detected), hasHeader);
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : t("table.importCsvDialog.readFailed") });
+      notify({ tone: "error", text: errorText(err, t("table.importCsvDialog.readFailed")) });
     }
   }
 
@@ -111,7 +112,7 @@ function ImportForm({
       await onImport(picked.map((m) => m.target!), rows);
       onClose();
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : t("table.importCsvDialog.importFailed") });
+      notify({ tone: "error", text: errorText(err, t("table.importCsvDialog.importFailed")) });
       setBusy(false);
     }
   }

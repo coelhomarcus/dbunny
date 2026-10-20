@@ -36,6 +36,7 @@ import { getSettings } from "../../lib/settings";
 import { explainAnalyzeHint, notAvailableFor } from "../../lib/engines";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useT, t } from "../../i18n";
+import { errorText } from "../../lib/appError";
 
 const MOD = isMac ? "⌘" : "Ctrl+";
 const SHIFT = isMac ? "⇧" : "Shift+";
@@ -313,7 +314,7 @@ function QueryPaneBody({
       else if (command === "commit") await api.commitTransaction();
       else await api.rollbackTransaction();
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.queryPane.transactionFailed") });
+      notify({ tone: "error", text: errorText(err, t("ui.queryPane.transactionFailed")) });
     } finally {
       // Commit and rollback close the transaction even when they fail
       setInTransaction(await api.transactionOpen().catch(() => false));
@@ -351,7 +352,7 @@ function QueryPaneBody({
       if (DDL_PATTERN.test(sql)) loadCompletionSchema();
     } catch (err) {
       await delay;
-      const msg = typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.queryPane.queryFailed");
+      const msg = errorText(err, t("ui.queryPane.queryFailed"));
       setError(msg);
       if (historyStorageKey) {
         setHistory(addToHistory(historyStorageKey, { sql, durationMs: null, rows: null, error: errorSummary(msg) }));
@@ -379,7 +380,7 @@ function QueryPaneBody({
       setPlan(res);
       showView("plan");
     } catch (err) {
-      notify({ tone: "error", text: typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.queryPane.explainFailed") });
+      notify({ tone: "error", text: errorText(err, t("ui.queryPane.explainFailed")) });
     } finally {
       setRunning(false);
       setRunningSince(null);

@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { getSettings, subscribeSettings } from "./settings";
 import { t } from "../i18n/store";
+import { errorText } from "./appError";
 
 /**
  * App updates from the GitHub releases (the endpoint and signing key are in tauri.conf.json):
@@ -43,7 +44,7 @@ function subscribe(listener: () => void) {
 /** Running inside the desktop app (not the browser preview), where the updater exists. */
 const inApp = () => "__TAURI_INTERNALS__" in window;
 
-const messageOf = (err: unknown) => (typeof err === "string" ? err : err instanceof Error ? err.message : t("ui.updater.wentWrong"));
+const messageOf = (err: unknown) => (errorText(err, t("ui.updater.wentWrong")));
 
 /**
  * Asks the release server for a newer version. A check the person started reports its
