@@ -43,3 +43,11 @@ export function agentFromStored(stored: unknown): AgentKind {
   if (isAgent(settings.assistantAgent)) return settings.assistantAgent;
   return typeof settings.assistantCommand === "string" && settings.assistantCommand.trim() !== "" ? "custom" : "claude";
 }
+
+/** What the agent uses and where things go, in two plain sentences for Settings. */
+export function agentSummary(info: AgentInfo): string {
+  if (info.kind === "custom") {
+    return "Runs the agent you chose, on this computer. Your schema and the results you allow go to its provider.";
+  }
+  return `${info.name} uses your ${info.account} account. Your schema and the results you allow go to ${info.company}. Chats are kept in ${info.folder}.`;
+}

@@ -2,14 +2,14 @@ import { useState } from "react";
 import { LogOut } from "lucide-react";
 import { useSettings } from "../../lib/settings";
 import { assistantApi } from "../../lib/api";
-import { agentInfo, type AgentKind } from "../../lib/assistantAgents";
+import { agentInfo, agentSummary, type AgentKind } from "../../lib/assistantAgents";
 import Button from "../ui/Button";
 import ConfirmDialog from "../ui/ConfirmDialog";
 import Dialog from "../ui/Dialog";
 import SegmentedTabs from "../ui/SegmentedTabs";
 import Switch from "../ui/Switch";
 import { inputClass } from "../ui/styles";
-import { Row, SectionTitle } from "./SettingsRows";
+import { Group, Row, SectionTitle } from "./SettingsRows";
 
 /** How the assistant is run and what it is told by default. */
 export default function AssistantSection() {
@@ -46,69 +46,75 @@ export default function AssistantSection() {
   return (
     <>
       <SectionTitle>AI Assistant</SectionTitle>
-      <Row title="Enable the assistant" hint="Turns on the panel and the actions in the query editor. Read what it sends before you do.">
+      <Row title="Ask your database" hint="A chat that reads your data through an agent on this computer. It stays off until you turn it on.">
         <Switch checked={settings.assistantEnabled} onChange={(v) => update({ assistantEnabled: v })} aria-label="Enable the assistant" />
       </Row>
-      <Row title="Agent" hint={agent === "claude" ? "npx @agentclientprotocol/claude-agent-acp" : agent === "codex" ? "npx @agentclientprotocol/codex-acp" : "Runs on this computer, with your own account."}>
-        <SegmentedTabs<AgentKind>
-          value={agent}
-          onChange={(value) => update({ assistantAgent: value })}
-          options={[
-            { value: "claude", label: "Claude Code" },
-            { value: "codex", label: "Codex" },
-            { value: "custom", label: "Custom" },
-          ]}
-        />
-      </Row>
-      {agent === "custom" && (
-        <Row title="Command" hint="The command that starts an agent speaking the Agent Client Protocol.">
+
+      <Group title="Agent">
+        <div className="space-y-3 border-b border-border py-3.5">
+          <SegmentedTabs<AgentKind>
+            value={agent}
+            onChange={(value) => update({ assistantAgent: value })}
+            options={[
+              { value: "claude", label: "Claude Code" },
+              { value: "codex", label: "Codex" },
+              { value: "custom", label: "Custom" },
+            ]}
+          />
+          <p className="text-xs leading-relaxed text-muted-foreground">{agentSummary(info)}</p>
+          {agent === "custom" && (
+            <label className="block">
+              <span className="text-[13px] font-medium">Command</span>
+              <input
+                className={`${inputClass} mt-1 w-full`}
+                value={command}
+                placeholder="/path/to/agent --flag"
+                aria-label="Agent command"
+                onChange={(event) => setCommand(event.target.value)}
+                onBlur={() => command.trim() !== settings.assistantCommand && applyCommand(command.trim())}
+              />
+              <span className="mt-1 block text-xs text-muted-foreground">Any agent that speaks the Agent Client Protocol.</span>
+            </label>
+          )}
+        </div>
+        <Row
+          title={`Sign out of ${info.name === "your agent" ? "the agent" : info.name}`}
+          hint={signOutResult ? <span className={signOutResult.ok ? "text-success-foreground" : "text-destructive-foreground"}>{signOutResult.text}</span> : `Signs out ${info.signOutScope}.`}
+        >
+          <Button variant="outline" size="sm" disabled={signingOut} onClick={() => setConfirmSignOut(true)}>
+            <LogOut />
+            {signingOut ? "Signing out…" : "Sign out"}
+          </Button>
+        </Row>
+      </Group>
+
+      <Group title="Queries">
+        <Row title="Ask before each query" hint="You can allow reads for one conversation from the chat.">
+          <Switch checked={settings.assistantAskBeforeQueries} onChange={(v) => update({ assistantAskBeforeQueries: v })} aria-label="Ask before each query" />
+        </Row>
+        <Row title="Rows the assistant can see" hint="Per query, from 10 to 1000.">
           <input
-            className={`${inputClass} w-72`}
-            value={command}
-            placeholder="/path/to/agent --flag"
-            aria-label="Agent command"
-            onChange={(event) => setCommand(event.target.value)}
-            onBlur={() => command.trim() !== settings.assistantCommand && applyCommand(command.trim())}
+            type="number"
+            min={10}
+            max={1000}
+            className={`${inputClass} w-24`}
+            value={settings.assistantRowLimit}
+            aria-label="Rows the assistant can see"
+            onChange={(event) => update({ assistantRowLimit: Number(event.target.value) })}
+            onBlur={() => update({ assistantRowLimit: Math.min(1000, Math.max(10, Math.round(settings.assistantRowLimit) || 100)) })}
           />
         </Row>
-      )}
-      <Row
-        title={`${info.account === "its" ? "Agent" : info.account} account`}
-        hint={
-          signOutResult ? (
-            <span className={signOutResult.ok ? "text-success-foreground" : "text-destructive-foreground"}>{signOutResult.text}</span>
-          ) : (
-            `Signs out ${info.name} ${info.signOutScope}.`
-          )
-        }
-      >
-        <Button variant="outline" size="sm" disabled={signingOut} onClick={() => setConfirmSignOut(true)}>
-          <LogOut />
-          {signingOut ? "Signing out…" : "Sign out"}
-        </Button>
-      </Row>
-      <Row title="Ask before each query" hint="New conversations ask before running each query. You can allow reads for one conversation from the chat.">
-        <Switch checked={settings.assistantAskBeforeQueries} onChange={(v) => update({ assistantAskBeforeQueries: v })} aria-label="Ask before each query" />
-      </Row>
-      <Row title="Rows sent per query" hint="How many rows of a result the assistant sees, from 10 to 1000.">
-        <input
-          type="number"
-          min={10}
-          max={1000}
-          className={`${inputClass} w-24`}
-          value={settings.assistantRowLimit}
-          aria-label="Rows sent per query"
-          onChange={(event) => update({ assistantRowLimit: Number(event.target.value) })}
-          onBlur={() => update({ assistantRowLimit: Math.min(1000, Math.max(10, Math.round(settings.assistantRowLimit) || 100)) })}
-        />
-      </Row>
-      <Row title="Log" hint="What the agent wrote while it ran, for when it doesn't start.">
-        <Button variant="outline" size="sm" onClick={async () => setLog(await assistantApi.log().catch(() => []))}>
-          Show log
-        </Button>
-      </Row>
-      <p className="mt-4 text-xs text-muted-foreground">
-        {info.name} keeps conversations in {info.folder}. Removing a saved connection removes DBunny&apos;s folder for it, not those files.
+      </Group>
+
+      <p className="mt-6 text-xs leading-relaxed text-muted-foreground">
+        For a saved connection, <span className="font-medium text-foreground">Schema only</span> and notes about the database are in the chat&apos;s options button. Removing a saved
+        connection removes DBunny&apos;s folder for it, not what {info.name} kept in {info.folder}.
+      </p>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Agent not starting?{" "}
+        <button type="button" className="cursor-pointer text-primary underline underline-offset-2" onClick={async () => setLog(await assistantApi.log().catch(() => []))}>
+          Show the agent log
+        </button>
       </p>
       <ConfirmDialog
         open={confirmSignOut}

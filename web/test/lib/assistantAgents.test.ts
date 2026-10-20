@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agentFromStored, agentInfo } from "../../src/lib/assistantAgents.ts";
+import { agentFromStored, agentInfo, agentSummary } from "../../src/lib/assistantAgents.ts";
 
 test("each agent has its name, company and the folder it keeps conversations in", () => {
   assert.deepEqual(agentInfo("claude"), { kind: "claude", name: "Claude Code", account: "Claude", company: "Anthropic", folder: "~/.claude/projects", loginTitle: "Sign in to Claude", signOutScope: "on this computer, not only in DBunny" });
@@ -16,4 +16,13 @@ test("the agent comes from the setting, or from the command a person had set bef
   assert.equal(agentFromStored({ assistantCommand: "  " }), "claude");
   assert.equal(agentFromStored({}), "claude");
   assert.equal(agentFromStored(null), "claude");
+});
+
+test("settings say in plain words what an agent uses and where things go", () => {
+  assert.equal(
+    agentSummary(agentInfo("codex")),
+    "Codex uses your ChatGPT account. Your schema and the results you allow go to OpenAI. Chats are kept in DBunny's own Codex folder.",
+  );
+  assert.match(agentSummary(agentInfo("claude")), /Anthropic.*~\/\.claude\/projects/);
+  assert.match(agentSummary(agentInfo("custom")), /its provider/);
 });
