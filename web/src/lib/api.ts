@@ -84,11 +84,11 @@ export const assistantApi = {
 
   /** Starts the agent unless it is up; `command` is the person's own command, if any. */
   async start(command?: string) {
-    return invoke<AgentStatus>("assistant_start", { command: command || null });
+    return invoke<AgentStatus>("assistant_start", { agent: command ? "custom" : "claude", command: command || null });
   },
 
   async restart(command?: string) {
-    return invoke<AgentStatus>("assistant_restart", { command: command || null });
+    return invoke<AgentStatus>("assistant_restart", { agent: command ? "custom" : "claude", command: command || null });
   },
 
   async newConversation(sessionId: string, savedId: string | null, options: ConversationOptions) {
@@ -130,7 +130,7 @@ export const assistantApi = {
 
   /** Signs out of Claude on this computer; every conversation ends. */
   async signOut(command?: string) {
-    return invoke<void>("assistant_sign_out", { command: command || null });
+    return invoke<void>("assistant_sign_out", { agent: command ? "custom" : "claude", command: command || null });
   },
 };
 

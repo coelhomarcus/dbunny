@@ -58,7 +58,7 @@ impl Live {
 
         let path = login_shell_path().await;
         check_node(path.as_deref()).await.expect("Node 20 or newer is needed");
-        let agent = AgentHandle::spawn(&default_command(cfg!(windows)), path, Arc::new(LogBuffer::new(500)), events, Arc::clone(&conversations), approvals)
+        let agent = AgentHandle::spawn(&default_command(cfg!(windows)), path, &[], Arc::new(LogBuffer::new(500)), events, Arc::clone(&conversations), approvals)
             .await
             .unwrap_or_else(|status| panic!("the agent didn't start: {status:?}"));
 
@@ -74,7 +74,8 @@ impl Live {
             cwd,
             mcp_url: server.url(),
             token: conversation.token.clone(),
-            system_prompt: prompt,
+            system_prompt: Some(prompt),
+            meta: Some(super::agent::session_meta()),
         };
         Live { agent, server, conversations, sink, conversation, setup, file }
     }
@@ -121,7 +122,8 @@ async fn claude_session_sees_only_dbunny_tools() {
         meta["claudeCode"]["emitRawSDKMessages"] = json!(true);
         meta
     };
-    let opened = live.agent.new_session_with_meta(&live.setup, meta).await.unwrap();
+    let reporting = SessionSetup { cwd: live.setup.cwd.clone(), mcp_url: live.setup.mcp_url.clone(), token: live.setup.token.clone(), system_prompt: live.setup.system_prompt.clone(), meta: Some(meta) };
+    let opened = live.agent.new_session(&reporting).await.unwrap();
     *live.conversation.acp_session.lock().unwrap() = Some(opened.acp_session.clone());
     // The session reports what it has when its first message starts; the answer doesn't matter
     let _ = live.agent.prompt(&opened.acp_session, "Say hello.").await;
@@ -169,7 +171,7 @@ async fn claude_answers_with_run_query_and_keeps_history() {
 
     // And reopened, it plays back what was said
     let before = live.sink.events().len();
-    let mut again = SessionSetup { cwd: live.setup.cwd.clone(), mcp_url: live.setup.mcp_url.clone(), token: live.setup.token.clone(), system_prompt: live.setup.system_prompt.clone() };
+    let mut again = SessionSetup { cwd: live.setup.cwd.clone(), mcp_url: live.setup.mcp_url.clone(), token: live.setup.token.clone(), system_prompt: live.setup.system_prompt.clone(), meta: live.setup.meta.clone() };
     again.token = live.conversation.token.clone();
     live.agent.load_session(&id, &again).await.unwrap();
     let replayed = live.sink.events().into_iter().skip(before).filter(|e| matches!(e, AssistantEvent::Update { update, .. } if update["sessionUpdate"] == "user_message_chunk")).count();

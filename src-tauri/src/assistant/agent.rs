@@ -34,7 +34,10 @@ pub struct SessionSetup {
     pub cwd: PathBuf,
     pub mcp_url: String,
     pub token: String,
-    pub system_prompt: String,
+    /// The system prompt, for an agent that takes one per session.
+    pub system_prompt: Option<String>,
+    /// The `_meta` of the session, for an agent that is told what to leave out that way.
+    pub meta: Option<Value>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -295,12 +298,13 @@ impl AgentHandle {
     pub async fn spawn(
         command: &AgentCommand,
         path: Option<String>,
+        env: &[(String, String)],
         log: Arc<LogBuffer>,
         events: Arc<dyn EventSink>,
         conversations: Arc<Conversations>,
         approvals: Arc<Approvals>,
     ) -> Result<Arc<AgentHandle>, AgentStatus> {
-        let mut child = child_process(command, path).map_err(|e| AgentStatus::Failed { message: format!("Couldn't start {}: {e}", command.program) })?;
+        let mut child = child_process(command, path, env).map_err(|e| AgentStatus::Failed { message: format!("Couldn't start {}: {e}", command.program) })?;
         let pid = child.id();
         let (stdout, stdin, stderr) = (child.stdout.take().unwrap(), child.stdin.take().unwrap(), child.stderr.take().unwrap());
         let keep = Arc::clone(&log);
@@ -396,38 +400,36 @@ impl AgentHandle {
         self.capabilities.system_prompt
     }
 
-    fn session_params(&self, setup: &SessionSetup, meta: Value) -> serde_json::Map<String, Value> {
+    fn session_params(&self, setup: &SessionSetup) -> serde_json::Map<String, Value> {
         let mut params = serde_json::Map::new();
         params.insert("cwd".into(), json!(setup.cwd));
         params.insert(
             "mcpServers".into(),
             json!([{"type": "http", "name": "dbunny", "url": setup.mcp_url, "headers": [{"name": "Authorization", "value": format!("Bearer {}", setup.token)}]}]),
         );
-        let mut meta = meta;
-        if self.capabilities.system_prompt {
-            params.insert("systemPrompt".into(), json!({"mode": "override", "content": [{"type": "text", "text": setup.system_prompt}]}));
-        } else {
-            // The adapter before that capability reads a string here as the whole system prompt
-            meta["systemPrompt"] = json!(setup.system_prompt);
+        let mut meta = setup.meta.clone();
+        if let Some(prompt) = &setup.system_prompt {
+            if self.capabilities.system_prompt {
+                params.insert("systemPrompt".into(), json!({"mode": "override", "content": [{"type": "text", "text": prompt}]}));
+            } else {
+                // The adapter before that capability reads a string here as the whole system prompt
+                meta.get_or_insert_with(|| json!({}))["systemPrompt"] = json!(prompt);
+            }
         }
-        params.insert("_meta".into(), meta);
+        if let Some(meta) = meta {
+            params.insert("_meta".into(), meta);
+        }
         params
     }
 
     pub async fn new_session(&self, setup: &SessionSetup) -> Result<OpenedSession, AgentError> {
-        self.new_session_with_meta(setup, session_meta()).await
-    }
-
-    /// `new_session` with other `_meta` than the usual (the tests with the real agent ask it to
-    /// report what the session has).
-    pub(crate) async fn new_session_with_meta(&self, setup: &SessionSetup, meta: Value) -> Result<OpenedSession, AgentError> {
-        let result = self.shared.request("session/new", Value::Object(self.session_params(setup, meta))).await?;
+        let result = self.shared.request("session/new", Value::Object(self.session_params(setup))).await?;
         let acp_session = result["sessionId"].as_str().ok_or_else(|| AgentError::Other("The agent gave no session".into()))?.to_string();
         Ok(self.opened(acp_session, &result))
     }
 
     pub async fn load_session(&self, acp_session: &str, setup: &SessionSetup) -> Result<OpenedSession, AgentError> {
-        let mut params = self.session_params(setup, session_meta());
+        let mut params = self.session_params(setup);
         params.insert("sessionId".into(), json!(acp_session));
         let result = self.shared.request("session/load", Value::Object(params)).await?;
         Ok(self.opened(acp_session.to_string(), &result))
@@ -514,12 +516,14 @@ impl AgentHandle {
 
 /// The command as a child process of its own: its output piped, no console window on Windows, and
 /// on unix a process group of its own, so that what it starts can be ended with it.
-fn child_process(command: &AgentCommand, path: Option<String>) -> std::io::Result<tokio::process::Child> {
+fn child_process(command: &AgentCommand, path: Option<String>, env: &[(String, String)]) -> std::io::Result<tokio::process::Child> {
     let mut process = tokio::process::Command::new(&command.program);
     process.args(&command.args).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
     if let Some(path) = path {
         process.env("PATH", path);
     }
+    // The profile's variables win over what the app inherited, a CODEX_CONFIG of the person's included
+    process.envs(env.iter().cloned());
     #[cfg(unix)]
     process.process_group(0);
     #[cfg(windows)]
@@ -589,7 +593,7 @@ mod tests {
     }
 
     fn setup() -> SessionSetup {
-        SessionSetup { cwd: "/tmp/work".into(), mcp_url: "http://127.0.0.1:4000/mcp".into(), token: "tok".into(), system_prompt: "You are the assistant.".into() }
+        SessionSetup { cwd: "/tmp/work".into(), mcp_url: "http://127.0.0.1:4000/mcp".into(), token: "tok".into(), system_prompt: Some("You are the assistant.".into()), meta: Some(session_meta()) }
     }
 
     fn options() -> ConversationOptions {
@@ -630,6 +634,19 @@ mod tests {
         assert_eq!(status, AgentStatus::Unsupported { message: "This agent can't use DBunny's tools.".into() });
         let status = rig(FakeConfig { load_session: false, ..Default::default() }).await.err().unwrap();
         assert!(matches!(status, AgentStatus::Unsupported { .. }));
+    }
+
+    #[tokio::test]
+    async fn a_session_without_system_prompt_or_meta_carries_neither() {
+        let r = rig(FakeConfig::default()).await.unwrap();
+        r.agent.new_session(&SessionSetup { system_prompt: None, meta: None, ..setup() }).await.unwrap();
+        let params = r.fake.calls("session/new")[0]["params"].clone();
+        assert!(params.get("systemPrompt").is_none() && params.get("_meta").is_none(), "{params}");
+        // The agent that reads the prompt from `_meta` still gets only the prompt there
+        let without = rig(FakeConfig { system_prompt: false, ..Default::default() }).await.unwrap();
+        without.agent.new_session(&SessionSetup { meta: None, ..setup() }).await.unwrap();
+        let params = without.fake.calls("session/new")[0]["params"].clone();
+        assert_eq!(params["_meta"], json!({"systemPrompt": "You are the assistant."}));
     }
 
     #[tokio::test]
@@ -831,11 +848,23 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn the_profile_environment_wins_over_the_inherited_one() {
+        use tokio::io::AsyncBufReadExt;
+        std::env::set_var("DBUNNY_TEST_PROFILE_VAR", "inherited");
+        let command = AgentCommand { program: "sh".into(), args: vec!["-c".into(), "echo $DBUNNY_TEST_PROFILE_VAR".into()] };
+        let mut child = child_process(&command, None, &[("DBUNNY_TEST_PROFILE_VAR".into(), "profile".into())]).unwrap();
+        let line = BufReader::new(child.stdout.take().unwrap()).lines().next_line().await.unwrap().unwrap();
+        assert_eq!(line, "profile");
+        let _ = child.wait().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn ending_the_agent_ends_what_it_started() {
         use tokio::io::AsyncBufReadExt;
         // Like npx: the command starts the real thing as a child of its own and waits for it
         let command = AgentCommand { program: "sh".into(), args: vec!["-c".into(), "sleep 300 & echo $!; wait".into()] };
-        let mut child = child_process(&command, None).unwrap();
+        let mut child = child_process(&command, None, &[]).unwrap();
         let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
         let grandchild: i32 = lines.next_line().await.unwrap().unwrap().trim().parse().unwrap();
         let alive = |pid: i32| unsafe { libc::kill(pid, 0) } == 0;

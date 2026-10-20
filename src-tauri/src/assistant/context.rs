@@ -18,7 +18,7 @@ pub struct PromptInput<'a> {
 /// Schemas the server keeps for itself; the agent can still ask about them by name.
 const SYSTEM_SCHEMAS: [&str; 6] = ["information_schema", "pg_catalog", "pg_toast", "performance_schema", "sys", "mysql"];
 
-const BASE_PROMPT: &str = "You are the SQL assistant inside DBunny, a database client. Answer in the language the person writes in.
+pub const BASE_PROMPT: &str = "You are the SQL assistant inside DBunny, a database client. Answer in the language the person writes in.
 
 How to work:
 - Never invent table or column names. Use the schema below, list_tables, describe_table and relationships to find them.
