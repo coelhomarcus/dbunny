@@ -14,14 +14,14 @@ import Button from "../ui/Button";
 import ReleaseNotesDialog from "../ReleaseNotesDialog";
 import Switch from "../ui/Switch";
 import AssistantSection from "./AssistantSection";
-import ClaudeCodeIcon from "../assistant/ClaudeCodeIcon";
+import AiIcon from "../ui/AiIcon";
 import { Row, SectionTitle } from "./SettingsRows";
 import SegmentedTabs from "../ui/SegmentedTabs";
 
 const SECTIONS: { id: SettingsSection; label: string; icon: ReactNode }[] = [
   { id: "general", label: "General", icon: <Settings2 /> },
   { id: "editor", label: "Query editor", icon: <Code /> },
-  { id: "assistant", label: "AI Assistant", icon: <ClaudeCodeIcon /> },
+  { id: "assistant", label: "AI Assistant", icon: <AiIcon /> },
   { id: "updates", label: "Updates", icon: <RefreshCw /> },
   { id: "about", label: "About", icon: <Info /> },
 ];

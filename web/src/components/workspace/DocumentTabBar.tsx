@@ -33,7 +33,7 @@ import { useCapabilities } from "../../hooks/useCapabilities";
 import { cn } from "../../lib/cn";
 import { isMac } from "../../lib/platform";
 import Tooltip from "../Tooltip";
-import ClaudeCodeIcon from "../assistant/ClaudeCodeIcon";
+import AiIcon from "../ui/AiIcon";
 import type { DataIcon, Document } from "../../lib/documents";
 
 const DATA_ICON: Record<DataIcon, ComponentType<LucideProps>> = {
@@ -71,7 +71,7 @@ function iconFor(doc: Document): ComponentType<LucideProps> {
     case "diagram":
       return Waypoints;
     case "assistant":
-      return ClaudeCodeIcon;
+      return AiIcon;
   }
 }
 
