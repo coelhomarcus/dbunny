@@ -37,3 +37,18 @@ export type ParamsOf<S extends string> = S extends `${string}{${infer P}}${infer
 
 /** A text with elements inside: plain strings and tags that wrap more of the same. */
 export type RichNode = string | { tag: string; children: RichNode[] };
+
+/** The message at a dotted path of a catalog type. */
+export type MessageAt<T, K extends string> = K extends `${infer Head}.${infer Rest}`
+  ? Head extends keyof T
+    ? MessageAt<T[Head], Rest>
+    : never
+  : K extends keyof T
+    ? T[K]
+    : never;
+
+/** The parameters a message needs; a plural always needs `count`. */
+export type ParamNames<M> = M extends string ? ParamsOf<M> : M extends { other: infer O extends string } ? ParamsOf<O> | "count" : never;
+
+/** What follows the key in a call: nothing when the message has no parameters. */
+export type ArgsFor<M> = [ParamNames<M>] extends [never] ? [params?: Params] : [params: { [N in ParamNames<M>]: string | number }];
