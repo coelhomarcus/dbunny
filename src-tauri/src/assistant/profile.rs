@@ -82,9 +82,12 @@ impl AgentProfile {
         self
     }
 
-    pub fn delivery(&self) -> PromptDelivery {
+    /// How the instructions reach this agent. `takes_system_prompt` is whether it said it takes one per
+    /// session: an agent of the person's own that doesn't gets them in the first message instead.
+    pub fn delivery_for(&self, takes_system_prompt: bool) -> PromptDelivery {
         match self.kind {
             AgentKind::Codex => PromptDelivery::FirstMessage,
+            AgentKind::Custom if !takes_system_prompt => PromptDelivery::FirstMessage,
             _ => PromptDelivery::System,
         }
     }
@@ -120,7 +123,8 @@ mod tests {
         let profile = resolve(AgentKind::Claude, None, false).unwrap();
         assert_eq!(profile.command, launch::default_command(false));
         assert!(profile.env.is_empty());
-        assert_eq!(profile.delivery(), PromptDelivery::System);
+        assert_eq!(profile.delivery_for(false), PromptDelivery::System);
+        assert_eq!(profile.delivery_for(true), PromptDelivery::System);
         assert!(profile.session_meta().is_some());
         assert_eq!(profile.login_command(), Some(launch::login_command()));
     }
@@ -141,7 +145,7 @@ mod tests {
         assert_eq!(config["web_search"], "disabled");
         assert_eq!(config["include_environment_context"], false);
         assert!(!config["developer_instructions"].as_str().unwrap().is_empty());
-        assert_eq!(profile.delivery(), PromptDelivery::FirstMessage);
+        assert_eq!(profile.delivery_for(true), PromptDelivery::FirstMessage);
         assert!(profile.session_meta().is_none());
         assert_eq!(profile.login_command(), None);
     }
@@ -169,7 +173,9 @@ mod tests {
         let profile = resolve(AgentKind::Custom, Some("/opt/x --flag"), false).unwrap();
         assert_eq!(profile.command.program, "/opt/x");
         assert!(profile.env.is_empty());
-        assert_eq!(profile.delivery(), PromptDelivery::System);
+        // The agent of the person's choosing gets the instructions the way it can take them
+        assert_eq!(profile.delivery_for(true), PromptDelivery::System);
+        assert_eq!(profile.delivery_for(false), PromptDelivery::FirstMessage);
         assert_eq!(profile.login_command(), None);
     }
 
