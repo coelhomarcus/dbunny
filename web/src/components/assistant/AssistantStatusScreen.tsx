@@ -8,6 +8,7 @@ import type { AgentInfo } from "../../lib/assistantAgents";
 import type { AgentStatus } from "../../types/assistant";
 import Button from "../ui/Button";
 import Dialog from "../ui/Dialog";
+import AgentMark from "./AgentMark";
 import StartingScreen from "./StartingScreen";
 
 /** The assistant's agent is not ready: what is missing, and what to do about it. */
@@ -46,9 +47,10 @@ export default function AssistantStatusScreen({
   if (status.state === "starting") return <StartingScreen agent={agent} step={status.step} detail={status.detail} />;
   if (status.state === "idle" || status.state === "ready") {
     return (
-      <div className="flex h-full items-center justify-center gap-2 text-[13px] text-muted-foreground">
-        <Spinner size={15} />
-        Starting the assistant…
+      <div className="flex h-full flex-col items-center justify-center">
+        <AgentMark agent={agent} />
+        <p className="mt-4 text-sm font-medium">Starting the assistant</p>
+        <Spinner size={15} className="mt-3 text-muted-foreground" />
       </div>
     );
   }
