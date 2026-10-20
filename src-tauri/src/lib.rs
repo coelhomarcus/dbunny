@@ -1,6 +1,7 @@
 mod assistant;
 mod commands;
 mod db;
+mod error;
 
 use commands::state::AppState;
 use commands::storage;
