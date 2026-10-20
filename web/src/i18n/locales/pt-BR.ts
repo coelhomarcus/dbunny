@@ -1091,6 +1091,7 @@ export const ptBR: Translation<typeof en> = {
       hexColor: "Cor em hexadecimal",
       hue: "Matiz",
       saturationAndBrightness: "Saturação e brilho",
+      valueText: "Saturação {saturation}%, brilho {brightness}%",
     },
     columnMeta: {
       generated: "Gerada pelo servidor (somente leitura)",
