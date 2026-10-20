@@ -22,7 +22,9 @@ export type Item =
       approval?: ApprovalRequest;
     }
   | { kind: "approval"; approval: ApprovalRequest }
-  | { kind: "error"; text: string };
+  | { kind: "error"; text: string }
+  /** A line of what happened to the conversation that is nobody's message: it was stopped, say. */
+  | { kind: "note"; text: string };
 
 export interface Conversation {
   items: Item[];
@@ -30,6 +32,9 @@ export interface Conversation {
   running: boolean;
   title: string | null;
 }
+
+/** The text the assistant is given when the person turns a query down. */
+export const DECLINED = "The user declined to run this query. Ask them how to continue.";
 
 const OWN_TOOLS = "mcp__dbunny__";
 const OWN_SERVER = "dbunny";
@@ -166,9 +171,12 @@ export function addUserMessage(conversation: Conversation, text: string): Conver
   return { ...conversation, running: true, items: [...conversation.items, { kind: "user", text }] };
 }
 
-/** The agent's turn is over, or it failed with `error`. */
-export function finishTurn(conversation: Conversation, error?: string): Conversation {
-  return { ...conversation, running: false, items: error ? [...conversation.items, { kind: "error", text: error }] : conversation.items };
+/** The agent's turn is over, or it failed with `error`; `note` says how it ended when that is worth a line (stopped). */
+export function finishTurn(conversation: Conversation, error?: string, note?: string): Conversation {
+  const items: Item[] = [...conversation.items];
+  if (error) items.push({ kind: "error", text: error });
+  if (note) items.push({ kind: "note", text: note });
+  return { ...conversation, running: false, items };
 }
 
 /** A query waits for the person: it goes on the card that runs it, or on one of its own. */

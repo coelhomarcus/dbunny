@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyUpdate, emptyConversation, type Conversation, type Item, type ToolItem } from "../../src/lib/assistantConversation.ts";
-import { formatDuration, groupItems, stepsSummary, toolDescription } from "../../src/lib/assistantTurns.ts";
+import { formatDuration, groupItems, isWorking, stepsSummary, toolDescription, toolTitle } from "../../src/lib/assistantTurns.ts";
 
 const text = (kind: string, value: string) => ({ sessionUpdate: kind, content: { type: "text", text: value } });
 const call = (id: string, tool: string, input: Record<string, unknown> = {}) => ({
@@ -90,4 +90,39 @@ test("the summary counts the steps and says how long they took", () => {
   assert.equal(stepsSummary([tool({ id: "a" })], undefined), "1 step");
   assert.equal(stepsSummary([{ kind: "thought", text: "t", at: 1000 }], 5000), "Thought for 4s");
   assert.equal(stepsSummary([{ kind: "thought", text: "t" }], undefined), "Thought");
+});
+
+test("a step is named in the present while it goes and in the past when it is done", () => {
+  const read = { tool: "describe_table", input: { schema: "public", table: "orders" } };
+  assert.equal(toolTitle(tool({ ...read, status: "in_progress" })), "Reading the structure of public.orders");
+  assert.equal(toolTitle(tool({ ...read, status: "completed" })), "Read the structure of public.orders");
+  assert.equal(toolTitle(tool({ ...read, status: "failed", output: "no such table" })), "Couldn't read the structure of public.orders");
+  assert.equal(toolTitle(tool({ tool: "list_tables", input: {}, status: "pending" })), "Listing the tables");
+  assert.equal(toolTitle(tool({ tool: "list_tables", input: { schema: "audit" }, status: "completed" })), "Listed the tables of audit");
+  assert.equal(toolTitle(tool({ tool: "relationships", input: { schema: "public" }, status: "in_progress" })), "Reading the relationships of public");
+  assert.equal(toolTitle(tool({ tool: "run_query", status: "in_progress" })), "Running a query");
+  assert.equal(toolTitle(tool({ tool: "run_query", status: "completed" })), "Ran a query");
+  assert.equal(toolTitle(tool({ tool: "explain_query", input: { analyze: true }, status: "completed" })), "Explained a query and ran it");
+  assert.equal(toolTitle(tool({ tool: "explain_query", status: "in_progress" })), "Explaining a query");
+});
+
+test("a query the person turned down is declined, not failed", () => {
+  const declined = "The user declined to run this query. Ask them how to continue.";
+  assert.equal(toolTitle(tool({ tool: "run_query", status: "failed", output: declined })), "Query declined");
+  assert.equal(toolTitle(tool({ tool: "run_query", status: "failed", output: "syntax error" })), "Query failed");
+  assert.equal(toolTitle(tool({ tool: "explain_query", status: "failed", output: declined })), "Explain declined");
+});
+
+test("the assistant is working when it was asked and nothing shows it yet", () => {
+  assert.equal(isWorking([user], true), true);
+  assert.equal(isWorking([user, tool({ status: "completed" })], true), true);
+  assert.equal(isWorking([user, tool({ status: "failed" })], true), true);
+  // Something is going on that shows itself
+  assert.equal(isWorking([user, tool({ status: "in_progress" })], true), false);
+  assert.equal(isWorking([user, { kind: "thought", text: "hm" }], true), false);
+  assert.equal(isWorking([user, { kind: "agent", text: "I'll" }], true), false);
+  assert.equal(isWorking([user, tool({ approval: { id: "a", conversationId: "c", tool: "run_query", sql: "x", analyze: false } })], true), false);
+  // Not running: not working
+  assert.equal(isWorking([user], false), false);
+  assert.equal(isWorking([], true), false);
 });

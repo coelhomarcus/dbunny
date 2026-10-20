@@ -1,4 +1,4 @@
-import type { Item, ToolItem } from "./assistantConversation.ts";
+import { DECLINED, type Item, type ToolItem } from "./assistantConversation.ts";
 
 /** A span of time as a person says it: 0.4s, 14s, 1m 5s. */
 export function formatDuration(ms: number): string {
@@ -107,4 +107,43 @@ export function stepsSummary(steps: Item[], end: number | undefined): string {
   if (steps.every((step) => step.kind === "thought")) return took ? `Thought for ${took}` : "Thought";
   const count = plural(steps.length, "step");
   return took ? `Worked for ${took} · ${count}` : count;
+}
+
+/** The person turned this query down. */
+export function isDeclined(item: ToolItem): boolean {
+  return item.status === "failed" && item.output === DECLINED;
+}
+
+/** A step named for where it stands: in the present while it goes, in the past once done, and plainly when it failed. */
+export function toolTitle(item: ToolItem): string {
+  const text = (key: string) => (typeof item.input[key] === "string" ? (item.input[key] as string) : "");
+  const going = item.status === "pending" || item.status === "in_progress";
+  const failed = item.status === "failed";
+  const table = `${text("schema")}.${text("table")}`;
+  switch (item.tool) {
+    case "list_tables": {
+      const of = text("schema") ? ` of ${text("schema")}` : "";
+      return going ? `Listing the tables${of}` : failed ? `Couldn't list the tables${of}` : `Listed the tables${of}`;
+    }
+    case "describe_table":
+      return going ? `Reading the structure of ${table}` : failed ? `Couldn't read the structure of ${table}` : `Read the structure of ${table}`;
+    case "relationships":
+      return going ? `Reading the relationships of ${text("schema")}` : failed ? `Couldn't read the relationships of ${text("schema")}` : `Read the relationships of ${text("schema")}`;
+    case "run_query":
+      return going ? "Running a query" : failed ? (isDeclined(item) ? "Query declined" : "Query failed") : "Ran a query";
+    case "explain_query":
+      if (going) return "Explaining a query";
+      if (failed) return isDeclined(item) ? "Explain declined" : "Couldn't explain the query";
+      return item.input.analyze === true ? "Explained a query and ran it" : "Explained a query";
+    default:
+      return item.tool || "Used a tool";
+  }
+}
+
+/** The assistant was asked and nothing on screen shows it is at work: the chat says so. */
+export function isWorking(items: Item[], running: boolean): boolean {
+  const last = items[items.length - 1];
+  if (!running || !last) return false;
+  if (last.kind === "user") return true;
+  return last.kind === "tool" && last.approval === undefined && (last.status === "completed" || last.status === "failed");
 }

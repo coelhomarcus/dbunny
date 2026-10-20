@@ -18,7 +18,7 @@ export function TraceLine({ status, className, children }: { status?: TraceStatu
       <span
         data-status={status}
         className={cn(
-          "flex min-h-7 w-full items-center gap-2 py-1 text-muted-foreground",
+          "flex min-h-7 w-full items-center gap-2 py-1 text-[13px] text-muted-foreground",
           status === "error" && "text-destructive-foreground",
           status === "pending" && "opacity-60",
           className,
