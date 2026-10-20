@@ -51,3 +51,33 @@ test("bytes keeps the rule of lib/format with the decimal separator of the local
   assert.equal(en.bytes(1024 * 250), "250 kB");
   assert.equal(en.bytes(5 * 1024 * 1024), "5.0 MB");
 });
+
+test("a formatter is built once for a language and its options, not on every call", () => {
+  const original = Intl.NumberFormat;
+  let built = 0;
+  const counting = function (this: unknown, ...args: ConstructorParameters<typeof Intl.NumberFormat>) {
+    built++;
+    return new original(...args);
+  } as unknown as typeof Intl.NumberFormat;
+  Intl.NumberFormat = counting;
+  try {
+    const fresh = makeFormatters("pt-BR");
+    for (let i = 0; i < 5; i++) fresh.number(1234.5, { maximumFractionDigits: 7 });
+    assert.equal(built, 1);
+    fresh.bytes(2048);
+    const afterFirstSize = built;
+    for (let i = 0; i < 5; i++) fresh.bytes(2048);
+    assert.equal(built, afterFirstSize, "sizes reuse theirs too");
+    fresh.number(1, { maximumFractionDigits: 8 });
+    assert.equal(built, afterFirstSize + 1, "other options get their own");
+  } finally {
+    Intl.NumberFormat = original;
+  }
+});
+
+test("the same language gives the same results after the formatters are reused", () => {
+  const at = Date.UTC(2026, 9, 20, 14, 5);
+  assert.equal(en.time(at, { timeZone: "UTC" }), en.time(at, { timeZone: "UTC" }));
+  assert.equal(pt.list(["A", "B"]), pt.list(["A", "B"]));
+  assert.notEqual(en.date(at, { timeZone: "UTC" }), pt.date(at, { timeZone: "UTC" }));
+});
