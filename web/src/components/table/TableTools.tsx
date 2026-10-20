@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { FileUp, Loader, RefreshCw, MoveHorizontal, TableProperties } from "lucide-react";
+import { FileUp, RefreshCw, MoveHorizontal, TableProperties } from "lucide-react";
+import Spinner from "../ui/Spinner";
 import type { QueryColumn } from "@/types";
 import Button from "../ui/Button";
 import Tooltip from "../Tooltip";
@@ -60,7 +61,7 @@ export default function TableTools({
               disabled={counting}
               className="flex h-6 items-center gap-1 rounded-md px-1.5 tabular-nums text-foreground transition-colors cursor-pointer hover:bg-accent disabled:cursor-default"
             >
-              {counting ? <Loader size={11} className="animate-spin" /> : "~"}
+              {counting ? <Spinner size={11} /> : "~"}
               {label}
             </button>
           </Tooltip>

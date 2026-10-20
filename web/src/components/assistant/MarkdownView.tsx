@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { cn } from "../../lib/cn";
 import { parseMarkdown, type Inline } from "../../lib/markdown";
 import { isWebLink } from "../../lib/links";
 import { openExternal } from "../../lib/openExternal";
@@ -8,13 +9,16 @@ import ResultTable from "./ResultTable";
 export default function MarkdownView({
   source,
   renderCode,
+  className,
 }: {
   source: string;
   renderCode?: (language: string, text: string) => ReactNode;
+  /** Replaces the size and color of the text (the thinking is smaller and quieter). */
+  className?: string;
 }) {
   const blocks = parseMarkdown(source);
   return (
-    <div className="select-text space-y-2.5 text-[13px] leading-relaxed">
+    <div className={cn("select-text space-y-2.5 leading-relaxed", className ?? "text-[13px]")}>
       {blocks.map((block, index) => {
         if (block.kind === "heading") {
           return (
@@ -26,7 +30,7 @@ export default function MarkdownView({
         if (block.kind === "list") {
           const List = block.ordered ? "ol" : "ul";
           return (
-            <List key={index} className={block.ordered ? "list-decimal space-y-1 pl-5" : "list-disc space-y-1 pl-4"}>
+            <List key={index} className={block.ordered ? "list-decimal space-y-1.5 pl-5 marker:text-muted-foreground" : "list-disc space-y-1.5 pl-5 marker:text-muted-foreground"}>
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex}>
                   <Inlines parts={item} />
@@ -70,7 +74,7 @@ function Inlines({ parts }: { parts: Inline[] }) {
   return parts.map((part, index) => {
     if (part.kind === "code") {
       return (
-        <code key={index} className="rounded bg-muted px-1 py-0.5 font-mono text-[12px]">
+        <code key={index} className="rounded-md bg-primary/[0.08] px-1.5 py-px font-mono text-[0.92em] text-[color-mix(in_oklab,var(--primary)_60%,var(--foreground))]">
           {part.text}
         </code>
       );

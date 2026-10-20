@@ -162,3 +162,63 @@ test("the text of a tool that failed comes without the code fence the agent puts
   // A result that is JSON is not touched either
   assert.equal((failed('{"rowCount":1}') as ToolItem).output, '{"rowCount":1}');
 });
+
+// What codex-acp sends for a call of the database's tool, as captured from the real agent
+const codexCall = {
+  sessionUpdate: "tool_call",
+  toolCallId: "exec-1",
+  kind: "execute",
+  title: "mcp.dbunny.run_query",
+  status: "in_progress",
+  rawInput: { server: "dbunny", tool: "run_query", arguments: { sql: "SELECT 1" } },
+  _meta: { is_mcp_tool_call: true },
+};
+const codexDone = (status: string, text: string) => ({
+  sessionUpdate: "tool_call_update",
+  toolCallId: "exec-1",
+  status,
+  rawOutput: { result: { content: [{ type: "text", text }], structuredContent: null, _meta: null }, error: null },
+});
+
+test("a call of the database's tool by codex makes the same card as claude's", () => {
+  const rows = JSON.stringify({ columns: [{ name: "n", type: "integer" }], rows: [[2]], rowCount: 1, truncated: false });
+  const state = play([codexCall, { sessionUpdate: "tool_call_update", toolCallId: "exec-1", status: "in_progress" }, codexDone("completed", rows)]);
+  const item = state.items[0] as ToolItem;
+  assert.equal(item.tool, "run_query");
+  assert.deepEqual(item.input, { sql: "SELECT 1" });
+  assert.equal(item.status, "completed");
+  assert.equal(parseToolOutput(item.output ?? "")?.rowCount, 1);
+});
+
+test("a query codex was refused shows as declined", () => {
+  const declined = "The user declined to run this query. Ask them how to continue.";
+  const item = play([codexCall, codexDone("failed", declined)]).items[0] as ToolItem;
+  assert.equal(item.status, "failed");
+  assert.equal(item.output, declined);
+});
+
+test("a call of another server keeps its input and gets no database name", () => {
+  const other = { ...codexCall, toolCallId: "x", title: "mcp.github.create_issue", rawInput: { server: "github", tool: "create_issue", arguments: { title: "t" } } };
+  const item = play([other]).items[0] as ToolItem;
+  assert.equal(item.tool, "");
+  assert.deepEqual(item.input, other.rawInput);
+});
+
+test("an approval joins the card of codex's call by its sql", () => {
+  const state = attachApproval(play([codexCall]), approval("a1", "SELECT 1"));
+  assert.equal((state.items[0] as ToolItem).approval?.id, "a1");
+  assert.equal(state.items.length, 1);
+});
+
+test("a title made of a first message that carried the database context is only the question", () => {
+  const title = "Quantos pedidos?\n\n<dbunny-context>\nThe database:\n- Engine: SQLite\n</dbunny-context>";
+  assert.equal(play([{ sessionUpdate: "session_info_update", title }]).title, "Quantos pedidos?");
+});
+
+test("thought chunks with nothing in them make no Thinking block", () => {
+  assert.deepEqual(play([chunk("agent_thought_chunk", ""), chunk("agent_thought_chunk", "\n\n"), chunk("agent_message_chunk", "ok")]).items, [{ kind: "agent", text: "ok" }]);
+  // A break between two parts of a thought that has text stays in it
+  assert.deepEqual(play([chunk("agent_thought_chunk", "one"), chunk("agent_thought_chunk", "\n\n"), chunk("agent_thought_chunk", "two")]).items, [{ kind: "thought", text: "one\n\ntwo" }]);
+  // Text that comes after blank chunks is still a thought
+  assert.deepEqual(play([chunk("agent_thought_chunk", "\n"), chunk("agent_thought_chunk", "plan")]).items, [{ kind: "thought", text: "plan" }]);
+});

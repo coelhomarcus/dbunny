@@ -538,21 +538,6 @@ function QueryPaneBody({
               </Button>
             </Tooltip>
             <div className="ml-auto flex items-center gap-0.5">
-              <Button
-                variant="ghost-muted"
-                size="sm"
-                className="shrink-0"
-                data-active={historyOpen}
-                aria-pressed={historyOpen}
-                onClick={() => {
-                  if (!historyOpen && historyStorageKey) setHistory(loadHistory(historyStorageKey));
-                  if (!historyOpen && savedStorageKey) setSavedQueries(loadSaved(savedStorageKey));
-                  setHistoryOpen((open) => !open);
-                }}
-              >
-                <History />
-                History
-              </Button>
               {capabilities.transactions && (
                 <TransactionButton
                   open={inTransaction}
@@ -581,6 +566,19 @@ function QueryPaneBody({
               </Tooltip>
               <Popover open={moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreButtonRef} className="w-52 p-1">
                 <div role="menu" className="[&>button]:flex [&>button]:w-full [&>button]:items-center [&>button]:gap-2.5 [&>button]:rounded-md [&>button]:px-2 [&>button]:py-1.5 [&>button]:text-left [&>button]:text-[13px] [&>button]:cursor-pointer [&>button:hover]:bg-accent [&_svg]:size-3.5 [&_svg]:text-muted-foreground">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      if (!historyOpen && historyStorageKey) setHistory(loadHistory(historyStorageKey));
+                      if (!historyOpen && savedStorageKey) setSavedQueries(loadSaved(savedStorageKey));
+                      setHistoryOpen((open) => !open);
+                    }}
+                  >
+                    <History /> {historyOpen ? "Hide history" : "History"}
+                  </button>
+                  <div className="mx-1 my-1 h-px bg-border" />
                   <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); editorRef.current?.format(); }}>
                     <AlignLeft /> Format SQL
                     <kbd className="ml-auto font-sans text-[11px] text-muted-foreground">{SHIFT}{ALT}F</kbd>

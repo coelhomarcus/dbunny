@@ -1,23 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { getVersion } from "@tauri-apps/api/app";
-import {
-  ArrowUpRight,
-  CircleCheck,
-  Code,
-  Download,
-  Info,
-  Loader,
-  Monitor,
-  Moon,
-  RefreshCw,
-  RotateCw,
-  Settings2,
-  ShieldCheck,
-  Sun,
-  TriangleAlert,
-  X,
-} from "lucide-react";
+import { ArrowUpRight, CircleCheck, Code, Download, Info, Monitor, Moon, RefreshCw, RotateCw, Settings2, ShieldCheck, Sun, TriangleAlert, X } from "lucide-react";
+import Spinner from "../ui/Spinner";
 import { cn } from "../../lib/cn";
 import { useSettings } from "../../lib/settings";
 import { useTheme, type ThemePreference } from "../../lib/theme";
@@ -29,14 +14,14 @@ import Button from "../ui/Button";
 import ReleaseNotesDialog from "../ReleaseNotesDialog";
 import Switch from "../ui/Switch";
 import AssistantSection from "./AssistantSection";
-import ClaudeCodeIcon from "../assistant/ClaudeCodeIcon";
+import AiIcon from "../ui/AiIcon";
 import { Row, SectionTitle } from "./SettingsRows";
 import SegmentedTabs from "../ui/SegmentedTabs";
 
 const SECTIONS: { id: SettingsSection; label: string; icon: ReactNode }[] = [
   { id: "general", label: "General", icon: <Settings2 /> },
   { id: "editor", label: "Query editor", icon: <Code /> },
-  { id: "assistant", label: "AI Assistant", icon: <ClaudeCodeIcon /> },
+  { id: "assistant", label: "AI Assistant", icon: <AiIcon /> },
   { id: "updates", label: "Updates", icon: <RefreshCw /> },
   { id: "about", label: "About", icon: <Info /> },
 ];
@@ -95,14 +80,14 @@ function UpdatesSection() {
   const status = (() => {
     switch (state.status) {
       case "checking":
-        return { icon: <Loader className="animate-spin" />, text: "Looking for a new version…" };
+        return { icon: <Spinner />, text: "Looking for a new version…" };
       case "up-to-date":
         return { icon: <CircleCheck className="text-success-foreground" />, text: "DBunny is up to date." };
       case "available":
         return { icon: <Download className="text-primary" />, text: `DBunny ${state.version} is available.` };
       case "downloading":
         return {
-          icon: <Loader className="animate-spin" />,
+          icon: <Spinner />,
           text: `Downloading ${state.version}${state.progress !== null ? ` · ${Math.round(state.progress * 100)}%` : "…"}`,
         };
       case "ready":

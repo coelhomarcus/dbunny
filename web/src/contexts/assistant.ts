@@ -1,8 +1,11 @@
 import { createContext, useContext } from "react";
+import type { AgentInfo } from "../lib/assistantAgents";
 import type { Conversation } from "../lib/assistantConversation";
 import type { AgentStatus, Decision, ModelChoice, SessionSummary } from "../types/assistant";
 
 export interface AssistantValue {
+  /** The agent the assistant runs, as the interface names it. */
+  agent: AgentInfo;
   /** The connected database can be read by the assistant. */
   available: boolean;
   status: AgentStatus;
@@ -28,12 +31,17 @@ export interface AssistantValue {
   stop: () => Promise<void>;
   approve: (approvalId: string, decision: Decision) => Promise<void>;
   newChat: () => Promise<void>;
-  openConversation: (acpSession: string) => Promise<void>;
+  /** Opens a past conversation; `title` is shown while it loads. */
+  openConversation: (acpSession: string, title?: string) => Promise<void>;
+  /** The title (maybe empty) of the past conversation being opened, or null when none is. */
+  openingTitle: string | null;
   setModel: (modelId: string) => Promise<void>;
   /** Opens the assistant and sends `text` as soon as it can. */
   ask: (text: string) => void;
   /** Starts the agent again after it stopped or could not start. */
   retry: () => Promise<void>;
+  /** Signs in with one of the methods the agent offered; rejects with the reason when the login fails. */
+  signIn: (methodId: string) => Promise<void>;
 }
 
 export const AssistantContext = createContext<AssistantValue | null>(null);

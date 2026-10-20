@@ -7,12 +7,15 @@ import ModelPicker from "./ModelPicker";
 /** Where the person writes to the assistant. Enter sends; Shift+Enter starts a new line. */
 export default function Composer({
   running,
+  locked = false,
   models,
   onSend,
   onStop,
   onModel,
 }: {
   running: boolean;
+  /** A conversation is opening: nothing can be sent yet. */
+  locked?: boolean;
   /** The models the conversation can run on, once it has started. */
   models: ModelChoice | null;
   onSend: (text: string) => void;
@@ -32,7 +35,7 @@ export default function Composer({
 
   function submit() {
     const text = draft.trim();
-    if (!text || running) return;
+    if (!text || running || locked) return;
     setDraft("");
     onSend(text);
   }
@@ -44,8 +47,8 @@ export default function Composer({
           ref={field}
           value={draft}
           rows={1}
-          placeholder="Ask about your data…"
-          disabled={running}
+          placeholder={locked ? "Opening the conversation…" : "Ask about your data…"}
+          disabled={running || locked}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -60,7 +63,7 @@ export default function Composer({
             <Square />
           </Button>
         ) : (
-          <Button variant="primary" size="icon-xs" aria-label="Send" disabled={!draft.trim()} onClick={submit}>
+          <Button variant="primary" size="icon-xs" aria-label="Send" disabled={!draft.trim() || locked} onClick={submit}>
             <ArrowUp />
           </Button>
         )}

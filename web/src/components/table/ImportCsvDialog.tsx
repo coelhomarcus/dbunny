@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { FileUp, FolderOpen, Loader } from "lucide-react";
+import { FileUp, FolderOpen } from "lucide-react";
+import Spinner from "../ui/Spinner";
 import type { ColumnInfo } from "@/types";
 import { detectDelimiter, looksLikeHeader, matchColumns, parseCsv } from "../../lib/csv";
 import { cn } from "../../lib/cn";
@@ -150,7 +151,7 @@ function ImportForm({
             Cancel
           </Button>
           <Button variant="primary" size="sm" onClick={runImport} disabled={!canImport}>
-            {busy && <Loader className="animate-spin" />}
+            {busy && <Spinner />}
             Import{file && dataRows.length > 0 ? ` ${dataRows.length.toLocaleString()} rows` : ""}
           </Button>
         </>

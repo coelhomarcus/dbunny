@@ -23,6 +23,10 @@ pub struct FakeConfig {
     pub sessions: Vec<Value>,
     /// Sent to the client before `session/load` is answered, like the replay of a conversation.
     pub load_script: Vec<Value>,
+    /// How many `session/prompt` calls, from the first, are answered with an error.
+    pub fail_prompts: usize,
+    /// `authenticate` is answered with an error.
+    pub fail_authenticate: bool,
 }
 
 impl Default for FakeConfig {
@@ -37,6 +41,8 @@ impl Default for FakeConfig {
             die_on_prompt: false,
             sessions: vec![],
             load_script: vec![],
+            fail_prompts: 0,
+            fail_authenticate: false,
         }
     }
 }
@@ -72,6 +78,9 @@ async fn send(out: &mut DuplexStream, message: &Value) {
 async fn run(config: FakeConfig, input: DuplexStream, mut out: DuplexStream, received: Arc<Mutex<Vec<Value>>>, answers: Arc<Mutex<Vec<Value>>>) {
     let mut lines = BufReader::new(input).lines();
     let mut sessions = 0;
+    let mut prompts = 0;
+    // Signing in with `authenticate` ends "authentication required"
+    let mut signed_in = !config.auth_required;
     while let Ok(Some(line)) = lines.next_line().await {
         let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
         if message.get("method").is_none() {
@@ -91,9 +100,9 @@ async fn run(config: FakeConfig, input: DuplexStream, mut out: DuplexStream, rec
                         "systemPrompt": if config.system_prompt { json!({"mode": {"override": {}}}) } else { Value::Null },
                     },
                 },
-                "authMethods": [{"id": "claude-login", "name": "Log in with Claude"}],
+                "authMethods": [{"id": "claude-login", "name": "Log in with Claude"}, {"id": "chat-gpt", "name": "ChatGPT"}],
             })),
-            "session/new" | "session/load" if config.auth_required => Err(json!({"code": -32000, "message": "Authentication required"})),
+            "session/new" | "session/load" if !signed_in => Err(json!({"code": -32000, "message": "Authentication required"})),
             "session/new" => {
                 sessions += 1;
                 Ok(json!({
@@ -112,11 +121,22 @@ async fn run(config: FakeConfig, input: DuplexStream, mut out: DuplexStream, rec
                 Ok(json!({}))
             }
             "session/list" => Ok(json!({"sessions": config.sessions})),
+            "authenticate" if config.fail_authenticate => Err(json!({"code": -32603, "message": "The login was cancelled"})),
+            "authenticate" => {
+                signed_in = true;
+                Ok(json!({}))
+            }
             "session/set_config_option" | "logout" => Ok(json!({})),
+            "session/prompt" if { prompts += 1; prompts <= config.fail_prompts } => Err(json!({"code": -32603, "message": "The model is busy"})),
             "session/prompt" => {
                 let before = answers.lock().unwrap().len();
                 let requests = config.prompt_script.iter().filter(|m| m.get("id").is_some()).count();
                 for item in &config.prompt_script {
+                    // A pause in the script, for what arrives out of order
+                    if let Some(ms) = item["_delay_ms"].as_u64() {
+                        tokio::time::sleep(Duration::from_millis(ms)).await;
+                        continue;
+                    }
                     send(&mut out, item).await;
                 }
                 for _ in 0..400 {

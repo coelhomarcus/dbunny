@@ -217,6 +217,7 @@ pub fn run() {
             commands::assistant::assistant_close_conversation,
             commands::assistant::assistant_log,
             commands::assistant::assistant_sign_out,
+            commands::assistant::assistant_authenticate,
             #[cfg(debug_assertions)]
             open_devtools,
         ])

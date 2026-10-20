@@ -5,10 +5,13 @@ pub mod agent;
 pub mod approvals;
 #[cfg(test)]
 mod claude_tests;
+#[cfg(test)]
+mod codex_tests;
 pub mod context;
 pub mod conversation;
 pub mod events;
 pub mod launch;
+pub mod profile;
 pub mod mcp;
 #[cfg(test)]
 mod fake;
@@ -19,7 +22,7 @@ pub mod tools;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
@@ -28,10 +31,11 @@ use tokio::sync::Mutex;
 
 use agent::{AgentError, AgentHandle, LogBuffer, ModelChoice, LOG_LINES, SessionSetup, SessionSummary};
 use approvals::{Approvals, Decision};
-use context::{system_prompt, PromptInput};
+use context::{database_context, system_prompt, with_context, PromptInput};
 use conversation::{Conversation, ConversationOptions, Conversations, Workspace};
-use events::{AgentStatus, AssistantEvent, EventSink};
-use launch::{default_command, login_command, parse_custom, AgentCommand};
+use events::{AgentStatus, AssistantEvent, EventSink, StartStep};
+use launch::AgentCommand;
+use profile::{AgentKind, AgentProfile, PromptDelivery};
 use mcp::McpServer;
 use tools::Tools;
 
@@ -65,6 +69,7 @@ pub trait AgentHost: Send + Sync {
         &self,
         command: &AgentCommand,
         path: Option<String>,
+        env: &[(String, String)],
         log: Arc<LogBuffer>,
         events: Arc<dyn EventSink>,
         conversations: Arc<Conversations>,
@@ -89,12 +94,13 @@ impl AgentHost for SystemHost {
         &self,
         command: &AgentCommand,
         path: Option<String>,
+        env: &[(String, String)],
         log: Arc<LogBuffer>,
         events: Arc<dyn EventSink>,
         conversations: Arc<Conversations>,
         approvals: Arc<Approvals>,
     ) -> Result<Arc<AgentHandle>, AgentStatus> {
-        AgentHandle::spawn(command, path, log, events, conversations, approvals).await
+        AgentHandle::spawn(command, path, env, log, events, conversations, approvals).await
     }
 }
 
@@ -124,6 +130,7 @@ impl EventSink for StatusTap {
 struct Running {
     agent: Arc<AgentHandle>,
     mcp: McpServer,
+    kind: AgentKind,
 }
 
 /// The assistant of the app: one agent and one tool server, started on first use, and the
@@ -143,8 +150,8 @@ pub struct Assistant {
     shutdowns: AtomicU64,
     /// What the last agent started wrote to its stderr, kept also when it didn't come up.
     log: StdMutex<Arc<LogBuffer>>,
-    /// The agent is one the person chose, so how to sign in to it is not for DBunny to say.
-    custom_command: AtomicBool,
+    /// The profile of the agent last started: how to sign in to it, how it is told things.
+    profile: StdMutex<Option<AgentProfile>>,
 }
 
 impl Assistant {
@@ -156,7 +163,7 @@ impl Assistant {
         let tap = Arc::new(StatusTap { inner: events, status: StdMutex::new(AgentStatus::Idle) });
         let approvals = Arc::new(Approvals::default());
         let tools = Arc::new(Tools { sessions: Arc::clone(&sessions), approvals: Arc::clone(&approvals), events: tap.clone() });
-        Assistant { data_dir, sessions, tap, host, conversations: Arc::new(Conversations::default()), approvals, tools, running: Mutex::new(None), starting: Mutex::new(()), shutdowns: AtomicU64::new(0), log: StdMutex::new(Arc::new(LogBuffer::new(LOG_LINES))), custom_command: AtomicBool::new(false) }
+        Assistant { data_dir, sessions, tap, host, conversations: Arc::new(Conversations::default()), approvals, tools, running: Mutex::new(None), starting: Mutex::new(()), shutdowns: AtomicU64::new(0), log: StdMutex::new(Arc::new(LogBuffer::new(LOG_LINES))), profile: StdMutex::new(None) }
     }
 
     pub fn status(&self) -> AgentStatus {
@@ -167,14 +174,14 @@ impl Assistant {
         self.tap.emit(AssistantEvent::Status { status });
     }
 
-    /// Brings the agent and the tool server up, unless they already are. `command` is the
-    /// person's own command, if they set one.
-    pub async fn start(&self, command: Option<String>) -> AgentStatus {
+    /// Brings the agent and the tool server up, unless that agent already is. `command` is the
+    /// person's own command, which only `AgentKind::Custom` takes.
+    pub async fn start(&self, kind: AgentKind, command: Option<String>) -> AgentStatus {
         let _starting = self.starting.lock().await;
         let shutdowns = self.shutdowns.load(Ordering::SeqCst);
         let old = {
             let mut running = self.running.lock().await;
-            if running.is_some() && self.status() == AgentStatus::Ready {
+            if running.as_ref().is_some_and(|running| running.kind == kind) && self.status() == AgentStatus::Ready {
                 return AgentStatus::Ready;
             }
             running.take()
@@ -183,20 +190,25 @@ impl Assistant {
             old.agent.shutdown().await;
             old.mcp.stop().await;
         }
-        self.set_status(AgentStatus::Starting);
+        self.starting_step(StartStep::Shell, None);
         let path = self.host.login_path().await;
+        self.starting_step(StartStep::Node, None);
         if let Err(found) = self.host.check_node(path.as_deref()).await {
             return self.fail(AgentStatus::NeedsNode { found });
         }
-        let own_command = command.as_deref().map(str::trim).filter(|text| !text.is_empty());
-        self.custom_command.store(own_command.is_some(), Ordering::SeqCst);
-        let command = match own_command {
-            Some(text) => match parse_custom(text) {
-                Ok(command) => command,
-                Err(message) => return self.fail(AgentStatus::Failed { message }),
-            },
-            None => default_command(cfg!(windows)),
+        let profile = match profile::resolve(kind, command.as_deref(), cfg!(windows)) {
+            Ok(profile) => profile,
+            Err(message) => return self.fail(AgentStatus::Failed { message }),
         };
+        let home = self.data_dir.join("codex-home");
+        if kind == AgentKind::Codex {
+            if let Err(e) = std::fs::create_dir_all(&home) {
+                return self.fail(AgentStatus::Failed { message: format!("Couldn't prepare Codex's folder: {e}") });
+            }
+        }
+        let profile = profile.with_home(&home);
+        *self.profile.lock().unwrap() = Some(profile.clone());
+        self.starting_step(StartStep::Tools, None);
         let mcp = match McpServer::start(Arc::clone(&self.conversations), Arc::clone(&self.tools)).await {
             Ok(mcp) => mcp,
             Err(message) => return self.fail(AgentStatus::Failed { message }),
@@ -204,7 +216,17 @@ impl Assistant {
         let events: Arc<dyn EventSink> = self.tap.clone();
         let log = Arc::new(LogBuffer::new(LOG_LINES));
         *self.log.lock().unwrap() = Arc::clone(&log);
-        match self.host.launch(&command, path, log, events, Arc::clone(&self.conversations), Arc::clone(&self.approvals)).await {
+        self.starting_step(StartStep::Agent, None);
+        // What the agent writes while it starts (a download, the first time) is what the panel shows
+        let tap = Arc::clone(&self.tap);
+        log.listen(move |line| {
+            let line = line.trim();
+            let starting = matches!(tap.status.lock().unwrap().clone(), AgentStatus::Starting { step: StartStep::Agent, .. });
+            if starting && !line.is_empty() {
+                tap.emit(AssistantEvent::Status { status: AgentStatus::Starting { step: StartStep::Agent, detail: Some(line.chars().take(200).collect()) } });
+            }
+        });
+        match self.host.launch(&profile.command, path, &profile.env, log, events, Arc::clone(&self.conversations), Arc::clone(&self.approvals)).await {
             Ok(agent) => {
                 let mut running = self.running.lock().await;
                 // The app asked to end while the agent was coming up: it goes at once
@@ -215,7 +237,7 @@ impl Assistant {
                     self.set_status(AgentStatus::Idle);
                     return AgentStatus::Idle;
                 }
-                *running = Some(Running { agent, mcp });
+                *running = Some(Running { agent, mcp, kind });
                 self.set_status(AgentStatus::Ready);
                 AgentStatus::Ready
             }
@@ -226,14 +248,18 @@ impl Assistant {
         }
     }
 
+    fn starting_step(&self, step: StartStep, detail: Option<String>) {
+        self.set_status(AgentStatus::Starting { step, detail });
+    }
+
     fn fail(&self, status: AgentStatus) -> AgentStatus {
         self.set_status(status.clone());
         status
     }
 
-    pub async fn restart(&self, command: Option<String>) -> AgentStatus {
+    pub async fn restart(&self, kind: AgentKind, command: Option<String>) -> AgentStatus {
         self.shutdown().await;
-        self.start(command).await
+        self.start(kind, command).await
     }
 
     /// Ends the agent and the tool server.
@@ -245,6 +271,15 @@ impl Assistant {
             old.mcp.stop().await;
             self.set_status(AgentStatus::Idle);
         }
+    }
+
+    /// Signs in to the agent with one of the methods it offered. The agent is up, though not ready
+    /// until the person has signed in.
+    pub async fn authenticate(&self, method_id: &str) -> Result<(), String> {
+        let agent = self.running.lock().await.as_ref().map(|running| Arc::clone(&running.agent)).ok_or_else(|| "The assistant isn't running".to_string())?;
+        agent.authenticate(method_id).await.map_err(|e| e.to_string())?;
+        self.set_status(AgentStatus::Ready);
+        Ok(())
     }
 
     pub async fn mcp_url(&self) -> Option<String> {
@@ -273,12 +308,24 @@ impl Assistant {
         let schema = driver.catalog().completion_schema().await.unwrap_or(CompletionSchema { current_schema: None, relations: vec![], functions: vec![] });
         let (cwd, temporary) = workspace_dir(&self.data_dir, saved_id, &info.database);
         std::fs::create_dir_all(&cwd).map_err(|e| format!("Couldn't prepare the assistant's folder: {e}"))?;
-        let prompt = system_prompt(&PromptInput { engine: driver.engine(), info: &info, schema: &schema, instructions: &options.instructions, schema_only: options.schema_only });
+        let input = PromptInput { engine: driver.engine(), info: &info, schema: &schema, instructions: &options.instructions, schema_only: options.schema_only };
+        let (prompt, context) = (system_prompt(&input), database_context(&input));
         let mcp_url = self.mcp_url().await.ok_or_else(|| "The assistant isn't running".to_string())?;
 
         let conversation = self.conversations.create(session_id, options);
         *conversation.workspace.lock().unwrap() = Some(Workspace { path: cwd.clone(), temporary });
-        let setup = SessionSetup { cwd, mcp_url, token: conversation.token.clone(), system_prompt: prompt };
+        let profile = self.current_profile();
+        // An agent with no system prompt per session gets the database in the first message of a new conversation
+        if profile.delivery() == PromptDelivery::FirstMessage && resume.is_none() {
+            *conversation.pending_context.lock().unwrap() = Some(context);
+        }
+        let setup = SessionSetup {
+            cwd,
+            mcp_url,
+            token: conversation.token.clone(),
+            system_prompt: (profile.delivery() == PromptDelivery::System).then_some(prompt),
+            meta: profile.session_meta(),
+        };
         let outcome = match resume {
             Some(acp_session) => {
                 // The replay of the past messages arrives before the load is answered
@@ -300,11 +347,19 @@ impl Assistant {
         }
     }
 
+    /// The profile of the agent in use (Claude's until one has been started).
+    fn current_profile(&self) -> AgentProfile {
+        self.profile.lock().unwrap().clone().unwrap_or_else(|| profile::resolve(AgentKind::Claude, None, cfg!(windows)).expect("Claude always resolves"))
+    }
+
+    fn login_command(&self) -> Option<String> {
+        self.current_profile().login_command()
+    }
+
     /// The agent's failure as a message; one that asks for a sign-in also changes the status.
     fn explain(&self, error: AgentError) -> String {
         if let AgentError::AuthRequired(methods) = &error {
-            let command = (!self.custom_command.load(Ordering::SeqCst)).then(login_command);
-            self.set_status(AgentStatus::NeedsSignIn { methods: methods.clone(), command });
+            self.set_status(AgentStatus::NeedsSignIn { methods: methods.clone(), command: self.login_command() });
         }
         error.to_string()
     }
@@ -321,7 +376,17 @@ impl Assistant {
         let conversation = self.conversations.get(conversation_id).ok_or_else(|| "This conversation was closed".to_string())?;
         let acp_session = conversation.acp_session.lock().unwrap().clone().ok_or_else(|| "This conversation has not started".to_string())?;
         let agent = self.agent().await?;
-        agent.prompt(&acp_session, text).await.map_err(|e| self.explain(e))
+        let context = conversation.pending_context.lock().unwrap().take();
+        let sent = match &context {
+            Some(context) => with_context(text, context),
+            None => text.to_string(),
+        };
+        let outcome = agent.prompt(&acp_session, &sent).await;
+        if outcome.is_err() && context.is_some() {
+            // The agent has not seen it: the next message carries it
+            *conversation.pending_context.lock().unwrap() = context;
+        }
+        outcome.map_err(|e| self.explain(e))
     }
 
     /// Stops the turn and turns down what was waiting for the person's approval.
@@ -379,8 +444,8 @@ impl Assistant {
     }
 
     /// Signs out of Claude on this computer, which ends every conversation; the panel then asks to sign in.
-    pub async fn sign_out(&self, command: Option<String>) -> Result<(), String> {
-        let status = self.start(command).await;
+    pub async fn sign_out(&self, kind: AgentKind, command: Option<String>) -> Result<(), String> {
+        let status = self.start(kind, command).await;
         if status != AgentStatus::Ready {
             return Err(match status {
                 AgentStatus::NeedsNode { .. } => "Node.js 20 or newer is needed".to_string(),
@@ -388,15 +453,15 @@ impl Assistant {
                 _ => "The assistant isn't running".to_string(),
             });
         }
-        self.agent().await?.logout().await.map_err(|e| e.to_string())?;
+        let agent = self.agent().await?;
+        agent.logout().await.map_err(|e| e.to_string())?;
         // What was said is gone with the account: nothing of it can go on
         for conversation in self.conversations.all() {
             self.conversations.remove(&conversation.id);
             self.stop_turn(&conversation).await;
             self.forget_workspace(&conversation);
         }
-        let command = (!self.custom_command.load(Ordering::SeqCst)).then(login_command);
-        self.set_status(AgentStatus::NeedsSignIn { methods: vec![], command });
+        self.set_status(AgentStatus::NeedsSignIn { methods: agent.auth_methods(), command: self.login_command() });
         Ok(())
     }
 
@@ -407,6 +472,7 @@ impl Assistant {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
     use serde_json::json;
@@ -435,6 +501,8 @@ mod tests {
         config: StdMutex<FakeConfig>,
         agents: StdMutex<Vec<FakeAgent>>,
         launched: StdMutex<Vec<AgentCommand>>,
+        /// The environment each launch was given.
+        envs: StdMutex<Vec<Vec<(String, String)>>>,
         /// What the agent writes to stderr while it starts.
         stderr: StdMutex<Vec<String>>,
         launch_fails: StdMutex<Option<AgentStatus>>,
@@ -455,6 +523,7 @@ mod tests {
                 config: StdMutex::new(config),
                 agents: Default::default(),
                 launched: Default::default(),
+                envs: Default::default(),
                 stderr: Default::default(),
                 launch_fails: Default::default(),
                 hold_launch: AtomicBool::new(false),
@@ -482,12 +551,14 @@ mod tests {
             &self,
             command: &AgentCommand,
             _path: Option<String>,
+            env: &[(String, String)],
             log: Arc<LogBuffer>,
             events: Arc<dyn EventSink>,
             conversations: Arc<Conversations>,
             approvals: Arc<Approvals>,
         ) -> Result<Arc<AgentHandle>, AgentStatus> {
             self.launched.lock().unwrap().push(command.clone());
+            self.envs.lock().unwrap().push(env.to_vec());
             for line in self.stderr.lock().unwrap().iter() {
                 log.push(line);
             }
@@ -537,7 +608,7 @@ mod tests {
 
     async fn started(config: FakeConfig) -> Rig {
         let r = rig(config).await;
-        assert_eq!(r.assistant.start(None).await, AgentStatus::Ready);
+        assert_eq!(r.assistant.start(AgentKind::Claude, None).await, AgentStatus::Ready);
         r
     }
 
@@ -545,33 +616,101 @@ mod tests {
     async fn start_brings_the_agent_up_with_the_default_command() {
         let r = rig(FakeConfig::default()).await;
         assert_eq!(r.assistant.status(), AgentStatus::Idle);
-        assert_eq!(r.assistant.start(None).await, AgentStatus::Ready);
+        assert_eq!(r.assistant.start(AgentKind::Claude, None).await, AgentStatus::Ready);
         assert_eq!(r.assistant.status(), AgentStatus::Ready);
-        assert_eq!(r.host.launched.lock().unwrap().clone(), vec![default_command(cfg!(windows))]);
+        assert_eq!(r.host.launched.lock().unwrap().clone(), vec![launch::default_command(cfg!(windows))]);
         let states: Vec<AgentStatus> = r.sink.events().into_iter().filter_map(|e| match e { AssistantEvent::Status { status } => Some(status), _ => None }).collect();
-        assert_eq!(states, vec![AgentStatus::Starting, AgentStatus::Ready]);
+        let starting = |step| AgentStatus::Starting { step, detail: None };
+        assert_eq!(states, vec![starting(StartStep::Shell), starting(StartStep::Node), starting(StartStep::Tools), starting(StartStep::Agent), AgentStatus::Ready]);
         // Starting again is a no-op
-        assert_eq!(r.assistant.start(None).await, AgentStatus::Ready);
+        assert_eq!(r.assistant.start(AgentKind::Claude, None).await, AgentStatus::Ready);
         assert_eq!(r.host.launched.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn starting_codex_launches_its_adapter_with_the_environment() {
+        let r = rig(FakeConfig::default()).await;
+        assert_eq!(r.assistant.start(AgentKind::Codex, None).await, AgentStatus::Ready);
+        assert_eq!(r.host.launched.lock().unwrap()[0].args[1], profile::CODEX_PACKAGE);
+        let env = r.host.envs.lock().unwrap()[0].clone();
+        assert!(env.contains(&("INITIAL_AGENT_MODE".to_string(), "read-only".to_string())), "{env:?}");
+        assert!(env.iter().any(|(key, _)| key == "CODEX_CONFIG"));
+    }
+
+    #[tokio::test]
+    async fn codex_runs_in_a_home_of_dbunnys_own() {
+        let r = rig(FakeConfig::default()).await;
+        r.assistant.start(AgentKind::Codex, None).await;
+        let home = r.data.join("codex-home");
+        let env = r.host.envs.lock().unwrap()[0].clone();
+        assert!(env.contains(&("CODEX_HOME".to_string(), home.to_string_lossy().to_string())), "{env:?}");
+        assert!(home.is_dir());
+        // Claude has no such home
+        let claude = rig(FakeConfig::default()).await;
+        claude.assistant.start(AgentKind::Claude, None).await;
+        assert!(claude.host.envs.lock().unwrap()[0].iter().all(|(key, _)| key != "CODEX_HOME"));
+    }
+
+    #[tokio::test]
+    async fn changing_the_agent_restarts_it() {
+        let r = started(FakeConfig::default()).await;
+        assert_eq!(r.host.launched.lock().unwrap().len(), 1);
+        assert_eq!(r.assistant.start(AgentKind::Codex, None).await, AgentStatus::Ready);
+        assert_eq!(r.host.launched.lock().unwrap().len(), 2);
+        // The same agent again is a no-op
+        assert_eq!(r.assistant.start(AgentKind::Codex, None).await, AgentStatus::Ready);
+        assert_eq!(r.host.launched.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_codex_conversation_gets_no_system_prompt_or_meta() {
+        let r = rig(FakeConfig::default()).await;
+        r.assistant.start(AgentKind::Codex, None).await;
+        r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        let params = r.host.agent().calls("session/new")[0]["params"].clone();
+        assert!(params.get("systemPrompt").is_none() && params.get("_meta").is_none(), "{params}");
+    }
+
+    #[tokio::test]
+    async fn what_the_agent_writes_while_it_starts_is_shown_as_the_detail() {
+        let host = FakeHost::new(FakeConfig::default());
+        *host.stderr.lock().unwrap() = vec!["npm http fetch GET 200 adapter.tgz".into(), "   ".into(), "added 120 packages".into()];
+        let r = rig_with(host).await;
+        r.assistant.start(AgentKind::Claude, None).await;
+        let details: Vec<Option<String>> = r
+            .sink
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                AssistantEvent::Status { status: AgentStatus::Starting { step: StartStep::Agent, detail } } => Some(detail),
+                _ => None,
+            })
+            .collect();
+        // The step itself, then each line the agent wrote (the blank one is no news)
+        assert_eq!(details, vec![None, Some("npm http fetch GET 200 adapter.tgz".to_string()), Some("added 120 packages".to_string())]);
+        // Once it is up, what the agent writes is no longer a status
+        let before = r.sink.events().len();
+        r.assistant.log.lock().unwrap().push("a line during the chat");
+        assert_eq!(r.sink.events().len(), before);
     }
 
     #[tokio::test]
     async fn start_takes_a_custom_command() {
         let r = rig(FakeConfig::default()).await;
-        assert_eq!(r.assistant.start(Some("/opt/agent --flag".into())).await, AgentStatus::Ready);
+        assert_eq!(r.assistant.start(AgentKind::Custom, Some("/opt/agent --flag".into())).await, AgentStatus::Ready);
         assert_eq!(r.host.launched.lock().unwrap()[0], AgentCommand { program: "/opt/agent".into(), args: vec!["--flag".into()] });
         let bad = rig(FakeConfig::default()).await;
-        assert!(matches!(bad.assistant.start(Some("run \"unclosed".into())).await, AgentStatus::Failed { .. }));
+        assert!(matches!(bad.assistant.start(AgentKind::Custom, Some("run \"unclosed".into())).await, AgentStatus::Failed { .. }));
     }
 
     #[tokio::test]
     async fn start_reports_needs_node() {
         let host = FakeHost::with_node(Err(Some("18.19.1".into())), FakeConfig::default());
         let r = rig_with(host).await;
-        assert_eq!(r.assistant.start(None).await, AgentStatus::NeedsNode { found: Some("18.19.1".into()) });
+        assert_eq!(r.assistant.start(AgentKind::Claude, None).await, AgentStatus::NeedsNode { found: Some("18.19.1".into()) });
         assert!(r.host.launched.lock().unwrap().is_empty());
         let none = FakeHost::with_node(Err(None), FakeConfig::default());
-        assert_eq!(rig_with(none).await.assistant.start(None).await, AgentStatus::NeedsNode { found: None });
+        assert_eq!(rig_with(none).await.assistant.start(AgentKind::Claude, None).await, AgentStatus::NeedsNode { found: None });
     }
 
     #[tokio::test]
@@ -645,6 +784,33 @@ mod tests {
         assert_eq!(params["sessionId"], "old");
     }
 
+    fn claude_login() -> events::AuthMethod {
+        events::AuthMethod { id: "claude-login".into(), name: "Log in with Claude".into() }
+    }
+
+    fn chat_gpt() -> events::AuthMethod {
+        events::AuthMethod { id: "chat-gpt".into(), name: "ChatGPT".into() }
+    }
+
+    #[tokio::test]
+    async fn signing_in_with_a_method_makes_the_agent_ready_again() {
+        let r = codex_rig(FakeConfig { auth_required: true, ..Default::default() }).await;
+        assert!(r.assistant.new_conversation("s1", Some("saved-1"), options()).await.is_err());
+        assert!(matches!(r.assistant.status(), AgentStatus::NeedsSignIn { command: None, .. }));
+        r.assistant.authenticate("chat-gpt").await.unwrap();
+        assert_eq!(r.host.agent().calls("authenticate")[0]["params"], json!({"methodId": "chat-gpt"}));
+        assert_eq!(r.assistant.status(), AgentStatus::Ready);
+        assert!(r.assistant.new_conversation("s1", Some("saved-1"), options()).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_login_that_fails_says_why_and_keeps_asking() {
+        let r = codex_rig(FakeConfig { auth_required: true, fail_authenticate: true, ..Default::default() }).await;
+        assert!(r.assistant.new_conversation("s1", Some("saved-1"), options()).await.is_err());
+        assert_eq!(r.assistant.authenticate("chat-gpt").await.err().unwrap(), "The login was cancelled");
+        assert!(matches!(r.assistant.status(), AgentStatus::NeedsSignIn { .. }));
+    }
+
     #[tokio::test]
     async fn auth_required_sets_needs_sign_in() {
         let r = started(FakeConfig { auth_required: true, ..Default::default() }).await;
@@ -652,7 +818,7 @@ mod tests {
         assert!(err.contains("Sign in"), "{err}");
         assert_eq!(
             r.assistant.status(),
-            AgentStatus::NeedsSignIn { methods: vec!["Log in with Claude".into()], command: Some(launch::login_command()) }
+            AgentStatus::NeedsSignIn { methods: vec![claude_login(), chat_gpt()], command: Some(launch::login_command()) }
         );
         assert!(r.assistant.conversations.all().is_empty());
     }
@@ -660,9 +826,9 @@ mod tests {
     #[tokio::test]
     async fn an_agent_of_the_persons_own_gets_no_login_command() {
         let r = rig(FakeConfig { auth_required: true, ..Default::default() }).await;
-        assert_eq!(r.assistant.start(Some("/opt/agent".into())).await, AgentStatus::Ready);
+        assert_eq!(r.assistant.start(AgentKind::Custom, Some("/opt/agent".into())).await, AgentStatus::Ready);
         r.assistant.new_conversation("s1", Some("saved-1"), options()).await.err().unwrap();
-        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec!["Log in with Claude".into()], command: None });
+        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec![claude_login(), chat_gpt()], command: None });
     }
 
     #[tokio::test]
@@ -733,7 +899,7 @@ mod tests {
         host.hold_launch.store(true, Ordering::SeqCst);
         let r = rig_with(host).await;
         let assistant = Arc::clone(&r.assistant);
-        let starting = tokio::spawn(async move { assistant.start(None).await });
+        let starting = tokio::spawn(async move { assistant.start(AgentKind::Claude, None).await });
         r.host.entered.notified().await;
         // Quitting the app, or looking at the log, doesn't wait for a start that may download for minutes
         tokio::time::timeout(Duration::from_secs(2), async {
@@ -756,15 +922,62 @@ mod tests {
         *host.stderr.lock().unwrap() = vec!["npm ERR! network".into()];
         *host.launch_fails.lock().unwrap() = Some(AgentStatus::Failed { message: "The agent didn't start".into() });
         let r = rig_with(host).await;
-        assert!(matches!(r.assistant.start(None).await, AgentStatus::Failed { .. }));
+        assert!(matches!(r.assistant.start(AgentKind::Claude, None).await, AgentStatus::Failed { .. }));
         assert_eq!(r.assistant.log().await, vec!["npm ERR! network".to_string()]);
+    }
+
+    async fn codex_rig(config: FakeConfig) -> Rig {
+        let r = rig(config).await;
+        assert_eq!(r.assistant.start(AgentKind::Codex, None).await, AgentStatus::Ready);
+        r
+    }
+
+    fn prompt_texts(r: &Rig) -> Vec<String> {
+        r.host.agent().calls("session/prompt").iter().map(|p| p["params"]["prompt"][0]["text"].as_str().unwrap().to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn the_first_message_of_a_codex_conversation_carries_the_context() {
+        let r = codex_rig(FakeConfig::default()).await;
+        let opened = r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "Quantos?").await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "E ontem?").await.unwrap();
+        let texts = prompt_texts(&r);
+        assert!(texts[0].starts_with("Quantos?\n\n<dbunny-context>\nThe database:") && texts[0].contains("public.orders") && texts[0].ends_with("</dbunny-context>"), "{}", texts[0]);
+        assert!(texts[0].contains("status 3 means cancelled"));
+        assert_eq!(texts[1], "E ontem?");
+    }
+
+    #[tokio::test]
+    async fn a_reopened_codex_conversation_gets_no_context() {
+        let r = codex_rig(FakeConfig::default()).await;
+        let opened = r.assistant.load_conversation("s1", Some("saved-1"), "old", options()).await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "E ontem?").await.unwrap();
+        assert_eq!(prompt_texts(&r), vec!["E ontem?".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_prompt_keeps_the_context_for_the_next_one() {
+        let r = codex_rig(FakeConfig { fail_prompts: 1, ..Default::default() }).await;
+        let opened = r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        assert!(r.assistant.prompt(&opened.conversation_id, "Quantos?").await.is_err());
+        r.assistant.prompt(&opened.conversation_id, "Quantos?").await.unwrap();
+        assert!(prompt_texts(&r)[1].contains("<dbunny-context>"));
+    }
+
+    #[tokio::test]
+    async fn claude_never_gets_the_context_in_a_message() {
+        let r = started(FakeConfig::default()).await;
+        let opened = r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "Quantos?").await.unwrap();
+        assert_eq!(prompt_texts(&r), vec!["Quantos?".to_string()]);
     }
 
     #[tokio::test]
     async fn restart_brings_the_agent_back() {
         let r = started(FakeConfig::default()).await;
         r.assistant.shutdown().await;
-        assert_eq!(r.assistant.restart(None).await, AgentStatus::Ready);
+        assert_eq!(r.assistant.restart(AgentKind::Claude, None).await, AgentStatus::Ready);
         assert_eq!(r.host.launched.lock().unwrap().len(), 2);
         assert!(r.assistant.new_conversation("s1", Some("saved-1"), options()).await.is_ok());
     }
@@ -773,17 +986,25 @@ mod tests {
     async fn signing_out_ends_the_conversations_and_asks_to_sign_in() {
         let r = started(FakeConfig::default()).await;
         let opened = r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
-        r.assistant.sign_out(None).await.unwrap();
+        r.assistant.sign_out(AgentKind::Claude, None).await.unwrap();
         assert_eq!(r.host.agent().calls("logout").len(), 1);
         assert!(r.assistant.conversations.all().is_empty());
         assert!(r.assistant.prompt(&opened.conversation_id, "hi").await.is_err());
-        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec![], command: Some(launch::login_command()) });
+        // It offers the ways the agent has to sign in again
+        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec![claude_login(), chat_gpt()], command: Some(launch::login_command()) });
+    }
+
+    #[tokio::test]
+    async fn signing_out_of_codex_offers_the_login_again() {
+        let r = codex_rig(FakeConfig::default()).await;
+        r.assistant.sign_out(AgentKind::Codex, None).await.unwrap();
+        assert_eq!(r.assistant.status(), AgentStatus::NeedsSignIn { methods: vec![claude_login(), chat_gpt()], command: None });
     }
 
     #[tokio::test]
     async fn signing_out_starts_the_agent_if_it_is_not_up() {
         let r = rig(FakeConfig::default()).await;
-        r.assistant.sign_out(None).await.unwrap();
+        r.assistant.sign_out(AgentKind::Claude, None).await.unwrap();
         assert_eq!(r.host.agent().calls("logout").len(), 1);
     }
 
@@ -791,7 +1012,7 @@ mod tests {
     async fn signing_out_says_why_when_the_agent_cannot_start() {
         let host = FakeHost::with_node(Err(None), FakeConfig::default());
         let r = rig_with(host).await;
-        let err = r.assistant.sign_out(None).await.err().unwrap();
+        let err = r.assistant.sign_out(AgentKind::Claude, None).await.err().unwrap();
         assert!(err.contains("Node.js"), "{err}");
     }
 
@@ -799,7 +1020,7 @@ mod tests {
     async fn a_conversation_needs_a_running_agent_and_an_open_session() {
         let r = rig(FakeConfig::default()).await;
         assert!(r.assistant.new_conversation("s1", Some("saved-1"), options()).await.is_err());
-        assert_eq!(r.assistant.start(None).await, AgentStatus::Ready);
+        assert_eq!(r.assistant.start(AgentKind::Claude, None).await, AgentStatus::Ready);
         assert!(r.assistant.new_conversation("missing", Some("saved-1"), options()).await.is_err());
     }
 }

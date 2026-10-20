@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { History } from "lucide-react";
+import { stripContext } from "../../lib/assistantContext";
 import { useAssistant } from "../../contexts/assistant";
 import { useConnection } from "../../contexts/useConnection";
 import Button from "../ui/Button";
@@ -48,11 +49,11 @@ export default function HistoryMenu() {
                 type="button"
                 onClick={() => {
                   setOpen(false);
-                  assistant.openConversation(entry.acpSession);
+                  assistant.openConversation(entry.acpSession, (entry.title && stripContext(entry.title)) || "");
                 }}
                 className="flex w-full cursor-pointer flex-col rounded-md px-2.5 py-1.5 text-left hover:bg-accent"
               >
-                <span className="truncate text-[13px]">{entry.title ?? "Untitled"}</span>
+                <span className="truncate text-[13px]">{(entry.title && stripContext(entry.title)) || "Untitled"}</span>
                 <span className="text-[11px] text-muted-foreground">{when(entry.updatedAt)}</span>
               </button>
             ))

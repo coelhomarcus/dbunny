@@ -7,6 +7,7 @@ use crate::assistant::agent::SessionSummary;
 use crate::assistant::approvals::Decision;
 use crate::assistant::conversation::ConversationOptions;
 use crate::assistant::events::{AgentStatus, AssistantEvent, EventSink};
+use crate::assistant::profile::AgentKind;
 use crate::assistant::{Assistant, OpenedConversation};
 
 /// Sends the assistant's events to the window.
@@ -33,15 +34,15 @@ pub async fn assistant_status(assistant: State<'_, Assistant>) -> Result<AgentSt
     Ok(assistant.status())
 }
 
-/// Starts the agent unless it is up; `command` is the person's own command, if any.
+/// Starts the agent unless that one is up; `command` is the person's own command, for a custom agent.
 #[tauri::command]
-pub async fn assistant_start(assistant: State<'_, Assistant>, command: Option<String>) -> Result<AgentStatus, String> {
-    Ok(assistant.start(command).await)
+pub async fn assistant_start(assistant: State<'_, Assistant>, agent: AgentKind, command: Option<String>) -> Result<AgentStatus, String> {
+    Ok(assistant.start(agent, command).await)
 }
 
 #[tauri::command]
-pub async fn assistant_restart(assistant: State<'_, Assistant>, command: Option<String>) -> Result<AgentStatus, String> {
-    Ok(assistant.restart(command).await)
+pub async fn assistant_restart(assistant: State<'_, Assistant>, agent: AgentKind, command: Option<String>) -> Result<AgentStatus, String> {
+    Ok(assistant.restart(agent, command).await)
 }
 
 #[tauri::command]
@@ -104,8 +105,14 @@ pub async fn assistant_close_conversation(assistant: State<'_, Assistant>, conve
 
 /// Signs out of Claude on this computer; every conversation ends and the panel asks to sign in again.
 #[tauri::command]
-pub async fn assistant_sign_out(assistant: State<'_, Assistant>, command: Option<String>) -> Result<(), String> {
-    assistant.sign_out(command).await
+pub async fn assistant_sign_out(assistant: State<'_, Assistant>, agent: AgentKind, command: Option<String>) -> Result<(), String> {
+    assistant.sign_out(agent, command).await
+}
+
+/// Signs in to the agent with one of the methods it offered; answers when the login is over.
+#[tauri::command]
+pub async fn assistant_authenticate(assistant: State<'_, Assistant>, method_id: String) -> Result<(), String> {
+    assistant.authenticate(&method_id).await
 }
 
 #[tauri::command]

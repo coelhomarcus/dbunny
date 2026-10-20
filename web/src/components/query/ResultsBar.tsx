@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Clock, Loader, Rows3, Square, TriangleAlert } from "lucide-react";
+import { Clock, Rows3, Square, TriangleAlert } from "lucide-react";
+import Spinner from "../ui/Spinner";
 import type { QueryResult } from "@/types";
 import Button from "../ui/Button";
 import ExportMenu from "../ExportMenu";
@@ -38,7 +39,7 @@ export default function ResultsBar({
       {runningSince !== null ? (
         <>
           <span className="flex items-center gap-1.5 text-foreground">
-            <Loader className="animate-spin" />
+            <Spinner />
             Running <Elapsed since={runningSince} />
           </span>
           <Button variant="ghost-muted" size="xs" onClick={onCancel}>

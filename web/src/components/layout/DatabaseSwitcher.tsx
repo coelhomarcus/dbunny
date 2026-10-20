@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { Check, ChevronsUpDown, Database, Loader, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronsUpDown, Database, Plus, Trash2 } from "lucide-react";
+import Spinner from "../ui/Spinner";
 import type { DatabaseInfo } from "@/types";
 import { useConnection } from "../../contexts/useConnection";
 import { useNotify } from "../../contexts/NoticeProvider";
@@ -120,7 +121,7 @@ export default function DatabaseSwitcher() {
         <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Databases on this server</div>
         {databases === null && !listFailed ? (
           <div className="flex justify-center py-3">
-            <Loader size={14} className="animate-spin text-muted-foreground" />
+            <Spinner size={14} className="text-muted-foreground" />
           </div>
         ) : (
           <div className="max-h-72 overflow-y-auto">
@@ -140,7 +141,7 @@ export default function DatabaseSwitcher() {
                   <Database size={13} className="shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{db.name}</span>
                   {opening === db.name ? (
-                    <Loader size={12} className="shrink-0 animate-spin text-muted-foreground" />
+                    <Spinner size={12} className="shrink-0 text-muted-foreground" />
                   ) : db.isCurrent ? (
                     <Check size={13} className="shrink-0 text-primary" />
                   ) : (

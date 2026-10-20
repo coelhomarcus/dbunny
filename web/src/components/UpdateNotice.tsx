@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { CircleCheck, Download, Loader, RotateCw, TriangleAlert, X } from "lucide-react";
+import { CircleCheck, Download, RotateCw, TriangleAlert, X } from "lucide-react";
+import Spinner from "./ui/Spinner";
 import { dismissUpdate, installUpdate, RELEASES_URL, restartApp, useUpdate } from "../lib/updater";
 import { openExternal } from "../lib/openExternal";
 import { isWindows } from "../lib/platform";
@@ -60,7 +61,7 @@ export default function UpdateNotice() {
       {state.status === "downloading" && (
         <>
           <div className="flex items-center gap-2.5 text-[13px] [&_svg]:size-4">
-            <Loader className="animate-spin text-muted-foreground" />
+            <Spinner className="text-muted-foreground" />
             <span className="min-w-0 flex-1 font-medium">Downloading DBunny {state.version}</span>
             {state.progress !== null && <span className="tabular-nums text-muted-foreground">{Math.round(state.progress * 100)}%</span>}
           </div>

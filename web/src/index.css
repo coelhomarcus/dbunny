@@ -375,3 +375,15 @@ kbd {
 .sql-preview .tok.comment {
   color: var(--syntax-comment);
 }
+
+/* The spokes of the loading mark (components/ui/Spinner) turn in twelve steps */
+.spinner-spokes {
+  transform-origin: center;
+  animation: spinner-turn 0.75s steps(12) infinite;
+}
+
+@keyframes spinner-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}

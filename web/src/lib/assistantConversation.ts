@@ -1,4 +1,5 @@
 import type { ApprovalRequest } from "../types/assistant";
+import { stripContext } from "./assistantContext.ts";
 
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
 
@@ -27,6 +28,7 @@ export interface Conversation {
 }
 
 const OWN_TOOLS = "mcp__dbunny__";
+const OWN_SERVER = "dbunny";
 
 export function emptyConversation(): Conversation {
   return { items: [], running: false, title: null };
@@ -39,19 +41,39 @@ function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-function toolNameOf(update: Record<string, unknown>): string | null {
-  const name = record(record(update._meta)?.claudeCode)?.toolName;
-  if (typeof name !== "string") return null;
-  return name.startsWith(OWN_TOOLS) ? name.slice(OWN_TOOLS.length) : name;
+/** The server and the tool of a call that says which MCP server it went to (codex does), if it is the database's. */
+function ownCallOf(update: Record<string, unknown>): { tool: string; input: Record<string, unknown> } | null {
+  const raw = record(update.rawInput);
+  if (raw?.server !== OWN_SERVER) return null;
+  const title = typeof update.title === "string" && update.title.startsWith(`mcp.${OWN_SERVER}.`) ? update.title.slice(`mcp.${OWN_SERVER}.`.length) : "";
+  const tool = typeof raw.tool === "string" ? raw.tool : title;
+  return tool ? { tool, input: record(raw.arguments) ?? {} } : null;
 }
 
-function textOf(content: unknown): string {
+function toolNameOf(update: Record<string, unknown>): string | null {
+  const name = record(record(update._meta)?.claudeCode)?.toolName;
+  if (typeof name === "string") return name.startsWith(OWN_TOOLS) ? name.slice(OWN_TOOLS.length) : name;
+  return ownCallOf(update)?.tool ?? null;
+}
+
+/** What the call was given: codex wraps the arguments with the server and the tool. */
+function inputOf(update: Record<string, unknown>): Record<string, unknown> | null {
+  return ownCallOf(update)?.input ?? record(update.rawInput);
+}
+
+/** The text a tool returned: in `content` for claude, in `rawOutput.result.content` for codex. */
+function textOf(content: unknown, rawOutput?: unknown): string {
   const blocks = Array.isArray(content) ? content : [];
-  return blocks
+  const text = blocks
     .map((block) => {
       const inner = record(record(block)?.content);
       return inner?.type === "text" && typeof inner.text === "string" ? inner.text : "";
     })
+    .join("");
+  if (text) return text;
+  const raw = record(record(rawOutput)?.result)?.content;
+  return (Array.isArray(raw) ? raw : [])
+    .map((block) => (record(block)?.type === "text" && typeof record(block)?.text === "string" ? (record(block)?.text as string) : ""))
     .join("");
 }
 
@@ -91,20 +113,23 @@ export function applyUpdate(conversation: Conversation, raw: unknown): Conversat
     const content = record(update.content);
     if (content?.type !== "text" || typeof content.text !== "string") return conversation;
     const itemKind = kind === "agent_message_chunk" ? "agent" : kind === "agent_thought_chunk" ? "thought" : "user";
+    // A thought that has said nothing yet and gets only blanks (agents send breaks between parts) is no Thinking block
+    const last = conversation.items[conversation.items.length - 1];
+    if (itemKind === "thought" && content.text.trim() === "" && last?.kind !== "thought") return conversation;
     return { ...conversation, items: append(conversation.items, itemKind, content.text) };
   }
 
   if (kind === "session_info_update") {
-    return typeof update.title === "string" ? { ...conversation, title: update.title } : conversation;
+    return typeof update.title === "string" ? { ...conversation, title: stripContext(update.title) } : conversation;
   }
 
   if (kind === "tool_call" || kind === "tool_call_update") {
     const id = typeof update.toolCallId === "string" ? update.toolCallId : null;
     if (!id) return conversation;
-    const input = record(update.rawInput);
+    const input = inputOf(update);
     const name = toolNameOf(update);
     const status = statusOf(update.status);
-    const text = unfence(textOf(update.content));
+    const text = unfence(textOf(update.content, update.rawOutput));
     const at = conversation.items.findIndex((item) => item.kind === "tool" && item.id === id);
     if (at >= 0) {
       const current = conversation.items[at] as Tool;

@@ -15,6 +15,7 @@ import {
   resolveApproval,
   type Conversation,
 } from "../lib/assistantConversation";
+import { agentInfo } from "../lib/assistantAgents";
 import { ConversationOpener } from "../lib/assistantOpener";
 import { conversationOptions, getConnectionPrefs } from "../lib/assistantPrefs";
 import { isAssistantShortcut } from "../lib/assistantShortcut";
@@ -43,6 +44,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [models, setModels] = useState<ModelChoice | null>(null);
   const [history, setHistory] = useState<SessionSummary[]>([]);
   const [queued, setQueued] = useState<string | null>(null);
+  // A past conversation being opened: shown at once, so that the wait is seen as progress
+  const [openingTitle, setOpeningTitle] = useState<string | null>(null);
+  const openToken = useRef(0);
 
   // The id the event handlers compare with, and the opener that keeps the updates that arrive while
   // a conversation is opening (a reopened one replays before its id is known)
@@ -55,6 +59,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const emptyRef = useRef(true);
 
   const available = capabilities.assistant;
+  // The agent chosen in Settings; the person's own command is for a custom one only
+  const agent = settings.assistantAgent;
+  const command = agent === "custom" ? settings.assistantCommand || undefined : undefined;
   const enabled = settings.assistantEnabled;
 
   // The agent's status and the conversation's updates come as events
@@ -86,6 +93,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     idRef.current = null;
     // Whatever is opening is no longer wanted either
     opener.current?.invalidate();
+    openToken.current++;
+    setOpeningTitle(null);
     preparing.current = null;
     setConversationId(null);
     setConversation(emptyConversation());
@@ -176,14 +185,19 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, [forgetConversation]);
 
   const openConversation = useCallback(
-    async (acpSession: string) => {
+    async (acpSession: string, title?: string) => {
       if (!sessionId) return;
       forgetConversation();
+      // The conversation is on screen as opening from the click, not from when the agent answers
+      const token = openToken.current;
+      setOpeningTitle(title ?? "");
       try {
         await begin(() => assistantApi.loadConversation(sessionId, savedConnectionId, acpSession, options()));
       } catch (error) {
         setConversation((current) => finishTurn(current, messageOf(error)));
         refreshHistory();
+      } finally {
+        if (openToken.current === token) setOpeningTitle(null);
       }
     },
     [sessionId, savedConnectionId, forgetConversation, begin, options, refreshHistory],
@@ -196,9 +210,13 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const retry = useCallback(async () => {
-    const command = settings.assistantCommand || undefined;
-    setStatus(status.state === "idle" ? await assistantApi.start(command) : await assistantApi.restart(command));
-  }, [settings.assistantCommand, status.state]);
+    setStatus(status.state === "idle" ? await assistantApi.start(agent, command) : await assistantApi.restart(agent, command));
+  }, [agent, command, status.state]);
+
+  const signIn = useCallback(async (methodId: string) => {
+    // The status comes back as an event, ready, once the agent is signed in
+    await assistantApi.authenticate(methodId);
+  }, []);
 
   // The agent went away (stopped, or signed out): what was said to it can't go on
   const lastState = useRef(status.state);
@@ -222,8 +240,20 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   // The agent starts the first time the assistant is looked at
   const wanted = available && enabled && (panelOpen || inTab);
   useEffect(() => {
-    if (wanted && status.state === "idle") assistantApi.start(settings.assistantCommand || undefined).then(setStatus).catch((e) => setStatus({ state: "failed", message: messageOf(e) }));
-  }, [wanted, status.state, settings.assistantCommand]);
+    if (wanted && status.state === "idle") assistantApi.start(agent, command).then(setStatus).catch((e) => setStatus({ state: "failed", message: messageOf(e) }));
+  }, [wanted, status.state, agent, command]);
+
+  // Another agent was chosen: the one that is up gives way to it
+  const lastAgent = useRef(agent);
+  const stateRef = useRef(status.state);
+  useEffect(() => {
+    stateRef.current = status.state;
+  }, [status.state]);
+  useEffect(() => {
+    if (lastAgent.current === agent) return;
+    lastAgent.current = agent;
+    if (stateRef.current !== "idle") assistantApi.restart(agent, command).then(setStatus).catch((e) => setStatus({ state: "failed", message: messageOf(e) }));
+  }, [agent, command]);
 
   // A question asked from the editor goes once the assistant can take it
   useEffect(() => {
@@ -298,11 +328,14 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       approve,
       newChat,
       openConversation,
+      openingTitle,
       setModel,
       ask,
       retry,
+      signIn,
+      agent: agentInfo(agent),
     }),
-    [available, status, enabled, panelOpen, inTab, expand, backToPanel, conversation, conversationId, models, history, refreshHistory, send, stop, approve, newChat, openConversation, setModel, ask, retry],
+    [available, status, enabled, panelOpen, inTab, expand, backToPanel, conversation, conversationId, models, history, refreshHistory, send, stop, approve, newChat, openConversation, openingTitle, setModel, ask, retry, signIn, agent],
   );
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;

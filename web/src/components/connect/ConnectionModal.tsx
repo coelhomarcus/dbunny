@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowLeft, ArrowRight, Check, Loader, PlugZap, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, PlugZap, TriangleAlert, X } from "lucide-react";
+import Spinner from "../ui/Spinner";
 import type { SavedConnection } from "@/types";
 import {
   applyUrl,
@@ -308,17 +309,17 @@ function ModalBody({
                   )}
                   <div className="flex-1" />
                   <Button variant="outline" size="sm" onClick={handleTest} disabled={test.status === "testing"}>
-                    {test.status === "testing" ? <Loader className="animate-spin" /> : <PlugZap />}
+                    {test.status === "testing" ? <Spinner /> : <PlugZap />}
                     Test
                   </Button>
                   <Button variant="outline" size="sm" onClick={handleSave} disabled={saving}>
-                    {saving && <Loader className="animate-spin" />}
+                    {saving && <Spinner />}
                     Save
                   </Button>
                   <Button type="submit" variant="primary" size="sm" className="group" disabled={isConnecting}>
                     {isConnecting ? (
                       <>
-                        <Loader className="animate-spin" />
+                        <Spinner />
                         Connecting…
                       </>
                     ) : (

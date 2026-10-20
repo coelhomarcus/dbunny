@@ -1,5 +1,6 @@
 import { useAssistant } from "../../contexts/assistant";
 import Composer from "./Composer";
+import OpeningConversation from "./OpeningConversation";
 import MessageList from "./MessageList";
 import SqlBlock from "./SqlBlock";
 
@@ -17,7 +18,9 @@ export default function AssistantConversation() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {conversation.items.length === 0 ? (
+      {assistant.openingTitle !== null ? (
+        <OpeningConversation title={assistant.openingTitle} />
+      ) : conversation.items.length === 0 ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
           <div className="flex flex-col gap-2 pt-6">
             {SUGGESTIONS.map((suggestion) => (
@@ -35,7 +38,7 @@ export default function AssistantConversation() {
       ) : (
         <MessageList conversation={conversation} onDecide={assistant.approve} renderCode={renderCode} />
       )}
-      <Composer running={conversation.running} models={assistant.models} onSend={assistant.send} onStop={assistant.stop} onModel={assistant.setModel} />
+      <Composer running={conversation.running} locked={assistant.openingTitle !== null} models={assistant.models} onSend={assistant.send} onStop={assistant.stop} onModel={assistant.setModel} />
     </div>
   );
 }

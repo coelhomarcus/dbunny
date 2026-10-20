@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { AgentKind } from "./assistantAgents";
 import type {
   ConnectResponse,
   MysqlConnectParams,
@@ -82,13 +83,13 @@ export const assistantApi = {
     return invoke<AgentStatus>("assistant_status");
   },
 
-  /** Starts the agent unless it is up; `command` is the person's own command, if any. */
-  async start(command?: string) {
-    return invoke<AgentStatus>("assistant_start", { command: command || null });
+  /** Starts the agent unless that one is up; `command` is the person's own command, for a custom agent. */
+  async start(agent: AgentKind, command?: string) {
+    return invoke<AgentStatus>("assistant_start", { agent, command: command || null });
   },
 
-  async restart(command?: string) {
-    return invoke<AgentStatus>("assistant_restart", { command: command || null });
+  async restart(agent: AgentKind, command?: string) {
+    return invoke<AgentStatus>("assistant_restart", { agent, command: command || null });
   },
 
   async newConversation(sessionId: string, savedId: string | null, options: ConversationOptions) {
@@ -128,9 +129,14 @@ export const assistantApi = {
     return invoke<string[]>("assistant_log");
   },
 
-  /** Signs out of Claude on this computer; every conversation ends. */
-  async signOut(command?: string) {
-    return invoke<void>("assistant_sign_out", { command: command || null });
+  /** Signs in with one of the methods the agent offered; answers when the login is over. */
+  async authenticate(methodId: string) {
+    return invoke<void>("assistant_authenticate", { methodId });
+  },
+
+  /** Signs out of the agent's account on this computer; every conversation ends. */
+  async signOut(agent: AgentKind, command?: string) {
+    return invoke<void>("assistant_sign_out", { agent, command: command || null });
   },
 };
 

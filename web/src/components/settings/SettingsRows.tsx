@@ -16,3 +16,13 @@ export function Row({ title, hint, children }: { title: string; hint?: ReactNode
 export function SectionTitle({ children }: { children: ReactNode }) {
   return <h2 className="mb-1 text-[15px] font-semibold">{children}</h2>;
 }
+
+/** A group inside a section: a small heading over the rows that belong together. */
+export function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="mt-6">
+      <h3 className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</h3>
+      {children}
+    </div>
+  );
+}
