@@ -30,7 +30,7 @@ export default function MarkdownView({
         if (block.kind === "list") {
           const List = block.ordered ? "ol" : "ul";
           return (
-            <List key={index} className={block.ordered ? "list-decimal space-y-1 pl-5" : "list-disc space-y-1 pl-4"}>
+            <List key={index} className={block.ordered ? "list-decimal space-y-1.5 pl-5 marker:text-muted-foreground" : "list-disc space-y-1.5 pl-5 marker:text-muted-foreground"}>
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex}>
                   <Inlines parts={item} />
@@ -74,7 +74,7 @@ function Inlines({ parts }: { parts: Inline[] }) {
   return parts.map((part, index) => {
     if (part.kind === "code") {
       return (
-        <code key={index} className="rounded bg-muted px-1 py-0.5 font-mono text-[12px]">
+        <code key={index} className="rounded-md border border-primary/15 bg-primary/10 px-1.5 py-px font-mono text-[0.92em] font-medium text-primary">
           {part.text}
         </code>
       );
