@@ -701,6 +701,13 @@ export default function SchemaTree() {
                 aria-label={headerMenuLabel}
                 aria-expanded={schemaMenu?.schema === null}
                 onClick={(e) => {
+                  // With one thing to make there is nothing to pick from: the button does it (its tooltip says what)
+                  const items = schemaMenuItems(null);
+                  const only = items.length === 1 ? items[0] : null;
+                  if (only && typeof only === "object" && "onSelect" in only && only.onSelect) {
+                    only.onSelect();
+                    return;
+                  }
                   const r = e.currentTarget.getBoundingClientRect();
                   setSchemaMenu({ x: r.left, y: r.bottom + 4, schema: null });
                 }}
