@@ -84,8 +84,7 @@ function ImportForm({
   }
 
   async function chooseFile() {
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    const [{ open }, { readTextFile }] = await Promise.all([import("@tauri-apps/plugin-dialog"), import("@tauri-apps/plugin-fs")]);
     const path = await open({ multiple: false, filters: [{ name: "CSV", extensions: ["csv", "tsv", "txt"] }] });
     if (typeof path !== "string") return;
     try {

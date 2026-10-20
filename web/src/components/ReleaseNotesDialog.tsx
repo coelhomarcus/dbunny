@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useEffectEvent } from "react";
 import { TriangleAlert } from "lucide-react";
 import Spinner from "./ui/Spinner";
 import { fetchReleaseNotes } from "../lib/releaseNotes";
@@ -22,17 +22,19 @@ export default function ReleaseNotesDialog({
   const t = useT();
   const [notes, setNotes] = useState<{ version: string; markdown: string } | { version: string; error: string } | null>(null);
 
+  // Escape closes with whatever onClose is now, without the listener being set again each render
+  const closeOnEscape = useEffectEvent(onClose);
   useEffect(() => {
     if (!open) return;
     // Before the dialog and anything under it, so Escape closes the notes and leaves Settings open.
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       e.stopPropagation();
-      onClose();
+      closeOnEscape();
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [open, onClose]);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;

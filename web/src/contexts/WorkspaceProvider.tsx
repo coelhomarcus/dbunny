@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode, useLayoutEffect } from "react";
 import { GitCommitVertical } from "lucide-react";
 import { api, createSessionApi } from "../lib/api";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -44,8 +44,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setActiveTabId(tab.id);
   }, []);
 
+  // Read by the callbacks below when something happens, so it holds the tabs of the last render
   const snapshot = useRef({ tabs, activeTabId });
-  snapshot.current = { tabs, activeTabId };
+  useLayoutEffect(() => {
+    snapshot.current = { tabs, activeTabId };
+  });
 
   const closeNow = useCallback((ids: string[]) => {
     const { tabs: open, activeTabId: active } = snapshot.current;

@@ -46,6 +46,13 @@ export function setConnectionPrefs(savedId: string | null, prefs: ConnectionAssi
   }
 }
 
+/** The row limit for what was typed in the field: a whole number from 10 to 1000, and the default for an empty or unreadable one. */
+export function parseRowLimit(text: string): number {
+  const typed = Number(text);
+  if (text.trim() === "" || !Number.isFinite(typed)) return DEFAULT_ROWS;
+  return Math.min(MAX_ROWS, Math.max(MIN_ROWS, Math.round(typed)));
+}
+
 /** What a new conversation is opened with. */
 export function conversationOptions(
   settings: { assistantAskBeforeQueries: boolean; assistantRowLimit: number },

@@ -98,7 +98,10 @@ export default function ColorPicker({
         role="slider"
         tabIndex={0}
         aria-label={t("ui.colorPicker.saturationAndBrightness")}
-        aria-valuetext={`Saturation ${Math.round(hsv.s * 100)}%, brightness ${Math.round(hsv.v * 100)}%`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(hsv.s * 100)}
+        aria-valuetext={t("ui.colorPicker.valueText", { saturation: Math.round(hsv.s * 100), brightness: Math.round(hsv.v * 100) })}
         onPointerDown={onAreaPointer}
         onPointerMove={onAreaPointer}
         onKeyDown={onAreaKey}

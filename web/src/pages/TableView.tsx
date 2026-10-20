@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback, useState, useRef } from "react";
+import { useEffect, useMemo, useCallback, useState, useRef, useLayoutEffect } from "react";
 import { useDocuments } from "../contexts/DocumentsContext";
 import {
   useReactTable,
@@ -250,8 +250,11 @@ function TableViewContent({
     if (hadEdits) notify({ tone: "success", text: t("table.tableView.changesSaved") });
   }, [api, draft, draftCol, draftIsNull, draftText, editing, notify, pending, schema, table, tableData, t]);
 
+  // The keyboard listener below outlives renders, so it saves with the latest version of saveAll
   const saveAllRef = useRef(saveAll);
-  saveAllRef.current = saveAll;
+  useLayoutEffect(() => {
+    saveAllRef.current = saveAll;
+  });
 
   useEffect(() => {
     if (error) notify({ tone: "error", text: error });
