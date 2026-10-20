@@ -209,3 +209,8 @@ test("an approval joins the card of codex's call by its sql", () => {
   assert.equal((state.items[0] as ToolItem).approval?.id, "a1");
   assert.equal(state.items.length, 1);
 });
+
+test("a title made of a first message that carried the database context is only the question", () => {
+  const title = "Quantos pedidos?\n\n<dbunny-context>\nThe database:\n- Engine: SQLite\n</dbunny-context>";
+  assert.equal(play([{ sessionUpdate: "session_info_update", title }]).title, "Quantos pedidos?");
+});

@@ -5,6 +5,8 @@ pub mod agent;
 pub mod approvals;
 #[cfg(test)]
 mod claude_tests;
+#[cfg(test)]
+mod codex_tests;
 pub mod context;
 pub mod conversation;
 pub mod events;
@@ -197,6 +199,13 @@ impl Assistant {
             Ok(profile) => profile,
             Err(message) => return self.fail(AgentStatus::Failed { message }),
         };
+        let home = self.data_dir.join("codex-home");
+        if kind == AgentKind::Codex {
+            if let Err(e) = std::fs::create_dir_all(&home) {
+                return self.fail(AgentStatus::Failed { message: format!("Couldn't prepare Codex's folder: {e}") });
+            }
+        }
+        let profile = profile.with_home(&home);
         *self.profile.lock().unwrap() = Some(profile.clone());
         let mcp = match McpServer::start(Arc::clone(&self.conversations), Arc::clone(&self.tools)).await {
             Ok(mcp) => mcp,
@@ -607,6 +616,20 @@ mod tests {
         let env = r.host.envs.lock().unwrap()[0].clone();
         assert!(env.contains(&("INITIAL_AGENT_MODE".to_string(), "read-only".to_string())), "{env:?}");
         assert!(env.iter().any(|(key, _)| key == "CODEX_CONFIG"));
+    }
+
+    #[tokio::test]
+    async fn codex_runs_in_a_home_of_dbunnys_own() {
+        let r = rig(FakeConfig::default()).await;
+        r.assistant.start(AgentKind::Codex, None).await;
+        let home = r.data.join("codex-home");
+        let env = r.host.envs.lock().unwrap()[0].clone();
+        assert!(env.contains(&("CODEX_HOME".to_string(), home.to_string_lossy().to_string())), "{env:?}");
+        assert!(home.is_dir());
+        // Claude has no such home
+        let claude = rig(FakeConfig::default()).await;
+        claude.assistant.start(AgentKind::Claude, None).await;
+        assert!(claude.host.envs.lock().unwrap()[0].iter().all(|(key, _)| key != "CODEX_HOME"));
     }
 
     #[tokio::test]

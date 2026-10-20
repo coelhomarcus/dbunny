@@ -1,4 +1,5 @@
 import type { ApprovalRequest } from "../types/assistant";
+import { stripContext } from "./assistantContext.ts";
 
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
 
@@ -116,7 +117,7 @@ export function applyUpdate(conversation: Conversation, raw: unknown): Conversat
   }
 
   if (kind === "session_info_update") {
-    return typeof update.title === "string" ? { ...conversation, title: update.title } : conversation;
+    return typeof update.title === "string" ? { ...conversation, title: stripContext(update.title) } : conversation;
   }
 
   if (kind === "tool_call" || kind === "tool_call_update") {

@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { agentFromStored, agentInfo } from "../../src/lib/assistantAgents.ts";
 
 test("each agent has its name, company and the folder it keeps conversations in", () => {
-  assert.deepEqual(agentInfo("claude"), { kind: "claude", name: "Claude Code", account: "Claude", company: "Anthropic", folder: "~/.claude/projects", loginTitle: "Sign in to Claude" });
-  assert.deepEqual(agentInfo("codex"), { kind: "codex", name: "Codex", account: "ChatGPT", company: "OpenAI", folder: "~/.codex", loginTitle: "Sign in to Codex" });
+  assert.deepEqual(agentInfo("claude"), { kind: "claude", name: "Claude Code", account: "Claude", company: "Anthropic", folder: "~/.claude/projects", loginTitle: "Sign in to Claude", signOutScope: "on this computer, not only in DBunny" });
+  assert.deepEqual(agentInfo("codex"), { kind: "codex", name: "Codex", account: "ChatGPT", company: "OpenAI", folder: "DBunny's own Codex folder", loginTitle: "Sign in to Codex", signOutScope: "in DBunny only; your own Codex stays signed in" });
   assert.equal(agentInfo("custom").name, "your agent");
 });
 

@@ -11,11 +11,13 @@ export interface AgentInfo {
   /** Where it keeps its conversations. */
   folder: string;
   loginTitle: string;
+  /** What signing out reaches, for the sentence that says so. */
+  signOutScope: string;
 }
 
 const AGENTS: Record<AgentKind, AgentInfo> = {
-  claude: { kind: "claude", name: "Claude Code", account: "Claude", company: "Anthropic", folder: "~/.claude/projects", loginTitle: "Sign in to Claude" },
-  codex: { kind: "codex", name: "Codex", account: "ChatGPT", company: "OpenAI", folder: "~/.codex", loginTitle: "Sign in to Codex" },
+  claude: { kind: "claude", name: "Claude Code", account: "Claude", company: "Anthropic", folder: "~/.claude/projects", loginTitle: "Sign in to Claude", signOutScope: "on this computer, not only in DBunny" },
+  codex: { kind: "codex", name: "Codex", account: "ChatGPT", company: "OpenAI", folder: "DBunny's own Codex folder", loginTitle: "Sign in to Codex", signOutScope: "in DBunny only; your own Codex stays signed in" },
   custom: {
     kind: "custom",
     name: "your agent",
@@ -23,6 +25,7 @@ const AGENTS: Record<AgentKind, AgentInfo> = {
     company: "the agent's provider",
     folder: "the agent's own folder",
     loginTitle: "Sign in to your agent",
+    signOutScope: "on this computer",
   },
 };
 

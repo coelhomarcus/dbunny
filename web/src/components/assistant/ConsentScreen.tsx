@@ -13,8 +13,8 @@ export default function ConsentScreen({ agent, onEnable }: { agent: AgentInfo; o
       <p className="mt-2 max-w-xs text-[13px] leading-relaxed text-muted-foreground">
         {agent.kind === "custom"
           ? `The assistant runs the agent you chose on this computer. It can read this connection's schema and run queries that only read, after you allow them. Your schema and the results you allow are sent to the agent's provider, and the agent keeps the conversations where it likes. You need Node.js 20 or newer if the agent needs it.`
-          : `The assistant runs ${agent.name} on this computer with your ${agent.account} account. It can read this connection's schema and run queries that only read, after you allow them. Your schema and the results you allow are sent to ${agent.company}. ${agent.name} keeps the conversations in ${agent.folder}. You need Node.js 20 or newer and to be signed in to ${agent.name}.`}
-        {agent.kind === "codex" && " Codex also loads the tools and hooks from your own ~/.codex/config.toml."}
+          : `The assistant runs ${agent.name} on this computer with your ${agent.account} account. It can read this connection's schema and run queries that only read, after you allow them. Your schema and the results you allow are sent to ${agent.company}. ${agent.name} keeps the conversations in ${agent.folder}. You need Node.js 20 or newer and ${agent.kind === "codex" ? "to sign in to Codex the first time" : `to be signed in to ${agent.name}`}.`}
+        {agent.kind === "codex" && " Codex runs with a folder and a sign-in of its own in DBunny, apart from your own Codex."}
       </p>
       <Button variant="primary" size="sm" className="mt-5" onClick={onEnable}>
         Enable assistant

@@ -78,7 +78,7 @@ export default function AssistantSection() {
           signOutResult ? (
             <span className={signOutResult.ok ? "text-success-foreground" : "text-destructive-foreground"}>{signOutResult.text}</span>
           ) : (
-            `Signs out ${info.name} on this computer, not only in DBunny.`
+            `Signs out ${info.name} ${info.signOutScope}.`
           )
         }
       >
@@ -116,7 +116,7 @@ export default function AssistantSection() {
         onConfirm={signOut}
         icon={<LogOut />}
         title={`Sign out of ${info.name}?`}
-        description={`This signs out ${info.name} on this computer, not only in DBunny, and ends the conversations of the assistant. You sign in again from its panel.`}
+        description={`This signs out ${info.name} ${info.signOutScope}, and ends the conversations of the assistant. You sign in again from its panel.`}
         confirmLabel="Sign out"
       />
       <Dialog open={log !== null} onClose={() => setLog(null)} title="Assistant log" className="max-w-2xl">

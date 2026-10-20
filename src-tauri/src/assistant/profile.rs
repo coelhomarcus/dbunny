@@ -62,6 +62,8 @@ pub fn codex_config(rules: &str) -> Value {
         "features": {
             "shell_tool": false, "unified_exec": false, "multi_agent": false, "plugins": false, "apps": false,
             "browser_use": false, "computer_use": false, "image_generation": false, "goals": false,
+            "in_app_browser": false, "browser_use_external": false, "browser_use_full_cdp_access": false, "code_mode_host": false,
+            "hooks": false, "tool_suggest": false,
         },
         "web_search": "disabled",
         "include_environment_context": false,
@@ -70,6 +72,16 @@ pub fn codex_config(rules: &str) -> Value {
 }
 
 impl AgentProfile {
+    /// Codex runs with a home of its own: the person's `~/.codex` has tools of their own (a Node REPL
+    /// the ChatGPT app installs, say) that Codex runs without asking, and a login that DBunny's
+    /// sign-out must not touch.
+    pub fn with_home(mut self, home: &std::path::Path) -> AgentProfile {
+        if self.kind == AgentKind::Codex {
+            self.env.push(("CODEX_HOME".into(), home.to_string_lossy().into_owned()));
+        }
+        self
+    }
+
     pub fn delivery(&self) -> PromptDelivery {
         match self.kind {
             AgentKind::Codex => PromptDelivery::FirstMessage,
@@ -120,7 +132,10 @@ mod tests {
         assert_eq!(resolve(AgentKind::Codex, None, true).unwrap().command.program, "npx.cmd");
         assert!(profile.env.contains(&("INITIAL_AGENT_MODE".to_string(), "read-only".to_string())));
         let config = config_of(&profile);
-        for feature in ["shell_tool", "unified_exec", "multi_agent", "plugins", "apps", "browser_use", "computer_use"] {
+        for feature in [
+            "shell_tool", "unified_exec", "multi_agent", "plugins", "apps", "browser_use", "computer_use", "in_app_browser", "browser_use_external",
+            "browser_use_full_cdp_access", "code_mode_host", "hooks", "tool_suggest",
+        ] {
             assert_eq!(config["features"][feature], false, "{feature}");
         }
         assert_eq!(config["web_search"], "disabled");
@@ -129,6 +144,15 @@ mod tests {
         assert_eq!(profile.delivery(), PromptDelivery::FirstMessage);
         assert!(profile.session_meta().is_none());
         assert_eq!(profile.login_command(), None);
+    }
+
+    #[test]
+    fn codex_can_be_given_a_home_of_its_own() {
+        let home = std::path::Path::new("/data/codex-home");
+        let profile = resolve(AgentKind::Codex, None, false).unwrap().with_home(home);
+        assert!(profile.env.contains(&("CODEX_HOME".to_string(), "/data/codex-home".to_string())), "{:?}", profile.env);
+        // Only Codex has one
+        assert!(resolve(AgentKind::Claude, None, false).unwrap().with_home(home).env.is_empty());
     }
 
     #[test]
