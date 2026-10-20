@@ -185,6 +185,18 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 
 For larger backend work, mention server tests (`cargo test` with PostgreSQL) only if the environment is available.
 
+## Languages
+
+The interface speaks English and Portuguese (Brazil), and follows the system unless the person picks one in Settings. The code is in `web/src/i18n/`.
+
+- **All text a person reads goes through `t()`** (`useT()` in components, `t` from `@/i18n` in handlers and `lib/`). Write the key in `web/src/i18n/locales/en.ts` and its translation in `pt-BR.ts` in the same commit; a missing key does not compile. Keys are `area.screen.role`, at most three levels deep, and words used everywhere live in `common`.
+- **Never glue text together.** A sentence is one message with `{parameters}`; a noun is not inserted into another message; a count is a plural message (`{ one, other }`) with `{count}`. A text with a link or bold inside is read with `<Rich>`.
+- **Counts, dates and lists use the formatters** (`useFormat()` or `fmt()`), not `toLocaleString`.
+- **Errors the person sees:** an error DBunny itself makes in Rust is `AppError::coded("area.name", english_message).param(...)`, and its message goes in the catalog under `errors.area.name`. What a database server says passes through as it came. The interface shows any error with `errorText(error, fallback)`.
+- **Words that stay English on purpose** (said to the agent, or the vocabulary of a database) carry `// i18n-ignore: why` on their line. The test in `web/test/i18n` finds text that skips `t()`, and its list of exceptions only shrinks.
+- The pseudo language (the last item of the language picker in development) shows English made foreign and longer: use it to find text nobody extracted and layouts that don't stretch.
+- README, release notes, PR text and commit messages stay in English.
+
 ## Product conventions for agents
 
 - **Capabilities:** UI and commands must respect per-engine `Capabilities` from the backend; do not show PostgreSQL-only actions for SQLite.

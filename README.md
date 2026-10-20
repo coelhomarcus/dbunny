@@ -39,6 +39,7 @@ Screens and actions adapt to what the connected engine supports (for example, sc
 - **Queries:** a SQL editor with autocomplete, run the statement at the cursor or the whole script, query plans, transactions, formatting, history and saved queries. Safe mode asks before destructive statements.
 - **Structure:** columns, indexes, constraints, foreign keys, triggers, permissions and DDL where the engine allows it, with the SQL shown before it runs.
 - **Assistant:** ask about your data, write SQL, explain, fix and optimize it, with the database's tables, columns and relationships in view (see below).
+- **Languages:** English and Portuguese (Brazil). The app follows your system and can be set in Settings; the assistant answers in the same language.
 - **Server (PostgreSQL, MySQL and MariaDB):** create and drop databases (and schemas on PostgreSQL), see roles or accounts and live activity, and cancel or end sessions.
 
 ## AI Assistant
