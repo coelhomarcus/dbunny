@@ -2,6 +2,7 @@ import { useState } from "react";
 import { LogOut } from "lucide-react";
 import { useSettings } from "../../lib/settings";
 import { assistantApi } from "../../lib/api";
+import { parseRowLimit } from "../../lib/assistantPrefs";
 import { agentInfo, agentSummary } from "../../lib/assistantAgents";
 import Button from "../ui/Button";
 import ConfirmDialog from "../ui/ConfirmDialog";
@@ -19,6 +20,7 @@ export default function AssistantSection() {
   const t = useT();
   const [settings, update] = useSettings();
   const [command, setCommand] = useState(settings.assistantCommand);
+  const [rowsText, setRowsText] = useState(String(settings.assistantRowLimit));
   const [log, setLog] = useState<string[] | null>(null);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -94,10 +96,15 @@ export default function AssistantSection() {
             min={10}
             max={1000}
             className={`${inputClass} w-24`}
-            value={settings.assistantRowLimit}
+            value={rowsText}
             aria-label={t("assistant.assistantSection.rowsTheAssistantCanSee")}
-            onChange={(event) => update({ assistantRowLimit: Number(event.target.value) })}
-            onBlur={() => update({ assistantRowLimit: Math.min(1000, Math.max(10, Math.round(settings.assistantRowLimit) || 100)) })}
+            onChange={(event) => setRowsText(event.target.value)}
+            onBlur={() => {
+              // Only what is finished is kept: a cleared or half-typed number does not reach the settings
+              const rows = parseRowLimit(rowsText);
+              update({ assistantRowLimit: rows });
+              setRowsText(String(rows));
+            }}
           />
         </Row>
       </Group>

@@ -12,7 +12,7 @@ Object.defineProperty(globalThis, "localStorage", {
   },
 });
 
-const { conversationOptions, getConnectionPrefs, setConnectionPrefs } = await import("../../src/lib/assistantPrefs.ts");
+const { conversationOptions, getConnectionPrefs, parseRowLimit, setConnectionPrefs } = await import("../../src/lib/assistantPrefs.ts");
 
 beforeEach(() => store.clear());
 
@@ -56,4 +56,19 @@ test("the row limit stays between 10 and 1000", () => {
   assert.equal(conversationOptions({ assistantAskBeforeQueries: false, assistantRowLimit: 3 }, prefs, "en").rowLimit, 10);
   assert.equal(conversationOptions({ assistantAskBeforeQueries: false, assistantRowLimit: 5000 }, prefs, "en").rowLimit, 1000);
   assert.equal(conversationOptions({ assistantAskBeforeQueries: false, assistantRowLimit: Number.NaN }, prefs, "en").rowLimit, 100);
+});
+
+test("what is typed as the row limit becomes a number between 10 and 1000", () => {
+  assert.equal(parseRowLimit("250"), 250);
+  assert.equal(parseRowLimit(" 40 "), 40);
+  assert.equal(parseRowLimit("12.6"), 13);
+  assert.equal(parseRowLimit("5"), 10);
+  assert.equal(parseRowLimit("5000"), 1000);
+});
+
+test("an empty or unreadable row limit is the default, not zero or NaN", () => {
+  assert.equal(parseRowLimit(""), 100);
+  assert.equal(parseRowLimit("   "), 100);
+  assert.equal(parseRowLimit("abc"), 100);
+  assert.equal(parseRowLimit("1e999"), 100);
 });
