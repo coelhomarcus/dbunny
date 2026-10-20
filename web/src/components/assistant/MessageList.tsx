@@ -58,7 +58,9 @@ export default function MessageList({
             return (
               <details key={index} className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer select-none">Thinking…</summary>
-                <p className="mt-1 select-text whitespace-pre-wrap">{item.text}</p>
+                <div className="mt-1.5 border-l-2 border-border pl-3">
+                  <MarkdownView source={item.text} className="text-xs text-muted-foreground" />
+                </div>
               </details>
             );
           case "tool":

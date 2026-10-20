@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { cn } from "../../lib/cn";
 import { parseMarkdown, type Inline } from "../../lib/markdown";
 import { isWebLink } from "../../lib/links";
 import { openExternal } from "../../lib/openExternal";
@@ -8,13 +9,16 @@ import ResultTable from "./ResultTable";
 export default function MarkdownView({
   source,
   renderCode,
+  className,
 }: {
   source: string;
   renderCode?: (language: string, text: string) => ReactNode;
+  /** Replaces the size and color of the text (the thinking is smaller and quieter). */
+  className?: string;
 }) {
   const blocks = parseMarkdown(source);
   return (
-    <div className="select-text space-y-2.5 text-[13px] leading-relaxed">
+    <div className={cn("select-text space-y-2.5 leading-relaxed", className ?? "text-[13px]")}>
       {blocks.map((block, index) => {
         if (block.kind === "heading") {
           return (
