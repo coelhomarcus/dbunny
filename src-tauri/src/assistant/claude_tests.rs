@@ -62,14 +62,14 @@ impl Live {
             .await
             .unwrap_or_else(|status| panic!("the agent didn't start: {status:?}"));
 
-        let options = ConversationOptions { ask_before_queries: false, schema_only, row_limit: 100, instructions: String::new() };
+        let options = ConversationOptions { ask_before_queries: false, schema_only, row_limit: 100, instructions: String::new(), language: String::new() };
         let conversation = conversations.create("s1", options);
         let cwd = std::env::temp_dir().join(format!("dbunny-test-claude-cwd-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&cwd).unwrap();
         // The prompt the app gives, so that these tests see what the assistant really is told
         let schema = driver_for_prompt.catalog().completion_schema().await.unwrap();
         let info = driver_for_prompt.info();
-        let prompt = system_prompt(&PromptInput { engine: driver_for_prompt.engine(), info: &info, schema: &schema, instructions: "", schema_only });
+        let prompt = system_prompt(&PromptInput { engine: driver_for_prompt.engine(), info: &info, schema: &schema, instructions: "", schema_only, language: "" });
         let setup = SessionSetup {
             cwd,
             mcp_url: server.url(),

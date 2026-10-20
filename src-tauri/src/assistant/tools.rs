@@ -263,7 +263,7 @@ mod tests {
     }
 
     fn options(ask: bool, schema_only: bool) -> ConversationOptions {
-        ConversationOptions { ask_before_queries: ask, schema_only, row_limit: 100, instructions: String::new() }
+        ConversationOptions { ask_before_queries: ask, schema_only, row_limit: 100, instructions: String::new(), language: String::new() }
     }
 
     async fn fixture(options: ConversationOptions) -> Fixture {

@@ -42,13 +42,18 @@ test("damaged storage falls back to the defaults", () => {
 });
 
 test("a conversation's options combine the settings and the connection's preferences", () => {
-  const options = conversationOptions({ assistantAskBeforeQueries: true, assistantRowLimit: 100 }, { schemaOnly: true, instructions: "hi" });
-  assert.deepEqual(options, { askBeforeQueries: true, schemaOnly: true, rowLimit: 100, instructions: "hi" });
+  const options = conversationOptions({ assistantAskBeforeQueries: true, assistantRowLimit: 100 }, { schemaOnly: true, instructions: "hi" }, "en");
+  assert.deepEqual(options, { askBeforeQueries: true, schemaOnly: true, rowLimit: 100, instructions: "hi", language: "en" });
+});
+
+test("the options carry the language of the app, so the agent answers in it", () => {
+  const prefs = { schemaOnly: false, instructions: "" };
+  assert.equal(conversationOptions({ assistantAskBeforeQueries: true, assistantRowLimit: 100 }, prefs, "pt-BR").language, "pt-BR");
 });
 
 test("the row limit stays between 10 and 1000", () => {
   const prefs = { schemaOnly: false, instructions: "" };
-  assert.equal(conversationOptions({ assistantAskBeforeQueries: false, assistantRowLimit: 3 }, prefs).rowLimit, 10);
-  assert.equal(conversationOptions({ assistantAskBeforeQueries: false, assistantRowLimit: 5000 }, prefs).rowLimit, 1000);
-  assert.equal(conversationOptions({ assistantAskBeforeQueries: false, assistantRowLimit: Number.NaN }, prefs).rowLimit, 100);
+  assert.equal(conversationOptions({ assistantAskBeforeQueries: false, assistantRowLimit: 3 }, prefs, "en").rowLimit, 10);
+  assert.equal(conversationOptions({ assistantAskBeforeQueries: false, assistantRowLimit: 5000 }, prefs, "en").rowLimit, 1000);
+  assert.equal(conversationOptions({ assistantAskBeforeQueries: false, assistantRowLimit: Number.NaN }, prefs, "en").rowLimit, 100);
 });

@@ -668,7 +668,7 @@ mod tests {
     }
 
     fn options() -> ConversationOptions {
-        ConversationOptions { ask_before_queries: true, schema_only: false, row_limit: 100, instructions: String::new() }
+        ConversationOptions { ask_before_queries: true, schema_only: false, row_limit: 100, instructions: String::new(), language: String::new() }
     }
 
     fn update(session: &str, kind: &str) -> Value {

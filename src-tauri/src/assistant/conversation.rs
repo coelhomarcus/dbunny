@@ -21,6 +21,9 @@ pub struct ConversationOptions {
     pub row_limit: usize,
     /// What the person wrote about this connection.
     pub instructions: String,
+    /// The language of the app (`pt-BR`), so the agent answers in it; empty for English.
+    #[serde(default)]
+    pub language: String,
 }
 
 pub struct Conversation {
@@ -121,7 +124,7 @@ mod tests {
     use super::*;
 
     fn options(rows: usize) -> ConversationOptions {
-        ConversationOptions { ask_before_queries: true, schema_only: false, row_limit: rows, instructions: String::new() }
+        ConversationOptions { ask_before_queries: true, schema_only: false, row_limit: rows, instructions: String::new(), language: String::new() }
     }
 
     #[test]

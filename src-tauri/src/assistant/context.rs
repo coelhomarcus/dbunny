@@ -13,6 +13,8 @@ pub struct PromptInput<'a> {
     pub instructions: &'a str,
     /// The assistant is not shown values on this connection.
     pub schema_only: bool,
+    /// The language of the app, such as `pt-BR`; English adds nothing.
+    pub language: &'a str,
 }
 
 /// Schemas the server keeps for itself; the agent can still ask about them by name.
@@ -36,6 +38,14 @@ pub const CODEX_CONTEXT_NOTE: &str = "The first message of a conversation ends w
 /// The question with the database context after it, for an agent that has no system prompt per session.
 pub fn with_context(text: &str, context: &str) -> String {
     format!("{text}\n\n<dbunny-context>\n{context}\n</dbunny-context>")
+}
+
+/// What to say about the language, when the app is not in English.
+fn language_line(language: &str) -> Option<&'static str> {
+    if language.to_ascii_lowercase() == "pt-br" {
+        return Some("The app is shown in Brazilian Portuguese. Answer in Brazilian Portuguese unless the person writes in another language. Keep SQL, identifiers and technical terms as they are.");
+    }
+    None
 }
 
 /// The instructions of the assistant, with the database it works on.
@@ -62,6 +72,9 @@ pub fn database_context(input: &PromptInput) -> String {
         text.push_str(
             "- This connection hides values: run_query only returns column names and the row count. Do not run queries to read rows; use run_query only to count or check that something exists, and write any query that returns data in a ```sql block for the person to run in the editor.\n",
         );
+    }
+    if let Some(line) = language_line(input.language) {
+        text.push_str(&format!("\nLanguage: {line}\n"));
     }
     text.push_str(&format!("\nSQL dialect: {}\n", dialect_notes(input.engine)));
     text.push_str("\nTables:\n");
@@ -140,18 +153,41 @@ mod tests {
     }
 
     fn prompt(info: &ConnectionInfo, schema: &CompletionSchema, instructions: &str) -> String {
-        system_prompt(&PromptInput { engine: Engine::Postgres, info, schema, instructions, schema_only: false })
+        system_prompt(&PromptInput { engine: Engine::Postgres, info, schema, instructions, schema_only: false, language: "" })
     }
 
     #[test]
     fn the_context_is_the_database_without_the_rules() {
         let (info, schema) = (info(false), schema(2));
-        let input = PromptInput { engine: Engine::Postgres, info: &info, schema: &schema, instructions: "status 3 means cancelled", schema_only: true };
+        let input = PromptInput { engine: Engine::Postgres, info: &info, schema: &schema, instructions: "status 3 means cancelled", schema_only: true, language: "" };
         let context = database_context(&input);
         assert!(context.starts_with("The database:"), "{context}");
         assert!(context.contains("public.orders(") && context.contains("This connection hides values") && context.contains("status 3 means cancelled"));
         assert!(!context.contains("You are the SQL assistant"));
         assert_eq!(system_prompt(&input), format!("{BASE_PROMPT}\n\n{context}"));
+    }
+
+    #[test]
+    fn the_prompt_asks_for_portuguese_only_when_the_language_is_portuguese() {
+        let (info, schema) = (info(false), schema(1));
+        let ask = |language: &str| database_context(&PromptInput { engine: Engine::Postgres, info: &info, schema: &schema, instructions: "", schema_only: false, language });
+        let portuguese = ask("pt-BR");
+        assert!(portuguese.contains("Brazilian Portuguese") && portuguese.contains("Keep SQL, identifiers and technical terms as they are"), "{portuguese}");
+        assert!(portuguese.contains("unless the person writes in another language"), "{portuguese}");
+        for other in ["en", "", "fr", "pt-XX-nonsense-but-not-ours"] {
+            if other.starts_with("pt") {
+                continue;
+            }
+            assert!(!ask(other).contains("Portuguese"), "{other}");
+        }
+    }
+
+    #[test]
+    fn the_language_line_sits_with_the_database_before_the_tables() {
+        let (info, schema) = (info(false), schema(1));
+        let text = database_context(&PromptInput { engine: Engine::Postgres, info: &info, schema: &schema, instructions: "", schema_only: false, language: "pt-BR" });
+        assert!(text.starts_with("The database:"), "{text}");
+        assert!(text.find("Brazilian Portuguese").unwrap() < text.find("Tables:").unwrap(), "{text}");
     }
 
     #[test]
@@ -176,7 +212,7 @@ mod tests {
     #[test]
     fn a_connection_that_hides_values_says_so() {
         let (info, schema) = (info(false), schema(1));
-        let hidden = system_prompt(&PromptInput { engine: Engine::Postgres, info: &info, schema: &schema, instructions: "", schema_only: true });
+        let hidden = system_prompt(&PromptInput { engine: Engine::Postgres, info: &info, schema: &schema, instructions: "", schema_only: true, language: "" });
         assert!(hidden.contains("This connection hides values"), "{hidden}");
         assert!(hidden.contains("Do not run queries to read rows"), "{hidden}");
         assert!(!prompt(&info, &schema, "").contains("This connection hides values"));
