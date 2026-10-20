@@ -6,6 +6,11 @@ import App from "./App";
 import { initI18n } from "./i18n";
 import { getSettings } from "./lib/settings";
 
+// A development aid: hover an element and press Cmd/Ctrl+C to copy it with its source location. Not part of the build.
+if (import.meta.env.DEV) {
+  import("react-grab");
+}
+
 window.addEventListener("load", () => {
   getCurrentWindow().show();
 });
