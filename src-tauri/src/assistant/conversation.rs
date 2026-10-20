@@ -35,6 +35,8 @@ pub struct Conversation {
     pub reads_allowed: AtomicBool,
     /// The folder the agent works in, once the conversation has one.
     pub workspace: Mutex<Option<Workspace>>,
+    /// The database context still to go in the first message, for an agent that takes no system prompt.
+    pub pending_context: Mutex<Option<String>>,
 }
 
 /// A conversation's folder; one of a connection that wasn't saved goes away with the conversation.
@@ -61,6 +63,7 @@ impl Conversations {
             options: ConversationOptions { row_limit: options.row_limit.clamp(MIN_ROWS, MAX_ROWS), ..options },
             reads_allowed: AtomicBool::new(false),
             workspace: Mutex::new(None),
+            pending_context: Mutex::new(None),
         });
         self.items.lock().unwrap().push(Arc::clone(&conversation));
         conversation

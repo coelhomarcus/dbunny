@@ -29,7 +29,7 @@ use tokio::sync::Mutex;
 
 use agent::{AgentError, AgentHandle, LogBuffer, ModelChoice, LOG_LINES, SessionSetup, SessionSummary};
 use approvals::{Approvals, Decision};
-use context::{system_prompt, PromptInput};
+use context::{database_context, system_prompt, with_context, PromptInput};
 use conversation::{Conversation, ConversationOptions, Conversations, Workspace};
 use events::{AgentStatus, AssistantEvent, EventSink};
 use launch::AgentCommand;
@@ -274,12 +274,17 @@ impl Assistant {
         let schema = driver.catalog().completion_schema().await.unwrap_or(CompletionSchema { current_schema: None, relations: vec![], functions: vec![] });
         let (cwd, temporary) = workspace_dir(&self.data_dir, saved_id, &info.database);
         std::fs::create_dir_all(&cwd).map_err(|e| format!("Couldn't prepare the assistant's folder: {e}"))?;
-        let prompt = system_prompt(&PromptInput { engine: driver.engine(), info: &info, schema: &schema, instructions: &options.instructions, schema_only: options.schema_only });
+        let input = PromptInput { engine: driver.engine(), info: &info, schema: &schema, instructions: &options.instructions, schema_only: options.schema_only };
+        let (prompt, context) = (system_prompt(&input), database_context(&input));
         let mcp_url = self.mcp_url().await.ok_or_else(|| "The assistant isn't running".to_string())?;
 
         let conversation = self.conversations.create(session_id, options);
         *conversation.workspace.lock().unwrap() = Some(Workspace { path: cwd.clone(), temporary });
         let profile = self.current_profile();
+        // An agent with no system prompt per session gets the database in the first message of a new conversation
+        if profile.delivery() == PromptDelivery::FirstMessage && resume.is_none() {
+            *conversation.pending_context.lock().unwrap() = Some(context);
+        }
         let setup = SessionSetup {
             cwd,
             mcp_url,
@@ -337,7 +342,17 @@ impl Assistant {
         let conversation = self.conversations.get(conversation_id).ok_or_else(|| "This conversation was closed".to_string())?;
         let acp_session = conversation.acp_session.lock().unwrap().clone().ok_or_else(|| "This conversation has not started".to_string())?;
         let agent = self.agent().await?;
-        agent.prompt(&acp_session, text).await.map_err(|e| self.explain(e))
+        let context = conversation.pending_context.lock().unwrap().take();
+        let sent = match &context {
+            Some(context) => with_context(text, context),
+            None => text.to_string(),
+        };
+        let outcome = agent.prompt(&acp_session, &sent).await;
+        if outcome.is_err() && context.is_some() {
+            // The agent has not seen it: the next message carries it
+            *conversation.pending_context.lock().unwrap() = context;
+        }
+        outcome.map_err(|e| self.explain(e))
     }
 
     /// Stops the turn and turns down what was waiting for the person's approval.
@@ -808,6 +823,53 @@ mod tests {
         let r = rig_with(host).await;
         assert!(matches!(r.assistant.start(AgentKind::Claude, None).await, AgentStatus::Failed { .. }));
         assert_eq!(r.assistant.log().await, vec!["npm ERR! network".to_string()]);
+    }
+
+    async fn codex_rig(config: FakeConfig) -> Rig {
+        let r = rig(config).await;
+        assert_eq!(r.assistant.start(AgentKind::Codex, None).await, AgentStatus::Ready);
+        r
+    }
+
+    fn prompt_texts(r: &Rig) -> Vec<String> {
+        r.host.agent().calls("session/prompt").iter().map(|p| p["params"]["prompt"][0]["text"].as_str().unwrap().to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn the_first_message_of_a_codex_conversation_carries_the_context() {
+        let r = codex_rig(FakeConfig::default()).await;
+        let opened = r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "Quantos?").await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "E ontem?").await.unwrap();
+        let texts = prompt_texts(&r);
+        assert!(texts[0].starts_with("Quantos?\n\n<dbunny-context>\nThe database:") && texts[0].contains("public.orders") && texts[0].ends_with("</dbunny-context>"), "{}", texts[0]);
+        assert!(texts[0].contains("status 3 means cancelled"));
+        assert_eq!(texts[1], "E ontem?");
+    }
+
+    #[tokio::test]
+    async fn a_reopened_codex_conversation_gets_no_context() {
+        let r = codex_rig(FakeConfig::default()).await;
+        let opened = r.assistant.load_conversation("s1", Some("saved-1"), "old", options()).await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "E ontem?").await.unwrap();
+        assert_eq!(prompt_texts(&r), vec!["E ontem?".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_prompt_keeps_the_context_for_the_next_one() {
+        let r = codex_rig(FakeConfig { fail_prompts: 1, ..Default::default() }).await;
+        let opened = r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        assert!(r.assistant.prompt(&opened.conversation_id, "Quantos?").await.is_err());
+        r.assistant.prompt(&opened.conversation_id, "Quantos?").await.unwrap();
+        assert!(prompt_texts(&r)[1].contains("<dbunny-context>"));
+    }
+
+    #[tokio::test]
+    async fn claude_never_gets_the_context_in_a_message() {
+        let r = started(FakeConfig::default()).await;
+        let opened = r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
+        r.assistant.prompt(&opened.conversation_id, "Quantos?").await.unwrap();
+        assert_eq!(prompt_texts(&r), vec!["Quantos?".to_string()]);
     }
 
     #[tokio::test]

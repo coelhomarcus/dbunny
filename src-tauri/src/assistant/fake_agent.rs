@@ -23,6 +23,8 @@ pub struct FakeConfig {
     pub sessions: Vec<Value>,
     /// Sent to the client before `session/load` is answered, like the replay of a conversation.
     pub load_script: Vec<Value>,
+    /// How many `session/prompt` calls, from the first, are answered with an error.
+    pub fail_prompts: usize,
 }
 
 impl Default for FakeConfig {
@@ -37,6 +39,7 @@ impl Default for FakeConfig {
             die_on_prompt: false,
             sessions: vec![],
             load_script: vec![],
+            fail_prompts: 0,
         }
     }
 }
@@ -72,6 +75,7 @@ async fn send(out: &mut DuplexStream, message: &Value) {
 async fn run(config: FakeConfig, input: DuplexStream, mut out: DuplexStream, received: Arc<Mutex<Vec<Value>>>, answers: Arc<Mutex<Vec<Value>>>) {
     let mut lines = BufReader::new(input).lines();
     let mut sessions = 0;
+    let mut prompts = 0;
     while let Ok(Some(line)) = lines.next_line().await {
         let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
         if message.get("method").is_none() {
@@ -113,6 +117,7 @@ async fn run(config: FakeConfig, input: DuplexStream, mut out: DuplexStream, rec
             }
             "session/list" => Ok(json!({"sessions": config.sessions})),
             "session/set_config_option" | "logout" => Ok(json!({})),
+            "session/prompt" if { prompts += 1; prompts <= config.fail_prompts } => Err(json!({"code": -32603, "message": "The model is busy"})),
             "session/prompt" => {
                 let before = answers.lock().unwrap().len();
                 let requests = config.prompt_script.iter().filter(|m| m.get("id").is_some()).count();

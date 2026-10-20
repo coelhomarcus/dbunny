@@ -45,7 +45,7 @@ pub fn resolve(kind: AgentKind, custom: Option<&str>, windows: bool) -> Result<A
             command: AgentCommand { program: npx.into(), args: vec!["-y".into(), CODEX_PACKAGE.into()] },
             env: vec![
                 ("INITIAL_AGENT_MODE".into(), "read-only".into()),
-                ("CODEX_CONFIG".into(), codex_config(super::context::BASE_PROMPT).to_string()),
+                ("CODEX_CONFIG".into(), codex_config(&format!("{}\n\n{}", super::context::BASE_PROMPT, super::context::CODEX_CONTEXT_NOTE)).to_string()),
             ],
         }),
         AgentKind::Custom => {
@@ -129,6 +129,13 @@ mod tests {
         assert_eq!(profile.delivery(), PromptDelivery::FirstMessage);
         assert!(profile.session_meta().is_none());
         assert_eq!(profile.login_command(), None);
+    }
+
+    #[test]
+    fn codex_is_given_the_rules_and_told_where_the_database_comes_from() {
+        let instructions = config_of(&resolve(AgentKind::Codex, None, false).unwrap())["developer_instructions"].as_str().unwrap().to_string();
+        assert!(instructions.starts_with(super::super::context::BASE_PROMPT), "{instructions}");
+        assert!(instructions.contains("<dbunny-context>") && instructions.contains("first message"), "{instructions}");
     }
 
     #[test]
