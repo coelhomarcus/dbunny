@@ -2,13 +2,13 @@ import { useState } from "react";
 import { LogOut } from "lucide-react";
 import { useSettings } from "../../lib/settings";
 import { assistantApi } from "../../lib/api";
-import { agentInfo, agentSummary, type AgentKind } from "../../lib/assistantAgents";
+import { agentInfo, agentSummary } from "../../lib/assistantAgents";
 import Button from "../ui/Button";
 import ConfirmDialog from "../ui/ConfirmDialog";
 import Dialog from "../ui/Dialog";
-import SegmentedTabs from "../ui/SegmentedTabs";
 import Switch from "../ui/Switch";
 import { inputClass } from "../ui/styles";
+import AgentPicker from "./AgentPicker";
 import { Group, Row, SectionTitle } from "./SettingsRows";
 
 /** How the assistant is run and what it is told by default. */
@@ -52,15 +52,7 @@ export default function AssistantSection() {
 
       <Group title="Agent">
         <div className="space-y-3 border-b border-border py-3.5">
-          <SegmentedTabs<AgentKind>
-            value={agent}
-            onChange={(value) => update({ assistantAgent: value })}
-            options={[
-              { value: "claude", label: "Claude Code" },
-              { value: "codex", label: "Codex" },
-              { value: "custom", label: "Custom" },
-            ]}
-          />
+          <AgentPicker value={agent} onChange={(value) => update({ assistantAgent: value })} />
           <p className="text-xs leading-relaxed text-muted-foreground">{agentSummary(info)}</p>
           {agent === "custom" && (
             <label className="block">
