@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode, useCallback, useMemo } from "react";
 import { ChevronRight } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -76,12 +76,14 @@ export function TraceCollapsible({
 }) {
   const [inner, setInner] = useState(defaultOpen);
   const shown = open ?? inner;
-  const toggle = () => {
+  const toggle = useCallback(() => {
     if (open === undefined) setInner(!shown);
     onOpenChange?.(!shown);
-  };
+  }, [open, shown, onOpenChange]);
+  // One object while nothing changes, so the parts inside do not render again for nothing
+  const state = useMemo(() => ({ open: shown, toggle }), [shown, toggle]);
   return (
-    <CollapsibleContext.Provider value={{ open: shown, toggle }}>
+    <CollapsibleContext.Provider value={state}>
       <div data-state={shown ? "open" : "closed"} className={className}>
         {children}
       </div>
