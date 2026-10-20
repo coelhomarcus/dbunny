@@ -172,7 +172,7 @@ function QueryRow({
               <div className="mt-1 overflow-hidden rounded-lg border border-border bg-card">
                 <ResultTable
                   columns={rows.columns.map((column) => column.name)}
-                  rows={shown.map((row) => row.map((value) => (value === null ? <span className="text-muted-foreground">NULL</span> : typeof value === "string" ? value : JSON.stringify(value))))}
+                  rows={shown.map((row) => row.map((value) => (value === null ? <span key="null" className="text-muted-foreground">NULL</span> : typeof value === "string" ? value : JSON.stringify(value))))}
                 />
                 {rows.rows.length > PREVIEW_ROWS && !showAll && (
                   <button type="button" className="w-full cursor-pointer border-t border-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent" onClick={() => setShowAll(true)}>
