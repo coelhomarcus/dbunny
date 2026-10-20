@@ -44,6 +44,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [models, setModels] = useState<ModelChoice | null>(null);
   const [history, setHistory] = useState<SessionSummary[]>([]);
   const [queued, setQueued] = useState<string | null>(null);
+  // A past conversation being opened: shown at once, so that the wait is seen as progress
+  const [openingTitle, setOpeningTitle] = useState<string | null>(null);
+  const openToken = useRef(0);
 
   // The id the event handlers compare with, and the opener that keeps the updates that arrive while
   // a conversation is opening (a reopened one replays before its id is known)
@@ -90,6 +93,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     idRef.current = null;
     // Whatever is opening is no longer wanted either
     opener.current?.invalidate();
+    openToken.current++;
+    setOpeningTitle(null);
     preparing.current = null;
     setConversationId(null);
     setConversation(emptyConversation());
@@ -180,14 +185,19 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, [forgetConversation]);
 
   const openConversation = useCallback(
-    async (acpSession: string) => {
+    async (acpSession: string, title?: string) => {
       if (!sessionId) return;
       forgetConversation();
+      // The conversation is on screen as opening from the click, not from when the agent answers
+      const token = openToken.current;
+      setOpeningTitle(title ?? "");
       try {
         await begin(() => assistantApi.loadConversation(sessionId, savedConnectionId, acpSession, options()));
       } catch (error) {
         setConversation((current) => finishTurn(current, messageOf(error)));
         refreshHistory();
+      } finally {
+        if (openToken.current === token) setOpeningTitle(null);
       }
     },
     [sessionId, savedConnectionId, forgetConversation, begin, options, refreshHistory],
@@ -318,13 +328,14 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       approve,
       newChat,
       openConversation,
+      openingTitle,
       setModel,
       ask,
       retry,
       signIn,
       agent: agentInfo(agent),
     }),
-    [available, status, enabled, panelOpen, inTab, expand, backToPanel, conversation, conversationId, models, history, refreshHistory, send, stop, approve, newChat, openConversation, setModel, ask, retry, signIn, agent],
+    [available, status, enabled, panelOpen, inTab, expand, backToPanel, conversation, conversationId, models, history, refreshHistory, send, stop, approve, newChat, openConversation, openingTitle, setModel, ask, retry, signIn, agent],
   );
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;

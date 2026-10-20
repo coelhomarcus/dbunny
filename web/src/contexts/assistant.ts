@@ -31,7 +31,10 @@ export interface AssistantValue {
   stop: () => Promise<void>;
   approve: (approvalId: string, decision: Decision) => Promise<void>;
   newChat: () => Promise<void>;
-  openConversation: (acpSession: string) => Promise<void>;
+  /** Opens a past conversation; `title` is shown while it loads. */
+  openConversation: (acpSession: string, title?: string) => Promise<void>;
+  /** The title (maybe empty) of the past conversation being opened, or null when none is. */
+  openingTitle: string | null;
   setModel: (modelId: string) => Promise<void>;
   /** Opens the assistant and sends `text` as soon as it can. */
   ask: (text: string) => void;

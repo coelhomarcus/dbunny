@@ -49,7 +49,7 @@ export default function HistoryMenu() {
                 type="button"
                 onClick={() => {
                   setOpen(false);
-                  assistant.openConversation(entry.acpSession);
+                  assistant.openConversation(entry.acpSession, (entry.title && stripContext(entry.title)) || "");
                 }}
                 className="flex w-full cursor-pointer flex-col rounded-md px-2.5 py-1.5 text-left hover:bg-accent"
               >
