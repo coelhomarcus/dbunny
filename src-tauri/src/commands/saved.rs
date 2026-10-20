@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::db::net::ssh::SshConfig;
 use crate::db::Engine;
+use crate::error::AppError;
 use super::state::AppState;
 use super::storage::{save_connections_to_file, ConnectionDetails, SavedConnection, SavedConnectionInfo, TlsSettings};
 
@@ -49,7 +50,7 @@ pub async fn get_saved_connections(
 
 impl SavedConnectionInput {
     /// What is saved for its engine; the fields of the other engines are ignored.
-    fn into_details(self) -> Result<ConnectionDetails, String> {
+    fn into_details(self) -> Result<ConnectionDetails, AppError> {
         match self.engine {
             Engine::Postgres => Ok(ConnectionDetails::Postgres {
                 host: self.host,
@@ -83,7 +84,7 @@ impl SavedConnectionInput {
             }),
             Engine::Sqlite => {
                 if self.path.trim().is_empty() {
-                    return Err("path is required".into());
+                    return Err(AppError::coded("connection.pathRequired", "path is required"));
                 }
                 Ok(ConnectionDetails::Sqlite { path: self.path })
             }
@@ -98,13 +99,13 @@ fn upsert(
     key: &[u8; 32],
     input: SavedConnectionInput,
     now: String,
-) -> Result<SavedConnection, String> {
+) -> Result<SavedConnection, AppError> {
     let pos = match input.id {
         Some(ref id) => Some(
             connections
                 .iter()
                 .position(|c| &c.id == id)
-                .ok_or_else(|| format!("Connection with id {} not found", id))?,
+                .ok_or_else(|| not_found(id))?,
         ),
         None => None,
     };
@@ -125,12 +126,25 @@ fn upsert(
     Ok(saved)
 }
 
+/// The file of saved connections could not be written.
+fn not_saved(detail: impl std::fmt::Display) -> AppError {
+    AppError::coded("saved.notSaved", format!("The connection wasn't saved: {detail}")).param("detail", detail.to_string())
+}
+
+fn not_deleted(detail: impl std::fmt::Display) -> AppError {
+    AppError::coded("saved.notDeleted", format!("The connection wasn't deleted: {detail}")).param("detail", detail.to_string())
+}
+
+fn not_found(id: &str) -> AppError {
+    AppError::coded("saved.notFound", format!("Connection with id {id} not found")).param("id", id)
+}
+
 #[tauri::command]
 pub async fn save_connection(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
     connection: SavedConnectionInput,
-) -> Result<SavedConnectionInfo, String> {
+) -> Result<SavedConnectionInfo, AppError> {
     let mut connections = state.saved_connections.lock().await;
     // Restored if the file can't be written, so memory and disk don't disagree
     let previous = connections.clone();
@@ -140,10 +154,10 @@ pub async fn save_connection(
 
     if let Err(e) = save_connections_to_file(&app_handle, &connections) {
         *connections = previous;
-        return Err(format!("The connection wasn't saved: {e}"));
+        return Err(not_saved(e));
     }
 
-    saved.to_info(&state.encryption_key)
+    Ok(saved.to_info(&state.encryption_key)?)
 }
 
 #[tauri::command]
@@ -152,18 +166,18 @@ pub async fn delete_saved_connection(
     state: State<'_, AppState>,
     assistant: State<'_, crate::assistant::Assistant>,
     id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let mut connections = state.saved_connections.lock().await;
     let previous = connections.clone();
     connections.retain(|c| c.id != id);
 
     if connections.len() == previous.len() {
-        return Err(format!("Connection with id {} not found", id));
+        return Err(not_found(&id));
     }
 
     if let Err(e) = save_connections_to_file(&app_handle, &connections) {
         *connections = previous;
-        return Err(format!("The connection wasn't deleted: {e}"));
+        return Err(not_deleted(e));
     }
 
     assistant.forget_saved(&id);
@@ -184,6 +198,23 @@ mod tests {
             "readOnly": true, "color": "#22c55e", "icon": "box"
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_sqlite_connection_without_a_path_is_a_coded_error() {
+        let error = upsert(&mut Vec::new(), &KEY, input("sqlite", None, "  "), "t1".into()).err().unwrap();
+        assert_eq!((error.code(), error.message()), (Some("connection.pathRequired"), "path is required"));
+    }
+
+    #[test]
+    fn what_the_file_could_not_do_is_a_coded_error_with_the_detail() {
+        let saved = not_saved("disk full");
+        assert_eq!((saved.code(), saved.message()), (Some("saved.notSaved"), "The connection wasn't saved: disk full"));
+        let deleted = not_deleted("disk full");
+        assert_eq!((deleted.code(), deleted.message()), (Some("saved.notDeleted"), "The connection wasn't deleted: disk full"));
+        let missing = not_found("7");
+        assert_eq!((missing.code(), missing.message()), (Some("saved.notFound"), "Connection with id 7 not found"));
+        assert_eq!(serde_json::to_value(&missing).unwrap()["params"]["id"], "7");
     }
 
     #[test]
@@ -213,18 +244,18 @@ mod tests {
     fn a_sqlite_connection_without_a_path_isnt_saved() {
         let mut connections = Vec::new();
         let err = upsert(&mut connections, &KEY, input("sqlite", None, ""), "now".into()).err().unwrap();
-        assert_eq!(err, "path is required");
+        assert_eq!(err.message(), "path is required");
         assert!(connections.is_empty());
         // Blank space isn't a path either
         let err = upsert(&mut connections, &KEY, input("sqlite", None, "  \t "), "now".into()).err().unwrap();
-        assert_eq!(err, "path is required");
+        assert_eq!(err.message(), "path is required");
         assert!(connections.is_empty());
 
         // Nor is an edit that empties it
         upsert(&mut connections, &KEY, input("sqlite", None, "/data/a.sqlite"), "t1".into()).unwrap();
         let id = connections[0].id.clone();
         let err = upsert(&mut connections, &KEY, input("sqlite", Some(&id), ""), "t2".into()).err().unwrap();
-        assert_eq!(err, "path is required");
+        assert_eq!(err.message(), "path is required");
         assert_eq!(connections[0].to_info(&KEY).unwrap().path, "/data/a.sqlite");
     }
 
@@ -281,7 +312,7 @@ mod tests {
     fn editing_a_missing_connection_fails() {
         let mut connections = Vec::new();
         let err = upsert(&mut connections, &KEY, input("sqlite", Some("nope"), "/data/a.sqlite"), "t".into()).err().unwrap();
-        assert_eq!(err, "Connection with id nope not found");
+        assert_eq!(err.message(), "Connection with id nope not found");
         assert!(connections.is_empty());
     }
 }

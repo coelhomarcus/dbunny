@@ -372,7 +372,7 @@ mod database_server_tests {
 
         // First time: the host key is unknown, so the UI asks and retries with its fingerprint
         let err = open_session(&state, endpoint.clone(), None).await.err().expect("an unknown host key must be confirmed");
-        let problem: serde_json::Value = serde_json::from_str(&err).unwrap_or_else(|_| panic!("not a host key error: {err}"));
+        let problem: serde_json::Value = serde_json::from_str(err.message()).unwrap_or_else(|_| panic!("not a host key error: {err}"));
         let fingerprint = problem["sshHostKey"]["fingerprint"].as_str().unwrap().to_string();
         let (first, first_driver) = open_kept(&state, endpoint, Some(fingerprint)).await;
 

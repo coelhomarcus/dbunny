@@ -47,6 +47,13 @@ impl From<&str> for AppError {
     }
 }
 
+/// For code that still returns plain strings: the English text.
+impl From<AppError> for String {
+    fn from(error: AppError) -> Self {
+        error.message
+    }
+}
+
 impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.message)
@@ -91,6 +98,12 @@ mod tests {
         assert_eq!(serde_json::to_value(&with_params).unwrap(), json!({"code": "saved.notFound", "params": {"id": 7}, "message": "not found"}));
         let plain = AppError::from("the server said no");
         assert_eq!(serde_json::to_value(&plain).unwrap(), json!({"code": null, "params": {}, "message": "the server said no"}));
+    }
+
+    #[test]
+    fn code_that_still_returns_strings_gets_the_english_message() {
+        let text: String = AppError::coded("saved.notFound", "Connection with id 7 not found").into();
+        assert_eq!(text, "Connection with id 7 not found");
     }
 
     #[test]
