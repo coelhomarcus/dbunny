@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useRef, type RefObject } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, type RefObject } from "react";
 import { json } from "@codemirror/lang-json";
 import { bracketMatching, indentOnInput } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
@@ -28,8 +28,11 @@ export default function JsonValueEditor({
   const hostRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   const onApplyRef = useRef(onApply);
-  onChangeRef.current = onChange;
-  onApplyRef.current = onApply;
+  // The editor is made once, so its listeners read the latest callbacks from refs, kept up to date after each render
+  useLayoutEffect(() => {
+    onChangeRef.current = onChange;
+    onApplyRef.current = onApply;
+  });
   const viewRef = useRef<EditorView | null>(null);
 
   useImperativeHandle(handleRef, () => ({
