@@ -34,8 +34,7 @@ export async function exportData(
   format: ExportFormat,
   defaultName: string,
 ) {
-  const { save } = await import("@tauri-apps/plugin-dialog");
-  const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+  const [{ save }, { writeTextFile }] = await Promise.all([import("@tauri-apps/plugin-dialog"), import("@tauri-apps/plugin-fs")]);
 
   const content = format === "csv" ? toCsv(columns, rows) : toJson(columns, rows);
 

@@ -277,8 +277,7 @@ function QueryPaneBody({
   }
 
   async function exportQuery() {
-    const { save } = await import("@tauri-apps/plugin-dialog");
-    const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+    const [{ save }, { writeTextFile }] = await Promise.all([import("@tauri-apps/plugin-dialog"), import("@tauri-apps/plugin-fs")]);
     const sql = editorRef.current?.getValue() ?? initialSql;
     const defaultName = `${title.replace(/\s+/g, "_").toLowerCase()}.sql`;
     const path = await save({
@@ -289,8 +288,7 @@ function QueryPaneBody({
   }
 
   async function importQuery() {
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    const [{ open }, { readTextFile }] = await Promise.all([import("@tauri-apps/plugin-dialog"), import("@tauri-apps/plugin-fs")]);
     const path = await open({
       multiple: false,
       filters: [{ name: "SQL", extensions: ["sql"] }, { name: "Text", extensions: ["txt"] }],
