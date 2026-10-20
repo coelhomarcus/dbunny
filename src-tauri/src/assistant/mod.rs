@@ -33,7 +33,7 @@ use agent::{AgentError, AgentHandle, LogBuffer, ModelChoice, LOG_LINES, SessionS
 use approvals::{Approvals, Decision};
 use context::{database_context, system_prompt, with_context, PromptInput};
 use conversation::{Conversation, ConversationOptions, Conversations, Workspace};
-use events::{AgentStatus, AssistantEvent, EventSink};
+use events::{AgentStatus, AssistantEvent, EventSink, StartStep};
 use launch::AgentCommand;
 use profile::{AgentKind, AgentProfile, PromptDelivery};
 use mcp::McpServer;
@@ -190,8 +190,9 @@ impl Assistant {
             old.agent.shutdown().await;
             old.mcp.stop().await;
         }
-        self.set_status(AgentStatus::Starting);
+        self.starting_step(StartStep::Shell, None);
         let path = self.host.login_path().await;
+        self.starting_step(StartStep::Node, None);
         if let Err(found) = self.host.check_node(path.as_deref()).await {
             return self.fail(AgentStatus::NeedsNode { found });
         }
@@ -207,6 +208,7 @@ impl Assistant {
         }
         let profile = profile.with_home(&home);
         *self.profile.lock().unwrap() = Some(profile.clone());
+        self.starting_step(StartStep::Tools, None);
         let mcp = match McpServer::start(Arc::clone(&self.conversations), Arc::clone(&self.tools)).await {
             Ok(mcp) => mcp,
             Err(message) => return self.fail(AgentStatus::Failed { message }),
@@ -214,6 +216,16 @@ impl Assistant {
         let events: Arc<dyn EventSink> = self.tap.clone();
         let log = Arc::new(LogBuffer::new(LOG_LINES));
         *self.log.lock().unwrap() = Arc::clone(&log);
+        self.starting_step(StartStep::Agent, None);
+        // What the agent writes while it starts (a download, the first time) is what the panel shows
+        let tap = Arc::clone(&self.tap);
+        log.listen(move |line| {
+            let line = line.trim();
+            let starting = matches!(tap.status.lock().unwrap().clone(), AgentStatus::Starting { step: StartStep::Agent, .. });
+            if starting && !line.is_empty() {
+                tap.emit(AssistantEvent::Status { status: AgentStatus::Starting { step: StartStep::Agent, detail: Some(line.chars().take(200).collect()) } });
+            }
+        });
         match self.host.launch(&profile.command, path, &profile.env, log, events, Arc::clone(&self.conversations), Arc::clone(&self.approvals)).await {
             Ok(agent) => {
                 let mut running = self.running.lock().await;
@@ -234,6 +246,10 @@ impl Assistant {
                 self.fail(status)
             }
         }
+    }
+
+    fn starting_step(&self, step: StartStep, detail: Option<String>) {
+        self.set_status(AgentStatus::Starting { step, detail });
     }
 
     fn fail(&self, status: AgentStatus) -> AgentStatus {
@@ -604,7 +620,8 @@ mod tests {
         assert_eq!(r.assistant.status(), AgentStatus::Ready);
         assert_eq!(r.host.launched.lock().unwrap().clone(), vec![launch::default_command(cfg!(windows))]);
         let states: Vec<AgentStatus> = r.sink.events().into_iter().filter_map(|e| match e { AssistantEvent::Status { status } => Some(status), _ => None }).collect();
-        assert_eq!(states, vec![AgentStatus::Starting, AgentStatus::Ready]);
+        let starting = |step| AgentStatus::Starting { step, detail: None };
+        assert_eq!(states, vec![starting(StartStep::Shell), starting(StartStep::Node), starting(StartStep::Tools), starting(StartStep::Agent), AgentStatus::Ready]);
         // Starting again is a no-op
         assert_eq!(r.assistant.start(AgentKind::Claude, None).await, AgentStatus::Ready);
         assert_eq!(r.host.launched.lock().unwrap().len(), 1);
@@ -652,6 +669,29 @@ mod tests {
         r.assistant.new_conversation("s1", Some("saved-1"), options()).await.unwrap();
         let params = r.host.agent().calls("session/new")[0]["params"].clone();
         assert!(params.get("systemPrompt").is_none() && params.get("_meta").is_none(), "{params}");
+    }
+
+    #[tokio::test]
+    async fn what_the_agent_writes_while_it_starts_is_shown_as_the_detail() {
+        let host = FakeHost::new(FakeConfig::default());
+        *host.stderr.lock().unwrap() = vec!["npm http fetch GET 200 adapter.tgz".into(), "   ".into(), "added 120 packages".into()];
+        let r = rig_with(host).await;
+        r.assistant.start(AgentKind::Claude, None).await;
+        let details: Vec<Option<String>> = r
+            .sink
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                AssistantEvent::Status { status: AgentStatus::Starting { step: StartStep::Agent, detail } } => Some(detail),
+                _ => None,
+            })
+            .collect();
+        // The step itself, then each line the agent wrote (the blank one is no news)
+        assert_eq!(details, vec![None, Some("npm http fetch GET 200 adapter.tgz".to_string()), Some("added 120 packages".to_string())]);
+        // Once it is up, what the agent writes is no longer a status
+        let before = r.sink.events().len();
+        r.assistant.log.lock().unwrap().push("a line during the chat");
+        assert_eq!(r.sink.events().len(), before);
     }
 
     #[tokio::test]

@@ -96,11 +96,18 @@ impl fmt::Display for AgentError {
 pub struct LogBuffer {
     lines: Mutex<VecDeque<String>>,
     capacity: usize,
+    /// Told of each line as it comes.
+    listener: Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>,
 }
 
 impl LogBuffer {
     pub fn new(capacity: usize) -> LogBuffer {
-        LogBuffer { lines: Mutex::new(VecDeque::new()), capacity }
+        LogBuffer { lines: Mutex::new(VecDeque::new()), capacity, listener: Mutex::new(None) }
+    }
+
+    /// Has `listener` told of every line that comes from now on.
+    pub fn listen(&self, listener: impl Fn(&str) + Send + Sync + 'static) {
+        *self.listener.lock().unwrap() = Some(Box::new(listener));
     }
 
     pub fn push(&self, line: &str) {
@@ -109,6 +116,10 @@ impl LogBuffer {
             lines.pop_front();
         }
         lines.push_back(line.to_string());
+        drop(lines);
+        if let Some(listener) = self.listener.lock().unwrap().as_ref() {
+            listener(line);
+        }
     }
 
     pub fn lines(&self) -> Vec<String> {

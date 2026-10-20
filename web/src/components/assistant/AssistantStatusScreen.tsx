@@ -7,6 +7,7 @@ import type { AgentInfo } from "../../lib/assistantAgents";
 import type { AgentStatus } from "../../types/assistant";
 import Button from "../ui/Button";
 import Dialog from "../ui/Dialog";
+import StartingScreen from "./StartingScreen";
 
 /** The assistant's agent is not ready: what is missing, and what to do about it. */
 export default function AssistantStatusScreen({
@@ -41,7 +42,8 @@ export default function AssistantStatusScreen({
     setLog(await assistantApi.log().catch(() => []));
   }
 
-  if (status.state === "idle" || status.state === "starting" || status.state === "ready") {
+  if (status.state === "starting") return <StartingScreen agent={agent} step={status.step} detail={status.detail} />;
+  if (status.state === "idle" || status.state === "ready") {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-[13px] text-muted-foreground">
         <Loader2 size={15} className="animate-spin" />

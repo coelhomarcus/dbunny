@@ -7,7 +7,8 @@ export interface AuthMethod {
 /** Where the assistant's agent stands. */
 export type AgentStatus =
   | { state: "idle" }
-  | { state: "starting" }
+  /** What it is doing, and the last line the agent wrote while it starts (a download, say). */
+  | { state: "starting"; step: "shell" | "node" | "tools" | "agent"; detail: string | null }
   | { state: "ready" }
   | { state: "needsNode"; found: string | null }
   /** `command` is what to type in a terminal to sign in, when the agent is the usual one. */
