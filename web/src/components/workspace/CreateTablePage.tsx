@@ -223,7 +223,11 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                 size="icon-sm"
                 aria-label={t("ui.createTablePage.addColumn")}
                 className="ml-auto rounded-full"
-                onClick={() => setRows((prev) => [...prev, newRow()])}
+                onClick={() => {
+                  // The key is taken here, not inside the updater, which react may run twice
+                  const row = newRow();
+                  setRows((prev) => [...prev, row]);
+                }}
               >
                 <Plus />
               </Button>
@@ -331,12 +335,10 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                     size="icon-sm"
                     aria-label={t("ui.createTablePage.addForeignKey")}
                     className="ml-auto rounded-full"
-                    onClick={() =>
-                      setForeignKeys((prev) => [
-                        ...prev,
-                        { key: nextKey.current++, columns: [], refTable: "", refColumns: {}, onUpdate: "NO ACTION", onDelete: "NO ACTION" },
-                      ])
-                    }
+                    onClick={() => {
+                      const key = nextKey.current++;
+                      setForeignKeys((prev) => [...prev, { key, columns: [], refTable: "", refColumns: {}, onUpdate: "NO ACTION", onDelete: "NO ACTION" }]);
+                    }}
                   >
                     <Plus />
                   </Button>
