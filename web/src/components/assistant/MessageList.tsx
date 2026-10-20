@@ -2,10 +2,12 @@ import { useEffect, useRef, type ReactNode } from "react";
 import type { Conversation } from "../../lib/assistantConversation";
 import { stripContext } from "../../lib/assistantContext";
 import type { Decision } from "../../types/assistant";
+import { TriangleAlert } from "lucide-react";
+import { groupItems, isWorking } from "../../lib/assistantTurns";
+import { Marker, MarkerContent, MarkerIcon } from "../chat/Marker";
+import Spinner from "../ui/Spinner";
 import MarkdownView from "./MarkdownView";
-import ToolCard from "./ToolCard";
-import SqlSnippet from "./SqlSnippet";
-import ApprovalButtons from "./ApprovalButtons";
+import StepsView from "./Steps";
 
 /** What was said in the conversation, and what the assistant did meanwhile. Follows the end while the person stays there. */
 export default function MessageList({
@@ -18,6 +20,7 @@ export default function MessageList({
   renderCode?: (language: string, text: string) => ReactNode;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  const blocks = groupItems(conversation.items, conversation.running);
   const atEnd = useRef(true);
 
   useEffect(() => {
@@ -34,7 +37,12 @@ export default function MessageList({
         atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
       }}
     >
-      {conversation.items.map((item, index) => {
+      {blocks.map((block) => {
+        if (block.kind === "steps") {
+          const last = block.index + block.items.length >= conversation.items.length;
+          return <StepsView key={`steps-${block.index}`} block={block} working={conversation.running && last} onDecide={onDecide} />;
+        }
+        const { item, index } = block;
         switch (item.kind) {
           case "user": {
             // The database context some agents get in the first message is not for the person
@@ -54,37 +62,33 @@ export default function MessageList({
           }
           case "agent":
             return <MarkdownView key={index} source={item.text} renderCode={renderCode} />;
-          case "thought":
-            return (
-              <details key={index} className="text-xs text-muted-foreground">
-                <summary className="cursor-pointer select-none">Thinking…</summary>
-                <div className="mt-1.5 border-l-2 border-border pl-3">
-                  <MarkdownView source={item.text} className="text-xs text-muted-foreground" />
-                </div>
-              </details>
-            );
-          case "tool":
-            return <ToolCard key={item.id} item={item} onDecide={onDecide} />;
-          case "approval":
-            return (
-              <div key={item.approval.id} className="overflow-hidden rounded-lg border border-border bg-card text-xs">
-                <div className="px-2.5 py-1.5 font-medium">{item.approval.analyze ? "Run a query to explain it" : "Run a query"}</div>
-                <div className="border-t border-border">
-                  <SqlSnippet sql={item.approval.sql} />
-                </div>
-                <div className="border-t border-border px-2.5 py-2">
-                  <ApprovalButtons onDecide={(decision) => onDecide(item.approval.id, decision)} />
-                </div>
-              </div>
-            );
           case "error":
             return (
-              <p key={index} className="select-text rounded-lg bg-destructive/10 px-3 py-2 text-[13px] text-destructive-foreground">
-                {item.text}
-              </p>
+              <Marker key={index} live className="select-text items-start rounded-lg bg-destructive/10 px-3 py-2 text-[13px] text-destructive-foreground">
+                <MarkerIcon className="mt-0.5">
+                  <TriangleAlert />
+                </MarkerIcon>
+                <MarkerContent>{item.text}</MarkerContent>
+              </Marker>
             );
+          case "note":
+            return (
+              <Marker key={index} variant="separator">
+                {item.text}
+              </Marker>
+            );
+          default:
+            return null;
         }
       })}
+      {isWorking(conversation.items, conversation.running) && (
+        <Marker live>
+          <MarkerIcon>
+            <Spinner />
+          </MarkerIcon>
+          <MarkerContent shimmer>Thinking…</MarkerContent>
+        </Marker>
+      )}
     </div>
   );
 }

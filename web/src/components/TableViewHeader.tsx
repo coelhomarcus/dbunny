@@ -4,6 +4,7 @@ import Badge from "./ui/Badge";
 import Tooltip from "./Tooltip";
 import { HeaderTitle, PageHeader } from "./layout/PageHeader";
 import type { RelationType } from "../lib/api";
+import { Keys } from "./ui/Kbd";
 
 const LABEL: Record<RelationType, string> = {
   table: "Table",
@@ -93,7 +94,7 @@ export default function TableViewHeader({
             <Button variant="primary" size="sm" onClick={onSave} disabled={saving}>
               <Save />
               {saving ? "Saving…" : "Save"}
-              <kbd className="font-sans text-[11px] opacity-70">⌘S</kbd>
+              <Keys keys="⌘S" tone="inverse" />
             </Button>
           </>
         ) : (

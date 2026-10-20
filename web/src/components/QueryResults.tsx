@@ -14,6 +14,7 @@ import type { QueryColumn, QueryResult } from "@/types";
 import { QueryResultsSkeleton } from "./Skeleton";
 import { isMac } from "../lib/platform";
 import Button from "./ui/Button";
+import { Keys } from "./ui/Kbd";
 
 interface QueryResultsProps {
   result: QueryResult | null;
@@ -201,11 +202,11 @@ export default function QueryResults({ result, error, running, onFix }: QueryRes
       {!result && !error && !running && (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground select-none">
           <span className="flex items-center gap-2">
-            <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-sans text-xs">{isMac ? "⌘ ↵" : "Ctrl ↵"}</kbd>
+            <Keys keys={isMac ? "⌘↵" : "Ctrl+↵"} />
             runs the statement at the cursor
           </span>
           <span className="flex items-center gap-2">
-            <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-sans text-xs">{isMac ? "⇧ ⌘ ↵" : "Shift Ctrl ↵"}</kbd>
+            <Keys keys={isMac ? "⇧⌘↵" : "Shift+Ctrl+↵"} />
             runs everything
           </span>
         </div>

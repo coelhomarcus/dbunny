@@ -25,6 +25,7 @@ import { errorTextOf, explainPrompt, fixPrompt, optimizePrompt } from "../../lib
 import { engineLabel } from "../../lib/engines";
 import AssistantActions from "../query/AssistantActions";
 import Dialog from "../ui/Dialog";
+import { Keys } from "../ui/Kbd";
 import Input from "../ui/Input";
 import { loadSaved, removeSaved, saveQuery, savedKey, type SavedQuery } from "../../lib/savedQueries";
 import { addToHistory, clearHistory, errorSummary, historyKey, loadHistory, removeFromHistory, type HistoryEntry } from "../../lib/queryHistory";
@@ -525,7 +526,7 @@ function QueryPaneBody({
           <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-2.5 select-none">
             <RunButton disabled={running} explainAnalyze={capabilities.explainAnalyze} analyzeHint={explainAnalyzeHint(capabilities.explainFormat)} onRun={runQuery} onExplain={explain} />
             <AssistantActions onExplain={explainWithAssistant} onOptimize={optimizeWithAssistant} />
-            <Tooltip label={justSaved ? "Saved" : `Save the query (${MOD}S)`} side="top">
+            <Tooltip label={justSaved ? "Saved" : "Save the query"} shortcut={justSaved ? undefined : `${MOD}S`} side="top">
               <Button
                 variant="ghost-muted"
                 size="icon-sm"
@@ -581,7 +582,7 @@ function QueryPaneBody({
                   <div className="mx-1 my-1 h-px bg-border" />
                   <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); editorRef.current?.format(); }}>
                     <AlignLeft /> Format SQL
-                    <kbd className="ml-auto font-sans text-[11px] text-muted-foreground">{SHIFT}{ALT}F</kbd>
+                    <Keys keys={`${SHIFT}${ALT}F`} className="ml-auto" />
                   </button>
                   <div className="mx-1 my-1 h-px bg-border" />
                   <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); importQuery(); }}>

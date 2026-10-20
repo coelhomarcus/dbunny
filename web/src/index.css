@@ -387,3 +387,36 @@ kbd {
     transform: rotate(360deg);
   }
 }
+
+/*
+ * The shimmer of text that is still being worked on ("Thinking…"): a band of the foreground color
+ * sweeps over the text in its own color. Pure CSS, still under reduced motion.
+ */
+.shimmer {
+  --shimmer-duration: 2s;
+  background-color: currentColor;
+  background-image: linear-gradient(100deg, transparent 38%, var(--foreground) 50%, transparent 62%);
+  background-repeat: no-repeat;
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-sweep var(--shimmer-duration) linear infinite;
+}
+
+@keyframes shimmer-sweep {
+  from {
+    background-position-x: 150%;
+  }
+  to {
+    background-position-x: -50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}

@@ -1,13 +1,14 @@
 import { Link, Plus } from "lucide-react";
 import { isMac } from "../../lib/platform";
 import Button from "../ui/Button";
+import { Keys } from "../ui/Kbd";
 
 const mod = isMac ? "⌘" : "Ctrl+";
 
 function Shortcut({ keys, label }: { keys: string; label: string }) {
   return (
     <span className="flex items-center gap-1.5">
-      <kbd className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-sans text-[11px] text-foreground">{keys}</kbd>
+      <Keys keys={keys} />
       {label}
     </span>
   );

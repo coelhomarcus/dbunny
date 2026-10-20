@@ -222,3 +222,11 @@ test("thought chunks with nothing in them make no Thinking block", () => {
   // Text that comes after blank chunks is still a thought
   assert.deepEqual(play([chunk("agent_thought_chunk", "\n"), chunk("agent_thought_chunk", "plan")]).items, [{ kind: "thought", text: "plan" }]);
 });
+
+test("a turn the person stopped says so", () => {
+  const stopped = finishTurn(addUserMessage(emptyConversation(), "hi"), undefined, "Stopped");
+  assert.equal(stopped.running, false);
+  assert.deepEqual(stopped.items.slice(-1), [{ kind: "note", text: "Stopped" }]);
+  // An error and a note can come together, the error first
+  assert.deepEqual(finishTurn(emptyConversation(), "boom", "Stopped").items, [{ kind: "error", text: "boom" }, { kind: "note", text: "Stopped" }]);
+});

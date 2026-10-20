@@ -1,13 +1,19 @@
 import { useEffect, useRef } from "react";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightSpecialChars, drawSelection } from "@codemirror/view";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { appThemeExtension } from "../lib/codemirror/theme";
 import { dialectFor } from "../lib/codemirror/sqlCompletion";
 import { useSqlDialect } from "../hooks/useSqlDialect";
 
-/** Read-only, syntax-highlighted SQL (function definitions, etc.). */
-export default function SqlViewer({ value }: { value: string }) {
+/** The compact look, for a statement shown inside the conversation: smaller text, little padding, no line numbers. */
+const compactTheme = EditorView.theme({
+  "&": { fontSize: "12px" },
+  ".cm-content": { padding: "6px 12px" },
+});
+
+/** Read-only, syntax-highlighted SQL (function definitions, etc.); `compact` is for a statement in the conversation. */
+export default function SqlViewer({ value, compact = false }: { value: string; compact?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const dialect = useSqlDialect();
 
@@ -21,7 +27,7 @@ export default function SqlViewer({ value }: { value: string }) {
           EditorView.editable.of(false),
           // Keep the content focusable so text can be selected/copied and searched
           EditorView.contentAttributes.of({ tabindex: "0" }),
-          lineNumbers(),
+          ...(compact ? [] : [lineNumbers()]),
           highlightSpecialChars(),
           drawSelection(),
           highlightSelectionMatches(),
@@ -29,11 +35,13 @@ export default function SqlViewer({ value }: { value: string }) {
           keymap.of(searchKeymap),
           dialectFor(dialect).language,
           appThemeExtension,
+          // Over the app theme, which sets the editor's own sizes
+          ...(compact ? [Prec.high(compactTheme)] : []),
         ],
       }),
     });
     return () => view.destroy();
-  }, [value, dialect]);
+  }, [value, dialect, compact]);
 
   return <div ref={containerRef} className="h-full" />;
 }

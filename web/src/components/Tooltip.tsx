@@ -1,9 +1,12 @@
 import { useState, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn";
+import { Keys } from "./ui/Kbd";
 
 interface TooltipProps {
   label: string;
+  /** A keyboard shortcut for what the element does, shown as keys after the label. */
+  shortcut?: string;
   children: React.ReactNode;
   side?: "right" | "left" | "top" | "bottom";
   className?: string;
@@ -14,7 +17,7 @@ const GAP = 4;
 /** Closest a tooltip gets to the window's edges. */
 const MARGIN = 8;
 
-export default function Tooltip({ label, children, side = "right", className }: TooltipProps) {
+export default function Tooltip({ label, shortcut, children, side = "right", className }: TooltipProps) {
   // The element's box while the tooltip shows
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -67,7 +70,14 @@ export default function Tooltip({ label, children, side = "right", className }: 
             style={{ position: "fixed", top: 0, left: 0, visibility: "hidden" }}
             className="z-9999 pointer-events-none w-max max-w-sm whitespace-pre-line text-balance bg-popover border border-border text-popover-foreground text-xs px-2 py-1 rounded-md shadow-lg"
           >
-            {label}
+            {shortcut ? (
+              <span className="flex items-center gap-2">
+                {label}
+                <Keys keys={shortcut} />
+              </span>
+            ) : (
+              label
+            )}
           </div>,
           document.body,
         )}

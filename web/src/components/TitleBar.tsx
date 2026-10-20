@@ -217,7 +217,7 @@ export default function TitleBar() {
       {/* With the traffic lights: as far from them as the icons are apart, and 1px lower so
           their centres line up (the lights sit a little below the bar's middle) */}
       <div className={cn("flex shrink-0 items-center gap-0.5", trafficLights ? "w-[9rem] justify-end pt-0.5" : "pl-2")}>
-        <Tooltip label={`Settings (${isMac ? "⌘" : "Ctrl+"},)`} side="bottom">
+        <Tooltip label="Settings" shortcut={`${isMac ? "⌘" : "Ctrl+"},`} side="bottom">
           <Button variant="ghost-muted" size="icon-sm" onClick={() => openSettings()} aria-label="Settings">
             <Settings />
           </Button>

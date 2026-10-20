@@ -4,6 +4,7 @@ import Spinner from "../ui/Spinner";
 import type { QueryResult } from "@/types";
 import Button from "../ui/Button";
 import ExportMenu from "../ExportMenu";
+import { Keys } from "../ui/Kbd";
 
 function formatDuration(ms: number) {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
@@ -45,7 +46,7 @@ export default function ResultsBar({
           <Button variant="ghost-muted" size="xs" onClick={onCancel}>
             <Square className="size-2.5! fill-current" />
             Cancel
-            <kbd className="font-sans text-[10px] opacity-70">Esc</kbd>
+            <Keys keys="Esc" />
           </Button>
         </>
       ) : error ? (

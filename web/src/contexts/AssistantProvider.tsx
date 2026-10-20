@@ -71,7 +71,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       listen<{ conversationId: string; update: unknown }>("assistant:update", (event) => {
         const { conversationId: id, update } = event.payload;
         if (idRef.current === id) {
-          setConversation((current) => applyUpdate(current, update));
+          setConversation((current) => applyUpdate(current, update, Date.now()));
         } else {
           opener.current?.receive(id, update);
         }
@@ -161,8 +161,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       setConversation((current) => addUserMessage(current, text));
       // The turn ends in the conversation it was sent in, which may have been left meanwhile
       try {
-        await assistantApi.prompt(id, text);
-        if (idRef.current === id) setConversation((current) => finishTurn(current));
+        const reason = await assistantApi.prompt(id, text);
+        if (idRef.current === id) setConversation((current) => finishTurn(current, undefined, reason === "cancelled" ? "Stopped" : undefined));
       } catch (error) {
         if (idRef.current === id) setConversation((current) => finishTurn(current, messageOf(error)));
       }
