@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { setLanguage, useLocale, useT } from "../../i18n";
+import { activatePseudo, setLanguage, useLocale, useT } from "../../i18n";
 import { useSettings } from "../../lib/settings";
 import type { Language } from "../../i18n/messages.ts";
 import Popover from "../ui/Popover";
@@ -48,6 +48,20 @@ export default function LanguagePicker() {
             {value === language && <Check size={13} className="shrink-0" />}
           </button>
         ))}
+        {/* Development only: English made to look foreign and longer */}
+        {import.meta.env.DEV && (
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              activatePseudo();
+            }}
+            className="mt-1 flex w-full cursor-pointer items-center gap-2.5 rounded-md border-t border-border px-2 py-2 text-left text-[13px] font-medium text-muted-foreground hover:bg-accent"
+          >
+            {"Pseudo (dev)" /* i18n-ignore: development only */}
+          </button>
+        )}
       </Popover>
     </div>
   );

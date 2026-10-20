@@ -1,5 +1,6 @@
 import { en } from "./locales/en.ts";
 import { makeFormatters, type Formatters } from "./format.ts";
+import { pseudoCatalog } from "./pseudo.ts";
 import { lookup, pick, translate } from "./translate.ts";
 import type { ArgsFor, Catalog, Locale, MessageAt, MessageKey, Params, ParamNames } from "./messages.ts";
 
@@ -22,6 +23,8 @@ let locale: Locale = "en";
 // The language, then English for what a translation is missing
 let chain: Catalog[] = [en];
 let formatters: Formatters = makeFormatters("en");
+// The pseudo language shows while this is set, whatever `locale` says
+let pseudo = false;
 
 export function getLocale(): Locale {
   return locale;
@@ -42,13 +45,25 @@ export async function loadLocale(wanted: Locale): Promise<void> {
 export function activate(next: Locale): void {
   const catalog = loaded.get(next);
   if (!catalog) throw new Error(`The ${next} catalog isn't loaded`);
-  if (next === locale) return;
+  if (next === locale && !pseudo) return;
+  pseudo = false;
   locale = next;
   chain = next === "en" ? [en] : [catalog, en];
   formatters = makeFormatters(next);
   // `document` doesn't exist where the tests run, and the test project has no DOM types
   const root = (globalThis as { document?: { documentElement: { lang: string } } }).document?.documentElement;
   if (root) root.lang = next;
+  listeners.forEach((listener) => listener());
+}
+
+/** For development: English made to look foreign and longer, to find text nobody extracted and layouts that don't stretch. Not remembered. */
+export function activatePseudo(): void {
+  pseudo = true;
+  locale = "en";
+  chain = [pseudoCatalog(en)];
+  formatters = makeFormatters("en");
+  const root = (globalThis as { document?: { documentElement: { lang: string } } }).document?.documentElement;
+  if (root) root.lang = "en-XA";
   listeners.forEach((listener) => listener());
 }
 

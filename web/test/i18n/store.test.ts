@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activate, getLocale, has, loadLocale, raw, subscribe, t } from "../../src/i18n/store.ts";
+import { activate, activatePseudo, getLocale, has, loadLocale, raw, subscribe, t } from "../../src/i18n/store.ts";
 
 test("t answers in the active language", async () => {
   await loadLocale("pt-BR");
@@ -41,4 +41,23 @@ test("has tells whether a key exists, raw keeps the parameters in the text", () 
   assert.equal(has("common.save"), true);
   assert.equal(has("common.nope"), false);
   assert.equal(raw("common.save"), "Save");
+});
+
+test("the pseudo language makes every message look foreign, and english comes back", async () => {
+  activate("en");
+  activatePseudo();
+  assert.ok(t("common.cancel").startsWith("["));
+  assert.ok(t("settings.language.label").length > "Language".length);
+  assert.equal(getLocale(), "en");
+  activate("en");
+  assert.equal(t("common.cancel"), "Cancel");
+});
+
+test("the pseudo language tells the listeners and keeps parameters working", () => {
+  let calls = 0;
+  const stop = subscribe(() => calls++);
+  activatePseudo();
+  stop();
+  assert.equal(calls, 1);
+  activate("en");
 });
