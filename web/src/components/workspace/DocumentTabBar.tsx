@@ -310,7 +310,7 @@ export default function DocumentTabBar() {
           >
             <Server size={15} />
           </button>
-          <Popover open={serverOpen} onClose={() => setServerOpen(false)} anchorRef={serverRef}>
+          <Popover open={serverOpen} onClose={() => setServerOpen(false)} anchorRef={serverRef} className="p-1">
             {capabilities.activity && (
               <MenuItem
                 icon={Activity}
@@ -351,7 +351,7 @@ export default function DocumentTabBar() {
         <ChevronDown size={15} />
       </button>
       </div>
-      <Popover open={listOpen} onClose={() => setListOpen(false)} anchorRef={listRef}>
+      <Popover open={listOpen} onClose={() => setListOpen(false)} anchorRef={listRef} className="p-1">
         {documents.items.length === 0 ? (
           <div className="px-3 py-2 text-xs text-muted-foreground">Nothing is open.</div>
         ) : (
@@ -365,7 +365,7 @@ export default function DocumentTabBar() {
                   focusDocument(doc.id);
                   setListOpen(false);
                 }}
-                className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-accent"
+                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-accent"
               >
                 <Icon size={14} className={cn("shrink-0", iconClass(doc))} />
                 <span className="truncate">{doc.title}</span>
@@ -411,7 +411,7 @@ function MenuItem({
     <button
       type="button"
       onClick={onSelect}
-      className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-accent"
+      className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-accent"
     >
       <Icon size={14} className={cn("shrink-0", iconClass)} />
       {label}
