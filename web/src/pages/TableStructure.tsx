@@ -514,12 +514,11 @@ export default function TableStructure({ schema, name: table }: { schema: string
   const [draft, setDraft] = useState<ChangeDraft | null>(null);
   const [columnMenu, setColumnMenu] = useState<{ column: ColumnInfo; x: number; y: number } | null>(null);
   const [listMenu, setListMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
-  const [columnFilter, setColumnFilter] = useState("");
+  // The filter belongs to the table it was typed for: another table starts with none, without an effect to reset it
+  const [filterState, setFilterState] = useState({ key, text: "" });
+  const columnFilter = filterState.key === key ? filterState.text : "";
+  const setColumnFilter = (text: string) => setFilterState({ key, text });
   const notify = useNotify();
-
-  useEffect(() => {
-    setColumnFilter("");
-  }, [schema, table]);
 
   useEffect(() => {
     if (!schema || !table) return;
