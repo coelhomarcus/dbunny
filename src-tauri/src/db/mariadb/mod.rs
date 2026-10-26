@@ -497,4 +497,38 @@ mod server_tests {
         driver.close().await;
         db.drop_now().await;
     }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn mariadb_ignored_indexes_are_read() {
+        if !crate::db::mysql_common::tests_support::requires("mariadb_ignored_indexes_are_read", Engine::Mariadb, 10, 6, 0).await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(&db.endpoint, "CREATE TABLE t (a int, b int); CREATE INDEX t_b ON t (b); ALTER TABLE t ALTER INDEX t_b IGNORED").await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let structure = driver.catalog().table_structure(&db.name, "t").await.unwrap();
+        let index = structure.indexes.iter().find(|i| i.name == "t_b").expect("the index is listed");
+        // MariaDB's word for it: INVISIBLE is MySQL's and doesn't parse here
+        assert!(index.definition.ends_with(" IGNORED"), "{}", index.definition);
+        assert!(!index.definition.contains("INVISIBLE"), "{}", index.definition);
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn mariadb_returning_shows_rows_in_the_console() {
+        if !crate::db::mysql_common::tests_support::requires("mariadb_returning_shows_rows_in_the_console", Engine::Mariadb, 10, 5, 0).await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(&db.endpoint, "CREATE TABLE t (id int PRIMARY KEY, name varchar(20))").await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let result = driver.console().unwrap().execute("INSERT INTO t VALUES (1, 'a') RETURNING id").await.unwrap();
+        assert_eq!(result.rows.len(), 1, "{:?}", result.rows);
+        assert_eq!(result.rows[0][0], serde_json::json!(1));
+        driver.close().await;
+        db.drop_now().await;
+    }
 }

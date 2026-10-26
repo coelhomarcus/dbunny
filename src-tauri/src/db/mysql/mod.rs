@@ -60,6 +60,7 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
 
     use crate::db::mysql_common::tests_support::{ciphers, exec, is_mysql, open_through_ssh, query_one, test_endpoint, through_ssh, with_tls, CertUser, TestDb, SERVER_SETTINGS};
+    use crate::db::{Catalog as _, Console as _};
     use super::*;
     use crate::db::mysql_common::connect::MysqlEndpoint;
     use crate::db::mysql_common::errors::error_message;
@@ -478,5 +479,74 @@ mod server_tests {
         assert!(!editor.is_empty() && !pool.is_empty());
         driver.close().await;
         db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn explain_analyze_matches_the_capability() {
+        if !is_mysql().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
+        // Every MySQL in the matrix is 8.0.18 or newer
+        assert!(driver.capabilities().explain_analyze);
+        let plan = driver.console().unwrap().explain("SELECT 1", true).await.unwrap();
+        assert!(plan.analyzed);
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn check_constraints_are_enforced_and_read() {
+        if !crate::db::mysql_common::tests_support::requires("check_constraints_are_enforced_and_read", Engine::Mysql, 8, 0, 16).await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(&db.endpoint, "CREATE TABLE t (n int, CONSTRAINT n_positive CHECK (n > 0))").await;
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
+        let err = driver.console().unwrap().execute("INSERT INTO t VALUES (0)").await.err().unwrap();
+        assert!(err.contains("n_positive"), "{err}");
+        let structure = driver.catalog().table_structure(&db.name, "t").await.unwrap();
+        let check = structure.constraints.iter().find(|c| c.name == "n_positive").expect("the check is listed");
+        assert_eq!(check.kind, "check");
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn functional_index_is_read() {
+        if !crate::db::mysql_common::tests_support::requires("functional_index_is_read", Engine::Mysql, 8, 0, 13).await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(&db.endpoint, "CREATE TABLE t (email varchar(80)); CREATE INDEX t_lower ON t ((lower(email)))").await;
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
+        let structure = driver.catalog().table_structure(&db.name, "t").await.unwrap();
+        let index = structure.indexes.iter().find(|i| i.name == "t_lower").expect("the index is listed");
+        assert!(index.columns.iter().any(|c| c.to_lowercase().contains("lower(")), "{:?}", index.columns);
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn caching_sha2_login_works() {
+        if !crate::db::mysql_common::tests_support::requires("caching_sha2_login_works", Engine::Mysql, 8, 0, 0).await {
+            return;
+        }
+        let name = format!("dbunny_t_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        exec(&test_endpoint(), &format!("CREATE USER '{name}'@'%' IDENTIFIED WITH caching_sha2_password BY 'sha2pass'")).await;
+        let as_user = MysqlEndpoint { user: name.clone(), password: "sha2pass".into(), ..test_endpoint() };
+        // Without TLS the password goes through the RSA key exchange; with TLS, in the clear inside it
+        for endpoint in [as_user.clone(), with_tls(as_user, "require", "", "", "")] {
+            let driver = crate::db::mysql_common::tests_support::open_server(endpoint).await.unwrap();
+            let who: String = driver.conn().await.unwrap().query_first("SELECT CURRENT_USER()").await.unwrap().unwrap();
+            assert_eq!(who, format!("{name}@%"));
+            driver.close().await;
+        }
+        exec(&test_endpoint(), &format!("DROP USER '{name}'@'%'")).await;
     }
 }
