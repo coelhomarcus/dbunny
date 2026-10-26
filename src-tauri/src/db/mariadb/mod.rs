@@ -31,7 +31,8 @@ mod server_tests {
 
     use crate::db::mysql::MysqlDriver;
     use crate::db::mysql_common::tests_support::{
-        ciphers, endpoint_from, exec, is_mariadb, open_server, open_through_ssh, raw_conn, test_endpoint, through_ssh, with_tls, CertUser, TestDb,
+        ciphers, endpoint_from, exec, is_mariadb, open_server, open_through_ssh, raw_conn, test_endpoint, through_ssh, version, with_tls, CertUser, TestDb,
+        SERVER_SETTINGS,
     };
     use crate::db::{Driver, Engine};
 
@@ -61,6 +62,8 @@ mod server_tests {
         if !is_mariadb().await {
             return;
         }
+        // It checks the session isn't read-only, which a_read_only_mariadb_server_marks_the_session changes
+        let _settings = SERVER_SETTINGS.read().await;
         let db = TestDb::new().await;
         let driver = open_server(db.endpoint.clone()).await.unwrap();
         assert_eq!(driver.engine(), Engine::Mariadb);
@@ -454,6 +457,44 @@ mod server_tests {
         let (editor, pool) = ciphers(&secure).await;
         assert!(!editor.is_empty() && !pool.is_empty());
         secure.close().await;
+        db.drop_now().await;
+    }
+
+    /// Turns the server's read_only off again when dropped, also when the test fails.
+    struct WritableAgain;
+
+    impl Drop for WritableAgain {
+        fn drop(&mut self) {
+            let _ = std::thread::spawn(|| {
+                let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+                runtime.block_on(exec(&test_endpoint(), "SET GLOBAL read_only = OFF"));
+            })
+            .join();
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn a_read_only_mariadb_server_marks_the_session() {
+        if !is_mariadb().await {
+            return;
+        }
+        let _settings = SERVER_SETTINGS.write().await;
+        let db = TestDb::new().await;
+        let _restore = WritableAgain;
+        // From 12.x read_only is OFF, ON, NO_LOCK or NO_LOCK_NO_ADMIN instead of 0 or 1. Not
+        // NO_LOCK_NO_ADMIN: it would stop root, and so the tests running alongside, from writing
+        let modes: &[&str] = if version().await.at_least(12, 0, 0) { &["ON", "NO_LOCK"] } else { &["ON"] };
+        for mode in modes {
+            exec(&test_endpoint(), &format!("SET GLOBAL read_only = {mode}")).await;
+            let driver = open_server(db.endpoint.clone()).await.unwrap();
+            assert!(driver.info().read_only, "read_only = {mode}");
+            driver.close().await;
+        }
+        exec(&test_endpoint(), "SET GLOBAL read_only = OFF").await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        assert!(!driver.info().read_only);
+        driver.close().await;
         db.drop_now().await;
     }
 }
