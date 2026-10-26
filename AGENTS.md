@@ -191,7 +191,8 @@ eval "$(src-tauri/tests/servers.sh up postgres 17)"
 cargo test --manifest-path src-tauri/Cargo.toml --lib -- $(src-tauri/tests/servers.sh filters postgres) --ignored
 src-tauri/tests/matrix.sh                 # all 16 versions
 src-tauri/tests/matrix.sh mariadb 11.8    # one version
-src-tauri/tests/servers.sh down all
+src-tauri/tests/servers.sh down all      # containers and their volumes
+src-tauri/tests/servers.sh prune         # also the images of the matrix (about 13 GB)
 ```
 
 A server test whose feature the version lacks returns early through `requires()` and prints a `dbunny-skip:` line; skipping is only for that, never for a failure.

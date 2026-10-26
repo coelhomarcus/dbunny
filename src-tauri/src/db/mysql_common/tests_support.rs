@@ -1,5 +1,5 @@
 //! What the MySQL server tests share: where the test server is, a throwaway database per
-//! test, and a way to prepare fixtures. Start the servers with `src-tauri/tests/mysql-docker.sh up`.
+//! test, and a way to prepare fixtures. Start a server with `src-tauri/tests/servers.sh up mysql|mariadb <version>`.
 
 use mysql_async::prelude::Queryable;
 

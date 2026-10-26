@@ -6,9 +6,9 @@
 #
 #   eval "$(src-tauri/tests/mysql-docker.sh up)"
 #   cargo test --manifest-path src-tauri/Cargo.toml --lib -- mysql:: mysql_common:: --ignored
-# For MySQL 8.0, MariaDB 10.6 and MariaDB 11.4, run the suite again with DBUNNY_TEST_MYSQL_URL set to
-# DBUNNY_TEST_MYSQL80_URL, DBUNNY_TEST_MARIADB106_URL or DBUNNY_TEST_MARIADB_URL; or use
-# src-tauri/tests/matrix.sh, which runs every version.
+# That runs the suite against MySQL 8.4. For another version use servers.sh, whose variables
+# (certificates and SSH target included) belong to the server it started, or matrix.sh for all of
+# them: pointing DBUNNY_TEST_MYSQL_URL at another server here leaves the TLS and SSH tests on 8.4's.
 
 set -euo pipefail
 

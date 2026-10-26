@@ -49,7 +49,7 @@ mod tests {
     }
 }
 
-/// Tests that need a MySQL server: start one with `src-tauri/tests/mysql-docker.sh up`, then
+/// Tests that need a MySQL server: start one with `src-tauri/tests/servers.sh up mysql <version>`, then
 ///   cargo test --manifest-path src-tauri/Cargo.toml --lib mysql -- --ignored
 /// with the variables it prints (and once more with DBUNNY_TEST_MYSQL_URL set to the 8.0 one).
 #[cfg(test)]
@@ -70,7 +70,7 @@ mod server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
     async fn the_session_answers_as_mysql() {
-        // The certificates and the SSH target belong to the MySQL 8.4 container
+        // The certificates and the SSH target belong to the MySQL container servers.sh started
         if !is_mysql().await {
             return;
         }
@@ -363,7 +363,7 @@ mod server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
     async fn require_encrypts_with_the_servers_own_certificate() {
-        // The certificates and the SSH target belong to the MySQL 8.4 container
+        // The certificates and the SSH target belong to the MySQL container servers.sh started
         if !is_mysql().await {
             return;
         }
@@ -383,9 +383,9 @@ mod server_tests {
     }
 
     #[tokio::test]
-    #[ignore = "needs DBUNNY_TEST_MYSQL_URL (the 8.4 one) and DBUNNY_TEST_MYSQL_SSL_DIR"]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL and DBUNNY_TEST_MYSQL_SSL_DIR from servers.sh"]
     async fn verify_ca_checks_the_chain() {
-        // The certificates and the SSH target belong to the MySQL 8.4 container
+        // The certificates and the SSH target belong to the MySQL container servers.sh started
         if !is_mysql().await {
             return;
         }
@@ -410,9 +410,9 @@ mod server_tests {
     }
 
     #[tokio::test]
-    #[ignore = "needs DBUNNY_TEST_MYSQL_URL (the 8.4 one) and DBUNNY_TEST_MYSQL_SSL_DIR"]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL and DBUNNY_TEST_MYSQL_SSL_DIR from servers.sh"]
     async fn client_certificates_log_in() {
-        // The certificates and the SSH target belong to the MySQL 8.4 container
+        // The certificates and the SSH target belong to the MySQL container servers.sh started
         if !is_mysql().await {
             return;
         }
@@ -440,7 +440,7 @@ mod server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_SSH and DBUNNY_TEST_MYSQL_SSH_TARGET"]
     async fn the_session_goes_through_an_ssh_tunnel() {
-        // The certificates and the SSH target belong to the MySQL 8.4 container
+        // The certificates and the SSH target belong to the MySQL container servers.sh started
         if !is_mysql().await {
             return;
         }
@@ -467,7 +467,7 @@ mod server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_MYSQL_SSH, DBUNNY_TEST_MYSQL_SSH_TARGET and DBUNNY_TEST_MYSQL_SSL_DIR"]
     async fn tls_works_through_an_ssh_tunnel() {
-        // The certificates and the SSH target belong to the MySQL 8.4 container
+        // The certificates and the SSH target belong to the MySQL container servers.sh started
         if !is_mysql().await {
             return;
         }
