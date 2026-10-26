@@ -538,6 +538,7 @@ mod server_tests {
         }
         let name = format!("dbunny_t_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         exec(&test_endpoint(), &format!("CREATE USER '{name}'@'%' IDENTIFIED WITH caching_sha2_password BY 'sha2pass'")).await;
+        let _drop = DropUser(name.clone());
         let as_user = MysqlEndpoint { user: name.clone(), password: "sha2pass".into(), ..test_endpoint() };
         // Without TLS the password goes through the RSA key exchange; with TLS, in the clear inside it
         for endpoint in [as_user.clone(), with_tls(as_user, "require", "", "", "")] {
@@ -546,6 +547,19 @@ mod server_tests {
             assert_eq!(who, format!("{name}@%"));
             driver.close().await;
         }
-        exec(&test_endpoint(), &format!("DROP USER '{name}'@'%'")).await;
+    }
+
+    /// Drops the account when dropped, also when the test fails.
+    struct DropUser(String);
+
+    impl Drop for DropUser {
+        fn drop(&mut self) {
+            let sql = format!("DROP USER IF EXISTS '{}'@'%'", self.0);
+            let _ = std::thread::spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+                runtime.block_on(exec(&test_endpoint(), &sql));
+            })
+            .join();
+        }
     }
 }
