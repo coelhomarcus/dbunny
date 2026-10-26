@@ -6,6 +6,7 @@
 #   src-tauri/tests/servers.sh down all                  removes every dbunny-test-* container and the network
 #   src-tauri/tests/servers.sh filters <engine>          the cargo test filters of that engine's server tests
 #   src-tauri/tests/servers.sh list                      the matrix, one "<engine> <version>" per line
+#   src-tauri/tests/servers.sh prune                     down all, and the matrix images too (about 13 GB)
 #
 # Engines and versions (the test matrix):
 #   postgres 13 14 15 16 17 18
@@ -100,7 +101,7 @@ start() {
         made_by="$(docker container inspect -f '{{index .Config.Labels "dbunny.test.config"}}' "$name")"
         if [ "$made_by" != "$SCRIPT_CONFIG" ]; then
             log "recreating $name (made by an older servers.sh)"
-            docker rm -f "$name" >/dev/null
+            docker rm -f -v "$name" >/dev/null
         fi
     fi
     if running "$name"; then
@@ -147,24 +148,35 @@ network() {
 }
 
 # Two SSH keys the tunnel tests log in with: id_plain, and id_locked with the passphrase "testphrase".
-ssh_keys() {
-    if [ -f "$SSH_KEYS_DIR/id_plain" ] && [ -f "$SSH_KEYS_DIR/id_locked" ]; then
-        return 1
-    fi
+make_ssh_keys() {
     log "making SSH keys in $SSH_KEYS_DIR"
     rm -rf "$SSH_KEYS_DIR"
     mkdir -p "$SSH_KEYS_DIR/public"
     ssh-keygen -q -t ed25519 -N "" -C dbunny-test-plain -f "$SSH_KEYS_DIR/id_plain"
     ssh-keygen -q -t ed25519 -N testphrase -C dbunny-test-locked -f "$SSH_KEYS_DIR/id_locked"
     cp "$SSH_KEYS_DIR/id_plain.pub" "$SSH_KEYS_DIR/id_locked.pub" "$SSH_KEYS_DIR/public/"
-    return 0
+}
+
+# Removes the containers whose names start with $1, because files they were made with were made
+# again ($2 says which), for example after the system cleared the temporary folder.
+remove_stale() {
+    local name
+    for name in $(docker ps -a --format '{{.Names}}'); do
+        case "$name" in
+            "$1"*)
+                log "recreating $name ($2 were made again)"
+                docker rm -f -v "$name" >/dev/null
+                ;;
+        esac
+    done
 }
 
 # The SSH server every engine's tunnel tests go through; it reaches the databases by container name.
 ssh_server() {
-    if ssh_keys && exists "$SSH"; then
-        log "recreating $SSH (new keys)"
-        docker rm -f "$SSH" >/dev/null
+    # Not in a condition, where set -e would let a failing ssh-keygen through
+    if [ ! -f "$SSH_KEYS_DIR/id_plain" ] || [ ! -f "$SSH_KEYS_DIR/id_locked" ]; then
+        make_ssh_keys
+        remove_stale "$SSH" "its keys"
     fi
     CONTAINER_PORT=2222 start "$SSH" "$SSH_PORT" \
         -e PASSWORD_ACCESS=true -e USER_NAME=dbunny -e USER_PASSWORD=test \
@@ -206,6 +218,8 @@ pg_certificates() {
         return
     fi
     log "making PostgreSQL certificates in $PG_SSL_DIR"
+    # Every PostgreSQL container copied the old ones into its data folder when it was made
+    remove_stale "${PREFIX}pg" "its certificates"
     rm -rf "$PG_SSL_DIR"
     mkdir -p "$PG_SSL_DIR"
     make_ca "$PG_SSL_DIR/ca" "dbunny test CA"
@@ -318,11 +332,13 @@ other_ca() {
 # MariaDB doesn't write certificates of its own: the script makes them, with localhost and
 # 127.0.0.1 named, and the server is started with them.
 mariadb_certificates() {
-    local dir="$1"
+    local dir="$1" name="$2"
     if [ -f "$dir/client-key.pem" ]; then
         return
     fi
     log "making MariaDB certificates in $dir"
+    # The server loaded the old ones when it started
+    remove_stale "$name" "its certificates"
     rm -rf "$dir"
     mkdir -p "$dir"
     make_ca "$dir/ca" "dbunny test CA"
@@ -365,7 +381,7 @@ up_mariadb() {
     host_port="$(port mariadb "$version")"
     dir="$(mysql_ssl_dir mariadb "$version")"
     network
-    mariadb_certificates "$dir"
+    mariadb_certificates "$dir" "$name"
     CONTAINER_PORT=3306 start "$name" "$host_port" -e MARIADB_ROOT_PASSWORD=test \
         -v "$dir:/dbunny-ssl:ro" "mariadb:$version" \
         --ssl-ca=/dbunny-ssl/ca.pem --ssl-cert=/dbunny-ssl/server-cert.pem --ssl-key=/dbunny-ssl/server-key.pem
@@ -409,17 +425,19 @@ down_one() {
     port "$1" "$2" >/dev/null
     if exists "$name"; then
         log "removing $name"
-        docker rm -f "$name" >/dev/null
+        docker rm -f -v "$name" >/dev/null
     fi
 }
 
+# Containers go with their anonymous volumes (-v): the database images keep their data in one,
+# and each run would otherwise leave a few hundred MB behind.
 down_all() {
     local name
     for name in $(docker ps -a --format '{{.Names}}'); do
         case "$name" in
             "$PREFIX"*)
                 log "removing $name"
-                docker rm -f "$name" >/dev/null
+                docker rm -f -v "$name" >/dev/null
                 ;;
         esac
     done
@@ -438,6 +456,24 @@ list() {
     for version in 10.6 10.11 11.4 11.8 12.3 13.0; do echo "mariadb $version"; done
 }
 
+# down all, and also the images of the matrix and of the SSH server: frees the disk, and the next
+# run downloads them again.
+prune() {
+    down_all
+    local engine version image
+    while read -r engine version; do
+        image="$engine:$version"
+        if docker image inspect "$image" >/dev/null 2>&1; then
+            log "removing image $image"
+            docker image rm "$image" >/dev/null
+        fi
+    done < <(list)
+    if docker image inspect linuxserver/openssh-server >/dev/null 2>&1; then
+        log "removing image linuxserver/openssh-server"
+        docker image rm linuxserver/openssh-server >/dev/null
+    fi
+}
+
 filters() {
     case "$1" in
         postgres) echo "postgres:: net::ssh" ;;
@@ -448,7 +484,7 @@ filters() {
 }
 
 usage() {
-    log "usage: $0 up|env|down <engine> <version> | down all | filters <engine> | list"
+    log "usage: $0 up|env|down <engine> <version> | down all | filters <engine> | list | prune"
     exit 2
 }
 
@@ -476,6 +512,10 @@ case "${1:-}" in
     list)
         [ $# -eq 1 ] || usage
         list
+        ;;
+    prune)
+        [ $# -eq 1 ] || usage
+        prune
         ;;
     *) usage ;;
 esac
