@@ -109,9 +109,10 @@ impl Flavor for MariadbFlavor {
     }
 
     /// MariaDB has no `super_read_only`. `read_only` is 0 or 1 until 12.x, then OFF, ON,
-    /// NO_LOCK or NO_LOCK_NO_ADMIN: anything but off counts.
+    /// NO_LOCK or NO_LOCK_NO_ADMIN: anything but off counts. Compared as text, so the number of
+    /// older versions isn't converted (which leaves a warning on the editor's connection).
     fn read_only_sql(&self) -> &'static str {
-        "SELECT @@read_only NOT IN ('0', 'OFF'), 0"
+        "SELECT CAST(@@read_only AS CHAR) NOT IN ('0', 'OFF'), 0"
     }
 
     /// `EXPLAIN FORMAT=JSON`, which doesn't run the statement, or `ANALYZE FORMAT=JSON`, which

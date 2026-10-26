@@ -531,4 +531,24 @@ mod server_tests {
         driver.close().await;
         db.drop_now().await;
     }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn a_new_session_leaves_no_warning_in_the_editor() {
+        if !is_mariadb().await {
+            return;
+        }
+        let _settings = SERVER_SETTINGS.read().await;
+        let db = TestDb::new().await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        // What a person typing SHOW WARNINGS first would see from opening the session
+        let warnings: Vec<mysql_async::Row> = driver
+            .editor()
+            .run(|c| Box::pin(async move { c.query("SHOW WARNINGS").await.map_err(|e| e.to_string()) }))
+            .await
+            .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        driver.close().await;
+        db.drop_now().await;
+    }
 }
