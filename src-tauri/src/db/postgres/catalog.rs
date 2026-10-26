@@ -906,7 +906,9 @@ mod server_tests {
         assert!(!schemas.iter().any(internal), "{schemas:?}");
         let tree = explorer(&client).await.unwrap();
         let names: Vec<String> = tree.schemas.into_iter().map(|s| s.name).collect();
-        assert_eq!(names, schemas, "the sidebar and the explorer list the same schemas");
+        // Other tests create and drop their dbunny_* schemas between the two reads
+        let lasting = |list: &[String]| list.iter().filter(|s| !s.starts_with("dbunny_")).cloned().collect::<Vec<_>>();
+        assert_eq!(lasting(&names), lasting(&schemas), "the sidebar and the explorer list the same schemas");
     }
 
     #[tokio::test]

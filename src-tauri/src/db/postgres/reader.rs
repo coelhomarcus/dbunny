@@ -293,10 +293,13 @@ mod server_tests {
     async fn stops_after_limit() {
         let f = Fixture::new().await;
         let started = std::time::Instant::now();
-        let result = f.driver.reader().unwrap().query("SELECT g FROM generate_series(1, 50000000) g", limits(100)).await.unwrap();
+        // Every row after the 101 the reader asks for takes 30 seconds: reading one of them shows
+        // as a wait, however fast or loaded the machine is
+        let sql = "SELECT n, (SELECT 1 FROM pg_sleep(CASE WHEN n > 101 THEN 30 ELSE 0 END)) AS wait FROM generate_series(1, 1000) n";
+        let result = f.driver.reader().unwrap().query(sql, limits(100)).await.unwrap();
         assert_eq!(result.rows.len(), 100);
         assert!(result.more);
-        assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+        assert!(started.elapsed() < Duration::from_secs(20), "{:?}", started.elapsed());
         f.finish().await;
     }
 
