@@ -9,6 +9,8 @@ use crate::db::mariadb::MariadbDriver;
 use crate::db::mysql::MysqlDriver;
 use crate::db::mysql_common::connect::{opts_for, ConnRole, MysqlEndpoint};
 use crate::db::mysql_common::driver::ServerDriver;
+use crate::db::version::{numbers, skip_line, ServerVersion};
+use crate::db::Engine;
 
 /// Tests that change a global setting of the server (like `read_only`) hold this for
 /// writing; tests whose checks depend on those settings hold it for reading.
@@ -152,6 +154,27 @@ pub async fn is_mysql() -> bool {
 /// Whether the test server is MariaDB.
 pub async fn is_mariadb() -> bool {
     !is_mysql().await
+}
+
+/// The test server's version, without the `5.5.5-` prefix older MariaDB servers send.
+pub async fn version() -> ServerVersion {
+    let text = server_version().await;
+    let real = text.strip_prefix("5.5.5-").unwrap_or(text);
+    numbers(real).map(|(version, _)| version).unwrap_or_else(|| panic!("couldn't read the version in \"{text}\""))
+}
+
+/// Whether the test server is `engine` at `major.minor.patch` or newer. A server of the other
+/// family answers false quietly; an older one prints the `dbunny-skip` line for `test`.
+pub async fn requires(test: &str, engine: Engine, major: u16, minor: u16, patch: u16) -> bool {
+    let family = if is_mariadb().await { Engine::Mariadb } else { Engine::Mysql };
+    if family != engine {
+        return false;
+    }
+    if version().await.at_least(major, minor, patch) {
+        return true;
+    }
+    eprintln!("{}", skip_line(test, engine, ServerVersion { major, minor, patch }));
+    false
 }
 
 async fn server_version() -> &'static str {

@@ -13,6 +13,7 @@ pub mod postgres;
 pub mod sql;
 pub mod sqlite;
 pub mod unsupported;
+pub mod version;
 
 use serde::{Deserialize, Serialize};
 
