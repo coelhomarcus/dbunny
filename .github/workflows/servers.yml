@@ -58,6 +58,9 @@ jobs:
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "$matrix"
 
+      - name: Check the summary script
+        run: src-tauri/tests/matrix-summary-test.sh
+
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
@@ -137,6 +140,11 @@ jobs:
             cat servers.err | tee "$log"
           fi
           echo "dbunny-matrix-time: $(($(date +%s) - started))" >> "$log"
+          # On Linux the Unix socket is shared with the host, so its test has to run
+          if [ "$ENGINE" = postgres ] && grep -q '^dbunny-skip: a_unix_socket_opens_a_session' "$log"; then
+            echo "the Unix socket test skipped on Linux"
+            exit 1
+          fi
           src-tauri/tests/matrix-summary.sh "$log"
 
       - name: Keep the log

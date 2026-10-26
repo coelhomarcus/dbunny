@@ -22,7 +22,7 @@
 set -euo pipefail
 
 # Bump when the way a container is made changes: containers made by an older script are recreated
-SCRIPT_CONFIG=1
+SCRIPT_CONFIG=2
 
 NETWORK=dbunny-test-net
 SSH=dbunny-test-ssh
@@ -215,6 +215,9 @@ pg_certificates() {
     openssl pkcs8 -topk8 -nocrypt -in "$PG_SSL_DIR/client.key" -out "$PG_SSL_DIR/client.pk8.pem"
     openssl rsa -in "$PG_SSL_DIR/client.pk8.pem" -traditional -out "$PG_SSL_DIR/client.key" 2>/dev/null
     chmod 600 "$PG_SSL_DIR"/*.key "$PG_SSL_DIR/client.pk8.pem"
+    # The init script reads it as the postgres user, whose id a Linux host doesn't share; the copy
+    # it makes in the data folder is the one the server uses, at 600
+    chmod 644 "$PG_SSL_DIR/server.key"
     # What the server runs when it first starts: SSL on (the key has to belong to postgres,
     # so it is copied into the data folder), certuser by certificate only, and the fixtures
     mkdir -p "$PG_SSL_DIR/init"
@@ -255,17 +258,20 @@ up_postgres() {
     socket="$(pg_socket_dir "$version")"
     network
     pg_certificates
-    local extra=()
+    local extra=() command=()
     if [ -n "$socket" ]; then
+        # A folder of its own, not /var/run/postgresql: the image would take that one over for its
+        # user, and the next run on this host could neither reuse nor remove it
         mkdir -p "$socket"
         chmod 777 "$socket"
-        extra=(-v "$socket:/var/run/postgresql")
+        extra=(-v "$socket:/dbunny-sock")
+        command=(postgres -c "unix_socket_directories=/var/run/postgresql,/dbunny-sock")
     fi
     CONTAINER_PORT=5432 start "$name" "$host_port" \
         -e POSTGRES_PASSWORD=test \
         -v "$PG_SSL_DIR:/dbunny-ssl:ro" -v "$PG_SSL_DIR/init:/docker-entrypoint-initdb.d:ro" \
         ${extra[@]+"${extra[@]}"} \
-        "postgres:$version"
+        "postgres:$version" ${command[@]+"${command[@]}"}
     ssh_server
     # Over TCP: while the image initializes, its temporary server only listens on the socket
     wait_for "$name" pg_isready -h 127.0.0.1 -U postgres -q
