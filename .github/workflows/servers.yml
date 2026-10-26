@@ -55,6 +55,10 @@ jobs:
           matrix="$(src-tauri/tests/servers.sh list | jq -R -s -c --arg engine "$ENGINE" --arg version "$VERSION" '
             split("\n") | map(select(length > 0) | split(" ") | {engine: .[0], version: .[1]})
             | map(select(($engine == "" or .engine == $engine) and ($version == "" or .version == $version)))')"
+          if [ "$(echo "$matrix" | jq length)" -eq 0 ]; then
+            echo "::error::nothing in the matrix matches \"$ENGINE $VERSION\" (see src-tauri/tests/servers.sh list)"
+            exit 1
+          fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "$matrix"
 
@@ -98,7 +102,7 @@ jobs:
   servers:
     needs: build
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -118,8 +122,11 @@ jobs:
       # The libraries the test binary links against (it is the app's library, with the webview)
       - name: Install runtime libraries
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2
+          # Only what the binary loads: the recommended extras (gstreamer, pipewire...) are most of the
+          # download, and a slow mirror once made this step outlast the job
+          apt="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+          sudo apt-get $apt update
+          sudo apt-get $apt install -y --no-install-recommends libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2
           chmod +x server-tests/dbunny-tests
           if ldd server-tests/dbunny-tests | grep 'not found'; then exit 1; fi
 
