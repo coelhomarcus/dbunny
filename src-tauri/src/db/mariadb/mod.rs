@@ -42,7 +42,7 @@ mod server_tests {
     #[ignore = "needs DBUNNY_TEST_MYSQL80_URL"]
     async fn mariadb_refuses_mysql() {
         let err = MariadbDriver::open(endpoint_from("DBUNNY_TEST_MYSQL80_URL"), None).await.err().unwrap();
-        assert!(err.starts_with("This server is MySQL 8."), "{err}");
+        assert!(err.starts_with("This server is MySQL "), "{err}");
         assert!(err.ends_with(". Edit the connection and choose MySQL."), "{err}");
     }
 
@@ -50,7 +50,7 @@ mod server_tests {
     #[ignore = "needs DBUNNY_TEST_MARIADB_URL"]
     async fn mysql_refuses_mariadb() {
         let err = MysqlDriver::open(endpoint_from("DBUNNY_TEST_MARIADB_URL"), None).await.err().unwrap();
-        assert!(err.starts_with("This server is MariaDB 11.4."), "{err}");
+        assert!(err.starts_with("This server is MariaDB "), "{err}");
         assert!(err.ends_with(". Edit the connection and choose MariaDB."), "{err}");
     }
 

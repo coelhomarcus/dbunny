@@ -1,159 +1,44 @@
 #!/usr/bin/env bash
-# The servers the MySQL server tests run against, in Docker:
+# A shortcut kept for habit: the MySQL 8.4 and 8.0 and MariaDB 10.6 and 11.4 servers at once,
+# through servers.sh, which starts any version of the test matrix one at a time:
 #   src-tauri/tests/mysql-docker.sh up     starts them (or reuses them) and prints the variables
-#   src-tauri/tests/mysql-docker.sh down   removes them
+#   src-tauri/tests/mysql-docker.sh down   removes every dbunny-test-* container
 #
-# Progress goes to stderr and the variables to stdout, so this works:
 #   eval "$(src-tauri/tests/mysql-docker.sh up)"
-#   cargo test --manifest-path src-tauri/Cargo.toml --lib mysql -- --ignored
+#   cargo test --manifest-path src-tauri/Cargo.toml --lib -- mysql:: mysql_common:: --ignored
 # For MySQL 8.0, MariaDB 10.6 and MariaDB 11.4, run the suite again with DBUNNY_TEST_MYSQL_URL set to
-# DBUNNY_TEST_MYSQL80_URL, DBUNNY_TEST_MARIADB106_URL or DBUNNY_TEST_MARIADB_URL.
-#
-# Only the containers named here (all dbunny-test-*) and the network dbunny-test-net are
-# touched, and every port is bound to 127.0.0.1.
+# DBUNNY_TEST_MYSQL80_URL, DBUNNY_TEST_MARIADB106_URL or DBUNNY_TEST_MARIADB_URL; or use
+# src-tauri/tests/matrix.sh, which runs every version.
 
 set -euo pipefail
 
-NETWORK=dbunny-test-net
-MYSQL84=dbunny-test-mysql84
-MYSQL80=dbunny-test-mysql80
-MARIADB106=dbunny-test-mariadb106
-MARIADB=dbunny-test-mariadb
-SSH=dbunny-test-ssh
-CONTAINERS=("$MYSQL84" "$MYSQL80" "$MARIADB106" "$MARIADB" "$SSH")
+SERVERS="$(dirname "$0")/servers.sh"
 
-TMP_ROOT="${TMPDIR:-/tmp}"
-SSL_DIR="${TMP_ROOT%/}/dbunny-test-mysql-ssl"
-
-log() {
-    echo "$@" >&2
-}
-
-exists() {
-    docker container inspect "$1" >/dev/null 2>&1
-}
-
-running() {
-    [ "$(docker container inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = "true" ]
-}
-
-# Starts container $1 with the rest as `docker run` arguments, or starts the one already there.
-start() {
-    local name="$1"
-    shift
-    if running "$name"; then
-        log "$name is already running"
-    elif exists "$name"; then
-        log "starting $name"
-        docker start "$name" >/dev/null
-    else
-        log "creating $name"
-        docker run -d --name "$name" --network "$NETWORK" "$@" >/dev/null
-    fi
-}
-
-# Waits until `docker exec $1 <the rest>` succeeds.
-wait_for() {
-    local name="$1"
-    shift
-    log "waiting for $name"
-    for _ in $(seq 1 180); do
-        if docker exec "$name" "$@" >/dev/null 2>&1; then
-            return 0
-        fi
-        sleep 1
-    done
-    log "$name didn't get ready in 3 minutes"
-    docker logs --tail 30 "$name" >&2 || true
-    exit 1
-}
-
-# Waits until the SSH container finished setting up (users, the tunnel mod, sshd).
-wait_for_ssh() {
-    log "waiting for $SSH"
-    for _ in $(seq 1 180); do
-        if docker logs "$SSH" 2>&1 | grep -q "ls.io-init\] done"; then
-            return 0
-        fi
-        sleep 1
-    done
-    log "$SSH didn't get ready in 3 minutes"
-    docker logs --tail 30 "$SSH" >&2 || true
-    exit 1
+# The value of variable $2 in the export lines $1.
+value() {
+    printf '%s\n' "$1" | sed -n "s/^export $2=//p"
 }
 
 up() {
-    if ! docker network inspect "$NETWORK" >/dev/null 2>&1; then
-        log "creating network $NETWORK"
-        docker network create "$NETWORK" >/dev/null
-    fi
-
-    start "$MYSQL84" -p 127.0.0.1:33084:3306 -e MYSQL_ROOT_PASSWORD=test mysql:8.4
-    start "$MYSQL80" -p 127.0.0.1:33080:3306 -e MYSQL_ROOT_PASSWORD=test mysql:8.0
-    start "$MARIADB106" -p 127.0.0.1:33106:3306 -e MARIADB_ROOT_PASSWORD=test mariadb:10.6
-    start "$MARIADB" -p 127.0.0.1:33114:3306 -e MARIADB_ROOT_PASSWORD=test mariadb:11.4
-
-    # The SSH server is optional: without its image the tunnel tests are skipped
-    local ssh_ok=true
-    if ! exists "$SSH" && ! docker image inspect linuxserver/openssh-server >/dev/null 2>&1; then
-        if ! docker pull linuxserver/openssh-server >&2; then
-            log "notice: couldn't pull linuxserver/openssh-server; the SSH tunnel tests won't run"
-            ssh_ok=false
-        fi
-    fi
-    if $ssh_ok; then
-        start "$SSH" -p 127.0.0.1:32222:2222 \
-            -e PASSWORD_ACCESS=true -e USER_NAME=dbunny -e USER_PASSWORD=test \
-            -e DOCKER_MODS=linuxserver/mods:openssh-server-ssh-tunnel \
-            linuxserver/openssh-server
-    fi
-
-    # Over TCP: while the image initializes, its temporary server only listens on the socket
-    wait_for "$MYSQL84" mysqladmin ping -h 127.0.0.1 -uroot -ptest --silent
-    wait_for "$MYSQL80" mysqladmin ping -h 127.0.0.1 -uroot -ptest --silent
-    wait_for "$MARIADB106" mariadb-admin ping -h 127.0.0.1 -uroot -ptest --silent
-    wait_for "$MARIADB" mariadb-admin ping -h 127.0.0.1 -uroot -ptest --silent
-    if $ssh_ok; then
-        wait_for_ssh
-    fi
-
-    # The certificates MySQL generated for itself; the 8.0 one has a different CA
-    mkdir -p "$SSL_DIR"
-    for file in ca.pem client-cert.pem client-key.pem; do
-        docker cp "$MYSQL84:/var/lib/mysql/$file" "$SSL_DIR/$file" >/dev/null
-    done
-    docker cp "$MYSQL80:/var/lib/mysql/ca.pem" "$SSL_DIR/other-ca.pem" >/dev/null
-    chmod 600 "$SSL_DIR/client-key.pem"
-
-    echo "export DBUNNY_TEST_MYSQL_URL=mysql://root:test@127.0.0.1:33084"
-    echo "export DBUNNY_TEST_MYSQL80_URL=mysql://root:test@127.0.0.1:33080"
-    echo "export DBUNNY_TEST_MARIADB106_URL=mysql://root:test@127.0.0.1:33106"
-    echo "export DBUNNY_TEST_MARIADB_URL=mysql://root:test@127.0.0.1:33114"
-    echo "export DBUNNY_TEST_MYSQL_SSL_DIR=$SSL_DIR"
-    if $ssh_ok; then
-        echo "export DBUNNY_TEST_MYSQL_SSH=dbunny:test@127.0.0.1:32222"
-        echo "export DBUNNY_TEST_MYSQL_SSH_TARGET=$MYSQL84:3306"
-    fi
-}
-
-down() {
-    for name in "${CONTAINERS[@]}"; do
-        if exists "$name"; then
-            log "removing $name"
-            docker rm -f "$name" >/dev/null
-        fi
-    done
-    if docker network inspect "$NETWORK" >/dev/null 2>&1; then
-        log "removing network $NETWORK"
-        docker network rm "$NETWORK" >/dev/null
-    fi
+    local mysql84 mysql80 mariadb106 mariadb114
+    mysql84="$("$SERVERS" up mysql 8.4)"
+    mysql80="$("$SERVERS" up mysql 8.0)"
+    mariadb106="$(DBUNNY_TEST_NEIGHBOUR=0 "$SERVERS" up mariadb 10.6)"
+    mariadb114="$(DBUNNY_TEST_NEIGHBOUR=0 "$SERVERS" up mariadb 11.4)"
+    echo "export DBUNNY_TEST_MYSQL_URL=$(value "$mysql84" DBUNNY_TEST_MYSQL_URL)"
+    echo "export DBUNNY_TEST_MYSQL80_URL=$(value "$mysql80" DBUNNY_TEST_MYSQL_URL)"
+    echo "export DBUNNY_TEST_MARIADB106_URL=$(value "$mariadb106" DBUNNY_TEST_MYSQL_URL)"
+    echo "export DBUNNY_TEST_MARIADB_URL=$(value "$mariadb114" DBUNNY_TEST_MYSQL_URL)"
+    echo "export DBUNNY_TEST_MYSQL_SSL_DIR=$(value "$mysql84" DBUNNY_TEST_MYSQL_SSL_DIR)"
+    echo "export DBUNNY_TEST_MYSQL_SSH=$(value "$mysql84" DBUNNY_TEST_MYSQL_SSH)"
+    echo "export DBUNNY_TEST_MYSQL_SSH_TARGET=$(value "$mysql84" DBUNNY_TEST_MYSQL_SSH_TARGET)"
 }
 
 case "${1:-}" in
     up) up ;;
-    down) down ;;
+    down) "$SERVERS" down all ;;
     *)
-        log "usage: $0 up|down"
+        echo "usage: $0 up|down" >&2
         exit 2
         ;;
 esac

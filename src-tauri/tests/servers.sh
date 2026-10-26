@@ -27,6 +27,8 @@ NETWORK=dbunny-test-net
 SSH=dbunny-test-ssh
 SSH_PORT=32222
 PREFIX=dbunny-test-
+# The MySQL server a MariaDB run also starts, for the tests that open the wrong engine
+NEIGHBOUR_MYSQL=26.10
 
 SERVER_EXTENSIONS="subjectAltName=DNS:localhost,IP:127.0.0.1
 extendedKeyUsage=serverAuth"
@@ -290,6 +292,110 @@ env_postgres() {
     fi
 }
 
+# The MySQL client files the TLS tests read: the CA and client certificate the server made for
+# itself, and a CA that didn't sign it.
+mysql_ssl_dir() {
+    echo "$TMP_ROOT/dbunny-test-$1$2-ssl"
+}
+
+# A CA that signed none of the servers, for the "wrong CA" tests.
+other_ca() {
+    local dir="$TMP_ROOT/dbunny-test-other-ca"
+    if [ ! -f "$dir/other-ca.pem" ]; then
+        mkdir -p "$dir"
+        make_ca "$dir/other-ca" "dbunny other CA"
+    fi
+    echo "$dir/other-ca.pem"
+}
+
+# MariaDB doesn't write certificates of its own: the script makes them, with localhost and
+# 127.0.0.1 named, and the server is started with them.
+mariadb_certificates() {
+    local dir="$1"
+    if [ -f "$dir/client-key.pem" ]; then
+        return
+    fi
+    log "making MariaDB certificates in $dir"
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    make_ca "$dir/ca" "dbunny test CA"
+    sign "$dir/ca" "/CN=localhost" "$dir/server" "$SERVER_EXTENSIONS"
+    sign "$dir/ca" "/CN=dbunny-client" "$dir/client" "$CLIENT_EXTENSIONS"
+    mv "$dir/server.pem" "$dir/server-cert.pem"
+    mv "$dir/server.key" "$dir/server-key.pem"
+    mv "$dir/client.pem" "$dir/client-cert.pem"
+    mv "$dir/client.key" "$dir/client-key.pem"
+    # The server reads its key as the mysql user, whose id a Linux host doesn't share
+    chmod 644 "$dir/server-key.pem"
+    chmod 600 "$dir/client-key.pem" "$dir/ca.key"
+    cp "$(other_ca)" "$dir/other-ca.pem"
+}
+
+up_mysql() {
+    local version="$1" name host_port dir
+    name="$(container mysql "$version")"
+    host_port="$(port mysql "$version")"
+    dir="$(mysql_ssl_dir mysql "$version")"
+    network
+    CONTAINER_PORT=3306 start "$name" "$host_port" -e MYSQL_ROOT_PASSWORD=test "mysql:$version"
+    ssh_server
+    # Over TCP: while the image initializes, its temporary server only listens on the socket
+    wait_for "$name" mysqladmin ping -h 127.0.0.1 -uroot -ptest --silent
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    local file
+    for file in ca.pem client-cert.pem client-key.pem; do
+        docker cp "$name:/var/lib/mysql/$file" "$dir/$file" >/dev/null
+    done
+    chmod 600 "$dir/client-key.pem"
+    cp "$(other_ca)" "$dir/other-ca.pem"
+    env_mysql "$version"
+}
+
+up_mariadb() {
+    local version="$1" name host_port dir
+    name="$(container mariadb "$version")"
+    host_port="$(port mariadb "$version")"
+    dir="$(mysql_ssl_dir mariadb "$version")"
+    network
+    mariadb_certificates "$dir"
+    CONTAINER_PORT=3306 start "$name" "$host_port" -e MARIADB_ROOT_PASSWORD=test \
+        -v "$dir:/dbunny-ssl:ro" "mariadb:$version" \
+        --ssl-ca=/dbunny-ssl/ca.pem --ssl-cert=/dbunny-ssl/server-cert.pem --ssl-key=/dbunny-ssl/server-key.pem
+    ssh_server
+    wait_for "$name" mariadb-admin ping -h 127.0.0.1 -uroot -ptest --silent
+    # The refusal tests open a MySQL server with the MariaDB driver: the newest MySQL is the neighbour
+    if [ "${DBUNNY_TEST_NEIGHBOUR:-1}" = 1 ]; then
+        DBUNNY_TEST_NEIGHBOUR=0 up_mysql "$NEIGHBOUR_MYSQL" >/dev/null
+    fi
+    env_mariadb "$version"
+}
+
+# The variables the MySQL and MariaDB suites read; $1 is the engine, $2 the version.
+env_server() {
+    local engine="$1" version="$2" name host_port
+    name="$(container "$engine" "$version")"
+    host_port="$(port "$engine" "$version")"
+    running "$name" || die "$name isn't running; use: $0 up $engine $version"
+    echo "export DBUNNY_TEST_MYSQL_URL=mysql://root:test@127.0.0.1:$host_port"
+    echo "export DBUNNY_TEST_MYSQL_SSL_DIR=$(mysql_ssl_dir "$engine" "$version")"
+    echo "export DBUNNY_TEST_MYSQL_SSH=dbunny:test@127.0.0.1:$SSH_PORT"
+    echo "export DBUNNY_TEST_MYSQL_SSH_TARGET=$name:3306"
+}
+
+env_mysql() {
+    env_server mysql "$1"
+    echo "export DBUNNY_TEST_MYSQL80_URL=mysql://root:test@127.0.0.1:$(port mysql "$1")"
+}
+
+env_mariadb() {
+    env_server mariadb "$1"
+    echo "export DBUNNY_TEST_MARIADB_URL=mysql://root:test@127.0.0.1:$(port mariadb "$1")"
+    if running "$(container mysql "$NEIGHBOUR_MYSQL")"; then
+        echo "export DBUNNY_TEST_MYSQL80_URL=mysql://root:test@127.0.0.1:$(port mysql "$NEIGHBOUR_MYSQL")"
+    fi
+}
+
 down_one() {
     local name
     name="$(container "$1" "$2")"
@@ -320,6 +426,8 @@ down_all() {
 filters() {
     case "$1" in
         postgres) echo "postgres:: net::ssh" ;;
+        mysql) echo "mysql:: mysql_common::" ;;
+        mariadb) echo "mariadb:: mysql_common::" ;;
         *) die "unknown engine \"$1\"; use postgres, mysql or mariadb" ;;
     esac
 }
@@ -334,7 +442,7 @@ case "${1:-}" in
         [ $# -eq 3 ] || usage
         port "$2" "$3" >/dev/null
         case "$2" in
-            postgres) "$1_postgres" "$3" ;;
+            postgres | mysql | mariadb) "$1_$2" "$3" ;;
             *) die "unknown engine \"$2\"; use postgres, mysql or mariadb" ;;
         esac
         ;;
