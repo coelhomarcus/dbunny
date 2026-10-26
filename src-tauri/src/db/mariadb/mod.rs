@@ -23,15 +23,16 @@ impl MariadbDriver {
     }
 }
 
-/// Tests that need a MariaDB server: start them with `src-tauri/tests/mysql-docker.sh up`, then
-/// run the suite with `DBUNNY_TEST_MYSQL_URL` set to `DBUNNY_TEST_MARIADB_URL` (11.4) and again
-/// to `DBUNNY_TEST_MARIADB106_URL` (10.6). The refusals also need the MySQL server's url.
+/// Tests that need a MariaDB server: start one with `src-tauri/tests/servers.sh up mariadb <version>`
+/// (it also starts the MySQL server the refusals need), or run every version with `matrix.sh`.
 #[cfg(test)]
 mod server_tests {
     use mysql_async::prelude::Queryable;
 
     use crate::db::mysql::MysqlDriver;
-    use crate::db::mysql_common::tests_support::{endpoint_from, exec, is_mariadb, open_server, raw_conn, TestDb};
+    use crate::db::mysql_common::tests_support::{
+        ciphers, endpoint_from, exec, is_mariadb, open_server, open_through_ssh, raw_conn, test_endpoint, through_ssh, with_tls, CertUser, TestDb,
+    };
     use crate::db::{Driver, Engine};
 
     use crate::db::mysql_common::catalog::column_definitions;
@@ -374,6 +375,85 @@ mod server_tests {
         let page = driver.data().table_page(&db.name, "hist", TableDataParams::default()).await.unwrap();
         assert_eq!(page.total_rows, 1);
         driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL and DBUNNY_TEST_MYSQL_SSL_DIR"]
+    async fn mariadb_require_encrypts_every_connection() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        let driver = open_server(with_tls(db.endpoint.clone(), "require", "", "", "")).await.unwrap();
+        let (editor, pool) = ciphers(&driver).await;
+        assert!(!editor.is_empty(), "the editor's connection isn't encrypted");
+        assert!(!pool.is_empty(), "the pool's connection isn't encrypted");
+        driver.close().await;
+
+        // Without TLS the same server answers with no cipher
+        let plain = open_server(db.endpoint.clone()).await.unwrap();
+        assert_eq!(ciphers(&plain).await, (String::new(), String::new()));
+        plain.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL and DBUNNY_TEST_MYSQL_SSL_DIR"]
+    async fn mariadb_verify_full_accepts_a_certificate_that_names_the_host() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        // servers.sh signs the MariaDB certificate for localhost and 127.0.0.1 with ca.pem
+        let full = open_server(with_tls(db.endpoint.clone(), "verify-full", "ca.pem", "", "")).await.unwrap();
+        full.close().await;
+        // verify-ca checks the name too (a limit of the TLS library), and the name is right here
+        let ca = open_server(with_tls(db.endpoint.clone(), "verify-ca", "ca.pem", "", "")).await.unwrap();
+        ca.close().await;
+        // A CA that didn't sign the certificate doesn't vouch for it
+        let err = open_server(with_tls(db.endpoint.clone(), "verify-ca", "other-ca.pem", "", "")).await.err().unwrap();
+        assert!(err.contains("UnknownIssuer"), "{err}");
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL and DBUNNY_TEST_MYSQL_SSL_DIR"]
+    async fn mariadb_client_certificates_log_in() {
+        if !is_mariadb().await {
+            return;
+        }
+        let user = CertUser::new().await;
+        let as_user = crate::db::mysql_common::connect::MysqlEndpoint { user: user.name.clone(), password: "certpass".into(), ..test_endpoint() };
+
+        // The account requires a certificate: without one the login is refused
+        assert!(open_server(with_tls(as_user.clone(), "require", "", "", "")).await.is_err());
+
+        let driver = open_server(with_tls(as_user, "require", "", "client-cert.pem", "client-key.pem")).await.unwrap();
+        let who: String = driver.conn().await.unwrap().query_first("SELECT CURRENT_USER()").await.unwrap().unwrap();
+        assert_eq!(who, format!("{}@%", user.name));
+        driver.close().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL, DBUNNY_TEST_MYSQL_SSH and DBUNNY_TEST_MYSQL_SSH_TARGET"]
+    async fn mariadb_session_goes_through_an_ssh_tunnel() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        let endpoint = through_ssh(&db);
+        let driver = open_through_ssh(endpoint.clone()).await.unwrap();
+        assert_eq!(driver.info().database, db.name);
+        let one: i64 = driver.conn().await.unwrap().query_first("SELECT 1").await.unwrap().unwrap();
+        assert_eq!(one, 1);
+        driver.close().await;
+
+        // TLS inside the tunnel
+        let secure = open_through_ssh(with_tls(endpoint, "require", "", "", "")).await.unwrap();
+        let (editor, pool) = ciphers(&secure).await;
+        assert!(!editor.is_empty() && !pool.is_empty());
+        secure.close().await;
         db.drop_now().await;
     }
 }
