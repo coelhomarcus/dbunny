@@ -16,10 +16,6 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 OUT="$ROOT/src-tauri/target/matrix"
 SERVERS="$HERE/servers.sh"
 
-MATRIX="postgres:13 postgres:14 postgres:15 postgres:16 postgres:17 postgres:18
-mysql:8.0 mysql:8.4 mysql:9.7 mysql:26.10
-mariadb:10.6 mariadb:10.11 mariadb:11.4 mariadb:11.8 mariadb:12.3 mariadb:13.0"
-
 engine=""
 version=""
 keep=0
@@ -40,15 +36,15 @@ for arg in "$@"; do
 done
 
 selected=""
-for entry in $MATRIX; do
-    if [ -n "$engine" ] && [ "${entry%%:*}" != "$engine" ]; then
+while read -r e v; do
+    if [ -n "$engine" ] && [ "$e" != "$engine" ]; then
         continue
     fi
-    if [ -n "$version" ] && [ "${entry#*:}" != "$version" ]; then
+    if [ -n "$version" ] && [ "$v" != "$version" ]; then
         continue
     fi
-    selected="$selected $entry"
-done
+    selected="$selected $e:$v"
+done < <("$SERVERS" list)
 if [ -z "$selected" ]; then
     echo "nothing in the matrix matches \"$engine $version\"" >&2
     exit 2

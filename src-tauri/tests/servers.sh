@@ -5,6 +5,7 @@
 #   src-tauri/tests/servers.sh down <engine> <version>   removes it
 #   src-tauri/tests/servers.sh down all                  removes every dbunny-test-* container and the network
 #   src-tauri/tests/servers.sh filters <engine>          the cargo test filters of that engine's server tests
+#   src-tauri/tests/servers.sh list                      the matrix, one "<engine> <version>" per line
 #
 # Engines and versions (the test matrix):
 #   postgres 13 14 15 16 17 18
@@ -423,6 +424,14 @@ down_all() {
     rm -rf "$TMP_ROOT"/dbunny-test-*
 }
 
+# The test matrix, in the order matrix.sh and the CI run it.
+list() {
+    local version
+    for version in 13 14 15 16 17 18; do echo "postgres $version"; done
+    for version in 8.0 8.4 9.7 26.10; do echo "mysql $version"; done
+    for version in 10.6 10.11 11.4 11.8 12.3 13.0; do echo "mariadb $version"; done
+}
+
 filters() {
     case "$1" in
         postgres) echo "postgres:: net::ssh" ;;
@@ -433,7 +442,7 @@ filters() {
 }
 
 usage() {
-    log "usage: $0 up|env|down <engine> <version> | down all | filters <engine>"
+    log "usage: $0 up|env|down <engine> <version> | down all | filters <engine> | list"
     exit 2
 }
 
@@ -457,6 +466,10 @@ case "${1:-}" in
     filters)
         [ $# -eq 2 ] || usage
         filters "$2"
+        ;;
+    list)
+        [ $# -eq 1 ] || usage
+        list
         ;;
     *) usage ;;
 esac
