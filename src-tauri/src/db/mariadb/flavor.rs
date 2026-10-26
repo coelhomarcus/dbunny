@@ -45,6 +45,10 @@ impl Flavor for MariadbFlavor {
         "IF(s.IGNORED = 'YES', 'NO', 'YES')"
     }
 
+    fn hidden_index_keyword(&self) -> &'static str {
+        "IGNORED"
+    }
+
     /// MariaDB has no functional key parts.
     fn index_expression_sql(&self, _version: ServerVersion) -> &'static str {
         "NULL"

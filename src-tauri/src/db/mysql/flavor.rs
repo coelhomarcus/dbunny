@@ -43,6 +43,10 @@ impl Flavor for MysqlFlavor {
         "s.IS_VISIBLE"
     }
 
+    fn hidden_index_keyword(&self) -> &'static str {
+        "INVISIBLE"
+    }
+
     /// Functional key parts exist from 8.0.13.
     fn index_expression_sql(&self, version: ServerVersion) -> &'static str {
         if version.at_least(8, 0, 13) { "s.EXPRESSION" } else { "NULL" }
