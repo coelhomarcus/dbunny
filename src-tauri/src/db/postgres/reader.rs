@@ -403,4 +403,30 @@ mod server_tests {
         assert_eq!(again.rows.len(), 1);
         f.finish().await;
     }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn json_table_reads_where_the_server_has_it() {
+        let f = Fixture::new().await;
+        let reader = f.driver.reader().unwrap();
+        let sql = "SELECT * FROM JSON_TABLE('[1, 2]'::jsonb, '$[*]' COLUMNS (n int PATH '$'))";
+        if crate::db::postgres::tests_support::server_version().await.at_least(17, 0, 0) {
+            assert_eq!(reader.query(sql, limits(10)).await.unwrap().rows.len(), 2);
+        } else {
+            // The server's own error, and nothing left open
+            assert!(reader.query(sql, limits(10)).await.is_err());
+            assert_eq!(reader.query("SELECT 1", limits(10)).await.unwrap().rows.len(), 1);
+        }
+        f.finish().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn merge_is_refused_on_every_version() {
+        let f = Fixture::new().await;
+        let sql = format!("MERGE INTO {} t USING (SELECT 1 AS a) s ON false WHEN NOT MATCHED THEN INSERT (a) VALUES (s.a)", f.table);
+        assert_eq!(f.driver.reader().unwrap().query(&sql, limits(10)).await.unwrap_err(), READ_REFUSED);
+        assert_eq!(f.count().await, 1000);
+        f.finish().await;
+    }
 }
