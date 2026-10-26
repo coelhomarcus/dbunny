@@ -19,6 +19,11 @@ for log in "$@"; do
     base="$(basename "$log" .log)"
     engine="${base%%-*}"
     version="${base#*-}"
+    if [ ! -f "$log" ]; then
+        printf '%-8s %-8s %6s %6s %7s %6s  %s\n' "$engine" "$version" - - - - "FAILED (no log)"
+        any_failed=1
+        continue
+    fi
     result_line="$(grep -E '^test result: ' "$log" | tail -1)"
     passed="$(printf '%s' "$result_line" | sed -nE 's/.* ([0-9]+) passed;.*/\1/p')"
     failed="$(printf '%s' "$result_line" | sed -nE 's/.* ([0-9]+) failed;.*/\1/p')"

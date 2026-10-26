@@ -36,9 +36,16 @@ summary_fixture_zero_tests_fails() {
     line mariadb 13.0 | grep -q 'FAILED (no tests ran)'
 }
 
+summary_missing_log_fails() {
+    local out
+    out="$("$HERE/matrix-summary.sh" "$FIXTURES/postgres-99.log")"
+    [ $? -eq 1 ] && printf '%s\n' "$out" | grep -q 'FAILED (no log)'
+}
+
 check summary_fixture_counts_skips summary_fixture_counts_skips
 check summary_fixture_reports_failures summary_fixture_reports_failures
 check summary_fixture_zero_tests_fails summary_fixture_zero_tests_fails
+check summary_missing_log_fails summary_missing_log_fails
 
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]

@@ -1,6 +1,8 @@
 # Logs
 logs
 *.log
+# Logs the server matrix summary is tested against
+!src-tauri/tests/fixtures/**/*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
