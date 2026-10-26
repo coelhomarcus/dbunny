@@ -65,8 +65,10 @@ jobs:
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "$matrix"
 
-      - name: Check the summary script
-        run: src-tauri/tests/matrix-summary-test.sh
+      - name: Check the matrix scripts
+        run: |
+          src-tauri/tests/matrix-summary-test.sh
+          src-tauri/tests/check-filters-test.sh
 
       # The .deb files are cached: a slow Ubuntu mirror once made installing them take 20 minutes a job
       - name: Cached runtime packages
@@ -103,6 +105,8 @@ jobs:
             | jq -r 'select(.profile.test == true and .target.name == "dbunny_lib" and .executable != null) | .executable')"
           mkdir -p server-tests
           cp "$binary" server-tests/dbunny-tests
+          # Every server test has to match some engine's filters, or no job would run it
+          server-tests/dbunny-tests --ignored --list | src-tauri/tests/check-filters.sh
 
       - name: Keep the test binary
         uses: actions/upload-artifact@v4

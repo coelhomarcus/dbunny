@@ -1,0 +1,8 @@
+db::postgres::admin::activity_server_tests::shows_running_and_blocked_sessions_and_can_stop_them: test
+db::net::ssh::server_tests::password_login_forwards_to_the_database: test
+db::mysql::server_tests::verify_ca_checks_the_chain: test
+db::mysql_common::data::server_tests::insert_delete_and_import_work: test
+db::mariadb::server_tests::mariadb_refuses_mysql: test
+assistant::claude_tests::tests::a_question_is_answered: test
+
+6 tests, 0 benchmarks

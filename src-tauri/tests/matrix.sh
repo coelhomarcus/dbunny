@@ -53,6 +53,8 @@ fi
 mkdir -p "$OUT"
 echo "building the tests" >&2
 cargo test --manifest-path "$ROOT/src-tauri/Cargo.toml" --lib --no-run --quiet || exit 1
+# Every server test has to match some engine's filters, or it would never run here
+cargo test --manifest-path "$ROOT/src-tauri/Cargo.toml" --lib --quiet -- --ignored --list 2>/dev/null | "$HERE/check-filters.sh" >&2 || exit 1
 
 logs=()
 for entry in $selected; do
