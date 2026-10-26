@@ -1,0 +1,354 @@
+#!/usr/bin/env bash
+# The database servers the server tests run against, one version at a time, in Docker:
+#   src-tauri/tests/servers.sh up <engine> <version>     starts it (or reuses it) and prints the variables
+#   src-tauri/tests/servers.sh env <engine> <version>    prints the variables of one already running
+#   src-tauri/tests/servers.sh down <engine> <version>   removes it
+#   src-tauri/tests/servers.sh down all                  removes every dbunny-test-* container and the network
+#   src-tauri/tests/servers.sh filters <engine>          the cargo test filters of that engine's server tests
+#
+# Engines and versions (the test matrix):
+#   postgres 13 14 15 16 17 18
+#   mysql    8.0 8.4 9.7 26.10
+#   mariadb  10.6 10.11 11.4 11.8 12.3 13.0
+#
+# Progress goes to stderr and the variables to stdout, so this works:
+#   eval "$(src-tauri/tests/servers.sh up postgres 17)"
+#   cargo test --manifest-path src-tauri/Cargo.toml --lib -- $(src-tauri/tests/servers.sh filters postgres) --ignored
+#
+# Only containers named dbunny-test-* and the network dbunny-test-net are touched, and every
+# port is bound to 127.0.0.1.
+
+set -euo pipefail
+
+# Bump when the way a container is made changes: containers made by an older script are recreated
+SCRIPT_CONFIG=1
+
+NETWORK=dbunny-test-net
+SSH=dbunny-test-ssh
+SSH_PORT=32222
+PREFIX=dbunny-test-
+
+SERVER_EXTENSIONS="subjectAltName=DNS:localhost,IP:127.0.0.1
+extendedKeyUsage=serverAuth"
+CLIENT_EXTENSIONS="extendedKeyUsage=clientAuth"
+
+TMP_ROOT="${TMPDIR:-/tmp}"
+TMP_ROOT="${TMP_ROOT%/}"
+PG_SSL_DIR="$TMP_ROOT/dbunny-test-pg-ssl"
+SSH_KEYS_DIR="$TMP_ROOT/dbunny-test-ssh-keys"
+
+log() {
+    echo "$@" >&2
+}
+
+die() {
+    log "$@"
+    exit 1
+}
+
+exists() {
+    docker container inspect "$1" >/dev/null 2>&1
+}
+
+running() {
+    [ "$(docker container inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = "true" ]
+}
+
+# Whether something listens on 127.0.0.1:$1.
+port_busy() {
+    (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+}
+
+# The name of the container of engine $1, version $2.
+container() {
+    case "$1" in
+        postgres) echo "${PREFIX}pg${2//./}" ;;
+        mysql) echo "${PREFIX}mysql${2//./}" ;;
+        mariadb) echo "${PREFIX}mariadb${2//./}" ;;
+        *) die "unknown engine \"$1\"; use postgres, mysql or mariadb" ;;
+    esac
+}
+
+# The port on 127.0.0.1 of engine $1, version $2; versions outside the matrix are refused.
+port() {
+    case "$1 $2" in
+        "postgres 13" | "postgres 14" | "postgres 15" | "postgres 16" | "postgres 17" | "postgres 18") echo "354$2" ;;
+        "mysql 8.0") echo 33080 ;;
+        "mysql 8.4") echo 33084 ;;
+        "mysql 9.7") echo 33097 ;;
+        "mysql 26.10") echo 32610 ;;
+        "mariadb 10.6") echo 33106 ;;
+        "mariadb 10.11") echo 33111 ;;
+        "mariadb 11.4") echo 33114 ;;
+        "mariadb 11.8") echo 33118 ;;
+        "mariadb 12.3") echo 33123 ;;
+        "mariadb 13.0") echo 33130 ;;
+        *) die "$1 $2 isn't in the test matrix (see the top of $0)" ;;
+    esac
+}
+
+# Starts container $1 publishing port $2, with the rest as `docker run` arguments; reuses
+# one already running, starts one stopped, and recreates one made by an older script.
+start() {
+    local name="$1" host_port="$2"
+    shift 2
+    if exists "$name"; then
+        local made_by
+        made_by="$(docker container inspect -f '{{index .Config.Labels "dbunny.test.config"}}' "$name")"
+        if [ "$made_by" != "$SCRIPT_CONFIG" ]; then
+            log "recreating $name (made by an older servers.sh)"
+            docker rm -f "$name" >/dev/null
+        fi
+    fi
+    if running "$name"; then
+        log "$name is already running"
+        return
+    fi
+    if port_busy "$host_port"; then
+        die "port $host_port on 127.0.0.1 is already in use by something that isn't $name"
+    fi
+    if exists "$name"; then
+        log "starting $name"
+        docker start "$name" >/dev/null
+    else
+        log "creating $name"
+        docker run -d --name "$name" --network "$NETWORK" --label "dbunny.test.config=$SCRIPT_CONFIG" \
+            -p "127.0.0.1:$host_port:${CONTAINER_PORT}" "$@" >/dev/null
+    fi
+}
+
+# Waits until `docker exec $1 <the rest>` succeeds.
+wait_for() {
+    local name="$1"
+    shift
+    log "waiting for $name"
+    for _ in $(seq 1 180); do
+        if docker exec "$name" "$@" >/dev/null 2>&1; then
+            return 0
+        fi
+        if ! running "$name"; then
+            docker logs --tail 30 "$name" >&2 || true
+            die "$name stopped while starting"
+        fi
+        sleep 1
+    done
+    docker logs --tail 30 "$name" >&2 || true
+    die "$name didn't get ready in 3 minutes"
+}
+
+network() {
+    if ! docker network inspect "$NETWORK" >/dev/null 2>&1; then
+        log "creating network $NETWORK"
+        docker network create "$NETWORK" >/dev/null
+    fi
+}
+
+# Two SSH keys the tunnel tests log in with: id_plain, and id_locked with the passphrase "testphrase".
+ssh_keys() {
+    if [ -f "$SSH_KEYS_DIR/id_plain" ] && [ -f "$SSH_KEYS_DIR/id_locked" ]; then
+        return 1
+    fi
+    log "making SSH keys in $SSH_KEYS_DIR"
+    rm -rf "$SSH_KEYS_DIR"
+    mkdir -p "$SSH_KEYS_DIR/public"
+    ssh-keygen -q -t ed25519 -N "" -C dbunny-test-plain -f "$SSH_KEYS_DIR/id_plain"
+    ssh-keygen -q -t ed25519 -N testphrase -C dbunny-test-locked -f "$SSH_KEYS_DIR/id_locked"
+    cp "$SSH_KEYS_DIR/id_plain.pub" "$SSH_KEYS_DIR/id_locked.pub" "$SSH_KEYS_DIR/public/"
+    return 0
+}
+
+# The SSH server every engine's tunnel tests go through; it reaches the databases by container name.
+ssh_server() {
+    if ssh_keys && exists "$SSH"; then
+        log "recreating $SSH (new keys)"
+        docker rm -f "$SSH" >/dev/null
+    fi
+    CONTAINER_PORT=2222 start "$SSH" "$SSH_PORT" \
+        -e PASSWORD_ACCESS=true -e USER_NAME=dbunny -e USER_PASSWORD=test \
+        -e PUBLIC_KEY_DIR=/keys -v "$SSH_KEYS_DIR/public:/keys:ro" \
+        -e DOCKER_MODS=linuxserver/mods:openssh-server-ssh-tunnel \
+        linuxserver/openssh-server
+    log "waiting for $SSH"
+    for _ in $(seq 1 180); do
+        if docker logs "$SSH" 2>&1 | grep -q "ls.io-init\] done"; then
+            return 0
+        fi
+        sleep 1
+    done
+    docker logs --tail 30 "$SSH" >&2 || true
+    die "$SSH didn't get ready in 3 minutes"
+}
+
+# Signs a certificate for $2 (a subject) with the CA $1, writing $3.pem and $3.key; $4 are its
+# X509v3 extensions, one per line. macOS checks server certificates by Apple's rules: they need
+# extendedKeyUsage=serverAuth and at most 825 days.
+sign() {
+    local ca="$1" subject="$2" out="$3" extensions="$4"
+    openssl genrsa -out "$out.key" 2048 2>/dev/null
+    openssl req -new -key "$out.key" -subj "$subject" -out "$out.csr" 2>/dev/null
+    printf '%s\n' "$extensions" >"$out.ext"
+    openssl x509 -req -in "$out.csr" -CA "$ca.pem" -CAkey "$ca.key" -CAcreateserial -days 825 -extfile "$out.ext" -out "$out.pem" 2>/dev/null
+    rm -f "$out.csr" "$out.ext"
+}
+
+# A self-signed CA, $1.pem and $1.key.
+make_ca() {
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "$1.key" -out "$1.pem" -days 3650 -subj "/CN=$2" 2>/dev/null
+}
+
+# The PostgreSQL certificates: a server certificate for localhost and 127.0.0.1 signed by ca.pem,
+# another CA, and a client certificate for certuser as PEM, PKCS#8 and PKCS#1.
+pg_certificates() {
+    if [ -f "$PG_SSL_DIR/client.key" ]; then
+        return
+    fi
+    log "making PostgreSQL certificates in $PG_SSL_DIR"
+    rm -rf "$PG_SSL_DIR"
+    mkdir -p "$PG_SSL_DIR"
+    make_ca "$PG_SSL_DIR/ca" "dbunny test CA"
+    make_ca "$PG_SSL_DIR/other-ca" "dbunny other CA"
+    sign "$PG_SSL_DIR/ca" "/CN=localhost" "$PG_SSL_DIR/server" "$SERVER_EXTENSIONS"
+    sign "$PG_SSL_DIR/ca" "/CN=certuser" "$PG_SSL_DIR/client" "$CLIENT_EXTENSIONS"
+    openssl pkcs8 -topk8 -nocrypt -in "$PG_SSL_DIR/client.key" -out "$PG_SSL_DIR/client.pk8.pem"
+    openssl rsa -in "$PG_SSL_DIR/client.pk8.pem" -traditional -out "$PG_SSL_DIR/client.key" 2>/dev/null
+    chmod 600 "$PG_SSL_DIR"/*.key "$PG_SSL_DIR/client.pk8.pem"
+    # What the server runs when it first starts: SSL on (the key has to belong to postgres,
+    # so it is copied into the data folder), certuser by certificate only, and the fixtures
+    mkdir -p "$PG_SSL_DIR/init"
+    cat >"$PG_SSL_DIR/init/10-dbunny.sh" <<'INIT'
+#!/usr/bin/env bash
+set -e
+cp /dbunny-ssl/server.pem /dbunny-ssl/server.key /dbunny-ssl/ca.pem "$PGDATA/"
+chmod 600 "$PGDATA/server.key"
+cat >>"$PGDATA/postgresql.conf" <<CONF
+ssl = on
+ssl_cert_file = 'server.pem'
+ssl_key_file = 'server.key'
+ssl_ca_file = 'ca.pem'
+CONF
+sed -i '1i hostssl all certuser all cert' "$PGDATA/pg_hba.conf"
+psql -v ON_ERROR_STOP=1 --username postgres <<SQL
+CREATE ROLE demo LOGIN PASSWORD 'demo';
+CREATE DATABASE demo OWNER demo;
+CREATE ROLE certuser LOGIN;
+CREATE DATABASE dbunny_second;
+SQL
+INIT
+    # Docker Desktop shows mounted files as executable, so the image runs it instead of sourcing it
+    chmod 755 "$PG_SSL_DIR/init/10-dbunny.sh"
+}
+
+# The folder a Linux host shares with the container for the Unix socket test; empty elsewhere.
+pg_socket_dir() {
+    if [ "$(uname -s)" = "Linux" ]; then
+        echo "$TMP_ROOT/dbunny-test-pg$1-sock"
+    fi
+}
+
+up_postgres() {
+    local version="$1" name host_port socket
+    name="$(container postgres "$version")"
+    host_port="$(port postgres "$version")"
+    socket="$(pg_socket_dir "$version")"
+    network
+    pg_certificates
+    local extra=()
+    if [ -n "$socket" ]; then
+        mkdir -p "$socket"
+        chmod 777 "$socket"
+        extra=(-v "$socket:/var/run/postgresql")
+    fi
+    CONTAINER_PORT=5432 start "$name" "$host_port" \
+        -e POSTGRES_PASSWORD=test \
+        -v "$PG_SSL_DIR:/dbunny-ssl:ro" -v "$PG_SSL_DIR/init:/docker-entrypoint-initdb.d:ro" \
+        ${extra[@]+"${extra[@]}"} \
+        "postgres:$version"
+    ssh_server
+    # Over TCP: while the image initializes, its temporary server only listens on the socket
+    wait_for "$name" pg_isready -h 127.0.0.1 -U postgres -q
+    if [ -z "$socket" ]; then
+        log "notice: no Unix socket test on Docker Desktop; a_unix_socket_opens_a_session will skip"
+    fi
+    env_postgres "$version"
+}
+
+env_postgres() {
+    local version="$1" name host_port socket
+    name="$(container postgres "$version")"
+    host_port="$(port postgres "$version")"
+    socket="$(pg_socket_dir "$version")"
+    running "$name" || die "$name isn't running; use: $0 up postgres $version"
+    echo "export DBUNNY_TEST_DATABASE_URL=postgresql://postgres:test@127.0.0.1:$host_port/postgres"
+    echo "export DBUNNY_TEST_SSL_DIR=$PG_SSL_DIR"
+    echo "export DBUNNY_TEST_SSL_PORT=$host_port"
+    echo "export DBUNNY_TEST_SSH=dbunny:test@127.0.0.1:$SSH_PORT"
+    echo "export DBUNNY_TEST_SSH_KEYS=$SSH_KEYS_DIR"
+    echo "export DBUNNY_TEST_SSH_TARGET=$name:5432"
+    echo "export DBUNNY_TEST_SSH_DATABASE_URL=postgresql://postgres:test@$name:5432/postgres"
+    if [ -n "$socket" ]; then
+        echo "export DBUNNY_TEST_SOCKET_URL=postgresql://postgres:test@${socket//\//%2F}:5432/postgres"
+    fi
+}
+
+down_one() {
+    local name
+    name="$(container "$1" "$2")"
+    port "$1" "$2" >/dev/null
+    if exists "$name"; then
+        log "removing $name"
+        docker rm -f "$name" >/dev/null
+    fi
+}
+
+down_all() {
+    local name
+    for name in $(docker ps -a --format '{{.Names}}'); do
+        case "$name" in
+            "$PREFIX"*)
+                log "removing $name"
+                docker rm -f "$name" >/dev/null
+                ;;
+        esac
+    done
+    if docker network inspect "$NETWORK" >/dev/null 2>&1; then
+        log "removing network $NETWORK"
+        docker network rm "$NETWORK" >/dev/null
+    fi
+    rm -rf "$TMP_ROOT"/dbunny-test-*
+}
+
+filters() {
+    case "$1" in
+        postgres) echo "postgres:: net::ssh" ;;
+        *) die "unknown engine \"$1\"; use postgres, mysql or mariadb" ;;
+    esac
+}
+
+usage() {
+    log "usage: $0 up|env|down <engine> <version> | down all | filters <engine>"
+    exit 2
+}
+
+case "${1:-}" in
+    up | env)
+        [ $# -eq 3 ] || usage
+        port "$2" "$3" >/dev/null
+        case "$2" in
+            postgres) "$1_postgres" "$3" ;;
+            *) die "unknown engine \"$2\"; use postgres, mysql or mariadb" ;;
+        esac
+        ;;
+    down)
+        if [ "${2:-}" = "all" ] && [ $# -eq 2 ]; then
+            down_all
+        else
+            [ $# -eq 3 ] || usage
+            down_one "$2" "$3"
+        fi
+        ;;
+    filters)
+        [ $# -eq 2 ] || usage
+        filters "$2"
+        ;;
+    *) usage ;;
+esac
