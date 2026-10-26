@@ -692,7 +692,8 @@ mod server_tests {
         run(StructureChange::DropConstraint { name: "t_age_ok".into(), cascade: false }).await.unwrap();
         run(StructureChange::DropConstraint { name: "t_team_fk".into(), cascade: false }).await.unwrap();
         let kinds: Vec<String> = client
-            .query(&format!("SELECT contype::text FROM pg_constraint WHERE conrelid = '{s}.t'::regclass ORDER BY 1"), &[])
+            // PostgreSQL 18 also lists each NOT NULL column as a constraint (contype 'n')
+            .query(&format!("SELECT contype::text FROM pg_constraint WHERE conrelid = '{s}.t'::regclass AND contype <> 'n' ORDER BY 1"), &[])
             .await
             .unwrap()
             .iter()
