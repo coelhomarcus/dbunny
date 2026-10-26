@@ -60,7 +60,6 @@ mod server_tests {
     use mysql_async::prelude::Queryable;
 
     use crate::db::mysql_common::tests_support::{ciphers, exec, is_mysql, open_through_ssh, query_one, test_endpoint, through_ssh, with_tls, CertUser, TestDb, SERVER_SETTINGS};
-    use crate::db::{Catalog as _, Console as _};
     use super::*;
     use crate::db::mysql_common::connect::MysqlEndpoint;
     use crate::db::mysql_common::errors::error_message;
