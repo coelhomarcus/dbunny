@@ -131,6 +131,42 @@ pub fn mysql_is_stock(version_text: &str, aurora: bool) -> bool {
     !aurora && !["TiDB", "Vitess"].iter().any(|name| version_text.contains(name))
 }
 
+/// The SQL a server's version speaks, by name, for the editor's suggestions and the assistant's
+/// notes. An unknown version (or a compatible server) gets the oldest version DBunny opens.
+pub fn sql_features(engine: Engine, version: Option<ServerVersion>) -> Vec<&'static str> {
+    let oldest = match engine {
+        Engine::Postgres => ServerVersion { major: 13, minor: 0, patch: 0 },
+        Engine::Mysql => ServerVersion { major: 8, minor: 0, patch: 0 },
+        Engine::Mariadb => ServerVersion { major: 10, minor: 6, patch: 0 },
+        Engine::Sqlite => ServerVersion { major: 3, minor: 53, patch: 0 },
+    };
+    let v = version.unwrap_or(oldest);
+    let mut features = vec!["windowFunctions", "recursiveCte"];
+    match engine {
+        Engine::Postgres => {
+            features.extend(["returning", "returningUpdate", "onConflict", "nullsOrdering", "ilike", "lateral", "filterClause"]);
+            if v.at_least(15, 0, 0) {
+                features.extend(["merge", "nullsNotDistinct"]);
+            }
+            if v.at_least(16, 0, 0) {
+                features.push("sqlJsonConstructors");
+            }
+            if v.at_least(17, 0, 0) {
+                features.push("jsonTable");
+            }
+        }
+        Engine::Mysql => {
+            features.extend(["onDuplicateKeyUpdate", "jsonTable"]);
+            if v.at_least(8, 0, 14) {
+                features.push("lateral");
+            }
+        }
+        Engine::Mariadb => features.extend(["returning", "onDuplicateKeyUpdate", "jsonTable"]),
+        Engine::Sqlite => features.extend(["returning", "returningUpdate", "onConflict", "nullsOrdering", "filterClause"]),
+    }
+    features
+}
+
 /// The line a server test prints when it skips because the server is too old for what it
 /// checks; `matrix.sh` counts these lines.
 #[cfg(test)]
@@ -279,5 +315,24 @@ mod tests {
         assert!(!mysql_is_stock("8.0.34-Vitess", false));
         // Aurora MySQL reports plain 8.0.x; it is told by @@aurora_version answering
         assert!(!mysql_is_stock("8.0.28", true));
+    }
+
+    #[test]
+    fn sql_features_follow_engine_and_version() {
+        let pg = |major| sql_features(Engine::Postgres, Some(v(major, 0, 0)));
+        assert!(!pg(14).contains(&"merge") && pg(15).contains(&"merge") && pg(15).contains(&"nullsNotDistinct"));
+        assert!(!pg(15).contains(&"sqlJsonConstructors") && pg(16).contains(&"sqlJsonConstructors"));
+        assert!(!pg(16).contains(&"jsonTable") && pg(17).contains(&"jsonTable"));
+        assert!(pg(13).contains(&"onConflict") && pg(13).contains(&"ilike") && !pg(13).contains(&"onDuplicateKeyUpdate"));
+        let my = |patch| sql_features(Engine::Mysql, Some(v(8, 0, patch)));
+        assert!(!my(13).contains(&"lateral") && my(14).contains(&"lateral"));
+        assert!(!my(14).contains(&"returning") && my(14).contains(&"onDuplicateKeyUpdate") && my(14).contains(&"jsonTable"));
+        let maria = sql_features(Engine::Mariadb, Some(v(10, 6, 0)));
+        assert!(maria.contains(&"returning") && !maria.contains(&"returningUpdate") && !maria.contains(&"lateral"));
+        let lite = sql_features(Engine::Sqlite, None);
+        assert!(lite.contains(&"returningUpdate") && lite.contains(&"onConflict") && !lite.contains(&"ilike"));
+        // Unknown version: the oldest accepted one
+        assert_eq!(sql_features(Engine::Postgres, None), pg(13));
+        assert_eq!(sql_features(Engine::Mysql, None), sql_features(Engine::Mysql, Some(v(8, 0, 0))));
     }
 }

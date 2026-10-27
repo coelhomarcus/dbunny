@@ -4,6 +4,8 @@
 use serde::Serialize;
 
 use super::mysql_common::version::ServerVersion;
+use super::version::sql_features;
+use super::Engine;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +45,8 @@ pub struct Capabilities {
     pub maintain_privilege: bool,
     /// Generated columns can be VIRTUAL (computed when read) as well as STORED.
     pub virtual_generated: bool,
+    /// The SQL the server's version speaks (`db::version::sql_features`), for the editor.
+    pub sql_features: Vec<&'static str>,
     pub ssh: bool,
     pub ssl: bool,
 }
@@ -93,6 +97,7 @@ impl Capabilities {
             explain_format: ExplainFormat::PostgresJson,
             maintain_privilege: version.at_least(17, 0, 0),
             virtual_generated: version.at_least(18, 0, 0),
+            sql_features: sql_features(Engine::Postgres, Some(version)),
             ssh: true,
             ssl: true,
         }
@@ -131,6 +136,7 @@ impl Capabilities {
             explain_format: ExplainFormat::SqliteQueryPlan,
             maintain_privilege: false,
             virtual_generated: true,
+            sql_features: sql_features(Engine::Sqlite, None),
             ssh: false,
             ssl: false,
         }
@@ -140,15 +146,15 @@ impl Capabilities {
     /// databases, users and sessions, but no schemas, sequences or RETURNING. What
     /// changes with the version is EXPLAIN ANALYZE (8.0.18).
     pub fn mysql(version: ServerVersion) -> Self {
-        Self::mysql_family(version.at_least(8, 0, 18))
+        Self::mysql_family(version.at_least(8, 0, 18), sql_features(Engine::Mysql, Some(version)))
     }
 
     /// MariaDB 10.6+: the same pieces as MySQL, and `ANALYZE` in every supported version.
-    pub fn mariadb(_version: ServerVersion) -> Self {
-        Self::mysql_family(true)
+    pub fn mariadb(version: ServerVersion) -> Self {
+        Self::mysql_family(true, sql_features(Engine::Mariadb, Some(version)))
     }
 
-    fn mysql_family(explain_analyze: bool) -> Self {
+    fn mysql_family(explain_analyze: bool, sql_features: Vec<&'static str>) -> Self {
         Self {
             console: true,
             transactions: true,
@@ -179,6 +185,7 @@ impl Capabilities {
             explain_format: ExplainFormat::MysqlTree,
             maintain_privilege: false,
             virtual_generated: true,
+            sql_features,
             ssh: true,
             ssl: true,
         }
@@ -233,8 +240,9 @@ mod tests {
         assert!(!c.schemas && !c.trigger_toggle && !c.cascade && !c.sequences);
         assert!(c.explain_analyze && c.constraints);
         assert_eq!(c.explain_format, ExplainFormat::MysqlTree);
-        // The same pieces as MySQL, whatever the version
-        assert_eq!(Capabilities::mariadb(v(11, 4, 0)), Capabilities { explain_analyze: true, ..Capabilities::mysql(v(8, 4, 0)) });
+        // The same pieces as MySQL; only the SQL they speak differs (RETURNING, LATERAL)
+        let maria = Capabilities::mariadb(v(11, 4, 0));
+        assert_eq!(maria, Capabilities { explain_analyze: true, sql_features: maria.sql_features.clone(), ..Capabilities::mysql(v(8, 4, 0)) });
     }
 
     #[test]
@@ -269,5 +277,13 @@ mod tests {
         let v = |major, minor| ServerVersion { major, minor, patch: 0 };
         assert!(Capabilities::mysql(v(8, 0)).virtual_generated && Capabilities::mariadb(v(10, 6)).virtual_generated && Capabilities::sqlite().virtual_generated);
         assert!(!Capabilities::mysql(v(8, 4)).maintain_privilege && !Capabilities::mariadb(v(11, 4)).maintain_privilege && !Capabilities::sqlite().maintain_privilege);
+    }
+
+    #[test]
+    fn capabilities_carry_the_sql_features() {
+        assert!(Capabilities::postgres(ServerVersion { major: 17, minor: 0, patch: 0 }).sql_features.contains(&"jsonTable"));
+        assert!(!Capabilities::postgres(PG18).sql_features.contains(&"onDuplicateKeyUpdate"));
+        let json = serde_json::to_value(Capabilities::sqlite()).unwrap();
+        assert!(json["sqlFeatures"].as_array().unwrap().iter().any(|f| f == "onConflict"));
     }
 }

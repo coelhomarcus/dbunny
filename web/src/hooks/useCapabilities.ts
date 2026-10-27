@@ -32,6 +32,7 @@ const NONE: Capabilities = {
   explainFormat: "postgresJson",
   maintainPrivilege: false,
   virtualGenerated: false,
+  sqlFeatures: [],
   ssh: false,
   ssl: false,
 };

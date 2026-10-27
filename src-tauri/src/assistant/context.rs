@@ -1,7 +1,7 @@
 //! What the agent is told about the database it works on.
 
 use crate::db::model::{CompletionRelation, CompletionSchema, ConnectionInfo};
-use crate::db::version::ServerVersion;
+use crate::db::version::{sql_features, ServerVersion};
 use crate::db::Engine;
 
 pub const SCHEMA_BUDGET: usize = 24 * 1024;
@@ -109,29 +109,21 @@ fn dialect_notes(engine: Engine, version: Option<ServerVersion>) -> String {
 
 /// The SQL the agent might reach for that this version doesn't have.
 fn missing_features(engine: Engine, version: ServerVersion) -> Vec<&'static str> {
-    let mut missing = Vec::new();
-    match engine {
-        Engine::Postgres => {
-            if !version.at_least(15, 0, 0) {
-                missing.extend(["MERGE", "NULLS NOT DISTINCT"]);
-            }
-            if !version.at_least(16, 0, 0) {
-                missing.extend(["the SQL/JSON constructors (JSON_ARRAY, JSON_OBJECT and their aggregates)", "IS JSON"]);
-            }
-            if !version.at_least(17, 0, 0) {
-                missing.extend(["JSON_TABLE", "JSON_EXISTS, JSON_QUERY and JSON_VALUE"]);
-            }
-        }
-        Engine::Mysql => {
-            missing.push("RETURNING");
-            if !version.at_least(8, 0, 14) {
-                missing.push("LATERAL");
-            }
-        }
-        Engine::Mariadb => missing.extend(["RETURNING in UPDATE (INSERT and DELETE have it)", "LATERAL"]),
-        Engine::Sqlite => {}
-    }
-    missing
+    // What the agent would reach for, by the feature the version needs for it; the editor's
+    // suggestions read the same features, so the two never disagree
+    let worth_saying: &[(&str, &[&'static str])] = match engine {
+        Engine::Postgres => &[
+            ("merge", &["MERGE"]),
+            ("nullsNotDistinct", &["NULLS NOT DISTINCT"]),
+            ("sqlJsonConstructors", &["the SQL/JSON constructors (JSON_ARRAY, JSON_OBJECT and their aggregates)", "IS JSON"]),
+            ("jsonTable", &["JSON_TABLE", "JSON_EXISTS, JSON_QUERY and JSON_VALUE"]),
+        ],
+        Engine::Mysql => &[("returning", &["RETURNING"]), ("lateral", &["LATERAL"])],
+        Engine::Mariadb => &[("returningUpdate", &["RETURNING in UPDATE (INSERT and DELETE have it)"]), ("lateral", &["LATERAL"])],
+        Engine::Sqlite => &[],
+    };
+    let features = sql_features(engine, Some(version));
+    worth_saying.iter().filter(|(feature, _)| !features.contains(feature)).flat_map(|(_, words)| words.iter().copied()).collect()
 }
 
 fn qualified(relation: &CompletionRelation) -> String {
