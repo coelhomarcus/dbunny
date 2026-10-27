@@ -13,6 +13,8 @@ mod reader;
 pub mod session;
 pub mod structure;
 pub mod text;
+#[cfg(test)]
+pub(crate) mod tests_support;
 mod transactions;
 
 use async_trait::async_trait;

@@ -576,4 +576,26 @@ mod server_tests {
         assert_eq!(count, 0, "EXPLAIN ANALYZE must not keep its changes");
         main.batch_execute("DROP TABLE dbunny_explain_test").await.unwrap();
     }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn merge_runs_in_the_console() {
+        if !crate::db::postgres::tests_support::requires("merge_runs_in_the_console", 15, 0).await {
+            return;
+        }
+        let client = connect().await;
+        client
+            .batch_execute(
+                "CREATE TEMP TABLE stock (sku text PRIMARY KEY, qty int); INSERT INTO stock VALUES ('a', 1), ('b', 2); \
+                 CREATE TEMP TABLE delivery (sku text, qty int); INSERT INTO delivery VALUES ('a', 10), ('c', 5)",
+            )
+            .await
+            .unwrap();
+        let merge = "MERGE INTO stock s USING delivery d ON s.sku = d.sku \
+                     WHEN MATCHED THEN UPDATE SET qty = s.qty + d.qty \
+                     WHEN NOT MATCHED THEN INSERT VALUES (d.sku, d.qty)";
+        assert_eq!(run(&client, merge).await.rows_affected, Some(2));
+        let total: i64 = client.query_one("SELECT sum(qty) FROM stock", &[]).await.unwrap().get(0);
+        assert_eq!(total, 18);
+    }
 }

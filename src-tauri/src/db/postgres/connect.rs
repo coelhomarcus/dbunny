@@ -469,7 +469,12 @@ mod database_server_tests {
     #[tokio::test]
     #[ignore = "needs DBUNNY_TEST_SOCKET_URL"]
     async fn a_unix_socket_opens_a_session() {
-        let url = url::Url::parse(&std::env::var("DBUNNY_TEST_SOCKET_URL").unwrap()).unwrap();
+        // Docker Desktop can't share a socket with the host, so servers.sh only sets this on Linux
+        let Ok(text) = std::env::var("DBUNNY_TEST_SOCKET_URL") else {
+            eprintln!("dbunny-skip: a_unix_socket_opens_a_session needs DBUNNY_TEST_SOCKET_URL");
+            return;
+        };
+        let url = url::Url::parse(&text).unwrap();
         let folder = socket_dir(&url).expect("the URL's host must be a socket folder");
         let state = AppState { sessions: Default::default(), saved_connections: Default::default(), encryption_key: [0; 32] };
         // What `open_session` does, keeping the driver to reach its connection

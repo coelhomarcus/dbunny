@@ -170,7 +170,8 @@ Write release notes and the README in English. Release text follows **No co-auth
 
 ## CI
 
-- **`test.yml`** — Runs on push to `develop` / `main` and on every PR: frontend unit tests, typecheck, Rust unit tests (PostgreSQL integration tests stay ignored in CI).
+- **`test.yml`** — Runs on push to `develop` / `main` and on every PR: frontend unit tests, typecheck, Rust unit tests (the server tests stay ignored there).
+- **`servers.yml`** — The server tests against every database version of the matrix (`src-tauri/tests/servers.sh list`), one job per version: weekly, on demand (Actions → Server tests, optionally one engine or version), and on pull requests to `main` that touch database or assistant code. A release PR (`develop` → `main`) needs it green.
 - Fix CI failures before merging when possible.
 
 ## Local checks (before claiming “done”)
@@ -183,7 +184,18 @@ npx tsc -b web
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
-For larger backend work, mention server tests (`cargo test` with PostgreSQL) only if the environment is available.
+For database work, also run the server tests against real servers in Docker. `servers.sh` starts one version (only `dbunny-test-*` containers, ports on 127.0.0.1) and prints the variables the tests read; `matrix.sh` runs every version of the matrix one at a time and writes a summary to `src-tauri/target/matrix/summary.md`:
+
+```bash
+eval "$(src-tauri/tests/servers.sh up postgres 17)"
+cargo test --manifest-path src-tauri/Cargo.toml --lib -- $(src-tauri/tests/servers.sh filters postgres) --ignored
+src-tauri/tests/matrix.sh                 # all 16 versions
+src-tauri/tests/matrix.sh mariadb 11.8    # one version
+src-tauri/tests/servers.sh down all      # containers and their volumes
+src-tauri/tests/servers.sh prune         # also the images of the matrix (about 13 GB)
+```
+
+A server test whose feature the version lacks returns early through `requires()` and prints a `dbunny-skip:` line; skipping is only for that, never for a failure.
 
 ## Languages
 

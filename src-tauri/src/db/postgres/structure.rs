@@ -573,4 +573,41 @@ mod server_tests {
         let missing = table_structure(&client, &schema, "nope").await.err().unwrap();
         assert!(missing.contains("doesn't exist"), "{missing}");
     }
+
+    async fn temp_schema(client: &Client) -> String {
+        client.query_one("SELECT nspname::text FROM pg_namespace WHERE oid = pg_my_temp_schema()", &[]).await.unwrap().get(0)
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn nulls_not_distinct_unique_index_is_read() {
+        if !crate::db::postgres::tests_support::requires("nulls_not_distinct_unique_index_is_read", 15, 0).await {
+            return;
+        }
+        let client = connect().await;
+        client
+            .batch_execute("CREATE TEMP TABLE codes (code text); CREATE UNIQUE INDEX codes_once ON codes (code) NULLS NOT DISTINCT")
+            .await
+            .unwrap();
+        let s = table_structure(&client, &temp_schema(&client).await, "codes").await.unwrap();
+        let index = s.indexes.iter().find(|i| i.name == "codes_once").expect("the index is listed");
+        assert!(index.is_unique);
+        assert!(index.definition.contains("NULLS NOT DISTINCT"), "{}", index.definition);
+        assert!(s.ddl.contains("NULLS NOT DISTINCT"), "{}", s.ddl);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn virtual_generated_columns_are_read() {
+        if !crate::db::postgres::tests_support::requires("virtual_generated_columns_are_read", 18, 0).await {
+            return;
+        }
+        let client = connect().await;
+        client
+            .batch_execute("CREATE TEMP TABLE sizes (w int, area int GENERATED ALWAYS AS (w * w) VIRTUAL)")
+            .await
+            .unwrap();
+        let s = table_structure(&client, &temp_schema(&client).await, "sizes").await.unwrap();
+        assert!(s.ddl.contains("\"area\" integer GENERATED ALWAYS AS (") && s.ddl.contains("w * w") && s.ddl.contains(") VIRTUAL"), "{}", s.ddl);
+    }
 }

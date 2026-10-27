@@ -1,0 +1,7 @@
+running 71 tests
+dbunny-skip: a_unix_socket_opens_a_session needs DBUNNY_TEST_SOCKET_URL
+test db::postgres::connect::database_server_tests::a_unix_socket_opens_a_session ... ok
+dbunny-skip: merge_runs_in_the_console needs PostgreSQL 15.0
+test db::postgres::console::server_tests::merge_runs_in_the_console ... ok
+test result: ok. 70 passed; 0 failed; 1 ignored; 0 measured; 558 filtered out; finished in 14.09s
+dbunny-matrix-time: 41

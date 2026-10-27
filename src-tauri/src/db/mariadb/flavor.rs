@@ -45,6 +45,10 @@ impl Flavor for MariadbFlavor {
         "IF(s.IGNORED = 'YES', 'NO', 'YES')"
     }
 
+    fn hidden_index_keyword(&self) -> &'static str {
+        "IGNORED"
+    }
+
     /// MariaDB has no functional key parts.
     fn index_expression_sql(&self, _version: ServerVersion) -> &'static str {
         "NULL"
@@ -104,9 +108,11 @@ impl Flavor for MariadbFlavor {
         Ok(())
     }
 
-    /// MariaDB has no `super_read_only`.
+    /// MariaDB has no `super_read_only`. `read_only` is 0 or 1 until 12.x, then OFF, ON,
+    /// NO_LOCK or NO_LOCK_NO_ADMIN: anything but off counts. Compared as text, so the number of
+    /// older versions isn't converted (which leaves a warning on the editor's connection).
     fn read_only_sql(&self) -> &'static str {
-        "SELECT @@read_only, 0"
+        "SELECT CAST(@@read_only AS CHAR) NOT IN ('0', 'OFF'), 0"
     }
 
     /// `EXPLAIN FORMAT=JSON`, which doesn't run the statement, or `ANALYZE FORMAT=JSON`, which

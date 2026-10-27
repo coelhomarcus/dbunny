@@ -1,0 +1,4 @@
+running 95 tests
+test db::mysql::server_tests::verify_ca_checks_the_chain ... FAILED
+test result: FAILED. 94 passed; 1 failed; 0 ignored; 0 measured; 558 filtered out; finished in 11.90s
+dbunny-matrix-time: 58

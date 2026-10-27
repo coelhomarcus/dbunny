@@ -258,7 +258,7 @@ async fn table_indexes(conn: &mut Conn, flavor: &dyn Flavor, schema: &str, table
                 "BTREE" | "FULLTEXT" | "SPATIAL" | "" => String::new(),
                 other => format!(" USING {other}"),
             };
-            let invisible = if visible { "" } else { " INVISIBLE" };
+            let invisible = if visible { String::new() } else { format!(" {}", flavor.hidden_index_keyword()) };
             index.definition = if index.is_primary {
                 format!("PRIMARY KEY ({list}){using}")
             } else {

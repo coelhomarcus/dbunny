@@ -1,5 +1,5 @@
 //! What the MySQL server tests share: where the test server is, a throwaway database per
-//! test, and a way to prepare fixtures. Start the servers with `src-tauri/tests/mysql-docker.sh up`.
+//! test, and a way to prepare fixtures. Start a server with `src-tauri/tests/servers.sh up mysql|mariadb <version>`.
 
 use mysql_async::prelude::Queryable;
 
@@ -9,6 +9,8 @@ use crate::db::mariadb::MariadbDriver;
 use crate::db::mysql::MysqlDriver;
 use crate::db::mysql_common::connect::{opts_for, ConnRole, MysqlEndpoint};
 use crate::db::mysql_common::driver::ServerDriver;
+use crate::db::version::{numbers, skip_line, ServerVersion};
+use crate::db::Engine;
 
 /// Tests that change a global setting of the server (like `read_only`) hold this for
 /// writing; tests whose checks depend on those settings hold it for reading.
@@ -113,12 +115,17 @@ impl Drop for TestDb {
 /// Opens a session on `endpoint` with the driver of the flavor the test server (the one in
 /// `DBUNNY_TEST_MYSQL_URL`) is.
 pub async fn open_server(endpoint: MysqlEndpoint) -> Result<Arc<ServerDriver>, String> {
+    open_server_trusting(endpoint, None).await
+}
+
+/// `open_server` with the SSH host key fingerprint the person confirmed.
+pub async fn open_server_trusting(endpoint: MysqlEndpoint, trust_host_key: Option<String>) -> Result<Arc<ServerDriver>, String> {
     let mariadb = is_mariadb().await;
     MARIADB_NOW.store(mariadb, std::sync::atomic::Ordering::Relaxed);
     if mariadb {
-        MariadbDriver::open(endpoint, None).await
+        MariadbDriver::open(endpoint, trust_host_key).await
     } else {
-        MysqlDriver::open(endpoint, None).await
+        MysqlDriver::open(endpoint, trust_host_key).await
     }
 }
 
@@ -154,7 +161,131 @@ pub async fn is_mariadb() -> bool {
     !is_mysql().await
 }
 
+/// The test server's version, without the `5.5.5-` prefix older MariaDB servers send.
+pub async fn version() -> ServerVersion {
+    let text = server_version().await;
+    let real = text.strip_prefix("5.5.5-").unwrap_or(text);
+    numbers(real).map(|(version, _)| version).unwrap_or_else(|| panic!("couldn't read the version in \"{text}\""))
+}
+
+/// Whether the test server is `engine` at `major.minor.patch` or newer. A server of the other
+/// family answers false quietly; an older one prints the `dbunny-skip` line for `test`.
+pub async fn requires(test: &str, engine: Engine, major: u16, minor: u16, patch: u16) -> bool {
+    let family = if is_mariadb().await { Engine::Mariadb } else { Engine::Mysql };
+    if family != engine {
+        return false;
+    }
+    if version().await.at_least(major, minor, patch) {
+        return true;
+    }
+    eprintln!("{}", skip_line(test, engine, ServerVersion { major, minor, patch }));
+    false
+}
+
 async fn server_version() -> &'static str {
     static VERSION: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
     VERSION.get_or_init(|| async { query_one::<String>(&test_endpoint(), "SELECT VERSION()").await.unwrap_or_default() }).await
+}
+
+// TLS and SSH: the certificates in DBUNNY_TEST_MYSQL_SSL_DIR belong to the server servers.sh
+// started, and the SSH target is its container name.
+
+pub fn ssl_file(name: &str) -> String {
+    let dir = std::env::var("DBUNNY_TEST_MYSQL_SSL_DIR").expect("set DBUNNY_TEST_MYSQL_SSL_DIR to run the MySQL TLS tests");
+    format!("{}/{name}", dir.trim_end_matches('/'))
+}
+
+pub fn with_tls(endpoint: MysqlEndpoint, mode: &str, root: &str, cert: &str, key: &str) -> MysqlEndpoint {
+    let file = |name: &str| if name.is_empty() { String::new() } else { ssl_file(name) };
+    MysqlEndpoint {
+        tls: Some(crate::db::net::tls::TlsSettings { mode: mode.into(), root_cert: file(root), cert: file(cert), key: file(key) }),
+        ..endpoint
+    }
+}
+
+/// What `SHOW STATUS LIKE 'Ssl_cipher'` says on the editor's and on a pool connection.
+pub async fn ciphers(driver: &ServerDriver) -> (String, String) {
+    let in_editor: (String, String) = driver
+        .editor()
+        .run(|c| Box::pin(async move { c.query_first("SHOW STATUS LIKE 'Ssl_cipher'").await.map(Option::unwrap).map_err(|e| e.to_string()) }))
+        .await
+        .unwrap();
+    let in_pool: (String, String) = driver.conn().await.unwrap().query_first("SHOW STATUS LIKE 'Ssl_cipher'").await.unwrap().unwrap();
+    (in_editor.1, in_pool.1)
+}
+
+/// A user that must log in with a client certificate; dropped with the value, also when
+/// the test fails.
+pub struct CertUser {
+    pub name: String,
+}
+
+impl CertUser {
+    pub async fn new() -> CertUser {
+        let name = format!("dbunny_t_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        exec(&test_endpoint(), &format!("CREATE USER '{name}'@'%' IDENTIFIED BY 'certpass' REQUIRE X509")).await;
+        CertUser { name }
+    }
+}
+
+impl Drop for CertUser {
+    fn drop(&mut self) {
+        let sql = format!("DROP USER IF EXISTS '{}'@'%'", self.name);
+        let _ = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            runtime.block_on(exec(&test_endpoint(), &sql));
+        })
+        .join();
+    }
+}
+
+pub struct SshEnv {
+    pub ssh: crate::db::net::ssh::SshConfig,
+    pub target: (String, u16),
+}
+
+pub fn ssh_env() -> SshEnv {
+    let var = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("set {name} to run the SSH tests"));
+    let ssh = url::Url::parse(&format!("ssh://{}", var("DBUNNY_TEST_MYSQL_SSH"))).unwrap();
+    let target = var("DBUNNY_TEST_MYSQL_SSH_TARGET");
+    let (host, port) = target.rsplit_once(':').unwrap();
+    SshEnv {
+        ssh: crate::db::net::ssh::SshConfig {
+            host: ssh.host_str().unwrap().into(),
+            port: ssh.port().unwrap_or(22),
+            user: ssh.username().into(),
+            auth_method: "password".into(),
+            password: ssh.password().unwrap_or("").into(),
+            ..Default::default()
+        },
+        target: (host.into(), port.parse().unwrap()),
+    }
+}
+
+/// Opens a session through the SSH server, confirming its host key the way the UI does:
+/// the first attempt is refused with the fingerprint, the second passes it.
+pub async fn open_through_ssh(endpoint: MysqlEndpoint) -> Result<Arc<ServerDriver>, String> {
+    let known_hosts = std::env::temp_dir().join(format!("dbunny-mysql-ssh-test-{}.json", uuid::Uuid::new_v4()));
+    let endpoint = MysqlEndpoint { known_hosts: Some(known_hosts.clone()), ..endpoint };
+    let err = match open_server(endpoint.clone()).await {
+        Ok(_) => panic!("an unknown host key must not be accepted silently"),
+        Err(e) => e,
+    };
+    let problem: serde_json::Value = serde_json::from_str(&err).unwrap_or_else(|_| panic!("not a host key error: {err}"));
+    assert_eq!(problem["sshHostKey"]["status"], "unknown");
+    let fingerprint = problem["sshHostKey"]["fingerprint"].as_str().unwrap().to_string();
+    let result = open_server_trusting(endpoint, Some(fingerprint)).await;
+    let _ = std::fs::remove_file(known_hosts);
+    result
+}
+
+pub fn through_ssh(db: &TestDb) -> MysqlEndpoint {
+    let env = ssh_env();
+    MysqlEndpoint {
+        // The container's name on the Docker network: only the SSH server can resolve it
+        host: env.target.0,
+        port: env.target.1,
+        ssh: Some(env.ssh),
+        ..db.endpoint.clone()
+    }
 }

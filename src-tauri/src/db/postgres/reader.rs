@@ -293,10 +293,13 @@ mod server_tests {
     async fn stops_after_limit() {
         let f = Fixture::new().await;
         let started = std::time::Instant::now();
-        let result = f.driver.reader().unwrap().query("SELECT g FROM generate_series(1, 50000000) g", limits(100)).await.unwrap();
+        // Every row after the 101 the reader asks for takes 30 seconds: reading one of them shows
+        // as a wait, however fast or loaded the machine is
+        let sql = "SELECT n, (SELECT 1 FROM pg_sleep(CASE WHEN n > 101 THEN 30 ELSE 0 END)) AS wait FROM generate_series(1, 1000) n";
+        let result = f.driver.reader().unwrap().query(sql, limits(100)).await.unwrap();
         assert_eq!(result.rows.len(), 100);
         assert!(result.more);
-        assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+        assert!(started.elapsed() < Duration::from_secs(20), "{:?}", started.elapsed());
         f.finish().await;
     }
 
@@ -398,6 +401,32 @@ mod server_tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
         let again = reader.query("SELECT 1", limits(1)).await.unwrap();
         assert_eq!(again.rows.len(), 1);
+        f.finish().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn json_table_reads_where_the_server_has_it() {
+        let f = Fixture::new().await;
+        let reader = f.driver.reader().unwrap();
+        let sql = "SELECT * FROM JSON_TABLE('[1, 2]'::jsonb, '$[*]' COLUMNS (n int PATH '$'))";
+        if crate::db::postgres::tests_support::server_version().await.at_least(17, 0, 0) {
+            assert_eq!(reader.query(sql, limits(10)).await.unwrap().rows.len(), 2);
+        } else {
+            // The server's own error, and nothing left open
+            assert!(reader.query(sql, limits(10)).await.is_err());
+            assert_eq!(reader.query("SELECT 1", limits(10)).await.unwrap().rows.len(), 1);
+        }
+        f.finish().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn merge_is_refused_on_every_version() {
+        let f = Fixture::new().await;
+        let sql = format!("MERGE INTO {} t USING (SELECT 1 AS a) s ON false WHEN NOT MATCHED THEN INSERT (a) VALUES (s.a)", f.table);
+        assert_eq!(f.driver.reader().unwrap().query(&sql, limits(10)).await.unwrap_err(), READ_REFUSED);
+        assert_eq!(f.count().await, 1000);
         f.finish().await;
     }
 }

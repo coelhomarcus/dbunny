@@ -435,7 +435,7 @@ pub(crate) async fn type_definition(client: &tokio_postgres::Client, schema: &st
              format_type(t.typbasetype, t.typtypmod) AS base_type, t.typnotnull AS not_null, t.typdefault AS default_value, \
              obj_description(t.oid, 'pg_type') AS comment, \
              (SELECT array_agg(e.enumlabel::text ORDER BY e.enumsortorder) FROM pg_enum e WHERE e.enumtypid = t.oid) AS labels, \
-             ARRAY(SELECT pg_get_constraintdef(con.oid, true) FROM pg_constraint con WHERE con.contypid = t.oid ORDER BY con.conname) AS checks, \
+             ARRAY(SELECT pg_get_constraintdef(con.oid, true) FROM pg_constraint con WHERE con.contypid = t.oid AND con.contype <> 'n' ORDER BY con.conname) AS checks, \
              ARRAY(SELECT quote_ident(a.attname) || ' ' || format_type(a.atttypid, a.atttypmod) FROM pg_attribute a \
                    WHERE a.attrelid = t.typrelid AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum) AS attributes, \
              (SELECT format_type(r.rngsubtype, NULL) FROM pg_range r WHERE r.rngtypid = t.oid) AS subtype \
@@ -462,6 +462,7 @@ pub(crate) async fn type_definition(client: &tokio_postgres::Client, schema: &st
             if let Some(default) = row.get::<_, Option<String>>("default_value") {
                 ddl += &format!("\n    DEFAULT {default}");
             }
+            // From PostgreSQL 17 the NOT NULL is also a constraint (contype 'n'), left out of `checks`
             if row.get::<_, bool>("not_null") {
                 ddl += "\n    NOT NULL";
             }
@@ -810,6 +811,8 @@ mod server_tests {
         }
         assert!(ddls[1].contains("'it''s high'") && ddls[1].contains("COMMENT ON TYPE"), "{}", ddls[1]);
         assert!(ddls[2].contains("NOT NULL") && ddls[2].contains("CHECK"), "{}", ddls[2]);
+        // PostgreSQL 17 also keeps the domain's NOT NULL as a constraint: it is written once
+        assert_eq!(ddls[2].matches("NOT NULL").count(), 1, "{}", ddls[2]);
 
         // Drop everything and run the definitions: they must rebuild identical objects
         client
@@ -903,7 +906,9 @@ mod server_tests {
         assert!(!schemas.iter().any(internal), "{schemas:?}");
         let tree = explorer(&client).await.unwrap();
         let names: Vec<String> = tree.schemas.into_iter().map(|s| s.name).collect();
-        assert_eq!(names, schemas, "the sidebar and the explorer list the same schemas");
+        // Other tests create and drop their dbunny_* schemas between the two reads
+        let lasting = |list: &[String]| list.iter().filter(|s| !s.starts_with("dbunny_")).cloned().collect::<Vec<_>>();
+        assert_eq!(lasting(&names), lasting(&schemas), "the sidebar and the explorer list the same schemas");
     }
 
     #[tokio::test]

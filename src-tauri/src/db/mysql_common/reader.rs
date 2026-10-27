@@ -312,4 +312,29 @@ mod server_tests {
         assert_eq!(described.rows.len(), 2);
         db.drop_now().await;
     }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn lateral_reads_on_mysql() {
+        if !crate::db::mysql_common::tests_support::requires("lateral_reads_on_mysql", crate::db::Engine::Mysql, 8, 0, 14).await {
+            return;
+        }
+        let (db, d) = thousand().await;
+        let sql = "SELECT x.a, y.m FROM t x, LATERAL (SELECT max(t.a) AS m FROM t WHERE t.a <= x.a) y WHERE x.a <= 3 ORDER BY x.a";
+        let result = d.reader().unwrap().query(sql, limits(10)).await.unwrap();
+        assert_eq!(result.rows.len(), 3);
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn returning_is_refused_by_the_reader_on_mariadb() {
+        if !crate::db::mysql_common::tests_support::requires("returning_is_refused_by_the_reader_on_mariadb", crate::db::Engine::Mariadb, 10, 5, 0).await {
+            return;
+        }
+        let (db, d) = thousand().await;
+        assert_eq!(d.reader().unwrap().query("DELETE FROM t RETURNING a", limits(10)).await.unwrap_err(), READ_REFUSED);
+        assert_eq!(count(&db).await, 1000);
+        db.drop_now().await;
+    }
 }

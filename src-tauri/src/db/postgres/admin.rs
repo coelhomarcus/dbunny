@@ -258,6 +258,44 @@ mod activity_server_tests {
         assert!(err.contains("own connection"));
         watcher.batch_execute("DROP TABLE dbunny_activity_test").await.unwrap();
     }
+
+    async fn driver() -> Arc<PostgresDriver> {
+        let url = url::Url::parse(&crate::db::postgres::tests_support::test_url()).unwrap();
+        PostgresDriver::open(Endpoint { url, ssh: None, known_hosts: None }, None).await.unwrap()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn drop_database_with_force_ends_other_sessions() {
+        let driver = driver().await;
+        let admin = driver.admin().unwrap();
+        let name = format!("dbunny_t_force_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        admin.create_database(&name).await.unwrap();
+        let mut url = url::Url::parse(&crate::db::postgres::tests_support::test_url()).unwrap();
+        url.set_path(&name);
+        let (other, connection) = tokio_postgres::connect(url.as_str(), tokio_postgres::NoTls).await.unwrap();
+        tokio::spawn(connection);
+        other.batch_execute("SELECT 1").await.unwrap();
+
+        let err = admin.drop_database(&name, false).await.err().unwrap();
+        assert!(err.contains("is being accessed by other users"), "{err}");
+        admin.drop_database(&name, true).await.unwrap();
+        let names: Vec<String> = admin.databases().await.unwrap().into_iter().map(|d| d.name).collect();
+        assert!(!names.contains(&name), "{names:?}");
+        driver.close().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn activity_lists_this_session_on_every_version() {
+        let driver = driver().await;
+        let activity = driver.admin().unwrap().activity(false).await.unwrap();
+        let own = activity.sessions.iter().find(|s| s.is_self).expect("this session is listed");
+        assert_eq!(own.state.as_deref(), Some("active"));
+        // Only client sessions: background workers have no database and no user
+        assert!(activity.sessions.iter().all(|s| s.database.is_some()), "{:?}", activity.sessions.iter().map(|s| &s.database).collect::<Vec<_>>());
+        driver.close().await;
+    }
 }
 
 /// Tests that need a real server, see `db::postgres::console::server_tests`.

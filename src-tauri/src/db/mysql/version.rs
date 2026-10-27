@@ -30,6 +30,14 @@ mod tests {
     }
 
     #[test]
+    fn calendar_versions_are_accepted() {
+        let v = parse_mysql_version("26.10.0").unwrap();
+        assert_eq!(v, ServerVersion { major: 26, minor: 10, patch: 0 });
+        assert!(crate::db::Capabilities::mysql(v).explain_analyze);
+        assert!(parse_mysql_version("9.7.4").is_ok());
+    }
+
+    #[test]
     fn old_mysql_and_mariadb_are_refused_by_name() {
         assert_eq!(parse_mysql_version("5.7.44-log").err().unwrap(), "MySQL 5.7.44 isn't supported; DBunny needs MySQL 8.0 or newer.");
         assert_eq!(parse_mysql_version("11.4.13-MariaDB-ubu2404").err().unwrap(), "This server is MariaDB 11.4.13. Edit the connection and choose MariaDB.");

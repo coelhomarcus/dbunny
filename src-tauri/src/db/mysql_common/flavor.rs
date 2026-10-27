@@ -28,6 +28,8 @@ pub trait Flavor: Send + Sync {
     /// The expression that tells, in an `information_schema.STATISTICS` row `s`, whether the
     /// index is visible to the optimizer: 'YES' or 'NO'.
     fn index_visible_sql(&self) -> &'static str;
+    /// The word that ends the definition of an index the optimizer doesn't use.
+    fn hidden_index_keyword(&self) -> &'static str;
     /// The expression for the key part of an index that is an expression, or NULL.
     fn index_expression_sql(&self, version: ServerVersion) -> &'static str;
     /// Whether this server version keeps CHECK constraints in `information_schema`.

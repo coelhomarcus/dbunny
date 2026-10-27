@@ -23,15 +23,17 @@ impl MariadbDriver {
     }
 }
 
-/// Tests that need a MariaDB server: start them with `src-tauri/tests/mysql-docker.sh up`, then
-/// run the suite with `DBUNNY_TEST_MYSQL_URL` set to `DBUNNY_TEST_MARIADB_URL` (11.4) and again
-/// to `DBUNNY_TEST_MARIADB106_URL` (10.6). The refusals also need the MySQL server's url.
+/// Tests that need a MariaDB server: start one with `src-tauri/tests/servers.sh up mariadb <version>`
+/// (it also starts the MySQL server the refusals need), or run every version with `matrix.sh`.
 #[cfg(test)]
 mod server_tests {
     use mysql_async::prelude::Queryable;
 
     use crate::db::mysql::MysqlDriver;
-    use crate::db::mysql_common::tests_support::{endpoint_from, exec, is_mariadb, open_server, raw_conn, TestDb};
+    use crate::db::mysql_common::tests_support::{
+        ciphers, endpoint_from, exec, is_mariadb, open_server, open_through_ssh, raw_conn, test_endpoint, through_ssh, version, with_tls, CertUser, TestDb,
+        SERVER_SETTINGS,
+    };
     use crate::db::{Driver, Engine};
 
     use crate::db::mysql_common::catalog::column_definitions;
@@ -42,7 +44,7 @@ mod server_tests {
     #[ignore = "needs DBUNNY_TEST_MYSQL80_URL"]
     async fn mariadb_refuses_mysql() {
         let err = MariadbDriver::open(endpoint_from("DBUNNY_TEST_MYSQL80_URL"), None).await.err().unwrap();
-        assert!(err.starts_with("This server is MySQL 8."), "{err}");
+        assert!(err.starts_with("This server is MySQL "), "{err}");
         assert!(err.ends_with(". Edit the connection and choose MySQL."), "{err}");
     }
 
@@ -50,7 +52,7 @@ mod server_tests {
     #[ignore = "needs DBUNNY_TEST_MARIADB_URL"]
     async fn mysql_refuses_mariadb() {
         let err = MysqlDriver::open(endpoint_from("DBUNNY_TEST_MARIADB_URL"), None).await.err().unwrap();
-        assert!(err.starts_with("This server is MariaDB 11.4."), "{err}");
+        assert!(err.starts_with("This server is MariaDB "), "{err}");
         assert!(err.ends_with(". Edit the connection and choose MariaDB."), "{err}");
     }
 
@@ -60,6 +62,8 @@ mod server_tests {
         if !is_mariadb().await {
             return;
         }
+        // It checks the session isn't read-only, which a_read_only_mariadb_server_marks_the_session changes
+        let _settings = SERVER_SETTINGS.read().await;
         let db = TestDb::new().await;
         let driver = open_server(db.endpoint.clone()).await.unwrap();
         assert_eq!(driver.engine(), Engine::Mariadb);
@@ -373,6 +377,177 @@ mod server_tests {
         assert!(diagram.tables.iter().any(|t| t.name == "hist"));
         let page = driver.data().table_page(&db.name, "hist", TableDataParams::default()).await.unwrap();
         assert_eq!(page.total_rows, 1);
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL and DBUNNY_TEST_MYSQL_SSL_DIR"]
+    async fn mariadb_require_encrypts_every_connection() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        let driver = open_server(with_tls(db.endpoint.clone(), "require", "", "", "")).await.unwrap();
+        let (editor, pool) = ciphers(&driver).await;
+        assert!(!editor.is_empty(), "the editor's connection isn't encrypted");
+        assert!(!pool.is_empty(), "the pool's connection isn't encrypted");
+        driver.close().await;
+
+        // Without TLS the same server answers with no cipher
+        let plain = open_server(db.endpoint.clone()).await.unwrap();
+        assert_eq!(ciphers(&plain).await, (String::new(), String::new()));
+        plain.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL and DBUNNY_TEST_MYSQL_SSL_DIR"]
+    async fn mariadb_verify_full_accepts_a_certificate_that_names_the_host() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        // servers.sh signs the MariaDB certificate for localhost and 127.0.0.1 with ca.pem
+        let full = open_server(with_tls(db.endpoint.clone(), "verify-full", "ca.pem", "", "")).await.unwrap();
+        full.close().await;
+        // verify-ca checks the name too (a limit of the TLS library), and the name is right here
+        let ca = open_server(with_tls(db.endpoint.clone(), "verify-ca", "ca.pem", "", "")).await.unwrap();
+        ca.close().await;
+        // A CA that didn't sign the certificate doesn't vouch for it
+        let err = open_server(with_tls(db.endpoint.clone(), "verify-ca", "other-ca.pem", "", "")).await.err().unwrap();
+        assert!(err.contains("UnknownIssuer"), "{err}");
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL and DBUNNY_TEST_MYSQL_SSL_DIR"]
+    async fn mariadb_client_certificates_log_in() {
+        if !is_mariadb().await {
+            return;
+        }
+        let user = CertUser::new().await;
+        let as_user = crate::db::mysql_common::connect::MysqlEndpoint { user: user.name.clone(), password: "certpass".into(), ..test_endpoint() };
+
+        // The account requires a certificate: without one the login is refused
+        assert!(open_server(with_tls(as_user.clone(), "require", "", "", "")).await.is_err());
+
+        let driver = open_server(with_tls(as_user, "require", "", "client-cert.pem", "client-key.pem")).await.unwrap();
+        let who: String = driver.conn().await.unwrap().query_first("SELECT CURRENT_USER()").await.unwrap().unwrap();
+        assert_eq!(who, format!("{}@%", user.name));
+        driver.close().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL, DBUNNY_TEST_MYSQL_SSH and DBUNNY_TEST_MYSQL_SSH_TARGET"]
+    async fn mariadb_session_goes_through_an_ssh_tunnel() {
+        if !is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        let endpoint = through_ssh(&db);
+        let driver = open_through_ssh(endpoint.clone()).await.unwrap();
+        assert_eq!(driver.info().database, db.name);
+        let one: i64 = driver.conn().await.unwrap().query_first("SELECT 1").await.unwrap().unwrap();
+        assert_eq!(one, 1);
+        driver.close().await;
+
+        // TLS inside the tunnel
+        let secure = open_through_ssh(with_tls(endpoint, "require", "", "", "")).await.unwrap();
+        let (editor, pool) = ciphers(&secure).await;
+        assert!(!editor.is_empty() && !pool.is_empty());
+        secure.close().await;
+        db.drop_now().await;
+    }
+
+    /// Turns the server's read_only off again when dropped, also when the test fails.
+    struct WritableAgain;
+
+    impl Drop for WritableAgain {
+        fn drop(&mut self) {
+            let _ = std::thread::spawn(|| {
+                let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+                runtime.block_on(exec(&test_endpoint(), "SET GLOBAL read_only = OFF"));
+            })
+            .join();
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn a_read_only_mariadb_server_marks_the_session() {
+        if !is_mariadb().await {
+            return;
+        }
+        let _settings = SERVER_SETTINGS.write().await;
+        let db = TestDb::new().await;
+        let _restore = WritableAgain;
+        // From 12.x read_only is OFF, ON, NO_LOCK or NO_LOCK_NO_ADMIN instead of 0 or 1. Not
+        // NO_LOCK_NO_ADMIN: it would stop root, and so the tests running alongside, from writing
+        let modes: &[&str] = if version().await.at_least(12, 0, 0) { &["ON", "NO_LOCK"] } else { &["ON"] };
+        for mode in modes {
+            exec(&test_endpoint(), &format!("SET GLOBAL read_only = {mode}")).await;
+            let driver = open_server(db.endpoint.clone()).await.unwrap();
+            assert!(driver.info().read_only, "read_only = {mode}");
+            driver.close().await;
+        }
+        exec(&test_endpoint(), "SET GLOBAL read_only = OFF").await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        assert!(!driver.info().read_only);
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn mariadb_ignored_indexes_are_read() {
+        if !crate::db::mysql_common::tests_support::requires("mariadb_ignored_indexes_are_read", Engine::Mariadb, 10, 6, 0).await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(&db.endpoint, "CREATE TABLE t (a int, b int); CREATE INDEX t_b ON t (b); ALTER TABLE t ALTER INDEX t_b IGNORED").await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let structure = driver.catalog().table_structure(&db.name, "t").await.unwrap();
+        let index = structure.indexes.iter().find(|i| i.name == "t_b").expect("the index is listed");
+        // MariaDB's word for it: INVISIBLE is MySQL's and doesn't parse here
+        assert!(index.definition.ends_with(" IGNORED"), "{}", index.definition);
+        assert!(!index.definition.contains("INVISIBLE"), "{}", index.definition);
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn mariadb_returning_shows_rows_in_the_console() {
+        if !crate::db::mysql_common::tests_support::requires("mariadb_returning_shows_rows_in_the_console", Engine::Mariadb, 10, 5, 0).await {
+            return;
+        }
+        let db = TestDb::new().await;
+        exec(&db.endpoint, "CREATE TABLE t (id int PRIMARY KEY, name varchar(20))").await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let result = driver.console().unwrap().execute("INSERT INTO t VALUES (1, 'a') RETURNING id").await.unwrap();
+        assert_eq!(result.rows.len(), 1, "{:?}", result.rows);
+        assert_eq!(result.rows[0][0], serde_json::json!(1));
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a MariaDB server in DBUNNY_TEST_MYSQL_URL"]
+    async fn a_new_session_leaves_no_warning_in_the_editor() {
+        if !is_mariadb().await {
+            return;
+        }
+        let _settings = SERVER_SETTINGS.read().await;
+        let db = TestDb::new().await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        // What a person typing SHOW WARNINGS first would see from opening the session
+        let warnings: Vec<mysql_async::Row> = driver
+            .editor()
+            .run(|c| Box::pin(async move { c.query("SHOW WARNINGS").await.map_err(|e| e.to_string()) }))
+            .await
+            .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
         driver.close().await;
         db.drop_now().await;
     }

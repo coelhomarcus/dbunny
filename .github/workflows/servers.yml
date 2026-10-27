@@ -1,0 +1,213 @@
+name: Server tests
+
+# The server suites against every database version of the test matrix
+# (src-tauri/tests/servers.sh list), with the same scripts used locally.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      engine:
+        description: "Only this engine (postgres, mysql or mariadb); empty runs all"
+        required: false
+        default: ""
+      version:
+        description: "Only this version (with an engine); empty runs all"
+        required: false
+        default: ""
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src-tauri/src/db/**"
+      - "src-tauri/src/assistant/**"
+      - "src-tauri/tests/**"
+      - "src-tauri/Cargo.lock"
+      - ".github/workflows/servers.yml"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # What compiling the tests needs, and what running the test binary loads
+  BUILD_PACKAGES: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev
+  RUNTIME_PACKAGES: libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2
+
+# Tests only read the repository
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pick the versions
+        id: matrix
+        env:
+          ENGINE: ${{ inputs.engine }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          matrix="$(src-tauri/tests/servers.sh list | jq -R -s -c --arg engine "$ENGINE" --arg version "$VERSION" '
+            split("\n") | map(select(length > 0) | split(" ") | {engine: .[0], version: .[1]})
+            | map(select(($engine == "" or .engine == $engine) and ($version == "" or .version == $version)))')"
+          if [ "$(echo "$matrix" | jq length)" -eq 0 ]; then
+            echo "::error::nothing in the matrix matches \"$ENGINE $VERSION\" (see src-tauri/tests/servers.sh list)"
+            exit 1
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "$matrix"
+
+      - name: Check the matrix scripts
+        run: |
+          src-tauri/tests/matrix-summary-test.sh
+          src-tauri/tests/check-filters-test.sh
+
+      # The .deb files are cached: a slow Ubuntu mirror once made installing them take 20 minutes a job
+      - name: Cached runtime packages
+        uses: actions/cache@v4
+        with:
+          path: ~/debs/runtime
+          key: debs-ubuntu-22.04-${{ hashFiles('.github/workflows/servers.yml', 'src-tauri/tests/ci-apt.sh') }}-runtime
+
+      - name: Cached build packages
+        uses: actions/cache@v4
+        with:
+          path: ~/debs/build
+          key: debs-ubuntu-22.04-${{ hashFiles('.github/workflows/servers.yml', 'src-tauri/tests/ci-apt.sh') }}-build
+
+      # Before the build packages, which would install them and leave nothing to download
+      - name: Download the runtime packages
+        run: src-tauri/tests/ci-apt.sh download ~/debs/runtime $RUNTIME_PACKAGES
+
+      - name: Install Linux dependencies
+        run: src-tauri/tests/ci-apt.sh install ~/debs/build $BUILD_PACKAGES
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # Built once: compiling the app for each of the 16 versions would take far longer than the tests
+      - name: Build the tests
+        run: |
+          binary="$(cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run --message-format=json \
+            | jq -r 'select(.profile.test == true and .target.name == "dbunny_lib" and .executable != null) | .executable')"
+          mkdir -p server-tests
+          cp "$binary" server-tests/dbunny-tests
+          # Every server test has to match some engine's filters, or no job would run it
+          server-tests/dbunny-tests --ignored --list | src-tauri/tests/check-filters.sh
+
+      - name: Keep the test binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-tests
+          path: server-tests/dbunny-tests
+          retention-days: 3
+
+  servers:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.build.outputs.matrix) }}
+    name: ${{ matrix.engine }} ${{ matrix.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get the test binary
+        uses: actions/download-artifact@v4
+        with:
+          name: server-tests
+          path: server-tests
+
+      - name: Cached runtime packages
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/debs/runtime
+          key: debs-ubuntu-22.04-${{ hashFiles('.github/workflows/servers.yml', 'src-tauri/tests/ci-apt.sh') }}-runtime
+
+      # The libraries the test binary links against (it is the app's library, with the webview)
+      - name: Install runtime libraries
+        run: |
+          src-tauri/tests/ci-apt.sh install ~/debs/runtime $RUNTIME_PACKAGES
+          chmod +x server-tests/dbunny-tests
+          if ldd server-tests/dbunny-tests | grep 'not found'; then exit 1; fi
+
+      - name: Run the server tests
+        env:
+          ENGINE: ${{ matrix.engine }}
+          VERSION: ${{ matrix.version }}
+        run: |
+          mkdir -p logs
+          log="logs/$ENGINE-$VERSION.log"
+          started=$(date +%s)
+          # A server that doesn't start leaves its output as the log, which the summary counts as failed
+          if variables="$(src-tauri/tests/servers.sh up "$ENGINE" "$VERSION" 2>servers.err)"; then
+            eval "$variables"
+            # shellcheck disable=SC2046
+            (cd src-tauri && ../server-tests/dbunny-tests $(tests/servers.sh filters "$ENGINE") --ignored --nocapture) 2>&1 | tee "$log" || true
+          else
+            cat servers.err | tee "$log"
+          fi
+          echo "dbunny-matrix-time: $(($(date +%s) - started))" >> "$log"
+          # On Linux the Unix socket is shared with the host, so its test has to run
+          if [ "$ENGINE" = postgres ] && grep -q '^dbunny-skip: a_unix_socket_opens_a_session' "$log"; then
+            echo "the Unix socket test skipped on Linux"
+            exit 1
+          fi
+          src-tauri/tests/matrix-summary.sh "$log"
+
+      - name: Keep the log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-${{ matrix.engine }}-${{ matrix.version }}
+          path: logs/
+          retention-days: 14
+
+  summary:
+    needs: [build, servers]
+    if: always()
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get the logs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: log-*
+          path: logs
+          merge-multiple: true
+
+      - name: Summary
+        run: |
+          set +e
+          src-tauri/tests/matrix-summary.sh logs/*.log > table.txt
+          status=$?
+          { echo '```'; cat table.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          cat table.txt
+          # Every version the build job picked must have a log
+          expected=$(echo '${{ needs.build.outputs.matrix }}' | jq length)
+          found=$(ls logs/*.log 2>/dev/null | wc -l)
+          if [ "$found" -ne "$expected" ]; then
+            echo "only $found of $expected versions left a log"
+            status=1
+          fi
+          exit $status

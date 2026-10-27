@@ -692,7 +692,8 @@ mod server_tests {
         run(StructureChange::DropConstraint { name: "t_age_ok".into(), cascade: false }).await.unwrap();
         run(StructureChange::DropConstraint { name: "t_team_fk".into(), cascade: false }).await.unwrap();
         let kinds: Vec<String> = client
-            .query(&format!("SELECT contype::text FROM pg_constraint WHERE conrelid = '{s}.t'::regclass ORDER BY 1"), &[])
+            // PostgreSQL 18 also lists each NOT NULL column as a constraint (contype 'n')
+            .query(&format!("SELECT contype::text FROM pg_constraint WHERE conrelid = '{s}.t'::regclass AND contype <> 'n' ORDER BY 1"), &[])
             .await
             .unwrap()
             .iter()
@@ -752,6 +753,38 @@ mod server_tests {
         assert!(row.get::<_, bool>(1));
         let err = client.batch_execute(&format!("INSERT INTO {s}.people (name) VALUES (NULL)")).await.unwrap_err();
         assert!(db_message(&err).contains("null value"));
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn grant_maintain() {
+        if !crate::db::postgres::tests_support::requires("grant_maintain", 17, 0).await {
+            return;
+        }
+        let client = connect().await;
+        let s = "dbunny_maintain";
+        client.batch_execute(&format!("DROP SCHEMA IF EXISTS {s} CASCADE; CREATE SCHEMA {s}; CREATE TABLE {s}.t (id int)")).await.unwrap();
+        let grant = StructureChange::Grant { grantee: "PUBLIC".into(), privileges: vec!["MAINTAIN".into()], grant_option: false };
+        apply(&client, s, "t", &grant).await.unwrap();
+        let granted: bool = client.query_one(&format!("SELECT has_table_privilege('public', '{s}.t', 'MAINTAIN')"), &[]).await.unwrap().get(0);
+        assert!(granted);
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn grant_maintain_before_17_reports_the_server_error() {
+        // What happens today below 17: the option is offered and the server refuses it
+        if crate::db::postgres::tests_support::server_version().await.at_least(17, 0, 0) {
+            return;
+        }
+        let client = connect().await;
+        let s = "dbunny_maintain_old";
+        client.batch_execute(&format!("DROP SCHEMA IF EXISTS {s} CASCADE; CREATE SCHEMA {s}; CREATE TABLE {s}.t (id int)")).await.unwrap();
+        let grant = StructureChange::Grant { grantee: "PUBLIC".into(), privileges: vec!["MAINTAIN".into()], grant_option: false };
+        let err = apply(&client, s, "t", &grant).await.err().unwrap();
+        assert!(err.to_lowercase().contains("maintain"), "{err}");
         client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
     }
 }
