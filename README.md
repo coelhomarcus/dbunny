@@ -31,6 +31,8 @@ DBunny is a native database client for **macOS**, **Windows** and **Linux**, bui
 
 Supported means the versions their vendors still maintain, and every one of them is tested on each release, TLS and SSH tunnels included. A version past its end of support keeps working: DBunny says so once when you connect, and keeps a mark next to the version in the status bar. PostgreSQL older than 13, MySQL older than 8.0 and MariaDB older than 10.6 don't open.
 
+How each database is reached, which libraries and versions are used and how every feature is carried out is in [docs/DATABASES.md](docs/DATABASES.md).
+
 Screens and actions adapt to what the connected engine supports (for example, schemas and materialized views are PostgreSQL-only today, and MySQL and MariaDB have databases instead of schemas).
 
 ## Features
