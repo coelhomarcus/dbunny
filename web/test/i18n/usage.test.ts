@@ -8,8 +8,8 @@ const ROOT = join(import.meta.dirname, "../..");
 
 /** Keys that are used through a typed map or a code from the backend, so no `t("…")` names them. */
 const DYNAMIC_KEYS: string[] = [];
-/** Messages found by a code from the backend (`errors.<code>`), so no `t("…")` names them. */
-const DYNAMIC_PREFIXES = ["errors."];
+/** Messages found by a code from the backend (`errors.<code>`) or by a catalog entry (`sqlFunctions.<engine>.<key>`, `sqlSnippets.<id>`), so no `t("…")` names them. */
+const DYNAMIC_PREFIXES = ["errors.", "sqlFunctions.", "sqlSnippets."];
 /** Keys written ahead of the screens that will use them; each leaves this list when it is used. */
 const PENDING_KEYS: string[] = [];
 
@@ -47,7 +47,7 @@ test("every static t() key exists in english", () => {
 });
 
 test("every key of english is used, or is waiting for its screen", () => {
-  const unused = [...known].filter((key) => !used.has(key) && !DYNAMIC_KEYS.includes(key) && !key.startsWith(DYNAMIC_PREFIXES[0]) && !PENDING_KEYS.includes(key));
+  const unused = [...known].filter((key) => !used.has(key) && !DYNAMIC_KEYS.includes(key) && !DYNAMIC_PREFIXES.some((prefix) => key.startsWith(prefix)) && !PENDING_KEYS.includes(key));
   assert.deepEqual(unused.sort(), [], "a key nobody uses is dead text: remove it");
 });
 
