@@ -1,7 +1,8 @@
 import { MySQL } from "@codemirror/lang-sql";
 import catalog from "./catalog/mysql.json" with { type: "json" };
+import snippets from "./catalog/mysql.snippets.json" with { type: "json" };
 import { COMMON_PHRASES, quoter, wordsOf, wordsToQuote } from "./shared.ts";
-import type { CatalogFunction, DialectItem, SqlDialect } from "./types.ts";
+import type { CatalogFunction, DialectItem, DialectSnippet, SqlDialect } from "./types.ts";
 
 /** The phrases MySQL and MariaDB share. */
 export const MYSQL_FAMILY_PHRASES: DialectItem[] = [
@@ -24,5 +25,5 @@ export const mysql: SqlDialect = {
   ...wordsOf(MySQL),
   phrases: [...MYSQL_FAMILY_PHRASES, { label: "LEFT JOIN LATERAL", requires: "lateral" }],
   functions: catalog as CatalogFunction[],
-  snippets: [],
+  snippets: snippets as DialectSnippet[],
 };

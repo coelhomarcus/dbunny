@@ -1,7 +1,8 @@
 import { SQLite } from "@codemirror/lang-sql";
 import catalog from "./catalog/sqlite.json" with { type: "json" };
+import snippets from "./catalog/sqlite.snippets.json" with { type: "json" };
 import { COMMON_PHRASES, quoter, wordsOf, wordsToQuote } from "./shared.ts";
-import type { CatalogFunction, SqlDialect } from "./types.ts";
+import type { CatalogFunction, DialectSnippet, SqlDialect } from "./types.ts";
 
 export const sqlite: SqlDialect = {
   engine: "sqlite",
@@ -26,5 +27,5 @@ export const sqlite: SqlDialect = {
     { label: "WITHOUT ROWID" },
   ],
   functions: catalog as CatalogFunction[],
-  snippets: [],
+  snippets: snippets as DialectSnippet[],
 };

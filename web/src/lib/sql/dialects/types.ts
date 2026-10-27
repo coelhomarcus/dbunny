@@ -19,9 +19,11 @@ export interface CatalogFunction {
   example: string;
 }
 
-/** A statement template; its label is `sqlSnippets.<id>`. */
+/** A statement template: `label` is the word that offers it, `sqlSnippets.<id>` says what it does. */
 export interface DialectSnippet {
   id: string;
+  label: string;
+  /** CodeMirror snippet text, with `${field}` placeholders. */
   template: string;
   requires?: SqlFeature;
   example: string;

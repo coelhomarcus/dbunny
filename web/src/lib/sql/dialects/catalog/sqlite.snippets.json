@@ -1,0 +1,11 @@
+[
+  {"id": "select", "label": "select", "template": "SELECT ${columns} FROM ${table} WHERE ${condition}", "example": "SELECT id, name FROM dbunny_snippet_t WHERE id = 1"},
+  {"id": "insert", "label": "insert", "template": "INSERT INTO ${table} (${columns}) VALUES (${values})", "example": "INSERT INTO dbunny_snippet_t (id, name) VALUES (1, 'a')"},
+  {"id": "update", "label": "update", "template": "UPDATE ${table} SET ${column} = ${value} WHERE ${condition}", "example": "UPDATE dbunny_snippet_t SET name = 'b' WHERE id = 1"},
+  {"id": "delete", "label": "delete", "template": "DELETE FROM ${table} WHERE ${condition}", "example": "DELETE FROM dbunny_snippet_t WHERE id = 1"},
+  {"id": "with", "label": "with", "template": "WITH ${name} AS (\n  ${query}\n)\nSELECT ${columns} FROM ${name}", "example": "WITH x AS (SELECT id FROM dbunny_snippet_t) SELECT id FROM x"},
+  {"id": "case", "label": "case", "template": "CASE WHEN ${condition} THEN ${result} ELSE ${otherwise} END", "example": "SELECT CASE WHEN id > 0 THEN 'a' ELSE 'b' END FROM dbunny_snippet_t"},
+  {"id": "join", "label": "join", "template": "JOIN ${table} ON ${condition}", "example": "SELECT * FROM dbunny_snippet_t a JOIN dbunny_snippet_t b ON a.id = b.id"},
+  {"id": "upsert", "label": "upsert", "template": "INSERT INTO ${table} (${key}, ${column}) VALUES (${values})\nON CONFLICT (${key}) DO UPDATE SET ${column} = excluded.${column}", "requires": "onConflict", "example": "INSERT INTO dbunny_snippet_t (id, name) VALUES (1, 'a') ON CONFLICT (id) DO UPDATE SET name = excluded.name"},
+  {"id": "createTable", "label": "create table", "template": "CREATE TABLE ${name} (\n  id INTEGER PRIMARY KEY,\n  ${column} ${type}\n)", "example": "CREATE TABLE dbunny_snippet_new (id INTEGER PRIMARY KEY, name TEXT)"}
+]

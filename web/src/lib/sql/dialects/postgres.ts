@@ -1,7 +1,8 @@
 import { PostgreSQL } from "@codemirror/lang-sql";
 import catalog from "./catalog/postgres.json" with { type: "json" };
+import snippets from "./catalog/postgres.snippets.json" with { type: "json" };
 import { COMMON_PHRASES, quoter, wordsOf } from "./shared.ts";
-import type { CatalogFunction, SqlDialect } from "./types.ts";
+import type { CatalogFunction, DialectSnippet, SqlDialect } from "./types.ts";
 
 /**
  * The words PostgreSQL reserves, or reserves except as a function or type name (Appendix C); its
@@ -46,5 +47,5 @@ export const postgres: SqlDialect = {
     { label: "MERGE INTO", requires: "merge" },
   ],
   functions: catalog as CatalogFunction[],
-  snippets: [],
+  snippets: snippets as DialectSnippet[],
 };

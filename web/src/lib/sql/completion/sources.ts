@@ -1,9 +1,9 @@
-import type { Completion } from "@codemirror/autocomplete";
+import { snippetCompletion, type Completion } from "@codemirror/autocomplete";
 import type { CompletionColumn, CompletionRelation, CompletionSchema, SqlFeature } from "@/types";
 import { t, tr } from "../../../i18n/store.ts";
 import { available, functionKey } from "../dialects/index.ts";
 import type { SqlDialect } from "../dialects/types.ts";
-import type { QueryContext, QueryRelation } from "./context.ts";
+import type { Position, QueryContext, QueryRelation } from "./context.ts";
 import { ICON_LABEL, type ItemKind } from "./icons.ts";
 
 /** How high each kind of suggestion ranks: what the position asks for, then objects, functions, words. */
@@ -17,6 +17,7 @@ const BOOST = {
   catalogFunction: 20,
   userFunction: 18,
   serverFunction: 10,
+  snippet: 0,
   phrase: -8,
   keyword: -10,
   dataType: -12,
@@ -270,6 +271,31 @@ export function keywordOptions(dialect: SqlDialect, features: SqlFeature[]): Com
   return list;
 }
 
+/** The snippets each position starts: statements at the start, `case` in an expression, `join` after a relation. */
+const SNIPPETS_AT: Partial<Record<Position["kind"], (id: string) => boolean>> = {
+  statementStart: (id) => id !== "case" && id !== "join",
+  column: (id) => id === "case",
+  joinCondition: (id) => id === "case",
+  keyword: (id) => id === "join",
+};
+
+/** The dialect's statement templates that fit the position and the server. */
+export function snippetOptions(dialect: SqlDialect, features: SqlFeature[], position: Position): Completion[] {
+  const fits = SNIPPETS_AT[position.kind];
+  if (!fits) return [];
+  return available(dialect.snippets, features)
+    .filter((s) => fits(s.id))
+    .map((s) =>
+      snippetCompletion(s.template, {
+        label: s.label,
+        type: "snippet",
+        detail: tr(`sqlSnippets.${s.id}`),
+        info: s.template.replace(/\$\{(\w+)\}/g, "$1"),
+        boost: BOOST.snippet,
+      }),
+    );
+}
+
 /** Everything worth offering at the cursor, ranked by `boost`. */
 export function optionsAt(schema: CompletionSchema | null, ctx: QueryContext, dialect: SqlDialect, features: SqlFeature[]): Completion[] {
   const position = ctx.position;
@@ -278,7 +304,7 @@ export function optionsAt(schema: CompletionSchema | null, ctx: QueryContext, di
       return [];
     case "statementStart":
     case "keyword":
-      return keywordOptions(dialect, features);
+      return [...snippetOptions(dialect, features, position), ...keywordOptions(dialect, features)];
     case "table":
       return [...relationOptions(schema, ctx, dialect), ...keywordOptions(dialect, features)];
     case "qualified":
@@ -293,9 +319,15 @@ export function optionsAt(schema: CompletionSchema | null, ctx: QueryContext, di
         ...joinConditionOptions(schema, ctx, dialect),
         ...columnOptions(schema, ctx, dialect),
         ...functionOptions(schema, dialect, features),
+        ...snippetOptions(dialect, features, position),
         ...keywordOptions(dialect, features),
       ];
     case "column":
-      return [...columnOptions(schema, ctx, dialect), ...functionOptions(schema, dialect, features), ...keywordOptions(dialect, features)];
+      return [
+        ...columnOptions(schema, ctx, dialect),
+        ...functionOptions(schema, dialect, features),
+        ...snippetOptions(dialect, features, position),
+        ...keywordOptions(dialect, features),
+      ];
   }
 }

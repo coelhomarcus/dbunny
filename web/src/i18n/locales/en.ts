@@ -1207,6 +1207,18 @@ export const en = {
       zeroblob: "N zero bytes.",
     },
   },
+  sqlSnippets: {
+    case: "Pick a value by condition",
+    createTable: "Create a table with an id",
+    delete: "Remove rows",
+    insert: "Add a row",
+    join: "Join another table",
+    merge: "Merge the rows of another query",
+    select: "Read rows",
+    update: "Change rows",
+    upsert: "Add a row, or change the one with the same key",
+    with: "Name a query and read from it",
+  },
   structure: {
     foreignKeyEditor: {
       chooseAColumn: "Choose at least one column",

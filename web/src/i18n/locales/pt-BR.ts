@@ -1209,6 +1209,18 @@ export const ptBR: Translation<typeof en> = {
       zeroblob: "N bytes zerados.",
     },
   },
+  sqlSnippets: {
+    case: "Escolher um valor por condição",
+    createTable: "Criar uma tabela com id",
+    delete: "Remover linhas",
+    insert: "Inserir uma linha",
+    join: "Juntar outra tabela",
+    merge: "Mesclar as linhas de outra consulta",
+    select: "Ler linhas",
+    update: "Alterar linhas",
+    upsert: "Inserir uma linha, ou alterar a que tem a mesma chave",
+    with: "Nomear uma consulta e ler dela",
+  },
   structure: {
     foreignKeyEditor: {
       chooseAColumn: "Escolha pelo menos uma coluna",

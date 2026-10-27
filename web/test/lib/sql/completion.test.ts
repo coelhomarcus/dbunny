@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import type { Completion } from "@codemirror/autocomplete";
 import { analyze } from "../../../src/lib/sql/completion/context.ts";
 import { ICON_LABEL, ITEM_KINDS, iconSvg } from "../../../src/lib/sql/completion/icons.ts";
-import { optionsAt } from "../../../src/lib/sql/completion/sources.ts";
+import { optionsAt, snippetOptions } from "../../../src/lib/sql/completion/sources.ts";
 import { dialectOf } from "../../../src/lib/sql/dialects/index.ts";
 import { en } from "../../../src/i18n/locales/en.ts";
+import { ptBR } from "../../../src/i18n/locales/pt-BR.ts";
 import type { CompletionColumn, CompletionRelation, CompletionSchema, Engine, SqlFeature } from "../../../src/types/index.ts";
 
 const col = (name: string, dataType: string, extra: Partial<CompletionColumn> = {}): CompletionColumn => ({
@@ -166,4 +167,51 @@ test("large schema builds quickly", () => {
   at("SELECT | FROM t1 JOIN t2 ON true", "postgres", [], big);
   at("SELECT * FROM |", "postgres", [], big);
   assert.ok(performance.now() - started < 50, `took ${performance.now() - started} ms`);
+});
+
+const snippet = (engine: Engine, id: string, features: SqlFeature[] = []) => dialectOf(engine).snippets.find((s) => s.id === id && (!s.requires || features.includes(s.requires)));
+
+test("snippets follow each dialect", () => {
+  assert.match(snippet("postgres", "upsert", ["onConflict"])!.template, /ON CONFLICT/);
+  assert.match(snippet("sqlite", "upsert", ["onConflict"])!.template, /ON CONFLICT/);
+  for (const engine of ["mysql", "mariadb"] as const) {
+    assert.match(snippet(engine, "upsert", ["onDuplicateKeyUpdate"])!.template, /ON DUPLICATE KEY UPDATE/);
+    assert.doesNotMatch(snippet(engine, "upsert", ["onDuplicateKeyUpdate"])!.template, /ON CONFLICT/);
+    assert.match(snippet(engine, "createTable")!.template, /AUTO_INCREMENT/);
+  }
+  assert.match(snippet("postgres", "createTable")!.template, /GENERATED ALWAYS AS IDENTITY/);
+  assert.match(snippet("sqlite", "createTable")!.template, /INTEGER PRIMARY KEY/);
+  const statement = (engine: Engine, features: SqlFeature[]) =>
+    snippetOptions(dialectOf(engine), features, { kind: "statementStart" }).map((o) => o.label);
+  assert.ok(!statement("postgres", []).includes("merge"));
+  assert.ok(statement("postgres", ["merge"]).includes("merge"));
+  assert.ok(!statement("mysql", ["merge"]).includes("merge"));
+});
+
+test("every snippet has an example and words in both languages", () => {
+  for (const engine of ["postgres", "mysql", "mariadb", "sqlite"] as const) {
+    const { snippets } = dialectOf(engine);
+    assert.ok(snippets.length >= 9, engine);
+    for (const s of snippets) {
+      assert.ok(s.example.trim() && s.template.includes("${"), `${engine} ${s.id}`);
+      assert.ok((en.sqlSnippets as Record<string, string>)[s.id], `en sqlSnippets.${s.id}`);
+      assert.ok((ptBR.sqlSnippets as Record<string, string>)[s.id], `pt-BR sqlSnippets.${s.id}`);
+    }
+  }
+});
+
+test("snippets open a statement and rank below names", () => {
+  const start = at("sel|");
+  const select = find(start, "select")!;
+  assert.equal(select.type, "snippet");
+  assert.equal(start.filter((o) => o.type === "snippet").length, 6);
+  // upsert and merge need the server's onConflict and merge
+  assert.equal(at("sel|", "postgres", ["onConflict", "merge"]).filter((o) => o.type === "snippet").length, 8);
+  const withColumn = { ...SCHEMA, relations: [{ schema: "public", name: "t", type: "table" as const, columns: [col("cased", "bool")] }] };
+  const options = ranked(at("SELECT cas| FROM t", "postgres", [], withColumn));
+  const column = options.findIndex((o) => o.label === "cased");
+  const caseSnippet = options.findIndex((o) => o.label === "case" && o.type === "snippet");
+  assert.ok(caseSnippet >= 0 && column < caseSnippet);
+  // A snippet ranks above the keyword it starts with
+  assert.ok(caseSnippet < options.findIndex((o) => o.label === "CASE"));
 });
