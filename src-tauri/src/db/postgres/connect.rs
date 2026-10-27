@@ -5,7 +5,7 @@ use postgres_native_tls::MakeTlsConnector;
 use std::sync::Arc;
 use tokio_postgres::config::SslMode;
 
-use crate::db::version::ServerVersion;
+use crate::db::version::{postgres_is_stock, ServerVersion};
 use super::session::{Endpoint, Link, Notices, PgState};
 use super::PostgresDriver;
 use crate::db::model::Notice;
@@ -243,12 +243,16 @@ impl PostgresDriver {
 
         // The version capabilities and the end of support follow; a server that doesn't tell it
         // (unlikely) opens without them rather than not at all
+        // Compatible servers (YugabyteDB, Greenplum, CockroachDB, Redshift) report a version they
+        // emulate: for them it stays unknown, so no floor and no end of support
+        let version_text: String = client.query_one("SELECT version()", &[]).await.map(|row| row.get(0)).unwrap_or_default();
         let version = client
             .query_one("SHOW server_version_num", &[])
             .await
             .ok()
             .and_then(|row| row.get::<_, String>(0).parse::<i32>().ok())
-            .map(ServerVersion::from_postgres_num);
+            .map(ServerVersion::from_postgres_num)
+            .filter(|_| postgres_is_stock(&server_version, &version_text));
         if let Some(version) = version {
             check_postgres_version(version, server_version.split_whitespace().next().unwrap_or(&server_version))?;
         }

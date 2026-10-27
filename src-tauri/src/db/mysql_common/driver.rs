@@ -13,6 +13,7 @@ use super::errors::error_message;
 use super::flavor::Flavor;
 use super::version::ServerVersion;
 use super::editor::EditorConn;
+use crate::db::version::mysql_is_stock;
 use crate::db::net::ssh::{open_tunnel, KnownHosts, Tunnel};
 use crate::db::{Capabilities, Catalog, Console, ConnectionInfo, Data, Driver, Engine, ReadOnlyQueries, SchemaEditor, ServerAdmin, Transactions};
 
@@ -35,6 +36,9 @@ pub struct ServerDriver {
     info: ConnectionInfo,
     #[allow(dead_code)] // read through `version()`
     version: ServerVersion,
+    /// MySQL or MariaDB itself, not a compatible server (Aurora, TiDB, Vitess) whose version
+    /// follows its own vendor's support.
+    stock: bool,
     capabilities: Capabilities,
     flavor: &'static dyn Flavor,
 }
@@ -67,6 +71,10 @@ impl ServerDriver {
             .run(|c| Box::pin(async move { c.query_first("SELECT VERSION()").await.map(Option::unwrap_or_default).map_err(fail_version) }))
             .await?;
         let version = flavor.parse_version(&text)?;
+        // Aurora MySQL reports a plain 8.0.x; only it answers @@aurora_version
+        let aurora = flavor.engine() == Engine::Mysql
+            && editor.run(|c| Box::pin(async move { c.query_drop("SELECT @@aurora_version").await.map_err(|e| e.to_string()) })).await.is_ok();
+        let stock = flavor.engine() != Engine::Mysql || mysql_is_stock(&text, aurora);
 
         if endpoint.database.as_deref().unwrap_or("").is_empty() {
             let fail_first = fail.clone();
@@ -121,6 +129,7 @@ impl ServerDriver {
             tunnel: Mutex::new(tunnel),
             info,
             version,
+            stock,
             capabilities: flavor.capabilities(version),
             flavor,
         }))
@@ -164,8 +173,9 @@ impl Driver for ServerDriver {
         self.flavor.engine()
     }
 
+    /// Only for MySQL and MariaDB themselves: the end of support follows their lines.
     fn version(&self) -> Option<ServerVersion> {
-        Some(ServerDriver::version(self))
+        self.stock.then(|| ServerDriver::version(self))
     }
 
     fn capabilities(&self) -> &Capabilities {

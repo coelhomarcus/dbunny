@@ -115,6 +115,22 @@ pub fn past_end_of_support(engine: Engine, version: ServerVersion, today: chrono
     (today > last_day).then_some(support)
 }
 
+/// Whether the server is PostgreSQL itself, whose version lines the table follows. Compatible
+/// servers report the PostgreSQL version they emulate (YugabyteDB 11.2, Greenplum 12, CockroachDB
+/// 13.0, Redshift 8.0), not their own release, so neither the floor nor the end of support of
+/// PostgreSQL applies to them. `server_version` is `SHOW server_version`, `version_text` is `version()`.
+pub fn postgres_is_stock(server_version: &str, version_text: &str) -> bool {
+    let number = server_version.split_whitespace().next().unwrap_or("");
+    let plain_number = !number.is_empty() && number.chars().all(|c| c.is_ascii_digit() || c == '.');
+    plain_number && version_text.starts_with("PostgreSQL ") && !["Greenplum", "Redshift"].iter().any(|name| version_text.contains(name))
+}
+
+/// Whether the server is MySQL itself. TiDB and Vitess (PlanetScale) write their name into
+/// `VERSION()`; Aurora MySQL reports a plain 8.0.x and is told by `@@aurora_version` answering.
+pub fn mysql_is_stock(version_text: &str, aurora: bool) -> bool {
+    !aurora && !["TiDB", "Vitess"].iter().any(|name| version_text.contains(name))
+}
+
 /// The line a server test prints when it skips because the server is too old for what it
 /// checks; `matrix.sh` counts these lines.
 #[cfg(test)]
@@ -242,5 +258,26 @@ mod tests {
     fn end_of_support_serializes_in_camel_case() {
         let json = serde_json::to_value(EndOfSupport { line: "13".into(), date: "2025-11-13".into() }).unwrap();
         assert_eq!(json, serde_json::json!({ "line": "13", "date": "2025-11-13" }));
+    }
+
+    #[test]
+    fn stock_postgresql_is_told_apart_from_compatible_servers() {
+        assert!(postgres_is_stock("13.23 (Debian 13.23-1.pgdg13+1)", "PostgreSQL 13.23 (Debian 13.23-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc"));
+        assert!(postgres_is_stock("17.2", "PostgreSQL 17.2 on x86_64-pc-linux-gnu, compiled by gcc (GCC) 12.2.0, 64-bit"));
+        // They report the PostgreSQL version they emulate, not their own release
+        assert!(!postgres_is_stock("11.2-YB-2.20.1.0-b0", "PostgreSQL 11.2-YB-2.20.1.0-b0 on x86_64-pc-linux-gnu, compiled by clang"));
+        assert!(!postgres_is_stock("12.12", "PostgreSQL 12.12 (Greenplum Database 7.1.0 build commit:e7c2b1f) on x86_64-pc-linux-gnu"));
+        assert!(!postgres_is_stock("13.0.0", "CockroachDB CCL v23.1.11 (aarch64-unknown-linux-gnu, built 2023/09/27 01:53:43, go1.19.10)"));
+        assert!(!postgres_is_stock("8.0.2", "PostgreSQL 8.0.2 on i686-pc-linux-gnu, compiled by GCC gcc (GCC) 3.4.2 20041017 (Red Hat 3.4.2-6.fc3), Redshift 1.0.77467"));
+    }
+
+    #[test]
+    fn stock_mysql_is_told_apart_from_compatible_servers() {
+        assert!(mysql_is_stock("8.0.46", false));
+        assert!(mysql_is_stock("8.0.36-0ubuntu0.22.04.1", false));
+        assert!(!mysql_is_stock("8.0.11-TiDB-v7.5.0", false));
+        assert!(!mysql_is_stock("8.0.34-Vitess", false));
+        // Aurora MySQL reports plain 8.0.x; it is told by @@aurora_version answering
+        assert!(!mysql_is_stock("8.0.28", true));
     }
 }
