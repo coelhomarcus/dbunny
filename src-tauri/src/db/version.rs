@@ -3,6 +3,8 @@
 
 use std::fmt;
 
+use crate::db::Engine;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ServerVersion {
     pub major: u16,
@@ -28,6 +30,89 @@ impl ServerVersion {
             ServerVersion { major: part(num / 10_000), minor: part(num / 100 % 100), patch: part(num % 100) }
         }
     }
+}
+
+/// When a version line stopped (or stops) being maintained by its vendor: `line` is the server's
+/// own line ("13", "8.0"), `date` the last day of support (YYYY-MM-DD).
+#[derive(serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EndOfSupport {
+    pub line: String,
+    pub date: String,
+}
+
+/// Every version line since the oldest one DBunny opens, and its last day of support
+/// (endoflife.date, 2026-10-26), short-lived ones (MySQL Innovation, MariaDB rolling) included.
+/// PostgreSQL lines are the major version (the minor is ignored); MySQL and MariaDB lines are
+/// major.minor. In version order within each engine.
+const SUPPORT: &[(Engine, u16, u16, &str)] = &[
+    (Engine::Postgres, 13, 0, "2025-11-13"),
+    (Engine::Postgres, 14, 0, "2026-11-12"),
+    (Engine::Postgres, 15, 0, "2027-11-11"),
+    (Engine::Postgres, 16, 0, "2028-11-09"),
+    (Engine::Postgres, 17, 0, "2029-11-08"),
+    (Engine::Postgres, 18, 0, "2030-11-14"),
+    (Engine::Mysql, 8, 0, "2026-04-30"),
+    (Engine::Mysql, 8, 1, "2023-10-25"),
+    (Engine::Mysql, 8, 2, "2024-01-16"),
+    (Engine::Mysql, 8, 3, "2024-04-30"),
+    (Engine::Mysql, 8, 4, "2032-04-30"),
+    (Engine::Mysql, 9, 0, "2024-10-15"),
+    (Engine::Mysql, 9, 1, "2025-01-21"),
+    (Engine::Mysql, 9, 2, "2025-04-15"),
+    (Engine::Mysql, 9, 3, "2025-07-22"),
+    (Engine::Mysql, 9, 4, "2025-10-21"),
+    (Engine::Mysql, 9, 5, "2026-01-20"),
+    (Engine::Mysql, 9, 6, "2026-04-21"),
+    (Engine::Mysql, 9, 7, "2034-04-30"),
+    (Engine::Mysql, 26, 7, "2026-10-20"),
+    (Engine::Mariadb, 10, 6, "2026-07-06"),
+    (Engine::Mariadb, 10, 7, "2023-02-09"),
+    (Engine::Mariadb, 10, 8, "2023-05-20"),
+    (Engine::Mariadb, 10, 9, "2023-08-22"),
+    (Engine::Mariadb, 10, 10, "2023-11-17"),
+    (Engine::Mariadb, 10, 11, "2028-02-16"),
+    (Engine::Mariadb, 11, 0, "2024-06-06"),
+    (Engine::Mariadb, 11, 1, "2024-08-21"),
+    (Engine::Mariadb, 11, 2, "2024-11-21"),
+    (Engine::Mariadb, 11, 3, "2024-05-29"),
+    (Engine::Mariadb, 11, 4, "2029-05-29"),
+    (Engine::Mariadb, 11, 5, "2024-11-21"),
+    (Engine::Mariadb, 11, 6, "2025-02-13"),
+    (Engine::Mariadb, 11, 7, "2025-05-12"),
+    (Engine::Mariadb, 11, 8, "2028-06-04"),
+    (Engine::Mariadb, 12, 0, "2025-11-18"),
+    (Engine::Mariadb, 12, 1, "2026-02-13"),
+    (Engine::Mariadb, 12, 2, "2026-05-28"),
+    (Engine::Mariadb, 12, 3, "2029-06-12"),
+    (Engine::Mariadb, 13, 0, "2026-12-31"),
+];
+
+/// The last day `version`'s line is maintained. A version newer than every line of its engine
+/// (a MySQL Innovation or MariaDB rolling release, a PostgreSQL out after this table) has none;
+/// one the table doesn't list between two lines takes the date of the line before it, the
+/// longest that can be said for sure. SQLite has none.
+pub fn end_of_support(engine: Engine, version: ServerVersion) -> Option<EndOfSupport> {
+    let (key, line) = match engine {
+        Engine::Sqlite => return None,
+        Engine::Postgres => ((version.major, 0), version.major.to_string()),
+        Engine::Mysql | Engine::Mariadb => ((version.major, version.minor), format!("{}.{}", version.major, version.minor)),
+    };
+    let lines: Vec<_> = SUPPORT.iter().filter(|(e, ..)| *e == engine).collect();
+    let last = lines.last()?;
+    if key > (last.1, last.2) {
+        return None;
+    }
+    // The line itself, or the newest one before it (or the oldest, below them all)
+    let date = lines.iter().rev().find(|(_, major, minor, _)| (*major, *minor) <= key).or(lines.first())?.3;
+    Some(EndOfSupport { line, date: date.to_string() })
+}
+
+/// `end_of_support`, only once `today` is past that last day.
+pub fn past_end_of_support(engine: Engine, version: ServerVersion, today: chrono::NaiveDate) -> Option<EndOfSupport> {
+    let support = end_of_support(engine, version)?;
+    let last_day = chrono::NaiveDate::parse_from_str(&support.date, "%Y-%m-%d").ok()?;
+    (today > last_day).then_some(support)
 }
 
 /// The line a server test prints when it skips because the server is too old for what it
@@ -59,7 +144,6 @@ pub(crate) fn numbers(text: &str) -> Option<(ServerVersion, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Engine;
 
     #[test]
     fn reads_major_minor_patch_and_shows_it() {
@@ -91,5 +175,72 @@ mod tests {
         assert!(version.at_least(8, 0, 18));
         assert!(!version.at_least(8, 0, 19));
         assert!(version.at_least(7, 9, 99));
+    }
+
+    fn day(y: i32, m: u32, d: u32) -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    fn v(major: u16, minor: u16, patch: u16) -> ServerVersion {
+        ServerVersion { major, minor, patch }
+    }
+
+    #[test]
+    fn every_line_of_the_table_has_its_date() {
+        let date = |engine, version| end_of_support(engine, version).map(|s| s.date);
+        let pg = |major, expected: &str| assert_eq!(date(Engine::Postgres, v(major, 4, 0)).as_deref(), Some(expected), "PostgreSQL {major}");
+        pg(13, "2025-11-13");
+        pg(14, "2026-11-12");
+        pg(15, "2027-11-11");
+        pg(16, "2028-11-09");
+        pg(17, "2029-11-08");
+        pg(18, "2030-11-14");
+        let line = |engine, major, minor, expected: &str| assert_eq!(date(engine, v(major, minor, 3)).as_deref(), Some(expected), "{engine:?} {major}.{minor}");
+        line(Engine::Mysql, 8, 0, "2026-04-30");
+        line(Engine::Mysql, 8, 4, "2032-04-30");
+        line(Engine::Mysql, 9, 7, "2034-04-30");
+        line(Engine::Mariadb, 10, 6, "2026-07-06");
+        line(Engine::Mariadb, 10, 11, "2028-02-16");
+        line(Engine::Mariadb, 11, 4, "2029-05-29");
+        line(Engine::Mariadb, 11, 8, "2028-06-04");
+        line(Engine::Mariadb, 12, 3, "2029-06-12");
+    }
+
+    #[test]
+    fn the_last_day_is_still_supported() {
+        assert_eq!(past_end_of_support(Engine::Postgres, v(14, 1, 0), day(2026, 11, 12)), None);
+        assert_eq!(
+            past_end_of_support(Engine::Postgres, v(14, 1, 0), day(2026, 11, 13)),
+            Some(EndOfSupport { line: "14".into(), date: "2026-11-12".into() })
+        );
+    }
+
+    #[test]
+    fn newer_than_the_table_is_supported() {
+        assert_eq!(end_of_support(Engine::Mysql, v(26, 10, 0)), None);
+        assert_eq!(end_of_support(Engine::Mariadb, v(13, 1, 0)), None);
+        assert_eq!(end_of_support(Engine::Postgres, v(19, 0, 0)), None);
+        assert_eq!(end_of_support(Engine::Sqlite, v(3, 53, 0)), None);
+        // A rolling release with a date still ahead
+        assert_eq!(past_end_of_support(Engine::Mariadb, v(13, 0, 2), day(2026, 10, 26)), None);
+    }
+
+    #[test]
+    fn short_lived_lines_have_their_own_date() {
+        assert_eq!(end_of_support(Engine::Mariadb, v(11, 1, 0)), Some(EndOfSupport { line: "11.1".into(), date: "2024-08-21".into() }));
+        assert_eq!(past_end_of_support(Engine::Mysql, v(9, 3, 0), day(2026, 10, 26)), Some(EndOfSupport { line: "9.3".into(), date: "2025-07-22".into() }));
+        assert_eq!(past_end_of_support(Engine::Mysql, v(26, 7, 1), day(2026, 10, 26)), Some(EndOfSupport { line: "26.7".into(), date: "2026-10-20".into() }));
+    }
+
+    #[test]
+    fn a_line_missing_from_the_table_takes_the_one_before() {
+        // 9.8 never shipped: it sits between 9.7 and 26.7, so it gets 9.7's date
+        assert_eq!(end_of_support(Engine::Mysql, v(9, 8, 0)), Some(EndOfSupport { line: "9.8".into(), date: "2034-04-30".into() }));
+    }
+
+    #[test]
+    fn end_of_support_serializes_in_camel_case() {
+        let json = serde_json::to_value(EndOfSupport { line: "13".into(), date: "2025-11-13".into() }).unwrap();
+        assert_eq!(json, serde_json::json!({ "line": "13", "date": "2025-11-13" }));
     }
 }
