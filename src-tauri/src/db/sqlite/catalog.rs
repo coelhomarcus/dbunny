@@ -6,11 +6,14 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use rusqlite::{Connection, OptionalExtension};
 
+use std::collections::HashMap;
+
 use super::conn::TransactionState;
 use super::errors::map_statement_error;
 use super::values::standard_type;
 use super::SqliteDriver;
 use crate::db::model::{
+    ColumnReference,
     ColumnInfo, CompletionColumn, CompletionRelation, CompletionSchema, ConstraintInfo, Diagram, DiagramColumn,
     DiagramRelation, DiagramTable, ExplorerObject, ExplorerSchema, ExplorerTree, ExtensionInfo, ForeignKeyInfo,
     ForeignKeyRef, FunctionDetail, IndexInfo, ObjectDefinition, ReferencedBy, TableMeta, TableStructure, TriggerInfo,
@@ -657,17 +660,35 @@ fn completion_schema(c: &Connection) -> rusqlite::Result<CompletionSchema> {
         let mut found: Vec<Object> = objects(c, &db)?.into_iter().filter(|o| o.kind == "table" || o.kind == "view").collect();
         found.sort_by(|a, b| a.name.cmp(&b.name));
         for o in found {
+            // Each column of a foreign key points at the column it pairs with
+            let mut references: HashMap<String, ColumnReference> = HashMap::new();
+            for key in foreign_keys(c, &db, &o.name).unwrap_or_default() {
+                for (from, to) in key.from.iter().zip(&key.to) {
+                    references.entry(from.clone()).or_insert_with(|| ColumnReference { schema: db.clone(), table: key.table.clone(), column: to.clone() });
+                }
+            }
             // A view whose tables are gone has no columns to offer, but the others still do
             let columns = raw_columns(c, &db, &o.name)
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|r| r.hidden != 1)
-                .map(|r| CompletionColumn { name: r.name, data_type: r.declared })
+                .map(|r| CompletionColumn {
+                    references: references.get(&r.name).cloned(),
+                    primary_key: r.pk > 0,
+                    // A rowid key (INTEGER PRIMARY KEY) is never null though SQLite doesn't say NOT NULL
+                    nullable: !r.not_null && r.pk == 0,
+                    name: r.name,
+                    data_type: r.declared,
+                })
                 .collect();
             relations.push(CompletionRelation { schema: db.clone(), name: o.name, relation_type: o.kind, columns });
         }
     }
-    Ok(CompletionSchema { current_schema: Some("main".into()), relations, functions: Vec::new() })
+    let builtin_functions = c
+        .prepare("SELECT DISTINCT name FROM pragma_function_list ORDER BY 1")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(CompletionSchema { current_schema: Some("main".into()), relations, functions: Vec::new(), builtin_functions })
 }
 
 // Reading the SQL SQLite keeps: just enough to tell a trigger's timing and event, a
@@ -1467,5 +1488,28 @@ mod tests {
         assert_eq!((incoming.from_schema.as_str(), incoming.to_table.as_str()), ("temp", "users"));
 
         assert!(d.diagram("missing").await.unwrap().tables.is_empty());
+    }
+
+    #[tokio::test]
+    async fn completion_marks_keys_nullability_and_functions() {
+        let f = TempDb::with(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY, a INT, b INT, UNIQUE (a, b)); \
+             CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parents (id), note TEXT, \
+               pa INT, pb INT, FOREIGN KEY (pa, pb) REFERENCES parents (a, b)); \
+             CREATE VIEW parent_ids AS SELECT id FROM parents;",
+        );
+        let d = open(&f).await;
+        let completion = d.completion_schema().await.unwrap();
+        let relation = |name: &str| completion.relations.iter().find(|r| r.name == name).unwrap();
+        let column = |name: &str| relation("children").columns.iter().find(|c| c.name == name).unwrap();
+        let points_at = |table: &str, col: &str| Some(ColumnReference { schema: "main".into(), table: table.into(), column: col.into() });
+        assert!(column("id").primary_key && !column("note").primary_key);
+        assert!(!column("parent_id").nullable && column("note").nullable);
+        assert_eq!(column("parent_id").references, points_at("parents", "id"));
+        assert_eq!((column("pa").references.clone(), column("pb").references.clone()), (points_at("parents", "a"), points_at("parents", "b")));
+        assert_eq!(column("note").references, None);
+        assert_eq!(relation("parent_ids").relation_type, "view");
+        assert!(completion.functions.is_empty());
+        assert!(completion.builtin_functions.iter().any(|f| f == "strftime"), "{:?}", completion.builtin_functions);
     }
 }

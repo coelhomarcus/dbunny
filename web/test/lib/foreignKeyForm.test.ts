@@ -8,8 +8,8 @@ const users: CompletionRelation = {
   name: "users",
   type: "table",
   columns: [
-    { name: "id", dataType: "bigint" },
-    { name: "email", dataType: "text" },
+    { name: "id", dataType: "bigint", primaryKey: true, nullable: false, references: null },
+    { name: "email", dataType: "text", primaryKey: false, nullable: true, references: null },
   ],
 };
 

@@ -64,6 +64,8 @@ pub struct FunctionInfo {
     pub schema: String,
     pub return_type: String,
     pub argument_types: String,
+    /// "function" or "procedure".
+    pub kind: String,
 }
 
 #[derive(Serialize)]
@@ -189,24 +191,41 @@ pub struct Diagram {
 pub struct CompletionRelation {
     pub schema: String,
     pub name: String,
+    /// "table", "view" or "materializedView".
     #[serde(rename = "type")]
     pub relation_type: String,
     pub columns: Vec<CompletionColumn>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletionColumn {
     pub name: String,
     pub data_type: String,
+    pub primary_key: bool,
+    pub nullable: bool,
+    /// The column a foreign key of this column points at; for a key of several columns, the
+    /// one that pairs with this column.
+    pub references: Option<ColumnReference>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnReference {
+    pub schema: String,
+    pub table: String,
+    pub column: String,
+}
+
+#[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletionSchema {
     pub current_schema: Option<String>,
     pub relations: Vec<CompletionRelation>,
     pub functions: Vec<FunctionInfo>,
+    /// Names of the functions the server itself declares (PostgreSQL, SQLite); the editor
+    /// adds them after its own catalog.
+    pub builtin_functions: Vec<String>,
 }
 
 // The Structure tab

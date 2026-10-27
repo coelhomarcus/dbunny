@@ -39,7 +39,6 @@ use profile::{AgentKind, AgentProfile, PromptDelivery};
 use mcp::McpServer;
 use tools::Tools;
 
-use crate::db::model::CompletionSchema;
 use crate::db::Driver;
 
 /// Where the person's conversations with one connection (and one of its databases) are kept,
@@ -305,7 +304,7 @@ impl Assistant {
         let agent = self.agent().await?;
         let driver = self.sessions.lock().await.get(session_id).cloned().ok_or_else(|| "Session not found".to_string())?;
         let info = driver.info();
-        let schema = driver.catalog().completion_schema().await.unwrap_or(CompletionSchema { current_schema: None, relations: vec![], functions: vec![] });
+        let schema = driver.catalog().completion_schema().await.unwrap_or_default();
         let (cwd, temporary) = workspace_dir(&self.data_dir, saved_id, &info.database);
         std::fs::create_dir_all(&cwd).map_err(|e| format!("Couldn't prepare the assistant's folder: {e}"))?;
         let input = PromptInput { engine: driver.engine(), info: &info, schema: &schema, instructions: &options.instructions, schema_only: options.schema_only, language: &options.language };

@@ -3,8 +3,8 @@ import { EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightSpecialChars, drawSelection } from "@codemirror/view";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { appThemeExtension } from "../lib/codemirror/theme";
-import { dialectFor } from "../lib/codemirror/sqlCompletion";
-import { useSqlDialect } from "../hooks/useSqlDialect";
+import { languageFor } from "../lib/sql/dialects";
+import { useConnection } from "../contexts/useConnection";
 
 /** The compact look, for a statement shown inside the conversation: smaller text, little padding, no line numbers. */
 const compactTheme = EditorView.theme({
@@ -15,7 +15,7 @@ const compactTheme = EditorView.theme({
 /** Read-only, syntax-highlighted SQL (function definitions, etc.); `compact` is for a statement in the conversation. */
 export default function SqlViewer({ value, compact = false }: { value: string; compact?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const dialect = useSqlDialect();
+  const engine = useConnection().connectionInfo?.engine ?? "postgres";
 
   useEffect(() => {
     const view = new EditorView({
@@ -33,7 +33,7 @@ export default function SqlViewer({ value, compact = false }: { value: string; c
           highlightSelectionMatches(),
           search({ top: true }),
           keymap.of(searchKeymap),
-          dialectFor(dialect).language,
+          languageFor(engine).language,
           appThemeExtension,
           // Over the app theme, which sets the editor's own sizes
           ...(compact ? [Prec.high(compactTheme)] : []),
@@ -41,7 +41,7 @@ export default function SqlViewer({ value, compact = false }: { value: string; c
       }),
     });
     return () => view.destroy();
-  }, [value, dialect, compact]);
+  }, [value, engine, compact]);
 
   return <div ref={containerRef} className="h-full" />;
 }
