@@ -2,6 +2,8 @@
 //! builders and how they bind values, the script splitter and the JSON conversions of values.
 
 pub mod bind;
+#[cfg(test)]
+mod catalog_tests;
 pub mod dialect;
 pub mod edit;
 pub mod filter;
