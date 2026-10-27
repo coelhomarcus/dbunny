@@ -671,7 +671,9 @@ async fn completion_schema(client: &tokio_postgres::Client) -> Result<Completion
         .collect();
 
     // The server's own functions, without the ones nobody calls: internal names and the
-    // input, output and modifier functions of types
+    // input, output and modifier functions of types. Best effort: a server that only looks
+    // like PostgreSQL may lack part of pg_proc or pg_type, and the rest of the completion
+    // still counts without these names.
     let builtin_functions = client
         .query(
             "SELECT DISTINCT p.proname::text AS name FROM pg_proc p \
@@ -681,10 +683,8 @@ async fn completion_schema(client: &tokio_postgres::Client) -> Result<Completion
             &[],
         )
         .await
-        .map_err(|e| e.to_string())?
-        .iter()
-        .map(|r| r.get("name"))
-        .collect();
+        .map(|rows| rows.iter().map(|r| r.get("name")).collect())
+        .unwrap_or_default();
 
     Ok(CompletionSchema {
         current_schema,

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { Completion } from "@codemirror/autocomplete";
 import { analyze } from "../../../src/lib/sql/completion/context.ts";
 import { ICON_LABEL, ITEM_KINDS, iconSvg } from "../../../src/lib/sql/completion/icons.ts";
-import { optionsAt, snippetOptions } from "../../../src/lib/sql/completion/sources.ts";
+import { insideQuotes, optionsAt, snippetOptions } from "../../../src/lib/sql/completion/sources.ts";
 import { dialectOf } from "../../../src/lib/sql/dialects/index.ts";
 import { en } from "../../../src/i18n/locales/en.ts";
 import { ptBR } from "../../../src/i18n/locales/pt-BR.ts";
@@ -214,4 +214,39 @@ test("snippets open a statement and rank below names", () => {
   assert.ok(caseSnippet >= 0 && column < caseSnippet);
   // A snippet ranks above the keyword it starts with
   assert.ok(caseSnippet < options.findIndex((o) => o.label === "CASE"));
+});
+
+test("join conditions write each relation the way the query does", () => {
+  const upper = { ...SCHEMA, relations: SCHEMA.relations.map((r) => ({ ...r })) };
+  // PostgreSQL folds unquoted PARENTS and Children to lower case: they must not come back quoted
+  const options = ranked(at("SELECT * FROM Children JOIN PARENTS ON |", "postgres", [], upper));
+  assert.equal(options[0].label, "PARENTS.id = Children.parent_id");
+  assert.equal(find(at("SELECT * FROM PARENTS WHERE |", "postgres", [], upper), "PARENTS")!.apply, undefined);
+});
+
+test("a schema-qualified table lists that schema's columns", () => {
+  const twin: CompletionSchema = {
+    ...SCHEMA,
+    relations: [
+      { schema: "public", name: "orders", type: "table", columns: [col("pub_only", "int")] },
+      { schema: "sales", name: "orders", type: "table", columns: [col("sales_only", "int")] },
+    ],
+  };
+  assert.deepEqual(labels(at("SELECT sales.orders.| FROM public.orders JOIN sales.orders ON true", "postgres", [], twin)), ["sales_only"]);
+  assert.deepEqual(labels(at("SELECT sales.orders.|", "postgres", [], twin)), ["sales_only"]);
+  assert.deepEqual(labels(at("SELECT public.orders.| FROM sales.orders", "postgres", [], twin)), ["pub_only"]);
+});
+
+test("inside an opened quote only single names are offered, without new quotes", () => {
+  const options: Completion[] = [
+    { label: "Other Table", type: "table" },
+    { label: "sales.Other Table", type: "table" },
+    { label: "p.id = c.parent_id", type: "columnForeignKey" },
+    { label: 'say "hi"', type: "column" },
+    { label: "SELECT", type: "keyword" },
+  ];
+  assert.deepEqual(insideQuotes(options, '"').map((o) => [o.label, o.apply]), [
+    ["Other Table", "Other Table"],
+    ['say "hi"', 'say ""hi""'],
+  ]);
 });

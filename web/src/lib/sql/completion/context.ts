@@ -7,6 +7,8 @@ export interface QueryRelation {
   schema: string | null;
   name: string;
   alias: string | null;
+  /** How the query refers to it (its alias, else its name), exactly as typed: `u`, `Users`, `"Orders"`. */
+  written: string;
 }
 
 /** A `WITH` query and the column names it declares, if it lists them. */
@@ -19,7 +21,8 @@ export interface QueryCte {
 export type Position =
   | { kind: "table"; afterJoin: boolean }
   | { kind: "joinCondition"; target: QueryRelation }
-  | { kind: "qualified"; qualifier: string }
+  /** After `qualifier.`; `schema` when it was written `schema.qualifier.` */
+  | { kind: "qualified"; qualifier: string; schema: string | null }
   | { kind: "column" }
   | { kind: "insertColumns"; table: QueryRelation; present: string[] }
   | { kind: "statementStart" }
@@ -194,6 +197,8 @@ const OPERATOR_WORDS = new Set([
   "AND", "OR", "NOT", "CASE", "WHEN", "THEN", "ELSE", "LIKE", "ILIKE", "IN", "IS", "BETWEEN",
   "DISTINCT", "ALL", "ANY", "SOME", "EXISTS", "REGEXP", "RLIKE", "GLOB", "MATCH", "ESCAPE",
 ]);
+/** Clause words that MySQL and MariaDB also have as functions: `TRUNCATE(x, 2)`, `VALUES(col)`, `INSERT(s, …)`. */
+const ALSO_FUNCTIONS = new Set(["TRUNCATE", "VALUES", "INSERT"]);
 /** Words that end a relation reference instead of naming its alias. */
 const NOT_ALIAS = new Set([
   "ON", "USING", "WHERE", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "NATURAL", "OUTER",
@@ -212,8 +217,11 @@ interface Parsed {
   scope: string;
 }
 
-/** Reads `[schema.]name [[AS] alias]` from `tokens[i]`; returns the relation and where it ended. */
-function readRelation(tokens: Token[], i: number) {
+/**
+ * Reads `[schema.]name [[AS] alias]` from `tokens[i]`; returns the relation and where it ended.
+ * `columnList` says a `(` after the name opens its columns (`INSERT INTO t (a, b)`), not a call.
+ */
+function readRelation(tokens: Token[], i: number, columnList = false) {
   if (!isName(tokens[i])) return null;
   let schema: string | null = null;
   let name = tokens[i].value;
@@ -224,16 +232,22 @@ function readRelation(tokens: Token[], i: number) {
     j += 2;
   }
   // A function in FROM (`generate_series(…)`) isn't a relation the schema knows
-  if (tokens[j]?.text === "(" && tokens[j].scope === tokens[i].scope) return null;
+  if (tokens[j]?.text === "(" && tokens[j].scope === tokens[i].scope) {
+    if (!columnList) return null;
+    return { relation: { schema, name, alias: null, written: tokens[j - 1].text }, end: j };
+  }
   let alias: string | null = null;
+  let written = tokens[j - 1].text;
   if (upper(tokens[j]) === "AS" && isName(tokens[j + 1])) {
     alias = tokens[j + 1].value;
+    written = tokens[j + 1].text;
     j += 2;
   } else if (tokens[j]?.type === "quoted" || (tokens[j]?.type === "word" && !NOT_ALIAS.has(upper(tokens[j])))) {
     alias = tokens[j].value;
+    written = tokens[j].text;
     j += 1;
   }
-  return { relation: { schema, name, alias }, end: j };
+  return { relation: { schema, name, alias, written }, end: j };
 }
 
 function readRelations(tokens: Token[]): Parsed[] {
@@ -246,7 +260,7 @@ function readRelations(tokens: Token[]): Parsed[] {
     if (!RELATION_CLAUSES.has(keyword)) continue;
     // ON DUPLICATE KEY UPDATE, ON CONFLICT … DO UPDATE and SELECT … INTO aren't relations
     if (keyword === "UPDATE" && /^(KEY|DO)$/.test(upper(tokens[i - 1]))) continue;
-    let read = readRelation(tokens, start);
+    let read = readRelation(tokens, start, keyword === "INTO");
     while (read) {
       out.push({ relation: read.relation, at: i, scope: tokens[start].scope });
       if (keyword !== "FROM" || tokens[read.end]?.text !== ",") break;
@@ -318,7 +332,8 @@ export function analyze(doc: string, pos: number, dialect: SqlDialect, features:
   if (before.length === 0) return context({ kind: "statementStart" });
   const last = before[before.length - 1];
   if (last.text === "." && isName(before[before.length - 2])) {
-    return context({ kind: "qualified", qualifier: before[before.length - 2].value });
+    const schema = before[before.length - 3]?.text === "." && isName(before[before.length - 4]) ? before[before.length - 4].value : null;
+    return context({ kind: "qualified", qualifier: before[before.length - 2].value, schema });
   }
 
   // The nearest clause at the cursor's level, or the parenthesis the cursor is inside
@@ -328,8 +343,11 @@ export function analyze(doc: string, pos: number, dialect: SqlDialect, features:
       return context(insideParenthesis(before, i, relations, word.from));
     }
     if (token.scope !== cursorScope) continue;
-    const keyword = upper(token);
+    let keyword = upper(token);
     if (!CLAUSES.has(keyword)) continue;
+    if (ALSO_FUNCTIONS.has(keyword) && before[i + 1]?.text === "(") continue;
+    // ON DUPLICATE KEY UPDATE and DO UPDATE set columns, like SET
+    if (keyword === "UPDATE" && /^(KEY|DO)$/.test(upper(before[i - 1]))) keyword = "SET";
     const lastWord = upper(last);
     if (RELATION_CLAUSES.has(keyword)) {
       const fresh = last === token || (keyword === "TRUNCATE" && lastWord === "TABLE") || (keyword === "FROM" && last.text === ",");
@@ -370,6 +388,7 @@ function insideParenthesis(before: Token[], open: number, relations: QueryRelati
   if (isName(before[j])) {
     let schema: string | null = null;
     const name = before[j].value;
+    const written = before[j].text;
     if (before[j - 1]?.text === "." && isName(before[j - 2])) {
       schema = before[j - 2].value;
       j -= 2;
@@ -377,7 +396,7 @@ function insideParenthesis(before: Token[], open: number, relations: QueryRelati
     if (upper(before[j - 1]) === "INTO") {
       const scope = before[open].scope + `${before[open].from}/`;
       const present = before.slice(open + 1).filter((t) => t.scope === scope && isName(t) && t.to <= wordFrom).map((t) => t.value);
-      const table = relations.find((r) => r.name === name && r.schema === schema) ?? { schema, name, alias: null };
+      const table = relations.find((r) => r.name === name && r.schema === schema) ?? { schema, name, alias: null, written };
       return { kind: "insertColumns", table: { ...table, alias: null }, present };
     }
   }

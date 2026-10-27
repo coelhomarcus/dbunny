@@ -74,8 +74,8 @@ The editor reads the statement under the cursor and decides what fits there. Not
 |---|---|---|
 | Where a table goes | `FROM ▌`, `JOIN ▌`, `UPDATE ▌`, `INSERT INTO ▌`, `DELETE FROM ▌`, `TRUNCATE TABLE ▌`, `FROM a, ▌` | CTEs, tables and views, other schemas; after `JOIN`, related tables first |
 | Join condition | `JOIN customers c ON ▌` | `c.id = o.customer_id` for each foreign key between the joined table and the ones before it, then the columns of all of them |
-| After `name.` | `o.▌`, `sales.▌` | The columns of that alias, table or CTE; for a schema, its tables, views and functions |
-| Expression | after `SELECT`, `WHERE`, `AND`, `OR`, `ON`, `SET`, `GROUP BY`, `ORDER BY`, `HAVING`, a comma or an operator; `RETURNING` where the server has it | Columns of the relations the query reads, their aliases, functions, `case`, keywords |
+| After `name.` | `o.▌`, `sales.▌`, `sales.orders.▌` | The columns of that alias, table or CTE; for a schema, its tables, views and functions; `schema.table.` is always that schema's table |
+| Expression | after `SELECT`, `WHERE`, `AND`, `OR`, `ON`, `SET`, `GROUP BY`, `ORDER BY`, `HAVING`, `ON DUPLICATE KEY UPDATE`, `DO UPDATE SET`, a comma or an operator; `RETURNING` where the server has it | Columns of the relations the query reads, their aliases, functions, `case`, keywords |
 | Insert columns | `INSERT INTO orders (id, ▌` | Only the columns of `orders` that aren't in the list yet |
 | Start of a statement | an empty editor, after `;` | Snippets and keywords |
 | After a whole expression or relation | `FROM orders o ▌`, `SELECT a ▌` | Keywords and phrases (`WHERE`, `LEFT JOIN`), `join` |
@@ -83,7 +83,7 @@ The editor reads the statement under the cursor and decides what fits there. Not
 
 With nothing typed yet, the list only opens by itself where something specific is expected: a table, a column (once the query reads a relation), a join condition, a name after a dot, an insert column. Elsewhere it waits for a letter, or for Ctrl-Space.
 
-**What the query reads.** The relations of the statement come with their schema and alias (`FROM sales.orders o`, `JOIN customers AS c`, comma lists, `UPDATE`, `INSERT INTO`, `DELETE FROM`). CTEs come with the columns they declare (`WITH totals(customer, amount) AS (…)`, `RECURSIVE`, `MATERIALIZED`). Each relation remembers the parentheses it sits in:
+**What the query reads.** The relations of the statement come with their schema and alias (`FROM sales.orders o`, `JOIN customers AS c`, comma lists, `UPDATE`, `INSERT INTO t (…)`, `DELETE FROM`), and with how the query writes them: a join condition or an alias is written back exactly as typed, so an unquoted `Orders` in PostgreSQL never comes back as `"Orders"`. A MySQL or MariaDB function that shares its name with a clause (`TRUNCATE(x, 2)`, `VALUES(col)`, `INSERT(…)`) doesn't end the expression it's in. CTEs come with the columns they declare (`WITH totals(customer, amount) AS (…)`, `RECURSIVE`, `MATERIALIZED`). Each relation remembers the parentheses it sits in:
 
 - a relation inside a CTE body or a `WHERE … IN (SELECT …)` doesn't reach the cursor outside it;
 - a correlated subquery sees the relations of the query around it.
@@ -199,7 +199,7 @@ A foreign key of several columns marks each column with its own target, so a joi
 2. `analyze` (`completion/context.ts`) cuts the statement under the cursor, splits it into tokens the way the dialect reads it (strings, quoted names, comments), and finds the relations, CTEs and aliases in reach of the cursor. Then it walks back from the cursor to the nearest clause at the same depth of parentheses, which gives the position.
 3. Inside a string or a comment it stops. With nothing typed and a position that waits for a letter, it stops too.
 4. `optionsAt` (`completion/sources.ts`) gathers what the position asks for: relations, columns, join conditions, functions, snippets, keywords. Each option has its kind, detail, panel text, boost, and the name as the dialect writes it (`apply`) when that differs from the label.
-5. A name typed after an opening quote (`"Ord`) is matched without the quote and completed without adding another.
+5. A name typed after an opening quote (`"Ord`) is matched without the quote and completed without adding another. Only single names are offered there: `schema.table` and join conditions would end up inside one pair of quotes.
 6. Once a word is typed, the other words of the document that nothing else suggests are added as `local`, last.
 7. CodeMirror filters by what was typed, sorts by match and boost, and draws each item with its icon.
 

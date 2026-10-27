@@ -144,10 +144,6 @@ function relatedTo(schema: CompletionSchema, relations: QueryRelation[]) {
   return related;
 }
 
-/** How the query names a relation: its alias, else its name. */
-function qualifierOf(relation: QueryRelation, dialect: SqlDialect) {
-  return relation.alias ? dialect.quoteIdent(relation.alias) : dialect.quoteIdent(relation.name);
-}
 
 /** The columns of the relations the query reads, and their aliases. */
 export function columnOptions(schema: CompletionSchema | null, ctx: QueryContext, dialect: SqlDialect): Completion[] {
@@ -155,8 +151,9 @@ export function columnOptions(schema: CompletionSchema | null, ctx: QueryContext
   const options: Completion[] = [];
   for (const relation of ctx.relations) {
     options.push(...columnsOf(schema, ctx, relation, dialect, many ? (relation.alias ?? relation.name) : null));
+    // Written back as the query has it: an unquoted `Users` is `users` to PostgreSQL, `"Users"` isn't
     const name = relation.alias ?? relation.name;
-    options.push({ label: name, type: "local", detail: label("local"), apply: applyName(name, dialect), boost: BOOST.alias });
+    options.push({ label: name, type: "local", detail: label("local"), apply: relation.written === name ? undefined : relation.written, boost: BOOST.alias });
   }
   return options;
 }
@@ -175,7 +172,7 @@ export function joinConditionOptions(schema: CompletionSchema | null, ctx: Query
     if (other === target) continue;
     const known = resolve(schema, other);
     if (!known) continue;
-    const [left, right] = [qualifierOf(target, dialect), qualifierOf(other, dialect)];
+    const [left, right] = [target.written, other.written];
     for (const column of joined.columns) {
       if (points(column, known)) conditions.push(`${left}.${q(column.name)} = ${right}.${q(column.references!.column)}`);
     }
@@ -192,7 +189,18 @@ export function joinConditionOptions(schema: CompletionSchema | null, ctx: Query
 }
 
 /** After `name.`: the columns of a relation or CTE of the query, of a table by name, or what a schema holds. */
-export function qualifiedOptions(schema: CompletionSchema | null, ctx: QueryContext, dialect: SqlDialect, qualifier: string): Completion[] {
+export function qualifiedOptions(
+  schema: CompletionSchema | null,
+  ctx: QueryContext,
+  dialect: SqlDialect,
+  qualifier: string,
+  qualifierSchema: string | null = null,
+): Completion[] {
+  if (qualifierSchema) {
+    // `schema.table.`: that schema's table, whatever else the query reads
+    const table = schema && resolve(schema, { schema: qualifierSchema, name: qualifier });
+    return table ? table.columns.map((column) => columnOption(column, dialect, null)) : [];
+  }
   const inQuery =
     ctx.relations.find((r) => r.alias && same(r.alias, qualifier)) ??
     ctx.relations.find((r) => !r.alias && same(r.name, qualifier) && (ctx.ctes.some((c) => same(c.name, r.name)) || (schema && resolve(schema, r))));
@@ -296,6 +304,19 @@ export function snippetOptions(dialect: SqlDialect, features: SqlFeature[], posi
     );
 }
 
+/** Kinds that name something, so they still fit inside a quoted name. */
+const NAMES = new Set(["schema", "table", "view", "materializedView", "column", "columnPrimaryKey", "columnForeignKey", "function", "procedure", "local"]);
+
+/**
+ * The options that fit inside a quote already opened: single names only (`schema.table` and
+ * join conditions would end up inside one pair of quotes), written without their own quotes.
+ */
+export function insideQuotes(options: Completion[], close: string): Completion[] {
+  return options
+    .filter((o) => NAMES.has(String(o.type)) && !o.label.includes("."))
+    .map((o) => ({ ...o, apply: o.label.split(close).join(close + close) }));
+}
+
 /** Everything worth offering at the cursor, ranked by `boost`. */
 export function optionsAt(schema: CompletionSchema | null, ctx: QueryContext, dialect: SqlDialect, features: SqlFeature[]): Completion[] {
   const position = ctx.position;
@@ -308,7 +329,7 @@ export function optionsAt(schema: CompletionSchema | null, ctx: QueryContext, di
     case "table":
       return [...relationOptions(schema, ctx, dialect), ...keywordOptions(dialect, features)];
     case "qualified":
-      return qualifiedOptions(schema, ctx, dialect, position.qualifier);
+      return qualifiedOptions(schema, ctx, dialect, position.qualifier, position.schema);
     case "insertColumns": {
       const present = new Set(position.present.map((name) => name.toLowerCase()));
       const columns = columnsOf(schema, ctx, position.table, dialect, null);

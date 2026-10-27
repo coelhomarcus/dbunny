@@ -4,12 +4,10 @@ import type { CompletionSchema, Engine, SqlFeature } from "@/types";
 import { dialectOf } from "../dialects/index.ts";
 import { analyze, type Position } from "./context.ts";
 import { iconSvg, isItemKind } from "./icons.ts";
-import { optionsAt } from "./sources.ts";
+import { insideQuotes, optionsAt } from "./sources.ts";
 
 /** Positions that open the list by themselves, before anything is typed. */
 const OPENS_BY_ITSELF = new Set<Position["kind"]>(["table", "column", "joinCondition", "qualified", "insertColumns"]);
-/** Kinds that name something, so they still fit inside a quoted name. */
-const NAMES = new Set(["schema", "table", "view", "materializedView", "column", "columnPrimaryKey", "columnForeignKey", "function", "procedure", "local"]);
 const WORD = /^[\w$]*$/;
 
 /** The item's icon, before its label; drawn by `autocompletion({ addToOptions })`. */
@@ -55,9 +53,7 @@ export function sqlCompletion(schema: CompletionSchema | null, engine: Engine, f
     if (quote && /["`[]/.test(quote)) {
       // Inside a quoted name: match the name itself, and write it without the quotes already typed
       const close = quote === "[" ? "]" : quote;
-      options = options
-        .filter((o) => NAMES.has(String(o.type)))
-        .map((o) => ({ ...o, apply: o.label.split(close).join(close + close) }));
+      options = insideQuotes(options, close);
       return { from: word.from + 1, options, validFor: new RegExp(`^[^${close === "]" ? "\\]" : close}]*$`) };
     }
     if (word.text && position.kind !== "qualified" && position.kind !== "insertColumns") {
