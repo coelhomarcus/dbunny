@@ -1393,6 +1393,10 @@ export const en = {
       showDetails: "Show the connection details",
       updateTo: "Update to {version}",
     },
+    supportNotice: {
+      gotIt: "Got it",
+      pastEndOfSupport: "{engine} {version} reached its end of support on {date}. DBunny no longer tests it; it keeps working, but upgrading is recommended.",
+    },
     tableData: {
       countFailed: "Failed to count rows",
       refreshFailed: "Failed to refresh",

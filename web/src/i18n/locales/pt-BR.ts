@@ -1395,6 +1395,10 @@ export const ptBR: Translation<typeof en> = {
       showDetails: "Mostrar os detalhes da conexão",
       updateTo: "Atualizar para {version}",
     },
+    supportNotice: {
+      gotIt: "Entendi",
+      pastEndOfSupport: "O {engine} {version} saiu do suporte do fabricante em {date}. O DBunny não o testa mais; ele continua funcionando, mas vale atualizar.",
+    },
     tableData: {
       countFailed: "Falha ao contar as linhas",
       refreshFailed: "Falha ao atualizar",

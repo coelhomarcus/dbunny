@@ -1,4 +1,5 @@
-import { Eye, EyeOff, Lock, LogOut } from "lucide-react";
+import { Eye, EyeOff, Lock, LogOut, TriangleAlert } from "lucide-react";
+import { useEndOfSupportText } from "./SupportNotice";
 import Tooltip from "../Tooltip";
 import { showUpdate, useUpdate } from "../../lib/updater";
 import type { ConnectionInfo } from "@/types";
@@ -37,6 +38,7 @@ export default function StatusBar({
   onDisconnect: () => void;
 }) {
   const t = useT();
+  const endOfSupport = useEndOfSupportText(connectionInfo);
   const { where: host, database } = connectionInfo ? locationOf(connectionInfo) : { where: "", database: "" };
 
   return (
@@ -66,8 +68,15 @@ export default function StatusBar({
       <div className="ml-auto flex items-center gap-1">
         <UpdateIndicator />
         {connectionInfo?.serverVersion && (
-          <span className="mr-1.5">
+          <span className="mr-1.5 flex items-center gap-1">
             {engineLabel(connectionInfo.engine)} {connectionInfo.serverVersion.split(" ")[0]}
+            {endOfSupport && (
+              <Tooltip label={endOfSupport} side="top">
+                <span role="img" aria-label={endOfSupport} className="flex text-warning-foreground">
+                  <TriangleAlert size={11} />
+                </span>
+              </Tooltip>
+            )}
           </span>
         )}
         <button
