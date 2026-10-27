@@ -16,7 +16,10 @@ import { indentOnInput, bracketMatching } from "@codemirror/language";
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { appThemeExtension } from "../lib/codemirror/theme";
-import { dialectFor, sqlCompletion } from "../lib/codemirror/sqlCompletion";
+import { completionIcon, sqlCompletion } from "../lib/sql/completion";
+import { languageFor } from "../lib/sql/dialects";
+import { useConnection } from "../contexts/useConnection";
+import { useCapabilities } from "../hooks/useCapabilities";
 import { useSqlDialect } from "../hooks/useSqlDialect";
 import type { SqlDialectName } from "../lib/sqlStatements";
 import { currentStatementHighlight, currentStatementRange, statementDialect } from "../lib/codemirror/currentStatement";
@@ -82,6 +85,10 @@ async function formatView(view: EditorView, dialect: SqlDialectName, onError?: (
 export default function SqlEditor({ initialValue, schema, onMount, onRun, onChange, onFormatError }: SqlEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const dialect = useSqlDialect();
+  const engine = useConnection().connectionInfo?.engine ?? "postgres";
+  const { sqlFeatures } = useCapabilities();
+  const featuresKey = sqlFeatures.join(",");
+  const featuresRef = useRef(sqlFeatures);
   const viewRef = useRef<EditorView | null>(null);
   const completionRef = useRef(new Compartment());
   const schemaRef = useRef(schema);
@@ -137,7 +144,7 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun, onChan
       indentOnInput(),
       bracketMatching(),
       closeBrackets(),
-      autocompletion({ icons: true }),
+      autocompletion({ icons: false, addToOptions: [completionIcon] }),
       rectangularSelection(),
       crosshairCursor(),
       highlightSelectionMatches(),
@@ -156,8 +163,8 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun, onChan
       EditorView.updateListener.of((update) => {
         if (update.docChanged) onChangeRef.current?.(update.state.doc.toString());
       }),
-      dialectFor(dialect).language,
-      completionRef.current.of(sqlCompletion(schemaRef.current, dialect)),
+      languageFor(engine).language,
+      completionRef.current.of(sqlCompletion(schemaRef.current, engine, featuresRef.current)),
       appThemeExtension,
     ];
 
@@ -222,10 +229,13 @@ export default function SqlEditor({ initialValue, schema, onMount, onRun, onChan
   // Swap autocomplete sources when the catalog (re)loads, without touching the document
   useEffect(() => {
     schemaRef.current = schema;
+    featuresRef.current = sqlFeatures;
     viewRef.current?.dispatch({
-      effects: completionRef.current.reconfigure(sqlCompletion(schema, dialect)),
+      effects: completionRef.current.reconfigure(sqlCompletion(schema, engine, sqlFeatures)),
     });
-  }, [schema, dialect]);
+    // sqlFeatures is a new array on each connection update; its contents are what matter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schema, engine, featuresKey]);
 
   return <div ref={containerRef} className="h-full" />;
 }

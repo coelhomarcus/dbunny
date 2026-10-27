@@ -1,6 +1,6 @@
 import { MySQL } from "@codemirror/lang-sql";
 import catalog from "./catalog/mysql.json" with { type: "json" };
-import { COMMON_PHRASES, quoter, wordsOf } from "./shared.ts";
+import { COMMON_PHRASES, quoter, wordsOf, wordsToQuote } from "./shared.ts";
 import type { CatalogFunction, DialectItem, SqlDialect } from "./types.ts";
 
 /** The phrases MySQL and MariaDB share. */
@@ -18,7 +18,7 @@ export const MYSQL_FAMILY_PHRASES: DialectItem[] = [
 export const mysql: SqlDialect = {
   engine: "mysql",
   language: MySQL,
-  quoteIdent: quoter(MySQL, "`", false),
+  quoteIdent: quoter(wordsToQuote(MySQL), "`", false),
   identifierQuote: "`",
   lineComments: ["--", "#"],
   ...wordsOf(MySQL),

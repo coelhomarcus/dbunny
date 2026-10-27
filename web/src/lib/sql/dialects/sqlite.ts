@@ -1,12 +1,12 @@
 import { SQLite } from "@codemirror/lang-sql";
 import catalog from "./catalog/sqlite.json" with { type: "json" };
-import { COMMON_PHRASES, quoter, wordsOf } from "./shared.ts";
+import { COMMON_PHRASES, quoter, wordsOf, wordsToQuote } from "./shared.ts";
 import type { CatalogFunction, SqlDialect } from "./types.ts";
 
 export const sqlite: SqlDialect = {
   engine: "sqlite",
   language: SQLite,
-  quoteIdent: quoter(SQLite, '"', false),
+  quoteIdent: quoter(wordsToQuote(SQLite), '"', false),
   identifierQuote: '"',
   lineComments: ["--"],
   ...wordsOf(SQLite),

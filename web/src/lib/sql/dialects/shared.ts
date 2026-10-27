@@ -19,16 +19,21 @@ export function wordsOf(language: SQLDialect) {
   };
 }
 
+/** Every word lang-sql knows for a dialect, lower case: the words a name is quoted to avoid. */
+export function wordsToQuote(language: SQLDialect): string[] {
+  const spec = language.spec;
+  return words([spec.keywords, spec.types, spec.builtin].join(" ")).map((w) => w.toLowerCase());
+}
+
 /**
- * Quotes a name only when it has to be: a reserved word, a character outside a plain name, or
+ * Quotes a name only when it has to be: a word in `reserved`, a character outside a plain name, or
  * (`foldsCase`, PostgreSQL) an upper-case letter the server would fold away.
  */
-export function quoter(language: SQLDialect, quote: '"' | "`", foldsCase: boolean) {
-  const spec = language.spec;
-  const reserved = new Set(words([spec.keywords, spec.types, spec.builtin].join(" ")).map((w) => w.toLowerCase()));
+export function quoter(reserved: string[], quote: '"' | "`", foldsCase: boolean) {
+  const set = new Set(reserved.map((w) => w.toLowerCase()));
   const plain = foldsCase ? /^[a-z_][a-z0-9_$]*$/ : /^[A-Za-z_][A-Za-z0-9_$]*$/;
   return (name: string) => {
-    if (plain.test(name) && !reserved.has(name.toLowerCase())) return name;
+    if (plain.test(name) && !set.has(name.toLowerCase())) return name;
     return `${quote}${name.split(quote).join(quote + quote)}${quote}`;
   };
 }

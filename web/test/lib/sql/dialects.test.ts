@@ -29,6 +29,17 @@ test("quoting follows each dialect", () => {
   assert.equal(dialectOf("mariadb").quoteIdent("nome com espaço"), "`nome com espaço`");
   assert.equal(dialectOf("sqlite").quoteIdent("index"), '"index"');
   for (const engine of ENGINES) assert.equal(dialectOf(engine).quoteIdent("customers"), "customers");
+  // Non-reserved keywords make fine names in PostgreSQL
+  for (const name of ["id", "name", "type", "data", "index", "status"]) assert.equal(dialectOf("postgres").quoteIdent(name), name);
+  assert.equal(dialectOf("postgres").quoteIdent("select"), '"select"');
+  // From the editor's first completion: reserved words, spaces and quotes inside a name
+  assert.equal(dialectOf("sqlite").quoteIdent("values"), '"values"');
+  assert.equal(dialectOf("sqlite").quoteIdent("title"), "title");
+  assert.equal(dialectOf("sqlite").quoteIdent("select"), '"select"');
+  assert.equal(dialectOf("mysql").quoteIdent("select"), "`select`");
+  assert.equal(dialectOf("mysql").quoteIdent("my col"), "`my col`");
+  // Double quotes are strings to MySQL, never names
+  assert.doesNotMatch(dialectOf("mysql").quoteIdent("Order Items"), /"/);
   assert.equal(dialectOf("mysql").identifierQuote, "`");
   assert.equal(dialectOf("sqlite").identifierQuote, '"');
   assert.ok(dialectOf("mysql").lineComments.includes("#"));
