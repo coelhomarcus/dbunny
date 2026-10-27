@@ -175,12 +175,13 @@ mod tests {
                     name: if i == 0 { "orders".into() } else { format!("table_with_a_long_name_{i}") },
                     relation_type: "table".into(),
                     columns: vec![
-                        CompletionColumn { name: "id".into(), data_type: "int4".into() },
-                        CompletionColumn { name: "total".into(), data_type: "numeric".into() },
+                        CompletionColumn { name: "id".into(), data_type: "int4".into(), ..Default::default() },
+                        CompletionColumn { name: "total".into(), data_type: "numeric".into(), ..Default::default() },
                     ],
                 })
                 .collect(),
             functions: vec![],
+            builtin_functions: vec![],
         }
     }
 

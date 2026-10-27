@@ -6,6 +6,7 @@ use super::data::db_message;
 use super::structure::table_structure;
 use super::PostgresDriver;
 use crate::db::model::{
+    ColumnReference,
     ColumnInfo, CompletionColumn, CompletionRelation, CompletionSchema, Diagram, DiagramColumn, DiagramRelation,
     DiagramTable, ExplorerObject, ExplorerPartition, ExplorerSchema, ExplorerTree, ExtensionInfo, ForeignKeyRef,
     FunctionDetail, FunctionInfo, ObjectDefinition, TableStructure,
@@ -584,13 +585,25 @@ async fn completion_schema(client: &tokio_postgres::Client) -> Result<Completion
         .query(
             &format!(
                 "SELECT n.nspname AS schema, c.relname AS name, \
-                 CASE WHEN c.relkind IN ('v', 'm') THEN 'view' ELSE 'table' END AS type, \
+                 CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materializedView' ELSE 'table' END AS type, \
                  a.attname AS column_name, \
-                 format_type(a.atttypid, a.atttypmod) AS data_type \
+                 format_type(a.atttypid, a.atttypmod) AS data_type, \
+                 COALESCE(a.attnotnull, false) AS not_null, \
+                 EXISTS (SELECT 1 FROM pg_constraint pk WHERE pk.conrelid = c.oid AND pk.contype = 'p' AND a.attnum = ANY (pk.conkey)) AS primary_key, \
+                 fk.ref_schema, fk.ref_table, fk.ref_column \
                  FROM pg_class c \
                  JOIN pg_namespace n ON n.oid = c.relnamespace \
                  LEFT JOIN pg_attribute a \
                    ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+                 LEFT JOIN LATERAL ( \
+                   SELECT rn.nspname::text AS ref_schema, rc.relname::text AS ref_table, ra.attname::text AS ref_column \
+                   FROM pg_constraint fk \
+                   JOIN pg_class rc ON rc.oid = fk.confrelid \
+                   JOIN pg_namespace rn ON rn.oid = rc.relnamespace \
+                   JOIN pg_attribute ra ON ra.attrelid = fk.confrelid AND ra.attnum = fk.confkey[array_position(fk.conkey, a.attnum)] \
+                   WHERE fk.conrelid = c.oid AND fk.contype = 'f' AND a.attnum = ANY (fk.conkey) \
+                   ORDER BY fk.conname LIMIT 1 \
+                 ) fk ON true \
                  WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND {USER_SCHEMAS} \
                  ORDER BY n.nspname, c.relname, a.attnum"
             ),
@@ -615,9 +628,16 @@ async fn completion_schema(client: &tokio_postgres::Client) -> Result<Completion
             });
         }
         if let Some(column) = r.get::<_, Option<String>>("column_name") {
+            let references = match (r.get::<_, Option<String>>("ref_schema"), r.get::<_, Option<String>>("ref_table"), r.get::<_, Option<String>>("ref_column")) {
+                (Some(schema), Some(table), Some(column)) => Some(ColumnReference { schema, table, column }),
+                _ => None,
+            };
             relations.last_mut().unwrap().columns.push(CompletionColumn {
                 name: column,
                 data_type: r.get("data_type"),
+                primary_key: r.get("primary_key"),
+                nullable: !r.get::<_, bool>("not_null"),
+                references,
             });
         }
     }
@@ -627,7 +647,8 @@ async fn completion_schema(client: &tokio_postgres::Client) -> Result<Completion
             &format!(
                 "SELECT p.proname AS name, n.nspname AS schema, \
                  COALESCE(pg_get_function_result(p.oid), '') AS return_type, \
-                 pg_get_function_arguments(p.oid) AS argument_types \
+                 pg_get_function_arguments(p.oid) AS argument_types, \
+                 CASE p.prokind WHEN 'p' THEN 'procedure' ELSE 'function' END AS kind \
                  FROM pg_proc p \
                  JOIN pg_namespace n ON p.pronamespace = n.oid \
                  WHERE {USER_SCHEMAS} AND p.prokind IN ('f', 'p') \
@@ -645,13 +666,31 @@ async fn completion_schema(client: &tokio_postgres::Client) -> Result<Completion
             schema: r.get("schema"),
             return_type: r.get("return_type"),
             argument_types: r.get("argument_types"),
+            kind: r.get("kind"),
         })
+        .collect();
+
+    // The server's own functions, without the ones nobody calls: internal names and the
+    // input, output and modifier functions of types
+    let builtin_functions = client
+        .query(
+            "SELECT DISTINCT p.proname::text AS name FROM pg_proc p \
+             WHERE p.pronamespace = 'pg_catalog'::regnamespace AND p.proname NOT LIKE '\\_%' \
+               AND NOT EXISTS (SELECT 1 FROM pg_type t WHERE p.oid IN (t.typinput, t.typoutput, t.typreceive, t.typsend, t.typmodin, t.typmodout)) \
+             ORDER BY 1",
+            &[],
+        )
+        .await
+        .map_err(|e| e.to_string())?
+        .iter()
+        .map(|r| r.get("name"))
         .collect();
 
     Ok(CompletionSchema {
         current_schema,
         relations,
         functions,
+        builtin_functions,
     })
 }
 
@@ -963,5 +1002,42 @@ mod server_tests {
         assert_eq!((incoming.from_schema.as_str(), incoming.to_table.as_str()), (other, "users"));
 
         client.batch_execute(&format!("DROP SCHEMA {s} CASCADE; DROP SCHEMA {other} CASCADE")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn completion_marks_keys_types_and_routines() {
+        let client = connect().await;
+        let s = "dbunny_completion";
+        client
+            .batch_execute(&format!(
+                "DROP SCHEMA IF EXISTS {s} CASCADE; CREATE SCHEMA {s}; \
+                 CREATE TABLE {s}.parents (id int PRIMARY KEY, a int, b int, UNIQUE (a, b)); \
+                 CREATE TABLE {s}.children (id int PRIMARY KEY, parent_id int NOT NULL REFERENCES {s}.parents (id), note text, \
+                   pa int, pb int, FOREIGN KEY (pa, pb) REFERENCES {s}.parents (a, b)); \
+                 CREATE VIEW {s}.parent_ids AS SELECT id FROM {s}.parents; \
+                 CREATE MATERIALIZED VIEW {s}.parent_count AS SELECT count(*) FROM {s}.parents; \
+                 CREATE FUNCTION {s}.twice(n int) RETURNS int LANGUAGE sql AS 'SELECT n * 2'; \
+                 CREATE PROCEDURE {s}.touch() LANGUAGE sql AS 'SELECT 1';"
+            ))
+            .await
+            .unwrap();
+        let completion = completion_schema(&client).await.unwrap();
+        let relation = |name: &str| completion.relations.iter().find(|r| r.schema == s && r.name == name).unwrap();
+        let column = |name: &str| relation("children").columns.iter().find(|c| c.name == name).unwrap();
+        let points_at = |table: &str, col: &str| Some(ColumnReference { schema: s.into(), table: table.into(), column: col.into() });
+        assert!(column("id").primary_key && !column("note").primary_key);
+        assert!(!column("parent_id").nullable && column("note").nullable);
+        assert_eq!(column("parent_id").references, points_at("parents", "id"));
+        assert_eq!((column("pa").references.clone(), column("pb").references.clone()), (points_at("parents", "a"), points_at("parents", "b")));
+        assert_eq!(relation("parent_ids").relation_type, "view");
+        assert_eq!(relation("parent_count").relation_type, "materializedView");
+        assert_eq!(relation("parents").relation_type, "table");
+        let routine = |name: &str| completion.functions.iter().find(|f| f.schema == s && f.name == name).unwrap();
+        assert_eq!((routine("twice").kind.as_str(), routine("touch").kind.as_str()), ("function", "procedure"));
+        let builtin = &completion.builtin_functions;
+        assert!(builtin.iter().any(|f| f == "date_trunc") && builtin.iter().any(|f| f == "now"));
+        assert!(!builtin.iter().any(|f| f.starts_with('_') || f == "int4in" || f == "textout"), "type support functions leak");
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
     }
 }

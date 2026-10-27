@@ -134,9 +134,10 @@ impl Catalog for FakeDb {
                 schema: "public".into(),
                 name: "orders".into(),
                 relation_type: "table".into(),
-                columns: vec![CompletionColumn { name: "id".into(), data_type: "int4".into() }],
+                columns: vec![CompletionColumn { name: "id".into(), data_type: "int4".into(), ..Default::default() }],
             }],
             functions: vec![],
+            builtin_functions: vec![],
         })
     }
     async fn object_definition(&self, _: &str, _: &str, _: &str) -> Result<ObjectDefinition, String> {

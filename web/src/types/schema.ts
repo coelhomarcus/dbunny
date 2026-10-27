@@ -44,6 +44,7 @@ export interface FunctionInfo {
   schema: string;
   returnType: string;
   argumentTypes: string;
+  kind: "function" | "procedure";
 }
 
 export interface FunctionDetail {
@@ -71,15 +72,25 @@ export interface SchemaTreeNode {
   isLoaded?: boolean;
 }
 
+/** The column a foreign key points at. */
+export interface ColumnReference {
+  schema: string;
+  table: string;
+  column: string;
+}
+
 export interface CompletionColumn {
   name: string;
   dataType: string;
+  primaryKey: boolean;
+  nullable: boolean;
+  references: ColumnReference | null;
 }
 
 export interface CompletionRelation {
   schema: string;
   name: string;
-  type: "table" | "view";
+  type: "table" | "view" | "materializedView";
   columns: CompletionColumn[];
 }
 
@@ -87,6 +98,8 @@ export interface CompletionSchema {
   currentSchema: string | null;
   relations: CompletionRelation[];
   functions: FunctionInfo[];
+  /** Names of the functions the server itself declares (PostgreSQL, SQLite). */
+  builtinFunctions: string[];
 }
 
 /** One server session from pg_stat_activity. */

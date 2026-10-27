@@ -14,6 +14,7 @@ use super::flavor::Flavor;
 use super::structure;
 use crate::db::mysql_common::driver::ServerDriver;
 use crate::db::model::{
+    ColumnReference,
     ColumnInfo, CompletionColumn, CompletionRelation, CompletionSchema, Diagram, DiagramColumn, DiagramRelation, DiagramTable,
     ExplorerObject, ExplorerSchema, ExplorerTree, ExtensionInfo, ForeignKeyRef, FunctionDetail, FunctionInfo, ObjectDefinition,
     TableStructure,
@@ -69,7 +70,7 @@ impl Catalog for ServerDriver {
     async fn completion_schema(&self) -> Result<CompletionSchema, String> {
         let database = self.database();
         if database.is_empty() {
-            return Ok(CompletionSchema { current_schema: None, relations: Vec::new(), functions: Vec::new() });
+            return Ok(CompletionSchema::default());
         }
         let mut conn = self.conn().await?;
         completion_schema(&mut conn, database).await.map_err(|e| self.message(&e))
@@ -431,11 +432,15 @@ async fn completion_schema(conn: &mut Conn, database: &str) -> mysql_async::Resu
     // A view whose tables are gone has no columns but still is a name to offer
     let rows: Vec<Row> = conn
         .exec(
-            "SELECT t.TABLE_NAME AS table_name, t.TABLE_TYPE AS table_type, c.COLUMN_NAME AS column_name, c.COLUMN_TYPE AS column_type \
+            "SELECT t.TABLE_NAME AS table_name, t.TABLE_TYPE AS table_type, c.COLUMN_NAME AS column_name, c.COLUMN_TYPE AS column_type, \
+             c.COLUMN_KEY AS column_key, c.IS_NULLABLE AS is_nullable, \
+             k.REFERENCED_TABLE_SCHEMA AS ref_schema, k.REFERENCED_TABLE_NAME AS ref_table, k.REFERENCED_COLUMN_NAME AS ref_column \
              FROM information_schema.TABLES t \
              LEFT JOIN information_schema.COLUMNS c ON c.TABLE_SCHEMA = t.TABLE_SCHEMA AND c.TABLE_NAME = t.TABLE_NAME \
+             LEFT JOIN information_schema.KEY_COLUMN_USAGE k ON k.TABLE_SCHEMA = c.TABLE_SCHEMA AND k.TABLE_NAME = c.TABLE_NAME \
+               AND k.COLUMN_NAME = c.COLUMN_NAME AND k.REFERENCED_TABLE_NAME IS NOT NULL \
              WHERE t.TABLE_SCHEMA = ? AND t.TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED', 'VIEW') \
-             ORDER BY t.TABLE_NAME, c.ORDINAL_POSITION",
+             ORDER BY t.TABLE_NAME, c.ORDINAL_POSITION, k.CONSTRAINT_NAME",
             (database,),
         )
         .await?;
@@ -451,7 +456,22 @@ async fn completion_schema(conn: &mut Conn, database: &str) -> mysql_async::Resu
             });
         }
         if let Some(column) = text(row, "column_name") {
-            relations.last_mut().unwrap().columns.push(CompletionColumn { name: column, data_type: string(row, "column_type") });
+            let columns = &mut relations.last_mut().unwrap().columns;
+            // A column in two foreign keys comes twice; the first key is enough
+            if columns.last().is_some_and(|last| last.name == column) {
+                continue;
+            }
+            let references = match (text(row, "ref_schema"), text(row, "ref_table"), text(row, "ref_column")) {
+                (Some(schema), Some(table), Some(column)) => Some(ColumnReference { schema, table, column }),
+                _ => None,
+            };
+            columns.push(CompletionColumn {
+                name: column,
+                data_type: string(row, "column_type"),
+                primary_key: string(row, "column_key") == "PRI",
+                nullable: string(row, "is_nullable") == "YES",
+                references,
+            });
         }
     }
     let routines: Vec<Row> = conn
@@ -471,10 +491,12 @@ async fn completion_schema(conn: &mut Conn, database: &str) -> mysql_async::Resu
                 schema: database.to_string(),
                 return_type: signature.returns,
                 argument_types: signature.arguments,
+                kind: if string(row, "routine_type") == "PROCEDURE" { "procedure" } else { "function" }.into(),
             }
         })
         .collect();
-    Ok(CompletionSchema { current_schema: Some(database.to_string()), relations, functions })
+    // MySQL and MariaDB have no catalog of their own functions; the editor's covers them
+    Ok(CompletionSchema { current_schema: Some(database.to_string()), relations, functions, builtin_functions: Vec::new() })
 }
 
 // The diagram
@@ -766,7 +788,7 @@ mod tests {
 mod server_tests {
     use std::sync::Arc;
 
-    use crate::db::mysql_common::tests_support::{exec, on_mariadb, ty, TestDb, label};
+    use crate::db::mysql_common::tests_support::{exec, label, on_mariadb, open_server, ty, TestDb};
     use super::*;
     use crate::db::model::{ColumnInfo, ExplorerTree};
     use crate::db::Driver;
@@ -1184,6 +1206,37 @@ mod server_tests {
         let db = TestDb::new().await;
         let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
         assert_eq!(driver.catalog().extensions().await.err().unwrap(), format!("Extensions isn\'t supported by {}", label()));
+        driver.close().await;
+        db.drop_now().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn completion_marks_keys_types_and_routines() {
+        let db = TestDb::new().await;
+        exec(
+            &db.endpoint,
+            "CREATE TABLE parents (id INT PRIMARY KEY, a INT, b INT, UNIQUE KEY (a, b)); \
+             CREATE TABLE children (id INT PRIMARY KEY, parent_id INT NOT NULL, note TEXT, pa INT, pb INT, \
+               FOREIGN KEY (parent_id) REFERENCES parents (id), FOREIGN KEY (pa, pb) REFERENCES parents (a, b)); \
+             CREATE VIEW parent_ids AS SELECT id FROM parents; \
+             CREATE FUNCTION twice(n INT) RETURNS INT DETERMINISTIC RETURN n * 2; \
+             CREATE PROCEDURE touch() SELECT 1;",
+        )
+        .await;
+        let driver = open_server(db.endpoint.clone()).await.unwrap();
+        let completion = driver.catalog().completion_schema().await.unwrap();
+        let relation = |name: &str| completion.relations.iter().find(|r| r.name == name).unwrap();
+        let column = |name: &str| relation("children").columns.iter().find(|c| c.name == name).unwrap();
+        let points_at = |table: &str, col: &str| Some(ColumnReference { schema: db.name.clone(), table: table.into(), column: col.into() });
+        assert!(column("id").primary_key && !column("note").primary_key);
+        assert!(!column("parent_id").nullable && column("note").nullable);
+        assert_eq!(column("parent_id").references, points_at("parents", "id"));
+        assert_eq!((column("pa").references.clone(), column("pb").references.clone()), (points_at("parents", "a"), points_at("parents", "b")));
+        assert_eq!(relation("parent_ids").relation_type, "view");
+        let routine = |name: &str| completion.functions.iter().find(|f| f.name == name).unwrap();
+        assert_eq!((routine("twice").kind.as_str(), routine("touch").kind.as_str()), ("function", "procedure"));
+        assert!(completion.builtin_functions.is_empty(), "MySQL and MariaDB have no catalog of their own functions");
         driver.close().await;
         db.drop_now().await;
     }
