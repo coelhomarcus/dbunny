@@ -28,6 +28,8 @@ The backend is Rust (Tauri 2) under `src-tauri/src/db/`; the interface is React 
 
 Errors DBunny makes itself are coded (`AppError::coded`) and translated; what a database server says passes through as it came.
 
+The SQL editor's autocomplete, with its dialect per database, is described in [AUTOCOMPLETE.md](AUTOCOMPLETE.md).
+
 ## Versions
 
 **Supported** means the versions their vendors still maintain. Every one of them is tested on each release, TLS and SSH tunnels included ([Testing](#testing)). A version past its end of support keeps working: DBunny says so once and keeps a mark in the status bar. Below a floor, the connection is refused.
