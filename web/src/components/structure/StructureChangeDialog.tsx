@@ -14,7 +14,7 @@ import Checkbox from "../Checkbox";
 import { selectClass } from "../ui/styles";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useSqlDialect } from "../../hooks/useSqlDialect";
-import { dialectData } from "../../lib/engines";
+import { dialectData, generationOptions, isGenerated } from "../../lib/engines";
 import { SqlPreviewBox } from "../schema/SqlPreview";
 import ForeignKeyEditor from "./ForeignKeyEditor";
 import { guessReference } from "../../lib/foreignKeyForm";
@@ -38,6 +38,7 @@ const GENERATION_LABELS: Record<ColumnGeneration, StaticKey> = {
   identityByDefault: "structure.structureChangeDialog.genIdentityByDefault",
   identityAlways: "structure.structureChangeDialog.genIdentityAlways",
   generated: "structure.structureChangeDialog.genGenerated",
+  generatedVirtual: "structure.structureChangeDialog.genGeneratedVirtual",
 };
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -95,6 +96,7 @@ function ChangeForm({
   const { tabId } = useTab();
   const capabilities = useCapabilities();
   const data = dialectData(useSqlDialect());
+  const addGenerations = generationOptions(data.addColumnGenerations, capabilities.virtualGenerated);
   const suggestedTypes = data.suggestedTypes;
   const column = "column" in draft ? draft.column : null;
   const [name, setName] = useState(column?.name ?? "");
@@ -150,8 +152,8 @@ function ChangeForm({
           comment: comment || null,
           unique: columnUnique,
           check: columnCheck.trim() || null,
-          generation: data.addColumnGenerations.length > 0 ? generation : "none",
-          generated: generation === "generated" ? generatedExpr.trim() || null : null,
+          generation: addGenerations.length > 0 ? generation : "none",
+          generated: isGenerated(generation) ? generatedExpr.trim() || null : null,
         };
       case "renameColumn":
         return { kind: "renameColumn", name: column!.name, newName: name };
@@ -304,18 +306,18 @@ function ChangeForm({
             <Field label={t("structure.structureChangeDialog.type")}>
               <Input value={dataType} onChange={(e) => setDataType(e.target.value)} spellCheck={false} className="font-mono" list="dbunny-common-types" />
             </Field>
-            {data.addColumnGenerations.length > 0 && (
+            {addGenerations.length > 0 && (
               <>
                 <Field label={t("structure.structureChangeDialog.generation")}>
                   <select value={generation} onChange={(e) => setGeneration(e.target.value as ColumnGeneration)} className={cn(selectClass, "w-full")}>
-                    {data.addColumnGenerations.map((option) => (
+                    {addGenerations.map((option) => (
                       <option key={option} value={option}>
                         {t(GENERATION_LABELS[option])}
                       </option>
                     ))}
                   </select>
                 </Field>
-                {generation === "generated" && (
+                {isGenerated(generation) && (
                   <Field label={t("structure.structureChangeDialog.generatedExpression")}>
                     <Input value={generatedExpr} onChange={(e) => setGeneratedExpr(e.target.value)} placeholder={t("structure.structureChangeDialog.expressionExample")} spellCheck={false} className="font-mono" />
                   </Field>

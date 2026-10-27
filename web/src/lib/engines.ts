@@ -74,8 +74,8 @@ const POSTGRES_DATA: DialectData = {
   ],
   indexMethods: ["btree", "hash", "gin", "gist", "brin"],
   defaultIndexMethod: "btree",
-  addColumnGenerations: ["none", "identityByDefault", "identityAlways", "generated"],
-  newTableGenerations: ["none", "identityByDefault", "identityAlways", "generated"],
+  addColumnGenerations: ["none", "identityByDefault", "identityAlways", "generated", "generatedVirtual"],
+  newTableGenerations: ["none", "identityByDefault", "identityAlways", "generated", "generatedVirtual"],
   createTableFlags: ["unlogged", "partition"],
 };
 
@@ -89,8 +89,9 @@ const SQLITE_DATA: DialectData = {
   ],
   indexMethods: [],
   defaultIndexMethod: "btree",
-  addColumnGenerations: [],
-  newTableGenerations: ["none", "autoincrement", "generated"],
+  // SQLite only adds a generated column to a table as VIRTUAL
+  addColumnGenerations: ["none", "generatedVirtual"],
+  newTableGenerations: ["none", "autoincrement", "generated", "generatedVirtual"],
   createTableFlags: ["withoutRowid", "strict"],
 };
 
@@ -106,10 +107,20 @@ const MYSQL_DATA: DialectData = {
   ],
   indexMethods: ["BTREE", "HASH", "FULLTEXT", "SPATIAL"],
   defaultIndexMethod: "BTREE",
-  addColumnGenerations: ["none", "autoincrement", "generated"],
-  newTableGenerations: ["none", "autoincrement", "generated"],
+  addColumnGenerations: ["none", "autoincrement", "generated", "generatedVirtual"],
+  newTableGenerations: ["none", "autoincrement", "generated", "generatedVirtual"],
   createTableFlags: [],
 };
+
+/** The ways of producing a column the connected server takes: VIRTUAL only where it has them. */
+export function generationOptions(options: ColumnGeneration[], virtualGenerated: boolean): ColumnGeneration[] {
+  return virtualGenerated ? options : options.filter((option) => option !== "generatedVirtual");
+}
+
+/** Whether the column is computed from an expression, stored or virtual. */
+export function isGenerated(generation: ColumnGeneration | undefined): boolean {
+  return generation === "generated" || generation === "generatedVirtual";
+}
 
 export function dialectData(dialect: SqlDialectName): DialectData {
   switch (dialect) {
