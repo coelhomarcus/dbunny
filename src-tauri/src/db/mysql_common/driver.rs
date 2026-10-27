@@ -164,6 +164,10 @@ impl Driver for ServerDriver {
         self.flavor.engine()
     }
 
+    fn version(&self) -> Option<ServerVersion> {
+        Some(ServerDriver::version(self))
+    }
+
     fn capabilities(&self) -> &Capabilities {
         &self.capabilities
     }

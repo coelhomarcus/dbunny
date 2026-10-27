@@ -562,4 +562,23 @@ mod server_tests {
             .join();
         }
     }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn connect_tells_when_the_mysql_version_left_its_support() {
+        if !crate::db::mysql_common::tests_support::is_mysql().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
+        let version = driver.version();
+        let response = crate::commands::connect::ConnectResponse::new("s".into(), driver.as_ref());
+        let expected = crate::db::version::past_end_of_support(Engine::Mysql, version, chrono::Local::now().date_naive());
+        assert_eq!(response.end_of_support, expected);
+        if (version.major, version.minor) == (8, 0) {
+            assert_eq!(response.end_of_support.unwrap().date, "2026-04-30");
+        }
+        driver.close().await;
+        db.drop_now().await;
+    }
 }

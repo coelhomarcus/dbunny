@@ -5,6 +5,7 @@ use postgres_native_tls::MakeTlsConnector;
 use std::sync::Arc;
 use tokio_postgres::config::SslMode;
 
+use crate::db::version::ServerVersion;
 use super::session::{Endpoint, Link, Notices, PgState};
 use super::PostgresDriver;
 use crate::db::model::Notice;
@@ -240,6 +241,18 @@ impl PostgresDriver {
             .map(|row| row.get(0))
             .unwrap_or_default();
 
+        // The version capabilities and the end of support follow; a server that doesn't tell it
+        // (unlikely) opens without them rather than not at all
+        let version = client
+            .query_one("SHOW server_version_num", &[])
+            .await
+            .ok()
+            .and_then(|row| row.get::<_, String>(0).parse::<i32>().ok())
+            .map(ServerVersion::from_postgres_num);
+        if let Some(version) = version {
+            check_postgres_version(version, server_version.split_whitespace().next().unwrap_or(&server_version))?;
+        }
+
         let read_only = client
             .query_one("SHOW transaction_read_only", &[])
             .await
@@ -262,9 +275,19 @@ impl PostgresDriver {
             reconnect_lock: Default::default(),
             reading: Default::default(),
             info: ConnectionInfo { database, host, port, server_version, read_only },
+            version,
             capabilities: Capabilities::postgres(),
         }))
     }
+}
+
+/// Refuses PostgreSQL older than 13, the oldest the test matrix covers. `shown` is the version as
+/// the server writes it.
+pub(crate) fn check_postgres_version(version: ServerVersion, shown: &str) -> Result<(), String> {
+    if version.major < 13 {
+        return Err(format!("PostgreSQL {shown} isn't supported; DBunny needs PostgreSQL 13 or newer."));
+    }
+    Ok(())
 }
 
 fn percent_decode(text: &str) -> String {
@@ -463,6 +486,7 @@ mod database_server_tests {
     use super::*;
     use crate::commands::connect::{open_session, ConnectResponse};
     use crate::commands::state::AppState;
+    use crate::db::{Driver, Engine};
 
     /// DBUNNY_TEST_SOCKET_URL: a URL whose host is a socket folder, e.g.
     /// postgresql://user:pass@%2Ftmp%2Fpg:5432/db
@@ -495,6 +519,25 @@ mod database_server_tests {
         };
         let err = open_session(&state, Endpoint { url, ssh: Some(ssh), known_hosts: None }, None).await.err().unwrap();
         assert!(err.message().contains("SSH"), "{err}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn connect_tells_when_the_version_left_its_support() {
+        let url = url::Url::parse(&crate::db::postgres::tests_support::test_url()).unwrap();
+        let driver = PostgresDriver::open(Endpoint { url, ssh: None, known_hosts: None }, None).await.unwrap();
+        let version = crate::db::postgres::tests_support::server_version().await;
+        assert_eq!(driver.version(), Some(version));
+        let expected = crate::db::version::past_end_of_support(Engine::Postgres, version, chrono::Local::now().date_naive());
+        let response = ConnectResponse::new("s".into(), driver.as_ref());
+        assert_eq!(response.end_of_support, expected);
+        if version.major == 13 {
+            assert_eq!(response.end_of_support.as_ref().unwrap().date, "2025-11-13");
+        }
+        if version.major >= 15 {
+            assert_eq!(response.end_of_support, None);
+        }
+        driver.close().await;
     }
 }
 
@@ -560,5 +603,19 @@ mod certificate_server_tests {
             Ok(_) => {} // some platforms read PKCS#1 too
             Err(e) => assert!(e.contains("PKCS#8") || e.contains("pkcs8"), "{e}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+    use crate::db::version::ServerVersion;
+
+    #[test]
+    fn postgres_below_13_is_refused() {
+        let v = ServerVersion::from_postgres_num;
+        assert_eq!(check_postgres_version(v(120022), "12.22").err().unwrap(), "PostgreSQL 12.22 isn't supported; DBunny needs PostgreSQL 13 or newer.");
+        assert!(check_postgres_version(v(130000), "13.0").is_ok());
+        assert!(check_postgres_version(v(180006), "18.6").is_ok());
     }
 }
