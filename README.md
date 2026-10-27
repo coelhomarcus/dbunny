@@ -23,11 +23,13 @@ DBunny is a native database client for **macOS**, **Windows** and **Linux**, bui
 
 | Database | Status | Versions | Connection |
 | --- | --- | --- | --- |
-| PostgreSQL | Supported | 13 and newer | Server (TCP, Unix socket, SSL, SSH tunnel) |
+| PostgreSQL | Supported | 14 to 18 (13 works, past its end of support) | Server (TCP, Unix socket, SSL, SSH tunnel) |
 | SQLite | Supported | Any database file (SQLite 3.53 is bundled) | Local database file |
-| MySQL | Supported | 8.0 and newer | Server (TCP, Unix socket, SSL, SSH tunnel) |
-| MariaDB | Supported | 10.6 and newer | Server (TCP, Unix socket, SSL, SSH tunnel) |
+| MySQL | Supported | 8.4, 9.7 and the current Innovation release (8.0 works, past its end of support) | Server (TCP, Unix socket, SSL, SSH tunnel) |
+| MariaDB | Supported | 10.11, 11.4, 11.8, 12.3 and 13.0 (10.6 works, past its end of support) | Server (TCP, Unix socket, SSL, SSH tunnel) |
 | SQL Server | Planned | - | Server |
+
+Supported means the versions their vendors still maintain, and every one of them is tested on each release, TLS and SSH tunnels included. A version past its end of support keeps working: DBunny says so once when you connect, and keeps a mark next to the version in the status bar. PostgreSQL older than 13, MySQL older than 8.0 and MariaDB older than 10.6 don't open.
 
 Screens and actions adapt to what the connected engine supports (for example, schemas and materialized views are PostgreSQL-only today, and MySQL and MariaDB have databases instead of schemas).
 
