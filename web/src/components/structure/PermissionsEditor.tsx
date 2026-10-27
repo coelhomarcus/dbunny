@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FileCode, Plus, Save, X } from "lucide-react";
 import type { RoleInfo, StructureChange, TablePrivilege } from "@/types";
 import { accountOf } from "../../lib/roles";
-import { useApi, useConnection } from "../../contexts/useConnection";
+import { useApi } from "../../contexts/useConnection";
+import { useCapabilities } from "../../hooks/useCapabilities";
+import { privilegeColumns } from "../../lib/privileges";
 import { cn } from "../../lib/cn";
 import Button from "../ui/Button";
 import Checkbox from "../Checkbox";
@@ -11,7 +13,6 @@ import Tooltip from "../Tooltip";
 import { useT } from "../../i18n";
 import { errorText } from "../../lib/appError";
 
-const BASE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
 
 const th = "sticky top-0 z-[1] bg-card-header border-b border-border px-4 py-2.5 text-left text-[13px] font-medium text-muted-foreground whitespace-nowrap";
 const td = "border-b border-border px-4 py-2 align-middle";
@@ -55,7 +56,7 @@ export default function PermissionsEditor({
 }) {
   const t = useT();
   const api = useApi();
-  const serverVersion = useConnection().connectionInfo?.serverVersion ?? "";
+  const capabilities = useCapabilities();
   const original = useMemo<Rights>(() => Object.fromEntries(privileges.map((p) => [p.grantee, p.privileges])), [privileges]);
   const [rights, setRights] = useState<Rights>(original);
   const [roles, setRoles] = useState<RoleInfo[] | null>(null);
@@ -65,12 +66,8 @@ export default function PermissionsEditor({
   const [showSql, setShowSql] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // MAINTAIN exists from PostgreSQL 17 on
-  const columns = useMemo(() => {
-    const major = parseInt(serverVersion, 10);
-    const hasMaintain = major >= 17 || privileges.some((p) => p.privileges.includes("MAINTAIN"));
-    return hasMaintain ? [...BASE_PRIVILEGES, "MAINTAIN"] : BASE_PRIVILEGES;
-  }, [serverVersion, privileges]);
+  // MAINTAIN where the server has it, or where someone already holds it
+  const columns = useMemo(() => privilegeColumns(capabilities.maintainPrivilege, privileges), [capabilities.maintainPrivilege, privileges]);
 
   const changes = useMemo(() => diff(original, rights), [original, rights]);
   const changesKey = JSON.stringify(changes);

@@ -4,6 +4,7 @@ import { useWorkspace } from "../contexts/workspace";
 import { useEffect, useState } from "react";
 import SchemaTree from "../components/SchemaTree";
 import StatusBar from "../components/layout/StatusBar";
+import SupportNotice from "../components/layout/SupportNotice";
 import DatabaseSwitcher from "../components/layout/DatabaseSwitcher";
 import { cn } from "../lib/cn";
 import { DocumentsProvider } from "../contexts/DocumentsContext";
@@ -80,6 +81,7 @@ export default function DatabaseLayout() {
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card">
           <RightPanelContext.Provider value={rightPanel}>
+            <SupportNotice />
             <DocumentTabBar />
             <div className="min-h-0 flex-1">
               <DocumentHost />

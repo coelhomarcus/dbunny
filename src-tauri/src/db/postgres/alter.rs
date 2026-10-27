@@ -320,12 +320,13 @@ fn append_column_tail(line: &mut String, column: &NewColumn, skip_not_null_on_pr
             *line += &format!(" GENERATED {kind} AS IDENTITY");
         }
         ColumnGeneration::Autoincrement => return Err(unsupported(Engine::Postgres, "AUTOINCREMENT")),
-        ColumnGeneration::Generated => {
+        ColumnGeneration::Generated | ColumnGeneration::GeneratedVirtual => {
             if has_default {
                 return Err("A generated column can't have a default".into());
             }
             let expr = column.generated.as_deref().filter(|e| !e.trim().is_empty()).ok_or("The generated expression can't be empty")?;
-            *line += &format!(" GENERATED ALWAYS AS ({}) STORED", fragment("generated expression", expr)?);
+            let kind = if column.generation == ColumnGeneration::GeneratedVirtual { "VIRTUAL" } else { "STORED" };
+            *line += &format!(" GENERATED ALWAYS AS ({}) {kind}", fragment("generated expression", expr)?);
         }
     }
     if !column.nullable && !(skip_not_null_on_primary_key && column.primary_key) {
@@ -607,6 +608,13 @@ mod tests {
         assert!(sql(StructureChange::Grant { grantee: "x".into(), privileges: vec!["ALL; DROP TABLE t".into()], grant_option: false }).starts_with("ERR"));
         assert!(sql(StructureChange::Revoke { grantee: "x".into(), privileges: vec![] }).starts_with("ERR"));
     }
+
+    #[test]
+    fn virtual_generated_columns() {
+        assert!(sql(StructureChange::AddColumn { name: "doubled".into(), data_type: "int".into(), nullable: true, default: None, comment: None, unique: false, check: None, generation: ColumnGeneration::GeneratedVirtual, generated: Some("a * 2".into()) }).ends_with("ADD COLUMN \"doubled\" int GENERATED ALWAYS AS (a * 2) VIRTUAL"), "{}", sql(StructureChange::AddColumn { name: "doubled".into(), data_type: "int".into(), nullable: true, default: None, comment: None, unique: false, check: None, generation: ColumnGeneration::GeneratedVirtual, generated: Some("a * 2".into()) }));
+        let table = create_table_sql("public", "t", &spec(vec![new_column("a", "int", true, false), NewColumn { generation: ColumnGeneration::GeneratedVirtual, generated: Some("a * 2".into()), ..new_column("b", "int", true, false) }])).unwrap();
+        assert!(table.contains("\"b\" int GENERATED ALWAYS AS (a * 2) VIRTUAL"), "{table}");
+    }
 }
 
 /// Tests that need a real server, see `db::postgres::console::server_tests`.
@@ -785,6 +793,21 @@ mod server_tests {
         let grant = StructureChange::Grant { grantee: "PUBLIC".into(), privileges: vec!["MAINTAIN".into()], grant_option: false };
         let err = apply(&client, s, "t", &grant).await.err().unwrap();
         assert!(err.to_lowercase().contains("maintain"), "{err}");
+        client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_DATABASE_URL"]
+    async fn virtual_column_is_added() {
+        if !crate::db::postgres::tests_support::requires("virtual_column_is_added", 18, 0).await {
+            return;
+        }
+        let client = connect().await;
+        let s = "dbunny_virtual";
+        client.batch_execute(&format!("DROP SCHEMA IF EXISTS {s} CASCADE; CREATE SCHEMA {s}; CREATE TABLE {s}.t (a int)")).await.unwrap();
+        apply(&client, s, "t", &StructureChange::AddColumn { name: "doubled".into(), data_type: "int".into(), nullable: true, default: None, comment: None, unique: false, check: None, generation: ColumnGeneration::GeneratedVirtual, generated: Some("a * 2".into()) }).await.unwrap();
+        let kind: String = client.query_one(&format!("SELECT attgenerated::text FROM pg_attribute WHERE attrelid = '{s}.t'::regclass AND attname = 'doubled'"), &[]).await.unwrap().get(0);
+        assert_eq!(kind, "v");
         client.batch_execute(&format!("DROP SCHEMA {s} CASCADE")).await.unwrap();
     }
 }

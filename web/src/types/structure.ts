@@ -114,7 +114,8 @@ export type StructureChange =
   | { kind: "revoke"; grantee: string; privileges: string[] };
 
 /** How a column value is produced. Autoincrement is SQLite; identity is PostgreSQL. */
-export type ColumnGeneration = "none" | "identityByDefault" | "identityAlways" | "autoincrement" | "generated";
+/** `generated` is stored when the row is written, `generatedVirtual` computed when it is read. */
+export type ColumnGeneration = "none" | "identityByDefault" | "identityAlways" | "autoincrement" | "generated" | "generatedVirtual";
 
 /** One column in the table builder. */
 export interface NewColumn {

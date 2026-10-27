@@ -4,6 +4,12 @@ import type { TlsSettings } from "./saved";
 /** The database a connection talks to. */
 export type Engine = "postgres" | "sqlite" | "mysql" | "mariadb";
 
+/** The server's version line is past its vendor's end of support: `line` as "13" or "8.0", `date` the last day (YYYY-MM-DD). */
+export interface EndOfSupport {
+  line: string;
+  date: string;
+}
+
 export interface ConnectRequest {
   connectionUrl: string;
 }
@@ -19,6 +25,8 @@ export interface ConnectResponse {
   engine: Engine;
   /** What the session supports. */
   capabilities: Capabilities;
+  /** Set only when the version is past its end of support. */
+  endOfSupport: EndOfSupport | null;
 }
 
 export interface ConnectionInfo {
@@ -29,6 +37,7 @@ export interface ConnectionInfo {
   readOnly: boolean;
   engine: Engine;
   capabilities: Capabilities;
+  endOfSupport: EndOfSupport | null;
 }
 
 /** The connection form of a MySQL or MariaDB server, as `connect_mysql` and `connect_mariadb` take it. */

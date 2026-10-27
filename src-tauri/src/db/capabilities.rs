@@ -39,7 +39,10 @@ pub struct Capabilities {
     pub duplicate_table: bool,
     pub explain_analyze: bool,
     pub explain_format: ExplainFormat,
-    pub returning: bool,
+    /// The MAINTAIN table privilege (PostgreSQL 17).
+    pub maintain_privilege: bool,
+    /// Generated columns can be VIRTUAL (computed when read) as well as STORED.
+    pub virtual_generated: bool,
     pub ssh: bool,
     pub ssl: bool,
 }
@@ -57,8 +60,9 @@ pub enum ExplainFormat {
 }
 
 impl Capabilities {
-    /// PostgreSQL has every piece and every detail.
-    pub fn postgres() -> Self {
+    /// PostgreSQL has every piece and every detail; MAINTAIN from 17, VIRTUAL generated columns
+    /// from 18.
+    pub fn postgres(version: ServerVersion) -> Self {
         Self {
             console: true,
             transactions: true,
@@ -87,7 +91,8 @@ impl Capabilities {
             duplicate_table: true,
             explain_analyze: true,
             explain_format: ExplainFormat::PostgresJson,
-            returning: true,
+            maintain_privilege: version.at_least(17, 0, 0),
+            virtual_generated: version.at_least(18, 0, 0),
             ssh: true,
             ssl: true,
         }
@@ -124,7 +129,8 @@ impl Capabilities {
             duplicate_table: true,
             explain_analyze: false,
             explain_format: ExplainFormat::SqliteQueryPlan,
-            returning: true,
+            maintain_privilege: false,
+            virtual_generated: true,
             ssh: false,
             ssl: false,
         }
@@ -171,7 +177,8 @@ impl Capabilities {
             duplicate_table: true,
             explain_analyze,
             explain_format: ExplainFormat::MysqlTree,
-            returning: false,
+            maintain_privilege: false,
+            virtual_generated: true,
             ssh: true,
             ssl: true,
         }
@@ -185,7 +192,7 @@ mod tests {
 
     #[test]
     fn capabilities_serialize_in_camel_case() {
-        let json = serde_json::to_value(Capabilities::postgres()).unwrap();
+        let json = serde_json::to_value(Capabilities::postgres(PG18)).unwrap();
         assert_eq!(json["materializedViews"], true);
         assert_eq!(json["explainFormat"], "postgresJson");
         assert_eq!(json["schemaEditing"], true);
@@ -194,7 +201,7 @@ mod tests {
 
     #[test]
     fn postgres_has_every_piece() {
-        let c = Capabilities::postgres();
+        let c = Capabilities::postgres(PG18);
         assert!(c.console && c.transactions && c.schema_editing && c.admin);
     }
 
@@ -210,7 +217,7 @@ mod tests {
         let v = |major, minor, patch| ServerVersion { major, minor, patch };
         let c = Capabilities::mysql(v(8, 4, 0));
         assert!(c.console && c.transactions && c.schema_editing && c.admin && c.databases && c.roles && c.activity);
-        assert!(!c.schemas && !c.returning && !c.trigger_toggle && !c.cascade && !c.sequences);
+        assert!(!c.schemas && !c.trigger_toggle && !c.cascade && !c.sequences);
         assert!(c.explain_analyze && c.constraints);
         assert_eq!(c.explain_format, ExplainFormat::MysqlTree);
         assert!(!Capabilities::mysql(v(8, 0, 17)).explain_analyze);
@@ -223,7 +230,7 @@ mod tests {
         let v = |major, minor, patch| ServerVersion { major, minor, patch };
         let c = Capabilities::mariadb(v(10, 6, 0));
         assert!(c.console && c.transactions && c.schema_editing && c.admin && c.databases && c.roles && c.activity);
-        assert!(!c.schemas && !c.returning && !c.trigger_toggle && !c.cascade && !c.sequences);
+        assert!(!c.schemas && !c.trigger_toggle && !c.cascade && !c.sequences);
         assert!(c.explain_analyze && c.constraints);
         assert_eq!(c.explain_format, ExplainFormat::MysqlTree);
         // The same pieces as MySQL, whatever the version
@@ -232,7 +239,7 @@ mod tests {
 
     #[test]
     fn postgres_keeps_roles_and_activity_and_sqlite_has_neither() {
-        assert!(Capabilities::postgres().roles && Capabilities::postgres().activity);
+        assert!(Capabilities::postgres(PG18).roles && Capabilities::postgres(PG18).activity);
         assert!(!Capabilities::sqlite().roles && !Capabilities::sqlite().activity);
     }
 
@@ -241,7 +248,26 @@ mod tests {
         let json = serde_json::to_value(Capabilities::sqlite()).unwrap();
         assert_eq!(json["explainFormat"], "sqliteQueryPlan");
         assert_eq!(json["duplicateTable"], true);
-        assert_eq!(json["returning"], true);
+        assert!(json.get("returning").is_none(), "nothing reads it, so it is gone");
+        assert_eq!(json["virtualGenerated"], true);
         assert_eq!(json["databases"], false);
+    }
+
+    const PG18: ServerVersion = ServerVersion { major: 18, minor: 0, patch: 0 };
+
+    #[test]
+    fn postgres_capabilities_follow_the_version() {
+        let v = |major| ServerVersion { major, minor: 0, patch: 0 };
+        assert!(!Capabilities::postgres(v(16)).maintain_privilege && Capabilities::postgres(v(17)).maintain_privilege);
+        assert!(!Capabilities::postgres(v(17)).virtual_generated && Capabilities::postgres(v(18)).virtual_generated);
+        let json = serde_json::to_value(Capabilities::postgres(v(17))).unwrap();
+        assert_eq!((json["maintainPrivilege"].clone(), json["virtualGenerated"].clone()), (serde_json::json!(true), serde_json::json!(false)));
+    }
+
+    #[test]
+    fn virtual_generated_columns_where_the_engine_has_them() {
+        let v = |major, minor| ServerVersion { major, minor, patch: 0 };
+        assert!(Capabilities::mysql(v(8, 0)).virtual_generated && Capabilities::mariadb(v(10, 6)).virtual_generated && Capabilities::sqlite().virtual_generated);
+        assert!(!Capabilities::mysql(v(8, 4)).maintain_privilege && !Capabilities::mariadb(v(11, 4)).maintain_privilege && !Capabilities::sqlite().maintain_privilege);
     }
 }

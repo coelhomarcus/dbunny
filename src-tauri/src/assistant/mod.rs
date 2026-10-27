@@ -14,7 +14,7 @@ pub mod launch;
 pub mod profile;
 pub mod mcp;
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
 #[cfg(test)]
 mod fake_agent;
 pub mod result;

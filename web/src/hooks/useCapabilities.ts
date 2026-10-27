@@ -30,7 +30,8 @@ const NONE: Capabilities = {
   duplicateTable: false,
   explainAnalyze: false,
   explainFormat: "postgresJson",
-  returning: false,
+  maintainPrivilege: false,
+  virtualGenerated: false,
   ssh: false,
   ssl: false,
 };

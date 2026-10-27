@@ -10,7 +10,7 @@ import { requestSchemaRefresh } from "../../lib/schemaRefresh";
 import { requestOpenQuery } from "../../lib/openQuery";
 import { useCapabilities } from "../../hooks/useCapabilities";
 import { useSqlDialect } from "../../hooks/useSqlDialect";
-import { dialectData, type DialectData } from "../../lib/engines";
+import { dialectData, generationOptions, isGenerated, type DialectData } from "../../lib/engines";
 import { cn } from "../../lib/cn";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
@@ -32,6 +32,7 @@ const GENERATION_LABELS: Record<ColumnGeneration, StaticKey> = {
   identityByDefault: "ui.createTablePage.genIdentityByDefault",
   identityAlways: "ui.createTablePage.genIdentityAlways",
   generated: "ui.createTablePage.genGenerated",
+  generatedVirtual: "ui.createTablePage.genGeneratedVirtual",
 };
 
 type ForeignKey = ForeignKeyDraft & { key: number };
@@ -119,7 +120,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
     check: r.check?.trim() ? r.check : null,
     comment: capabilities.comments && r.comment?.trim() ? r.comment : null,
     generation: r.generation,
-    generated: r.generation === "generated" && r.generated?.trim() ? r.generated : null,
+    generated: isGenerated(r.generation) && r.generated?.trim() ? r.generated : null,
     default: r.generation === "none" && r.default?.trim() ? r.default : null,
   }));
   const named = columns.map((c) => c.name.trim()).filter(Boolean);
@@ -291,7 +292,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                         onChange={(e) => update(r.key, { generation: e.target.value as ColumnGeneration })}
                         className="h-9 w-full cursor-pointer bg-transparent px-2 text-[13px] outline-none"
                       >
-                        {data.newTableGenerations.map((option) => (
+                        {generationOptions(data.newTableGenerations, capabilities.virtualGenerated).map((option) => (
                           <option key={option} value={option}>
                             {t(GENERATION_LABELS[option])}
                           </option>
@@ -307,7 +308,7 @@ export default function CreateTablePage({ documentId, schema: initialSchema }: {
                       </Button>
                     </span>
                   </div>
-                  {advanced && r.generation === "generated" && (
+                  {advanced && isGenerated(r.generation) && (
                     <div className="grid grid-cols-[7.5rem_1fr] items-center border-t border-border/50">
                       <span className="px-2.5 text-[11px] text-muted-foreground">{t("ui.createTablePage.expression")}</span>
                       <Input value={r.generated ?? ""} onChange={(e) => update(r.key, { generated: e.target.value })} aria-label={t("ui.createTablePage.generatedExpression")} placeholder={t("ui.createTablePage.expressionPlaceholder")} spellCheck={false} className={cn(cellClass, "font-mono text-[13px]")} />

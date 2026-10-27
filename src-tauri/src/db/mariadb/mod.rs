@@ -551,4 +551,23 @@ mod server_tests {
         driver.close().await;
         db.drop_now().await;
     }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn connect_tells_when_the_mariadb_version_left_its_support() {
+        if !crate::db::mysql_common::tests_support::is_mariadb().await {
+            return;
+        }
+        let db = TestDb::new().await;
+        let driver = crate::db::mysql_common::tests_support::open_server(db.endpoint.clone()).await.unwrap();
+        let version = driver.version();
+        let response = crate::commands::connect::ConnectResponse::new("s".into(), driver.as_ref());
+        let expected = crate::db::version::past_end_of_support(Engine::Mariadb, version, chrono::Local::now().date_naive());
+        assert_eq!(response.end_of_support, expected);
+        if (version.major, version.minor) == (10, 6) {
+            assert_eq!(response.end_of_support.unwrap().date, "2026-07-06");
+        }
+        driver.close().await;
+        db.drop_now().await;
+    }
 }

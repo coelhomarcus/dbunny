@@ -21,6 +21,7 @@ function infoOf(response: ConnectResponse): ConnectionInfo {
     readOnly: response.readOnly,
     engine: response.engine,
     capabilities: response.capabilities,
+    endOfSupport: response.endOfSupport ?? null,
   };
 }
 

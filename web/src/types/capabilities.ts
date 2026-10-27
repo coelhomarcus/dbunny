@@ -34,7 +34,10 @@ export interface Capabilities {
   duplicateTable: boolean;
   explainAnalyze: boolean;
   explainFormat: ExplainFormat;
-  returning: boolean;
+  /** The MAINTAIN table privilege (PostgreSQL 17). */
+  maintainPrivilege: boolean;
+  /** Generated columns can be VIRTUAL as well as STORED. */
+  virtualGenerated: boolean;
   ssh: boolean;
   ssl: boolean;
 }

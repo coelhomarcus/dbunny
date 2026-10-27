@@ -11,6 +11,7 @@ use super::model::{
     FunctionDetail, JsonMap, NewTable, ObjectDefinition, QueryResult, RoleList, RowChange, ServerActivity,
     StructureChange, TableDataParams, TableDataResponse, TableStructure,
 };
+use super::version::ServerVersion;
 use super::Engine;
 
 /// One open session on a database.
@@ -20,6 +21,10 @@ pub trait Driver: Send + Sync {
     fn capabilities(&self) -> &Capabilities;
     /// Database, host, port, server version and whether the session is read-only.
     fn info(&self) -> ConnectionInfo;
+    /// The server's version, when the engine has one DBunny reads (not SQLite).
+    fn version(&self) -> Option<ServerVersion> {
+        None
+    }
     async fn close(&self);
     fn catalog(&self) -> &dyn Catalog;
     fn data(&self) -> &dyn Data;
@@ -152,7 +157,7 @@ mod tests {
                     transactions: false,
                     schema_editing: false,
                     admin: false,
-                    ..Capabilities::postgres()
+                    ..Capabilities::postgres(ServerVersion { major: 18, minor: 0, patch: 0 })
                 },
             }
         }

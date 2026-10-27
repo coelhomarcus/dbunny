@@ -18,6 +18,8 @@ pub(crate) mod tests_support;
 mod transactions;
 
 use async_trait::async_trait;
+
+use crate::db::version::ServerVersion;
 use tokio::sync::Mutex;
 
 pub use session::{Endpoint, Link, Notices, PgState};
@@ -38,6 +40,8 @@ pub struct PostgresDriver {
     /// The assistant reads one statement at a time on its connection.
     reading: Mutex<()>,
     info: ConnectionInfo,
+    /// None when the server didn't tell `server_version_num`.
+    version: Option<ServerVersion>,
     capabilities: Capabilities,
 }
 
@@ -53,6 +57,10 @@ impl Driver for PostgresDriver {
 
     fn info(&self) -> ConnectionInfo {
         self.info.clone()
+    }
+
+    fn version(&self) -> Option<ServerVersion> {
+        self.version
     }
 
     /// Drops the session's connections and its tunnel, which closes them. A query already

@@ -9,6 +9,7 @@ use crate::db::net::ssh::SshConfig;
 use crate::db::net::tls::TlsSettings;
 use crate::db::postgres::{Endpoint, PostgresDriver};
 use crate::db::sqlite::{OpenOptions, SqliteDriver};
+use crate::db::version::{past_end_of_support, EndOfSupport};
 use crate::db::{Capabilities, Driver, Engine};
 use crate::error::AppError;
 
@@ -26,6 +27,8 @@ pub struct ConnectResponse {
     pub engine: Engine,
     /// What the session supports, so the app shows only the screens and actions that work.
     pub capabilities: Capabilities,
+    /// The server's version line is past its vendor's end of support (and since when).
+    pub end_of_support: Option<EndOfSupport>,
 }
 
 impl ConnectResponse {
@@ -41,6 +44,7 @@ impl ConnectResponse {
             read_only: info.read_only,
             engine: driver.engine(),
             capabilities: driver.capabilities().clone(),
+            end_of_support: driver.version().and_then(|version| past_end_of_support(driver.engine(), version, chrono::Local::now().date_naive())),
         }
     }
 }
@@ -212,6 +216,13 @@ pub async fn disconnect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_version_has_no_end_of_support() {
+        // The assistant's fake database tells no version
+        let response = ConnectResponse::new("s".into(), crate::assistant::fake::FakeDb::new().as_ref());
+        assert_eq!(response.end_of_support, None);
+    }
 
     #[test]
     fn an_empty_url_is_a_coded_error() {

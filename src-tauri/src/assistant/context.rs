@@ -1,6 +1,7 @@
 //! What the agent is told about the database it works on.
 
 use crate::db::model::{CompletionRelation, CompletionSchema, ConnectionInfo};
+use crate::db::version::ServerVersion;
 use crate::db::Engine;
 
 pub const SCHEMA_BUDGET: usize = 24 * 1024;
@@ -76,7 +77,8 @@ pub fn database_context(input: &PromptInput) -> String {
     if let Some(line) = language_line(input.language) {
         text.push_str(&format!("\nLanguage: {line}\n"));
     }
-    text.push_str(&format!("\nSQL dialect: {}\n", dialect_notes(input.engine)));
+    let version = crate::db::version::numbers(&input.info.server_version).map(|(version, _)| version);
+    text.push_str(&format!("\nSQL dialect: {}\n", dialect_notes(input.engine, version)));
     text.push_str("\nTables:\n");
     text.push_str(&schema_text(input.schema));
     if !input.instructions.trim().is_empty() {
@@ -85,13 +87,51 @@ pub fn database_context(input: &PromptInput) -> String {
     text
 }
 
-fn dialect_notes(engine: Engine) -> &'static str {
+fn engine_notes(engine: Engine) -> &'static str {
     match engine {
         Engine::Postgres => "PostgreSQL. Quote identifiers with double quotes; LIMIT n; ILIKE for case-insensitive matches; date_trunc and interval for dates.",
         Engine::Sqlite => "SQLite. Quote identifiers with double quotes; LIMIT n; dates are text, use strftime and date().",
         Engine::Mysql => "MySQL. Quote identifiers with backticks; LIMIT n; DATE_FORMAT and INTERVAL for dates. A schema is a database.",
         Engine::Mariadb => "MariaDB. Quote identifiers with backticks; LIMIT n; DATE_FORMAT and INTERVAL for dates. A schema is a database.",
     }
+}
+
+/// What the server's SQL has, and what this version of it lacks, so the agent doesn't write
+/// what the server will refuse. Nothing is said when the version can't be read.
+fn dialect_notes(engine: Engine, version: Option<ServerVersion>) -> String {
+    let missing = version.map(|version| missing_features(engine, version)).unwrap_or_default();
+    if missing.is_empty() {
+        engine_notes(engine).to_string()
+    } else {
+        format!("{} Not available on this version: {}.", engine_notes(engine), missing.join(", "))
+    }
+}
+
+/// The SQL the agent might reach for that this version doesn't have.
+fn missing_features(engine: Engine, version: ServerVersion) -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    match engine {
+        Engine::Postgres => {
+            if !version.at_least(15, 0, 0) {
+                missing.extend(["MERGE", "NULLS NOT DISTINCT"]);
+            }
+            if !version.at_least(16, 0, 0) {
+                missing.extend(["the SQL/JSON constructors (JSON_ARRAY, JSON_OBJECT and their aggregates)", "IS JSON"]);
+            }
+            if !version.at_least(17, 0, 0) {
+                missing.extend(["JSON_TABLE", "JSON_EXISTS, JSON_QUERY and JSON_VALUE"]);
+            }
+        }
+        Engine::Mysql => {
+            missing.push("RETURNING");
+            if !version.at_least(8, 0, 14) {
+                missing.push("LATERAL");
+            }
+        }
+        Engine::Mariadb => missing.extend(["RETURNING in UPDATE (INSERT and DELETE have it)", "LATERAL"]),
+        Engine::Sqlite => {}
+    }
+    missing
 }
 
 fn qualified(relation: &CompletionRelation) -> String {
@@ -222,6 +262,25 @@ mod tests {
     fn prompt_names_engine_version_and_database() {
         let text = prompt(&info(false), &schema(1), "");
         assert!(text.contains("PostgreSQL") && text.contains("16.2") && text.contains("shop"), "{text}");
+    }
+
+    #[test]
+    fn notes_say_what_the_version_lacks() {
+        use crate::db::version::ServerVersion;
+        let v = |major, minor, patch| Some(ServerVersion { major, minor, patch });
+        assert!(dialect_notes(Engine::Postgres, v(14, 0, 0)).contains("MERGE"));
+        let pg16 = dialect_notes(Engine::Postgres, v(16, 0, 0));
+        assert!(pg16.contains("JSON_TABLE") && pg16.contains("JSON_VALUE") && !pg16.contains("MERGE"), "{pg16}");
+        // PostgreSQL 16 has the SQL/JSON constructors and IS JSON; 15 doesn't
+        assert!(!pg16.contains("JSON_OBJECT") && !pg16.contains("IS JSON"), "{pg16}");
+        assert!(dialect_notes(Engine::Postgres, v(15, 0, 0)).contains("JSON_OBJECT"));
+        assert!(!dialect_notes(Engine::Postgres, v(18, 0, 0)).contains("Not available"));
+        assert!(dialect_notes(Engine::Mysql, v(8, 0, 13)).contains("LATERAL") && !dialect_notes(Engine::Mysql, v(8, 0, 14)).contains("LATERAL"));
+        assert!(dialect_notes(Engine::Mysql, v(9, 7, 0)).contains("RETURNING"));
+        assert!(dialect_notes(Engine::Mariadb, v(11, 4, 0)).contains("LATERAL"));
+        assert!(!dialect_notes(Engine::Sqlite, v(3, 53, 0)).contains("Not available"));
+        // An unreadable version: the usual note, no guess
+        assert_eq!(dialect_notes(Engine::Postgres, None), dialect_notes(Engine::Postgres, v(18, 0, 0)));
     }
 
     #[test]
