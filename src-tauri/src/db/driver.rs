@@ -157,7 +157,7 @@ mod tests {
                     transactions: false,
                     schema_editing: false,
                     admin: false,
-                    ..Capabilities::postgres()
+                    ..Capabilities::postgres(ServerVersion { major: 18, minor: 0, patch: 0 })
                 },
             }
         }

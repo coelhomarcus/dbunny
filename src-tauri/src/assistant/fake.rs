@@ -24,7 +24,7 @@ impl FakeDb {
             explained: Default::default(),
             analyzed: Default::default(),
             rows: vec![vec![json!(1), json!("ana")], vec![json!(2), json!("bo")]],
-            capabilities: Capabilities::postgres(),
+            capabilities: Capabilities::postgres(crate::db::version::ServerVersion { major: 18, minor: 0, patch: 0 }),
         })
     }
 

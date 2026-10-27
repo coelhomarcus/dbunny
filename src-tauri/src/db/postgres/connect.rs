@@ -276,7 +276,8 @@ impl PostgresDriver {
             reading: Default::default(),
             info: ConnectionInfo { database, host, port, server_version, read_only },
             version,
-            capabilities: Capabilities::postgres(),
+            // Unknown: what every supported version has
+            capabilities: Capabilities::postgres(version.unwrap_or(ServerVersion { major: 13, minor: 0, patch: 0 })),
         }))
     }
 }
