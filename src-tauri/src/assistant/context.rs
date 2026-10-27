@@ -115,8 +115,11 @@ fn missing_features(engine: Engine, version: ServerVersion) -> Vec<&'static str>
             if !version.at_least(15, 0, 0) {
                 missing.extend(["MERGE", "NULLS NOT DISTINCT"]);
             }
+            if !version.at_least(16, 0, 0) {
+                missing.extend(["the SQL/JSON constructors (JSON_ARRAY, JSON_OBJECT and their aggregates)", "IS JSON"]);
+            }
             if !version.at_least(17, 0, 0) {
-                missing.extend(["JSON_TABLE", "the SQL/JSON constructors (JSON_ARRAY, JSON_OBJECT, IS JSON)"]);
+                missing.extend(["JSON_TABLE", "JSON_EXISTS, JSON_QUERY and JSON_VALUE"]);
             }
         }
         Engine::Mysql => {
@@ -267,7 +270,10 @@ mod tests {
         let v = |major, minor, patch| Some(ServerVersion { major, minor, patch });
         assert!(dialect_notes(Engine::Postgres, v(14, 0, 0)).contains("MERGE"));
         let pg16 = dialect_notes(Engine::Postgres, v(16, 0, 0));
-        assert!(pg16.contains("JSON_TABLE") && !pg16.contains("MERGE"), "{pg16}");
+        assert!(pg16.contains("JSON_TABLE") && pg16.contains("JSON_VALUE") && !pg16.contains("MERGE"), "{pg16}");
+        // PostgreSQL 16 has the SQL/JSON constructors and IS JSON; 15 doesn't
+        assert!(!pg16.contains("JSON_OBJECT") && !pg16.contains("IS JSON"), "{pg16}");
+        assert!(dialect_notes(Engine::Postgres, v(15, 0, 0)).contains("JSON_OBJECT"));
         assert!(!dialect_notes(Engine::Postgres, v(18, 0, 0)).contains("Not available"));
         assert!(dialect_notes(Engine::Mysql, v(8, 0, 13)).contains("LATERAL") && !dialect_notes(Engine::Mysql, v(8, 0, 14)).contains("LATERAL"));
         assert!(dialect_notes(Engine::Mysql, v(9, 7, 0)).contains("RETURNING"));
