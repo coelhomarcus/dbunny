@@ -496,7 +496,10 @@ pub enum ColumnGeneration {
     IdentityByDefault,
     IdentityAlways,
     Autoincrement,
+    /// Computed and stored when the row is written.
     Generated,
+    /// Computed when the row is read.
+    GeneratedVirtual,
 }
 
 #[derive(Deserialize, Debug, Clone)]

@@ -119,16 +119,26 @@ fn free_name(c: &Connection, schema: &str, base: &str) -> rusqlite::Result<Strin
 fn change_sql(c: &Connection, schema: &str, table: &str, change: &StructureChange) -> Result<String, Failure> {
     let alter = format!("ALTER TABLE {}", relation(schema, table));
     let sql = match change {
-        StructureChange::AddColumn { name: column, data_type, nullable, default, comment, unique, check, generation, generated: _ } => {
+        StructureChange::AddColumn { name: column, data_type, nullable, default, comment, unique, check, generation, generated } => {
             if comment.as_deref().is_some_and(|c| !c.trim().is_empty()) {
                 return Err(not_in_sqlite("Comments"));
             }
-            if *generation != ColumnGeneration::None {
+            if *generation == ColumnGeneration::Generated {
+                return Err(Failure::message("SQLite can only add a generated column as VIRTUAL; STORED needs the table rebuilt.".into()));
+            }
+            if !matches!(generation, ColumnGeneration::None | ColumnGeneration::GeneratedVirtual) {
                 return Err(not_in_sqlite("Identity, AUTOINCREMENT and generated columns on an existing table"));
             }
             // SQLite rejects UNIQUE on ADD COLUMN. A unique index is the same rule and is allowed.
             let quoted = name("column name", column)?;
             let mut add = format!("{alter} ADD COLUMN {quoted} {}", fragment("type", data_type)?);
+            if *generation == ColumnGeneration::GeneratedVirtual {
+                if default.as_deref().is_some_and(|d| !d.trim().is_empty()) {
+                    return Err(Failure::message("A generated column can't have a default".into()));
+                }
+                let expr = generated.as_deref().filter(|e| !e.trim().is_empty()).ok_or_else(|| Failure::message("The generated expression can't be empty".into()))?;
+                add += &format!(" GENERATED ALWAYS AS ({}) VIRTUAL", fragment("generated expression", expr)?);
+            }
             if !nullable {
                 add += " NOT NULL";
             }
@@ -221,7 +231,7 @@ fn create_table_sql(schema: &str, table: &str, spec: &NewTable) -> Result<String
                 }
             }
             ColumnGeneration::IdentityByDefault | ColumnGeneration::IdentityAlways => return Err(not_in_sqlite("Identity columns")),
-            ColumnGeneration::Generated => {
+            ColumnGeneration::Generated | ColumnGeneration::GeneratedVirtual => {
                 if column.primary_key {
                     return Err(Failure::message("A generated column can't be a primary key".into()));
                 }
@@ -229,7 +239,8 @@ fn create_table_sql(schema: &str, table: &str, spec: &NewTable) -> Result<String
                     return Err(Failure::message("A generated column can't have a default".into()));
                 }
                 let expr = column.generated.as_deref().filter(|e| !e.trim().is_empty()).ok_or_else(|| Failure::message("The generated expression can't be empty".into()))?;
-                line += &format!(" GENERATED ALWAYS AS ({}) STORED", fragment("generated expression", expr)?);
+                let kind = if column.generation == ColumnGeneration::GeneratedVirtual { "VIRTUAL" } else { "STORED" };
+                line += &format!(" GENERATED ALWAYS AS ({}) {kind}", fragment("generated expression", expr)?);
             }
         }
         if column.primary_key && rowid_key {
@@ -1187,5 +1198,19 @@ mod tests {
         assert_eq!(column_names(&d, "main", "t \"q\"").await, vec!["c \"q\""]);
         editor(&d).drop_relation("main", "copy \"odd\"", "table", false).await.unwrap();
         assert_eq!(stored(&d, "main", "copy \"odd\"").await, None);
+    }
+
+    #[tokio::test]
+    async fn a_virtual_generated_column_can_be_added() {
+        let f = TempDb::with("CREATE TABLE steps (n INTEGER)");
+        let d = open(&f).await;
+        let virtual_ = StructureChange::AddColumn { name: "next".into(), data_type: "int".into(), nullable: true, default: None, comment: None, unique: false, check: None, generation: ColumnGeneration::GeneratedVirtual, generated: Some("n + 1".into()) };
+        let preview = editor(&d).preview_change("main", "steps", &virtual_).await.unwrap();
+        assert!(preview.contains("ADD COLUMN \"next\" int GENERATED ALWAYS AS (n + 1) VIRTUAL"), "{preview}");
+        editor(&d).apply_change("main", "steps", virtual_).await.unwrap();
+        exec(&d, "INSERT INTO steps (n) VALUES (1)").await.unwrap();
+        assert_eq!(query(&d, "SELECT next FROM steps").await, vec![vec![json!(2)]]);
+        let stored = editor(&d).preview_change("main", "steps", &StructureChange::AddColumn { name: "other".into(), data_type: "int".into(), nullable: true, default: None, comment: None, unique: false, check: None, generation: ColumnGeneration::Generated, generated: Some("n + 2".into()) }).await.unwrap_err();
+        assert_eq!(stored, "SQLite can only add a generated column as VIRTUAL; STORED needs the table rebuilt.");
     }
 }

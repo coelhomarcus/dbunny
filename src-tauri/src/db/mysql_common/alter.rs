@@ -306,12 +306,13 @@ fn column_body(engine: Engine, column: &NewColumn, primary_key_implies_not_null:
             }
             line += " AUTO_INCREMENT";
         }
-        ColumnGeneration::Generated => {
+        ColumnGeneration::Generated | ColumnGeneration::GeneratedVirtual => {
             if default.is_some() {
                 return Err("A generated column can't have a default".into());
             }
             let expression = column.generated.as_deref().filter(|e| !e.trim().is_empty()).ok_or("The generated expression can't be empty")?;
-            line += &format!(" GENERATED ALWAYS AS {} STORED", parenthesized(&fragment("generated expression", expression)?));
+            let kind = if column.generation == ColumnGeneration::GeneratedVirtual { "VIRTUAL" } else { "STORED" };
+            line += &format!(" GENERATED ALWAYS AS {} {kind}", parenthesized(&fragment("generated expression", expression)?));
             if !column.nullable && !skip_null {
                 line += " NOT NULL";
             }
@@ -1051,6 +1052,12 @@ mod tests {
         let wide = index_name("tábua", &["ção".repeat(30)]);
         assert!(wide.chars().count() <= 64 && wide.ends_with("_idx"), "{wide}");
     }
+
+    #[test]
+    fn virtual_generated_columns() {
+        let added = sql(StructureChange::AddColumn { name: "twice".into(), data_type: "int".into(), nullable: true, default: None, comment: None, unique: false, check: None, generation: ColumnGeneration::GeneratedVirtual, generated: Some("age * 2".into()) });
+        assert!(added.ends_with("ADD COLUMN `twice` int GENERATED ALWAYS AS (age * 2) VIRTUAL"), "{added}");
+    }
 }
 
 #[cfg(test)]
@@ -1362,5 +1369,17 @@ mod server_tests {
         // A refused option reaches the user as it is
         let err = editor.create_table(&db.name, "bad", NewTable { unlogged: true, ..Default::default() }).await.err().unwrap();
         assert_eq!(err, format!("Unlogged tables isn\'t supported by {}", label()));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DBUNNY_TEST_MYSQL_URL"]
+    async fn virtual_column_is_added() {
+        let (db, d) = open(SHOP).await;
+        let editor = d.schema_editor().unwrap();
+        editor.apply_change(&db.name, "customers", StructureChange::AddColumn { name: "twice".into(), data_type: "int".into(), nullable: true, default: None, comment: None, unique: false, check: None, generation: ColumnGeneration::GeneratedVirtual, generated: Some("age * 2".into()) }).await.unwrap();
+        let ddl: (String, String) = query_one(&db.endpoint, &format!("SHOW CREATE TABLE {}", qualified(&db.name, "customers"))).await.unwrap();
+        assert!(ddl.1.to_uppercase().contains("VIRTUAL"), "{}", ddl.1);
+        d.close().await;
+        db.drop_now().await;
     }
 }
