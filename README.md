@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="web/public/icon.svg" width="120" alt="DBunny logo" />
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="web/public/icon-light.svg" />
+    <img src="web/public/icon.svg" width="120" alt="DBunny logo" />
+  </picture>
 </p>
 
 <h1 align="center">DBunny</h1>

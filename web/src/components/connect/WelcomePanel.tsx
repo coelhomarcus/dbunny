@@ -2,6 +2,7 @@ import { Link, Plus } from "lucide-react";
 import { isMac } from "../../lib/platform";
 import Button from "../ui/Button";
 import { Keys } from "../ui/Kbd";
+import Logo from "../ui/Logo";
 import { useT } from "../../i18n";
 
 const mod = isMac ? "⌘" : "Ctrl+";
@@ -28,7 +29,7 @@ export default function WelcomePanel({
   const t = useT();
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center select-none">
-      <img src="/icon.svg" className="size-14 invert dark:invert-0" alt="" />
+      <Logo className="size-14" />
       <h1 className="mt-4 text-xl font-semibold leading-tight">DBunny</h1>
       <p className="mt-3 max-w-sm text-sm text-muted-foreground">
         {hasConnections ? t("connect.welcomePanel.pickOrCreate") : t("connect.welcomePanel.createFirst")}

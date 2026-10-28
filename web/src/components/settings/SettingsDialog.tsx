@@ -17,6 +17,7 @@ import AssistantSection from "./AssistantSection";
 import LanguagePicker from "./LanguagePicker";
 import { useT, type StaticKey } from "../../i18n";
 import AiIcon from "../ui/AiIcon";
+import Logo from "../ui/Logo";
 import { Row, SectionTitle } from "./SettingsRows";
 import SegmentedTabs from "../ui/SegmentedTabs";
 
@@ -186,7 +187,7 @@ function AboutSection() {
   return (
     <>
       <div className="flex items-center gap-4 pb-5">
-        <img src="/icon.svg" alt="" className="size-14 invert dark:invert-0" />
+        <Logo className="size-14" />
         <div>
           <h2 className="text-lg font-semibold leading-tight">DBunny</h2>
           <p className="text-[13px] text-muted-foreground">{version ? t("settings.settingsDialog.version", { version }) : t("settings.settingsDialog.tagline")}</p>
